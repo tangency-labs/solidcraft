@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1797",
+  "tangency-labs/solidcraft#1799"
+ ],
+ "what": "a tray whose flanges lean at 72 degrees with the tear corner relief: the torn ends are helices over slanted bends",
+ "source": "invariants",
+ "method": "one valid closed body (the helical torn ends must sew into a closed shell)",
+ "body_count": 1
+}

@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#514"
+ ],
+ "what": "a 60 x 40 base with a 20 mm 90 degree flange on one edge, unfolded: the flat plate is the base, the bend allowance and the flange's straight",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.4: BA = (pi/2)(2 + 0.8) = 4.3982, BD = 2*4 - BA = 3.6018; flat length 40 + (20 - BD) = 56.3982, width 60, thickness 2: V = 60*2*56.3982; the flat reaches 20 - BD past the base's edge (y from -16.3982 to 40), z 0..2",
+ "body_count": 1,
+ "volume_mm3": 6767.787565803085,
+ "bbox": {
+  "min": [
+   0,
+   -16.39822971502571,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   2
+  ]
+ }
+}
