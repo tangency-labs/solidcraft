@@ -48,7 +48,7 @@
 //! | [`GuessSphereSolve::new`]                                | `SmGuessSphereSolveENFO::SmGuessSphereSolveENFO` (file-local class) |
 //! | [`FilletSolver`] (re-exported from `blend.fillet_solver_p1`) | the `SmFilletSolver` base of the solvers (`FilletSolver::is_kind_of` is `SmFilletSolver::IsKindOf`) |
 //! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`] (re-exported from `blend.fillet_solver_p1`), [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
-//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read) |
+//! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is unit `blend.fillet_executive_p1`'s, the constructors `blend.fillet_executive_p2`'s) |
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
@@ -955,13 +955,13 @@ impl ConstantDistanceFs {
         let uv = uv_at(x, surf1_off, OP)?;
         self.solver.rail_mut(0)?.set_offset_distance(0.0);
         let [p_f, du_f, dv_f, duv_f, duu_f, dvv_f] =
-            offset_evaluate_2nd(self.solver.rail_mut(0)?, uv)?;
+            offset_evaluate_2nd(k, self.solver.rail_mut(0)?, uv)?;
 
         // get baseSurface2 G point values for given crX values
         let uv2 = uv_at(x, surf2_off, OP)?;
         self.solver.rail_mut(1)?.set_offset_distance(0.0);
         let [p_g, du_g, dv_g, duv_g, duu_g, dvv_g] =
-            offset_evaluate_2nd(self.solver.rail_mut(1)?, uv2)?;
+            offset_evaluate_2nd(k, self.solver.rail_mut(1)?, uv2)?;
 
         // get current radius value
         let radius = x_at(x, *num_parameters, OP)?;
@@ -1327,7 +1327,7 @@ impl ConstantDistanceFs {
                 non_zero_tangents: true,
             };
             let base2 = self.solver.rail(other_rail)?.base_surface();
-            let mat = base2.evaluate(uv2, 1, 1, flags)?;
+            let mat = base2.evaluate(k, uv2, 1, 1, flags)?;
             let du = mat
                 .get(1)
                 .and_then(|r| r.first())
@@ -1770,9 +1770,9 @@ impl VariableRadiusFs {
     /// Those of `SmFilletSolver::SetExtensionFlags` ([`FilletSolver::set_extension_flags`]
     /// on `b`, the B-rep of the edge uses); [`SolidError::InvalidInput`] without original
     /// curve or when the first extension fails (upstream then dereferences `NULL`).
-    pub fn set_extension_flags(&mut self, b: &Brep) -> Result<()> {
+    pub fn set_extension_flags(&mut self, k: &Kernel, b: &Brep) -> Result<()> {
         self.curve_based.solver.set_extension_flags(b)?;
-        self.extend_edge_curve()
+        self.extend_edge_curve(k)
     }
 
     /// The `SmVariableRadiusFS` part of `SetExtensionFlags`.
@@ -3362,7 +3362,7 @@ mod tests {
         assert!(fs.offset_radii_can_change().is_err());
         // the base SetExtensionFlags dereferences the missing edge uses
         assert!(matches!(
-            fs.set_extension_flags(&Brep::new()),
+            fs.set_extension_flags(k, &Brep::new()),
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(fs

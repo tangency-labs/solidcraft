@@ -53,7 +53,6 @@
 //!   reports the `rbDelete*` flags).
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`:
-//!   `SmBrep::MateLaminaEdgeToSurface` / `ReplaceSurface` (`topology.brep_p2`).
 //!   `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` is
 //!   `blend.fillet_standard_solver_p1`'s, on the centre line's `SmBSplineCurve` part.
 //!   The code after a stub is ported in full;

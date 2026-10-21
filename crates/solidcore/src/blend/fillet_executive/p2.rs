@@ -548,16 +548,16 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
-            FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::Circular {
-                approximate_arcs: true,
-                tol_percent_radius: circular_tol,
-                mirror: false,
-                complement: false,
-            }),
-            FilletSurfaceGeneratorType::BlendCurve => Some(FilletSurfaceGenerator::BlendCurve {
-                continuity: u64::from(params.continuity),
-                blend_scale: params.thumbweight,
-            }),
+            FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::circular(
+                true,
+                circular_tol,
+                false,
+                false,
+            )),
+            FilletSurfaceGeneratorType::BlendCurve => Some(FilletSurfaceGenerator::blend_curve(
+                params.thumbweight,
+                params.continuity,
+            )),
             FilletSurfaceGeneratorType::Unknown => None,
         };
 
@@ -1270,12 +1270,12 @@ where
     } else {
         access.new_surface_generator(
             k,
-            FilletSurfaceGenerator::Circular {
-                approximate_arcs: options.xsect_type == 1,
-                tol_percent_radius: options.xsect_accuracy,
-                mirror: options.mirror,
-                complement: options.complement,
-            },
+            FilletSurfaceGenerator::circular(
+                options.xsect_type == 1,
+                options.xsect_accuracy,
+                options.mirror,
+                options.complement,
+            ),
         )?
     };
 

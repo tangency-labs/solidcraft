@@ -18,7 +18,7 @@
 //! | [`SecantConstantRadiusFs::load_jacobian`]         | `SmSecantConstantRadiusFS::LoadJacobian`          |
 //! | [`ConstantRadiusAssistedFs`] (CO-PORTED)          | `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` over the `SmFilletSolver` base ([`FilletSolver`]) |
 //! | `impl FilletSolverOps for ConstantRadiusAssistedFs` | the same inherited overrides plus `SmConstantRadiusFS::LoadJacobian` (`blend.fillet_standard_solver_p1`'s methods); `IsKindOf` and `LoadInitialValues` (`_p2`) return [`SolidError::Unported`] (the class `blend.fillet_intersector` runs `ComputeSurfaceValues` on) |
-//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides `GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType` call `blend.fillet_standard_solver_p1`'s; `IsKindOf` (`_p2`) returns [`SolidError::Unported`] |
+//! | `impl FilletSolverOps` for both solvers            | their `LoadJacobian` / `LoadInitialValues` overrides; the inherited `SmConstantRadiusFS` / `SmConstantRadiusAssistedFS` overrides (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `GetType`); `IsKindOf` returns [`SolidError::Unported`] (unit `blend.fillet_standard_solver_p2`) |
 //! | [`OffsetSurface`], [`SurfaceId`]                  | an `SmOffsetSurface*` rail surface (unit `surface.offset_surface`) and the identity of its base pointer |
 //! | [`JacobianLoad`], [`InitialValues`]               | the in/out arguments of `LoadJacobian`, `LoadInitialValues` |
 //!
@@ -1608,30 +1608,33 @@ macro_rules! fillet_solver_ops {
                 &mut self.base.solver
             }
 
-            /// `SmConstantRadiusFS::GetJacobianSize` (inherited).
+            /// `SmConstantRadiusFS::GetJacobianSize`.
             fn jacobian_size(&self) -> Result<usize> {
-                Ok(ConstantRadiusAssistedFs::jacobian_size(&self.base))
+                Ok(self.base.jacobian_size())
             }
 
-            /// `SmConstantRadiusFS::SetupOffsetValues` (inherited).
+            /// `SmConstantRadiusFS::SetupOffsetValues`.
             fn setup_offset_values(
                 &mut self,
                 tsect: &TsectPnt,
                 offset_dist: Option<&mut f64>,
             ) -> Result<()> {
-                constant_radius_setup_offset_values(&mut self.base, tsect, offset_dist)
+                let d = self.base.setup_offset_values(tsect)?;
+                if let Some(o) = offset_dist {
+                    *o = d;
+                }
+                Ok(())
             }
 
-            /// `SmConstantRadiusFS::OffsetRadiiCanChange` (inherited).
+            /// `SmConstantRadiusFS::OffsetRadiiCanChange`.
             fn offset_radii_can_change(&self) -> Result<bool> {
-                Ok(ConstantRadiusAssistedFs::offset_radii_can_change(
-                    &self.base,
-                ))
+                Ok(self.base.offset_radii_can_change())
             }
 
-            /// `SmConstantRadiusAssistedFS::GetType` (inherited, `SM_COMMON`).
+            /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`: the derived solvers
+            /// declare none of their own).
             fn type_code(&self) -> Result<i64> {
-                Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+                Ok(crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE)
             }
 
             /// `SmConstantRadiusAssistedFS::IsKindOf` (unit
@@ -1754,6 +1757,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     /// the in/out `rlSurf1Offset`, `rlSurf2Offset` are written back into `load`.
     fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         load: &mut JacobianLoad<'_>,
@@ -1763,6 +1767,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         let mut offsets = [load.surf1_offset, load.surf2_offset];
         let found = ConstantRadiusAssistedFs::load_jacobian(
             self,
+            k,
             num_equations,
             num_parameters,
             load.rail_index,

@@ -7814,16 +7814,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_torus",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 578
     },
     {
       "max_rel_err": 0.0,
@@ -7834,16 +7830,12 @@
       "values_compared": 374
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_torus_self_intersecting",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 578
     },
     {
       "max_rel_err": 0.0,
@@ -7854,16 +7846,12 @@
       "values_compared": 374
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_torus_vertical",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 578
     },
     {
       "max_rel_err": 0.0,
@@ -7874,16 +7862,12 @@
       "values_compared": 374
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_cylinder",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 498
     },
     {
       "max_rel_err": 0.0,
@@ -7894,16 +7878,12 @@
       "values_compared": 262
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_cone",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 498
     },
     {
       "max_rel_err": 0.0,
@@ -7914,16 +7894,12 @@
       "values_compared": 262
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_close_rails",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 498
     },
     {
       "max_rel_err": 0.0,
@@ -7934,16 +7910,12 @@
       "values_compared": 262
     },
     {
-      "deferred": {
-        "symbol": "SmCircularCrossSectionFSG::CreateSurfaceFromCurves",
-        "unit": "blend.fillet_standard_solver_p1"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_edgeuse_offset_rails_mismatched_intervals",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "inline",
-      "values_compared": 0
+      "values_compared": 498
     },
     {
       "max_rel_err": 0.0,
@@ -8139,20 +8111,18 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 430,
+  "cases_deferred": 279,
   "cases_failed": 0,
-  "cases_passed": 431,
-  "cases_total": 861,
+  "cases_passed": 595,
+  "cases_total": 874,
   "deferred_by_unit": {
-    "curve.crv_on_surf": 26,
-    "harness:analytic-geometry-export": 70,
-    "intersect.surface_drop_curve": 27,
-    "intersect.surface_drop_lib_p3": 7,
-    "surface.sphere": 2,
-    "surface.surface_cache_p2": 78,
-    "topology.brep_p2": 166,
-    "topology.face_p2": 12,
-    "topology.face_p4": 42
+    "curve.crv_on_surf": 29,
+    "geom.tol": 82,
+    "harness:analytic-geometry-export": 123,
+    "intersect.surface_drop_curve": 18,
+    "intersect.surface_drop_lib_p3": 13,
+    "surface.surface_p2": 1,
+    "topology.face_p2": 13
   },
   "max_rel_err": 0.0,
   "pass": true,
