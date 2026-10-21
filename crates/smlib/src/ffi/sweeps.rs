@@ -22,11 +22,27 @@ pub const SWEEP_FOLLOW: i32 = 0;
 pub const SWEEP_TRANSLATE: i32 = 1;
 
 /// A curve list as the C API reads it: kinds (with a NURBS curve's degree and point count) and
-/// each curve's numbers. Only the calls read them, which a build without SMLib does not have.
-#[cfg_attr(not(feature = "native"), allow(dead_code))]
+/// each curve's numbers.
+#[cfg(feature = "native")]
 pub struct List<'a> {
-    pub kinds: &'a [i64],
-    pub reals: &'a [f64],
+    kinds: &'a [i64],
+    reals: &'a [f64],
+}
+
+/// Without SMLib nothing reads the list, so it carries nothing.
+#[cfg(not(feature = "native"))]
+pub struct List<'a>(std::marker::PhantomData<&'a ()>);
+
+impl<'a> List<'a> {
+    #[cfg(feature = "native")]
+    pub fn new(kinds: &'a [i64], reals: &'a [f64]) -> Self {
+        List { kinds, reals }
+    }
+
+    #[cfg(not(feature = "native"))]
+    pub fn new(_: &'a [i64], _: &'a [f64]) -> Self {
+        List(std::marker::PhantomData)
+    }
 }
 
 #[cfg(feature = "native")]
