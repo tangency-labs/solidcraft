@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 mod drawing;
 mod native_cache;
+mod share;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use native_cache::read_design_geometry;
+pub use share::{SHARED_DESIGN_EXT, is_shared_design_path, shared_design_name};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -730,6 +732,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         native_cache::read_geometry_with(&mut self.reader, &document).ok()
     }
 
+    /// Is this a design container (it has `container.json`), rather than some other ZIP such as
+    /// a zip an archiver made of a design file?
+    pub fn is_container(&self) -> bool {
+        self.reader.zip.index_for_name("container.json").is_some()
+    }
+
     /// Consume the reader, resolving every required blob before returning a document.
     pub fn read_document(mut self) -> Result<Document> {
         read_document(&mut self.reader)
@@ -737,7 +745,16 @@ impl<R: Read + Seek> DesignContainerReader<R> {
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<Document> {
-    DesignContainerReader::new(Cursor::new(bytes))?.read_document()
+    let reader = DesignContainerReader::new(Cursor::new(bytes));
+    if reader.as_ref().is_ok_and(DesignContainerReader::is_container) {
+        return reader?.read_document();
+    }
+    // A design shared as a zip of its file (#4019); one level only.
+    match share::inner(Cursor::new(bytes))? {
+        Some(inner) if is_design_container(&inner) => DesignContainerReader::new(Cursor::new(inner))?.read_document(),
+        Some(inner) => Ok(Document::from_json(std::str::from_utf8(&inner).map_err(|_| invalid("the shared design is not UTF-8 JSON"))?)?),
+        None => reader?.read_document(),
+    }
 }
 
 /// Open from disk (or browser VFS), publishing only provisional display before
@@ -746,8 +763,17 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let mut source = open_regular_file(path)?;
+    read_source(open_regular_file(path)?, notify, true)
+}
+
+fn read_source<R: Read + Seek>(mut source: R, notify: Option<impl FnOnce(DesignPreview)>, shared: bool) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     if is_container_source(&mut source)? {
+        if shared {
+            if let Some(inner) = share::inner(&mut source)? {
+                return read_source(Cursor::new(inner), notify, false);
+            }
+            source.seek(SeekFrom::Start(0)).map_err(invalid)?;
+        }
         let mut reader = DesignContainerReader::new(source)?;
         // A design with its model opens without a picture first: the model is the session.
         let model = reader.geometry();

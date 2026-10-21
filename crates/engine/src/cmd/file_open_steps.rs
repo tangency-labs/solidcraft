@@ -119,7 +119,8 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
+        let opened = Session::with_model(self.doc, self.visibility, self.model)
+            .located((!solidcraft_io::is_shared_design_path(&self.path)).then_some(self.path.as_str()));
         opened_design(s, opened, &self.path, self.read_only, self.disk)
     }
 }

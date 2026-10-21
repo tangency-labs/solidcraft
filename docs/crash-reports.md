@@ -4,7 +4,7 @@ When the desktop app crashes or hits an internal error, it writes a crash report
 computer. Each report holds enough to reproduce and fix the problem: in most cases the design
 and the exact commands that trigger it. Reports are never sent anywhere. To share one, use
 **Report…** in Help ▸ Crash Reports…, which opens a GitHub issue draft. Nothing is shared
-until you review and submit it, and the design is not part of the draft.
+until you review and submit it, and the design is not part of the draft unless you attach it.
 
 To send a report:
 
@@ -13,7 +13,12 @@ To send a report:
    GitHub. Short reports are also filled in through the URL; paste longer reports into the GitHub draft.
 2. Attach the screenshot if you want to share it: use **Copy screenshot** and paste it into
    GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
-3. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
+3. Attach the design only if it can be shared publicly. GitHub does not accept `.solidcraft`
+   files, so attach it as a `.zip`: **Save design to attach (.zip)…** saves the report's design
+   (or the open design, for other reports) as `name.solidcraft.zip`. A design file is a ZIP
+   container already, so renaming `name.solidcraft` to `name.solidcraft.zip` works too. SolidCraft
+   opens such a `.zip`, and also a `.zip` that holds exactly one design file.
+4. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
 
 ### Submission and fallback behavior
 

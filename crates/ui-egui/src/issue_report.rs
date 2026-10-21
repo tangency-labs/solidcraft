@@ -148,6 +148,9 @@ pub struct Draft {
     focus_requested: bool,
     missing_description: bool,
     opened_github: bool,
+    /// The design a crash report keeps (`design.solidcraft` in its folder), which "Save design to
+    /// attach" shares instead of the open design.
+    design: Option<String>,
 }
 
 impl Draft {
@@ -169,6 +172,7 @@ impl Draft {
             focus_requested: false,
             missing_description: false,
             opened_github: false,
+            design: None,
         }
     }
 
@@ -212,6 +216,9 @@ enum Origin {
 const NOTE_DETAILS_UPDATED: &str =
     "Technical details updated to match the current view. Screenshot captured locally. Review it before attaching it on GitHub.";
 const NOTE_DETAILS_KEPT: &str = "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.";
+
+/// What the drafts say about attaching the design: GitHub takes no `.solidcraft` file (#4019).
+const ATTACH_DESIGN: &str = "To share the design, attach it as a .zip: GitHub does not accept .solidcraft files. Use Save design to attach (.zip), or rename name.solidcraft to name.solidcraft.zip. Only attach it if the design can be shared publicly.";
 
 struct Pending {
     token: u64,
@@ -483,7 +490,7 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
         "The screenshot shows the current view."
     };
     let mut body = format!(
-        "## Operation context\n{actual}\n\n{image_state}\n\n## Settings and selection\n{context}\n## Environment\n{}\nRevision: {}\nCamera: {}\n\n## Visual context\nAttach the reviewed screenshot or a short example showing the problem.\n",
+        "## Operation context\n{actual}\n\n{image_state}\n\n## Settings and selection\n{context}\n## Environment\n{}\nRevision: {}\nCamera: {}\n\n## Visual context\nAttach the reviewed screenshot or a short example showing the problem.\n{ATTACH_DESIGN}\n",
         block(&debug(&help::diagnostics(app), 2000)),
         app.session.revision,
         block(&debug(&app.cam, 1500))
@@ -535,7 +542,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     let field = |o: Option<&serde_json::Value>, k: &str| o.and_then(|o| o.get(k)).and_then(serde_json::Value::as_str).unwrap_or("?").to_string();
     let system = report.get("system");
     let mut body = format!(
-        "## What happened\n{what}{}.{detection}\n\nMessage: {}\nLocation: {}\nThread: {}\nRecorded {} time(s), first recorded {}\n\n## Backtrace\n{}\n## Command\n{}\n## Recent commands\n{}\n\n## Reproduction\nCrash report `{}` on the reporter's computer holds {}. Replay it with `solidcraft-cli crashes replay {}`.\nOnly attach the design if it can be shared publicly.\n\n## Environment\n{}\n",
+        "## What happened\n{what}{}.{detection}\n\nMessage: {}\nLocation: {}\nThread: {}\nRecorded {} time(s), first recorded {}\n\n## Backtrace\n{}\n## Command\n{}\n## Recent commands\n{}\n\n## Reproduction\nCrash report `{}` on the reporter's computer holds {}. Replay it with `solidcraft-cli crashes replay {}`.\n{ATTACH_DESIGN}\n\n## Environment\n{}\n",
         command.map(|c| format!(" while running `{c}`")).unwrap_or_default(),
         limited(&s("message"), 2000),
         s("location"),
@@ -572,6 +579,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     draft.origin = Origin::Crash;
     draft.description =
         limited(&format!("{what}{}.", command.map(|c| format!(" while running `{}`", limited(c, 160))).unwrap_or_default()), MAX_ANSWER);
+    draft.design = report.get("design_path").and_then(serde_json::Value::as_str).map(str::to_string);
     draft
 }
 
@@ -893,6 +901,30 @@ fn fitted(image: Arc<ColorImage>, max: usize, max_side: usize) -> Option<Arc<Col
         }
     }
     Some(Arc::new(ColorImage::new([ow, oh], pixels)))
+}
+
+/// Save the design to attach as a `.zip` (`file.save_for_sharing`): the crash report's own
+/// design when the draft has one, else the open design.
+pub(super) fn save_design(app: &mut SolveApp, source: Option<String>) {
+    let stem = match &source {
+        Some(_) => "solidcraft-crash-design".to_string(),
+        None => app.session.doc.name.clone(),
+    };
+    let name = format!("{}.zip", solidcraft_engine::io::shared_design_name(&stem));
+    app.pick_save(&name, &[solidcraft_engine::io::SHARED_DESIGN_EXT], move |app, path| {
+        let Some(path) = path else { return };
+        let mut params = serde_json::json!({ "path": path });
+        if let Some(source) = source {
+            params["source"] = source.into();
+        }
+        let result = app.run("file.save_for_sharing", params);
+        if let Some(draft) = app.issue_report.draft.as_mut() {
+            draft.note = match result {
+                Ok(_) => crate::i18n::tr("issue.note_design_saved").into(),
+                Err(e) => crate::i18n::format("issue.note_design_save_failed", &[("error", &limited(&e, 1000))]),
+            };
+        }
+    });
 }
 
 /// The report card is hidden only while a frame is captured, so it cannot cover the evidence.

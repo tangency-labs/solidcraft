@@ -57,6 +57,9 @@ reads them, so you can leave them alone.
   folder rather than deleting it, so you can still open those autosaves (`.sc` files, or `.solidcraft` from earlier releases)
   with File > Open.
 - The **`crashes`** folder holds crash reports. Please attach the newest one to a bug report.
+  GitHub does not accept `.solidcraft` files: attach a design as a `.zip` instead (Help >
+  Crash Reports… > Report…, then **Save design to attach (.zip)…**, or rename
+  `name.solidcraft` to `name.solidcraft.zip`), and only if it can be shared publicly.
 
 From 0.10.2, SolidCraft also checks the settings files at start. A file it can't read is renamed
 to `app.ron.bad-<time>` or `graphics.json.bad-<time>`, and SolidCraft starts with defaults
