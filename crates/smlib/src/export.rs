@@ -759,7 +759,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         for fu in shell_faceuses.get(side).ok_or_else(|| invalid("shell"))?.clone() {
             let (f, same) = faceuse(fu)?;
             // A sheet lists both uses of each face in its one shell: keep the `same` one.
-            if side == mate && !same {
+            if mate == s && !same {
                 continue;
             }
             if !face_uses.get(f).is_some_and(|u| u.iter().any(|(o, _)| *o == mate)) {
