@@ -15,18 +15,11 @@
 //! | [`ProtoTopologyManager::resolve_overlapping_proto_edges`] | `SmProtoTopologyManager::ResolveOverlappingProtoEdges` |
 //!
 //! Deviations:
-//! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
-//!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
-//!   proto faces (coincident lists) and other proto edges (overlap lists) still name
-//!   it, and `GlueCoincidentBrepVertices` reads it after the free. Here the faces it
-//!   bounded get the surviving edge first
-//!   ([`ProtoTopologyManager::hand_over_coincident_proto_edge`]), and every reference
-//!   to it is dropped before the delete ([`ProtoTopologyManager::forget_proto_edge`],
-//!   part 1), here and in `ResolveOverlappingProtoEdges`. The fork does that inside
-//!   `RemoveProtoEdge`; the port does it at these library deletes, so unlisting or
-//!   deleting a proto edge on its own (the difftest's script ops) stays upstream's.
-//!   Without it, the stale id names a deleted slot and the later passes fail with
-//!   `InvalidInput`.
+//! - **Deleted vertex in `GlueCoincidentBrepVertices`** (SolidCraft fix,
+//!   tangency-labs/smlib da8d05e, UB-241). For two coincident vertices joined by
+//!   several common edges, upstream goes on to the next edge after squeezing or
+//!   gluing away the second vertex, and uses it after the free. The loop stops once
+//!   that vertex is recorded as deleted, in both B-reps' halves.
 //! - **B-rep access.** Topology objects are the caller's handles `O`, as in
 //!   [`p1`](super::p1). What these functions read from vertices and edges, and the
 //!   store new curves go to, is [`ProtoBrep`] (of `topology.proto_topology_p2`, which
@@ -1125,6 +1118,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         }
                     } else {
                         for &edge in edges {
+                            // SolidCraft change (tangency-labs/smlib da8d05e): squeezing
+                            // or gluing for an earlier common edge deleted v2; every
+                            // later step would use it (and the edges it ended) after the
+                            // free, so stop.
+                            if deleted_v.get(jj).copied().flatten() == Some(v2) {
+                                break;
+                            }
                             let curve_handle =
                                 brep.edge_curve(edge).ok_or(dangling("edge is unknown"))?;
                             let ivl = brep
@@ -1676,5 +1676,216 @@ fn xsect_tol<O: Copy>(brep: &impl ProtoBrep<O>, v1: O, v2: O) -> Result<f64> {
 fn set_slot<O: Copy>(list: &mut [Option<O>], index: usize, vertex: O) {
     if let Some(slot) = list.get_mut(index) {
         *slot = Some(vertex);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::p1::proto::{ProtoGeometry, ProtoTopology, VertexDefinition};
+    use super::*;
+    use crate::curve::line::Line;
+    use crate::geom::extent2d::Extent2d;
+    use crate::intersect::point_class::PointClassType;
+    use crate::surface::surface::Surface;
+    use crate::surface::volume::Volume;
+    use crate::topology::Brep;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct H(usize, ClassObjectKind);
+
+    impl ClassObject for H {
+        fn class_kind(&self) -> ClassObjectKind {
+            self.1
+        }
+    }
+
+    const fn vtx(i: usize) -> H {
+        H(i, ClassObjectKind::Vertex)
+    }
+
+    const fn edg(i: usize) -> H {
+        H(i, ClassObjectKind::Edge)
+    }
+
+    /// Vertices 0 and 1 of B-rep 1 coincide and are joined by the long edges 0 and 1
+    /// (both on curve 0); vertices 2 and 3 of B-rep 2 are far apart. Records every
+    /// `GlueVertices` call and refuses one of a vertex already glued away.
+    struct Pool {
+        curves: Vec<Curve>,
+        glued: Vec<(H, H)>,
+    }
+
+    impl Pool {
+        fn new() -> Self {
+            let line = Line::create_line_segment(
+                3,
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(10.0, 0.0, 0.0),
+                None,
+            )
+            .unwrap();
+            Self {
+                curves: vec![Curve::from(line)],
+                glued: Vec::new(),
+            }
+        }
+    }
+
+    impl ClassGeometry<H> for Pool {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            (o.1 == ClassObjectKind::Curve)
+                .then(|| self.curves.get(o.0))
+                .flatten()
+        }
+        fn surface(&self, _o: H) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _o: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+    }
+
+    impl ProtoGeometry<H> for Pool {
+        fn curve_mut(&mut self, o: H) -> Option<&mut Curve> {
+            (o.1 == ClassObjectKind::Curve)
+                .then(|| self.curves.get_mut(o.0))
+                .flatten()
+        }
+    }
+
+    impl ProtoTopology<H> for Pool {
+        fn vertex_use_faces(&self, _vertex: H) -> Result<Vec<Option<H>>> {
+            Ok(Vec::new())
+        }
+        fn edge_use_faces(&self, _edge: H) -> Result<Vec<Option<H>>> {
+            Ok(Vec::new())
+        }
+        fn edge_start_vertex(&self, _edge: H) -> Result<Option<H>> {
+            Ok(Some(vtx(0)))
+        }
+        fn edge_other_vertex(&self, _edge: H, _vertex: Option<H>) -> Result<Option<H>> {
+            Ok(Some(vtx(1)))
+        }
+        fn vertex_point(&self, vertex: H) -> Result<Point3> {
+            Ok(match vertex.0 {
+                2 => Point3::new(0.0, 5.0, 0.0),
+                3 => Point3::new(0.0, -5.0, 0.0),
+                _ => Point3::new(0.0, 0.0, 0.0),
+            })
+        }
+        fn edge_brep(&self, _edge: H) -> Result<Option<crate::geom::attribute::ObjectKey>> {
+            Ok(None)
+        }
+        fn edge_faces(&self, _edge: H) -> Result<Vec<H>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl ProtoBrep<H> for Pool {
+        fn edge_interval(&self, _edge: H) -> Option<Extent1d> {
+            Some(self.curves.first()?.natural_interval())
+        }
+        fn edge_curve(&self, _edge: H) -> Option<Option<H>> {
+            Some(Some(H(0, ClassObjectKind::Curve)))
+        }
+        fn topology_tolerance(&self, _topo: H) -> Option<f64> {
+            Some(1e-5)
+        }
+        fn face_uv_domain(&self, _face: H) -> Option<Extent2d> {
+            None
+        }
+        fn set_face_uv_domain(&mut self, _face: H, _domain: Extent2d) -> Option<()> {
+            None
+        }
+        fn face_surface(&self, _face: H) -> Option<Option<H>> {
+            None
+        }
+        fn edge_edgeuse_of_face(&self, _edge: H, _face: H) -> Result<Option<H>> {
+            Ok(None)
+        }
+        fn edge_is_connected_to_face(&self, _edge: H, _face: H) -> Result<bool> {
+            Ok(false)
+        }
+        fn insert_curve(&mut self, curve: Curve) -> Option<H> {
+            self.curves.push(curve);
+            Some(H(self.curves.len() - 1, ClassObjectKind::Curve))
+        }
+        fn vertex_common_edges(&self, v1: H, v2: H) -> Result<Vec<H>> {
+            Ok(if (v1, v2) == (vtx(0), vtx(1)) {
+                vec![edg(0), edg(1)]
+            } else {
+                Vec::new()
+            })
+        }
+        fn face_curve_on_classify(
+            &self,
+            _k: &Kernel,
+            _face: H,
+            _do_point_classify: bool,
+            _cc: &mut CurveClassification<H>,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    impl BrepGlue<H> for Pool {
+        fn glue_vertices(
+            &mut self,
+            _k: &mut Kernel,
+            _brep: H,
+            v1: H,
+            v2: H,
+            _opt_wire_edges_in_brep: Option<&[H]>,
+        ) -> Result<()> {
+            let again = self.glued.iter().any(|&(_, gone)| gone == v2);
+            self.glued.push((v1, v2));
+            if again {
+                return Err(SolidError::invalid_input(
+                    "test",
+                    "vertex already glued away",
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    fn region_pc(o: H) -> PointClassification<H> {
+        let mut pc = PointClassification::new(1e-5);
+        pc.set_class_object(PointClassType::Region, Some(o));
+        pc
+    }
+
+    #[test]
+    fn glue_stops_once_the_second_vertex_is_glued_away() {
+        // da8d05e (#371): two coincident vertices joined by two long common edges;
+        // gluing for the first edge deletes the second vertex, which the second
+        // edge's step glued again (upstream: a use-after-free)
+        let mut k = Kernel::default();
+        let mut pool = Pool::new();
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let r = H(50, ClassObjectKind::Region);
+        for (v1, v2) in [(vtx(0), vtx(2)), (vtx(1), vtx(3))] {
+            let mut vd =
+                VertexDefinition::new(&k, &pool, &region_pc(r), &region_pc(r), p, 1e-5, 1e-6, None)
+                    .unwrap();
+            vd.set_final_vertex(1, Some(v1));
+            vd.set_final_vertex(2, Some(v2));
+            let id = m.insert_vertex_definition(vd).unwrap();
+            m.add_vertex_definition(pv, id).unwrap();
+        }
+
+        m.glue_coincident_brep_vertices(&mut k, &mut pool, &mut NoMates)
+            .unwrap();
+        assert_eq!(pool.glued, vec![(vtx(0), vtx(1))]);
+        // the second definition, whose B-rep 1 vertex is gone, is deleted
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
     }
 }
