@@ -60,9 +60,9 @@ fn renumbers_into_canonical_order() {
     let raw = Raw::decode(RECORDS).unwrap();
     // Operand 0's SMLib face 2 is its canonical face 5, edge 7 its edge 0; the result's faces
     // and edges are listed backwards.
-    let a = Order { faces: vec![1, 2, 5, 0, 3, 4], edges: vec![1, 2, 3, 4, 5, 6, 7, 0] };
-    let b = Order { faces: vec![0, 1, 2, 3, 4], edges: vec![0, 1, 2, 3] };
-    let result = Order { faces: vec![2, 1, 0], edges: vec![2, 1, 0] };
+    let a = Order { faces: vec![1, 2, 5, 0, 3, 4], edges: vec![1, 2, 3, 4, 5, 6, 7, 0], pieces: vec![] };
+    let b = Order { faces: vec![0, 1, 2, 3, 4], edges: vec![0, 1, 2, 3], pieces: vec![] };
+    let result = Order { faces: vec![2, 1, 0], edges: vec![2, 1, 0], pieces: vec![] };
     let h = raw.history(&[a, b], &result).unwrap();
     assert_eq!(h.faces[2].origins, vec![face(0, 5)]);
     assert_eq!(h.faces[0].origins, vec![face(0, 1), face(1, 0)]);
@@ -79,10 +79,10 @@ fn bad_orders_are_errors() {
     // An origin on an operand that isn't there.
     assert!(raw.history(std::slice::from_ref(&ok), &ok).is_err());
     // An operand order too short for an origin.
-    assert!(raw.history(&[Order { faces: vec![0], edges: vec![] }, ok.clone()], &ok).is_err());
+    assert!(raw.history(&[Order { faces: vec![0], edges: vec![], pieces: vec![] }, ok.clone()], &ok).is_err());
     // A result order that isn't a permutation.
-    assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 0, 1], edges: vec![] }).is_err());
-    assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 1, 3], edges: vec![] }).is_err());
+    assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 0, 1], edges: vec![], pieces: vec![] }).is_err());
+    assert!(raw.history(&[ok.clone(), ok.clone()], &Order { faces: vec![0, 1, 3], edges: vec![], pieces: vec![] }).is_err());
 }
 
 /// A box with its edge 0 (between faces 4 and 5) filleted, as SMLib reports it: the fillet face

@@ -35,7 +35,18 @@ mod smlib {
             BoolOp::Intersect => BooleanOp::Intersect,
         };
         let Some(r) = ta.boolean(&tb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
-        let check = r.check(CheckLevel::All).map_err(|e| failed("check", e))?;
+        // Solids touching each other along an edge or at a vertex come back as one non-manifold
+        // body, which the export splits into separate solids: SMLib's check is of those, imported
+        // as given (its check of the touching arrangement itself refuses the radial order of
+        // faces round an edge they share).
+        let manifold = r.is_manifold_solid().map_err(|e| failed("check", e))?;
+        let check = if manifold {
+            r.check(CheckLevel::All).map_err(|e| failed("check", e))?
+        } else {
+            let record = r.to_native().map_err(|e| failed("export", e))?;
+            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids", e))?;
+            split.check(CheckLevel::All).map_err(|e| failed("check", e))?
+        };
         if !check.is_valid() {
             // Whether an operand failed it already says whose the fault is.
             let operands: Vec<&str> = [("the first operand", &sa), ("the second operand", &sb)]

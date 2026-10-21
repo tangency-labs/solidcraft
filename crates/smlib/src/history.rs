@@ -41,10 +41,26 @@ pub struct Raw {
 
 /// Where one body's faces and edges go in canonical order: `faces[i]` is the canonical index of
 /// SMLib's face i, likewise for edges. Empty means SMLib's order is the canonical one.
+///
+/// An SMLib edge solids touch along (non-manifold) becomes one record edge per solid:
+/// `edges[i]` is the first of them, and `pieces` lists every piece of such an edge, the first
+/// too, with the canonical faces it bounds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Order {
     pub faces: Vec<usize>,
     pub edges: Vec<usize>,
+    pub pieces: Vec<Piece>,
+}
+
+/// One record edge of an SMLib edge split where solids touch along it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Piece {
+    /// The SMLib edge.
+    pub edge: usize,
+    /// The record edge.
+    pub canonical: usize,
+    /// The canonical faces it bounds, ascending.
+    pub faces: Vec<usize>,
 }
 
 impl Brep {
@@ -122,7 +138,23 @@ impl Raw {
             }
             Ok(at)
         };
-        let (fat, eat) = (place(&result.faces, self.faces.len())?, place(&result.edges, self.edges.len())?);
+        let fat = place(&result.faces, self.faces.len())?;
+        // Each raw edge's record edges with the faces each bounds where it is split (`None`: as
+        // SMLib has them); together a permutation of the result's edges.
+        let n_edges = self.edges.len() + result.pieces.len() - result.pieces.iter().map(|p| p.edge).collect::<BTreeSet<_>>().len();
+        let mut targets: Vec<(usize, usize, Option<&[usize]>)> = Vec::with_capacity(n_edges);
+        for i in 0..self.edges.len() {
+            let mut split = result.pieces.iter().filter(|p| p.edge == i).peekable();
+            if split.peek().is_none() {
+                targets.push((i, map(&result.edges, i)?, None));
+            } else {
+                targets.extend(split.map(|p| (i, p.canonical, Some(p.faces.as_slice()))));
+            }
+        }
+        let distinct: BTreeSet<usize> = targets.iter().map(|t| t.1).collect();
+        if targets.len() != n_edges || distinct.len() != n_edges || targets.iter().any(|t| t.1 >= n_edges) {
+            return Err(bad("the result's order is no permutation"));
+        }
 
         let mut faces: Vec<Option<FaceProv>> = vec![None; self.faces.len()];
         for (f, at) in self.faces.iter().zip(&fat) {
@@ -131,14 +163,20 @@ impl Raw {
         }
         let faces: Vec<FaceProv> = faces.into_iter().collect::<Option<_>>().ok_or(bad("the result's order is no permutation"))?;
 
-        let mut edges: Vec<Option<EdgeProv>> = vec![None; self.edges.len()];
-        for (e, at) in self.edges.iter().zip(&eat) {
-            let bounds: BTreeSet<usize> = e
-                .faces
-                .iter()
-                .map(|f| fat.get(*f).copied().ok_or(bad("an edge lies on a face outside the result")))
-                .collect::<std::result::Result<_, _>>()?;
-            let bounds: Vec<usize> = bounds.into_iter().collect();
+        let mut edges: Vec<Option<EdgeProv>> = vec![None; n_edges];
+        for &(i, at, split) in &targets {
+            let e = self.edges.get(i).ok_or(bad("an edge lies outside the result"))?;
+            let bounds: Vec<usize> = match split {
+                Some(faces) => faces.to_vec(),
+                None => {
+                    let bounds: BTreeSet<usize> = e
+                        .faces
+                        .iter()
+                        .map(|f| fat.get(*f).copied().ok_or(bad("an edge lies on a face outside the result")))
+                        .collect::<std::result::Result<_, _>>()?;
+                    bounds.into_iter().collect()
+                }
+            };
             let origins = if e.origins.is_empty() {
                 // New: where its two faces meet, each side what that face came from.
                 let side = |f: usize| faces.get(f).and_then(|p| Side::new(p.origins.iter().copied()));
@@ -157,7 +195,7 @@ impl Raw {
                     .collect::<std::result::Result<_, Failed>>()?;
                 set.into_iter().collect()
             };
-            edges[*at] = Some(EdgeProv { faces: bounds, origins });
+            *edges.get_mut(at).ok_or(bad("the result's order is no permutation"))? = Some(EdgeProv { faces: bounds, origins });
         }
         let edges: Vec<EdgeProv> = edges.into_iter().collect::<Option<_>>().ok_or(bad("the result's order is no permutation"))?;
         Ok(History { operands: operands.len(), faces, edges })

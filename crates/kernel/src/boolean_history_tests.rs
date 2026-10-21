@@ -585,6 +585,35 @@ mod smlib {
         assert_eq!(meets(h).len(), 4, "{}", show(h));
     }
 
+    /// Cubes sharing an edge, and cubes sharing a vertex: SMLib's union touches itself there;
+    /// it comes back as two closed shells, the shared edge and vertices split into one copy per
+    /// cube, each copy with its edge's history (verified against the geometry).
+    #[test]
+    fn cubes_touching_along_an_edge_or_at_a_vertex_unite_into_two_solids() {
+        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        for (name, b) in [("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0)), ("vertex", boxed(10.0, 10.0, 10.0, 20.0, 20.0, 20.0))] {
+            let r = through_smlib(&a, &b, BoolOp::Union);
+            assert_eq!(r.solid.boundaries().len(), 2, "{name}");
+            assert_eq!((r.face_count(), r.edge_count()), (12, 24), "{name}");
+            let v = crate::measure(&r).unwrap().volume;
+            assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{name}: {v}");
+            let h = verified(&r, &[&a, &b], 0.02);
+            assert!(h.faces.iter().all(|f| f.origins.len() == 1), "{name}: {}", show(h));
+        }
+    }
+
+    /// Pieces of a cut meeting along a line (two opposite quarters of a slab cut away) come
+    /// back as separate solids rather than a refusal.
+    #[test]
+    fn a_cut_leaving_pieces_along_a_line_gives_two_solids() {
+        let a = boxed(0.0, 0.0, 0.0, 20.0, 20.0, 10.0);
+        let once = through_smlib(&a, &boxed(10.0, -1.0, -1.0, 21.0, 10.0, 11.0), BoolOp::Cut);
+        let r = through_smlib(&once, &boxed(-1.0, 10.0, -1.0, 10.0, 21.0, 11.0), BoolOp::Cut);
+        assert_eq!(r.solid.boundaries().len(), 2);
+        let v = crate::measure(&r).unwrap().volume;
+        assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{v}");
+    }
+
     #[test]
     fn disjoint_intersection_is_empty() {
         let a = boxed(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
