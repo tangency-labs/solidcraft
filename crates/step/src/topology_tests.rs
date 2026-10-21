@@ -383,6 +383,125 @@ fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     assert!((f.domain[0][1] - f.domain[0][0] - TAU).abs() < 1e-9 && f.domain[1][0] < 1e-6 && f.domain[1][1] > 10.0 - 1e-6, "{:?}", f.domain);
 }
 
+#[test]
+fn a_ball_bounded_by_its_seam_alone() {
+    for same_sense in [true, false] {
+        let mut w = W::default();
+        let (n, south) = ([0.0, 0.0, 5.0], [0.0, 0.0, -5.0]);
+        let (vn, vs) = (w.vertex(n), w.vertex(south));
+        // The meridian through +x: angle 0 at the north pole, π at the south.
+        let k = w.circle([0.0; 3], if same_sense { [0.0, 1.0, 0.0] } else { [0.0, -1.0, 0.0] }, [0.0, 0.0, 1.0], 5.0);
+        let e = w.add(format!("EDGE_CURVE('',#{vn},#{vs},#{k},{})", b(same_sense)));
+        let (o1, o2) = (w.oe(e, true), w.oe(e, false));
+        let bound = w.bound(&[o1, o2], true, true);
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+        let face = w.face(&[bound], sphere, true);
+        let shell = closed_shell(&mut w, &[face]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('ball',#{shell})"));
+        let s = one_solid(&w.file(&[solid]));
+        assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
+        let e = &s.brep.edges[0];
+        assert!((e.interval[1] - e.interval[0] - PI).abs() < 1e-12, "{:?}", e.interval);
+        faces_away(&s.brep, 0, |_| [0.0; 3]);
+    }
+}
+
+#[test]
+fn a_cone_reaches_its_apex_through_a_vertex_loop() {
+    let mut w = W::default();
+    let v = w.vertex([5.0, 0.0, 0.0]);
+    let apex = w.vertex([0.0, 0.0, 10.0]);
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+    // The cone widens down -z from its apex at z = 10 to radius 5 at z = 0.
+    let a = w.axis([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(0.5f64.atan())));
+    let o = w.oe(e, true);
+    let outer = w.bound(&[o], true, true);
+    let vl = w.add(format!("VERTEX_LOOP('',#{apex})"));
+    let point = w.add(format!("FACE_BOUND('',#{vl},.T.)"));
+    let side = w.face(&[outer, point], cone, true);
+    let o = w.oe(e, false);
+    let base_bound = w.bound(&[o], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let base = w.face(&[base_bound], plane, false);
+    let shell = closed_shell(&mut w, &[side, base]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cone',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    // A seam from the base circle's vertex to the apex replaces the vertex loop.
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    let f = &s.brep.faces[0];
+    assert_eq!(f.loops.len(), 1);
+    assert!((f.domain[1][0] + 10.0).abs() < 1e-9, "{:?}", f.domain);
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
+/// A tube (radius 5 outside, 3 inside, from z = 0 to 4) whose cylinders carry no seam edges:
+/// each side is bounded by two circles whose vertices sit at different angles.
+#[test]
+fn bands_and_caps_without_seams_get_one() {
+    let mut w = W::default();
+    let ring = |w: &mut W, r: f64, z: f64, at: f64| {
+        let v = w.vertex([r * at.cos(), r * at.sin(), z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [at.cos(), at.sin(), 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (ob, ot, ib, it) = (ring(&mut w, 5.0, 0.0, 0.0), ring(&mut w, 5.0, 4.0, 1.0), ring(&mut w, 3.0, 0.0, 2.0), ring(&mut w, 3.0, 4.0, 3.0));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (outer_cyl, inner_cyl) = (w.add(format!("CYLINDRICAL_SURFACE('',#{a},5.)")), w.add(format!("CYLINDRICAL_SURFACE('',#{a},3.)")));
+    // Outside: normal out; its bottom circle runs +u, its top −u.
+    let (x, y) = (w.oe(ob, true), w.oe(ot, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let outside = w.face(&[bx, by], outer_cyl, true);
+    // Inside: normal towards the axis (same_sense .F.): about it, the bottom runs −u.
+    let (x, y) = (w.oe(ib, false), w.oe(it, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let inside = w.face(&[bx, by], inner_cyl, false);
+    // Annuli: the bottom faces −z, the top +z.
+    let plane_b = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x, y) = (w.oe(ob, false), w.oe(ib, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let bottom = w.face(&[bx, by], plane_b, false);
+    let plane_t = w.plane([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x, y) = (w.oe(ot, true), w.oe(it, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let top = w.face(&[bx, by], plane_t, true);
+    let shell = closed_shell(&mut w, &[outside, inside, bottom, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('tube',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    // Each band's top circle split where the seam from its bottom vertex meets it.
+    assert_eq!(counts(&s.brep), [2, 1, 4, 4 + 2 + 2, 4 + 2]);
+    assert!(s.notes.iter().any(|n| n.contains("2 seam edges added")), "{:?}", s.notes);
+    faces_away(&s.brep, 0, |p| {
+        let r = p[0].hypot(p[1]);
+        let k = 4.0 / r.max(1e-9);
+        [p[0] * k, p[1] * k, p[2].clamp(1.0, 3.0)]
+    });
+
+    // A dome: a hemisphere bounded by its equator alone, closed by a disk.
+    let mut w = W::default();
+    let e = ring(&mut w, 5.0, 0.0, 0.5);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let x = w.oe(e, true);
+    let bx = w.bound(&[x], true, true);
+    let dome = w.face(&[bx], sphere, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(e, false);
+    let bx = w.bound(&[x], true, true);
+    let disk = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[dome, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('dome',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    // A meridian from the equator's vertex to a new vertex at the north pole.
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    let pole = s.brep.vertices.iter().find(|v| (v.point[2] - 5.0).abs() < 1e-9);
+    assert!(pole.is_some(), "{:?}", s.brep.vertices);
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
 /// FACE_OUTER_BOUNDs, otherwise every bound is a FACE_BOUND and the hole is listed first.
 fn plate(marked: bool) -> p21::Exchange {
