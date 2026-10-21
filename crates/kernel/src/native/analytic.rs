@@ -1,14 +1,6 @@
 //! Analytic wire records are mathematical loci, independent of backend parameterizations.
 use super::*;
 
-pub(super) fn full_turn(angle: &[f64; 2]) -> Result<()> {
-    if (angle[1] - angle[0] - std::f64::consts::TAU).abs() > 1e-12 {
-        Err(invalid("partial angular surface domains need another adapter representation"))
-    } else {
-        Ok(())
-    }
-}
-
 /// Exact rational conic locus. The adapter reparameterizes angle by rational spans.
 pub(super) fn arc(frame: &b::Frame, radii: [f64; 2], angle: [f64; 2]) -> Result<mt::Curve> {
     let span = angle[1] - angle[0];
@@ -36,32 +28,32 @@ pub(super) fn revolved(profile: mt::Curve, origin: mt::Point3, axis: mt::Vector3
     mt::Surface::RevolutedCurve(s)
 }
 
-pub(super) fn load_analytic(surface: b::Surface) -> Result<mt::Surface> {
+/// An unbounded analytic surface as a truck revolution, its profile over `height` (the face's
+/// v range) for a cylinder or cone, and the whole meridian for a sphere or torus. Truck's
+/// revolution has its own (u, v); the record's loops, not its parameters, bound the face.
+pub(super) fn load_analytic(surface: b::Surface, height: [f64; 2]) -> Result<mt::Surface> {
+    use std::f64::consts::{FRAC_PI_2, TAU};
     let axis = |f: &b::Frame| v(f.x_axis).cross(v(f.y_axis));
     Ok(match surface {
-        b::Surface::Cylinder { frame, radius, angle, height } => {
-            full_turn(&angle)?;
+        b::Surface::Cylinder { frame, radius } => {
             let z = axis(&frame);
             let at = |h| p(frame.origin) + v(frame.x_axis) * radius + z * h;
             revolved(mt::Curve::Line(mt::Line(at(height[0]), at(height[1]))), p(frame.origin), z, true)
         }
-        b::Surface::Cone { frame, radius_at_origin, half_angle, angle, height } => {
-            full_turn(&angle)?;
+        b::Surface::Cone { frame, radius_at_origin, half_angle } => {
             let z = axis(&frame);
             let at = |h| p(frame.origin) + v(frame.x_axis) * (radius_at_origin + h * half_angle.tan()) + z * h;
             revolved(mt::Curve::Line(mt::Line(at(height[0]), at(height[1]))), p(frame.origin), z, true)
         }
-        b::Surface::Sphere { frame, radius, longitude, latitude } => {
-            full_turn(&longitude)?;
+        b::Surface::Sphere { frame, radius } => {
             let z = axis(&frame);
             let meridian = b::Frame { origin: frame.origin, x_axis: frame.x_axis, y_axis: vector(z) };
-            revolved(arc(&meridian, [radius; 2], latitude)?, p(frame.origin), z, true)
+            revolved(arc(&meridian, [radius; 2], [-FRAC_PI_2, FRAC_PI_2])?, p(frame.origin), z, true)
         }
-        b::Surface::Torus { frame, major_radius, minor_radius, longitude, meridian } => {
-            full_turn(&longitude)?;
+        b::Surface::Torus { frame, major_radius, minor_radius } => {
             let z = axis(&frame);
             let profile = b::Frame { origin: point(p(frame.origin) + v(frame.x_axis) * major_radius), x_axis: frame.x_axis, y_axis: vector(z) };
-            revolved(arc(&profile, [minor_radius; 2], meridian)?, p(frame.origin), z, true)
+            revolved(arc(&profile, [minor_radius; 2], [0., TAU])?, p(frame.origin), z, true)
         }
         _ => return Err(invalid("expected analytic surface")),
     })

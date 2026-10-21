@@ -1818,6 +1818,80 @@ impl Body {
         self.lumps_with_clearance(2.0 * (self.size() * 1e-4).max(1e-6))
     }
 
+    /// Each shell's mesh at `tol` with its signed volume (positive: it bounds material).
+    fn shell_meshes(&self, tol: f64) -> Result<Vec<(f64, Mesh)>> {
+        let shells: Vec<mt::Shell> = self.solid.boundaries().clone();
+        if shells.len() > shell_groups::MAX_SHELLS
+            || shells.iter().flat_map(mt::Shell::vertex_iter).take(shell_groups::MAX_POINTS + 1).count() > shell_groups::MAX_POINTS
+            || shells.iter().flat_map(mt::Shell::face_iter).take(shell_groups::MAX_TRIANGLES + 1).count() > shell_groups::MAX_TRIANGLES
+        {
+            return Err(KernelError::Failed("lumps: topology exceeds the shell grouping limit".into()));
+        }
+        let (mut point_count, mut triangle_count) = (0usize, 0usize);
+        let data: Vec<(f64, Mesh)> = shells
+            .iter()
+            .map(|sh| {
+                let meshed = sh.robust_triangulation(tol);
+                if meshed.face_iter().any(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none())) {
+                    return Err(KernelError::Failed("lumps: cannot mesh a complete shell boundary".into()));
+                }
+                let pm = meshed.to_polygon();
+                point_count = point_count
+                    .checked_add(pm.positions().len())
+                    .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
+                triangle_count = triangle_count
+                    .checked_add(pm.faces().triangle_iter().take(shell_groups::MAX_TRIANGLES + 1).count())
+                    .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
+                if point_count > shell_groups::MAX_POINTS || triangle_count > shell_groups::MAX_TRIANGLES {
+                    return Err(KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()));
+                }
+                let mut m = Mesh::default();
+                for p in pm.positions() {
+                    m.positions.push(Vec3::new(p.x, p.y, p.z));
+                }
+                for t in pm.faces().triangle_iter() {
+                    let idx = |k: usize| {
+                        t.get(k).and_then(|x| u32::try_from(x.pos).ok()).ok_or_else(|| KernelError::Failed("lumps: invalid mesh index".into()))
+                    };
+                    let indices = [idx(0)?, idx(1)?, idx(2)?];
+                    let [a, b, c] = m.tri(&indices).ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))?;
+                    // STEP sphere poles can produce zero-area duplicate triangles.
+                    // They have no boundary area or volume and are not ray crossings.
+                    if (b - a).cross(c - a) == Vec3::ZERO {
+                        continue;
+                    }
+                    m.triangles.push(indices);
+                    m.tri_face.push(0);
+                }
+                let origin = m.positions.first().copied().ok_or_else(|| KernelError::Failed("lumps: empty mesh".into()))?;
+                let v = m
+                    .triangles
+                    .iter()
+                    .map(|t| {
+                        m.tri(t)
+                            .map(|[a, b, c]| (a - origin).dot((b - origin).cross(c - origin)) / 6.0)
+                            .ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .sum();
+                Ok((v, m))
+            })
+            .collect::<Result<_>>()?;
+        Ok(data)
+    }
+
+    /// The shell directly around each of the body's shells (`None` for one in the open) and
+    /// whether each bounds material (else a void), for closed shells; see `shell_groups`.
+    pub(crate) fn shell_nesting(&self) -> Result<(Vec<bool>, Vec<Option<usize>>)> {
+        guard("shell nesting", || {
+            let data = self.shell_meshes((self.size() * 1e-3).max(1e-3))?;
+            let (volumes, meshes): (Vec<_>, Vec<_>) = data.into_iter().unzip();
+            let parents = shell_groups::parents(&meshes, &volumes, (self.size() * 1e-8).max(1e-9))?;
+            Ok((volumes.iter().map(|v| *v > 0.0).collect(), parents))
+        })
+    }
+
     fn lumps_with_clearance(&self, clearance: f64) -> Result<Vec<Body>> {
         if self.mesh.is_some() || self.solid.boundaries().len() < 2 {
             return Ok(vec![self.clone()]);
@@ -1825,63 +1899,7 @@ impl Body {
         let tol = (self.size() * 1e-3).max(1e-3);
         guard("lumps", || {
             let shells: Vec<mt::Shell> = self.solid.boundaries().clone();
-            if shells.len() > shell_groups::MAX_SHELLS
-                || shells.iter().flat_map(mt::Shell::vertex_iter).take(shell_groups::MAX_POINTS + 1).count() > shell_groups::MAX_POINTS
-                || shells.iter().flat_map(mt::Shell::face_iter).take(shell_groups::MAX_TRIANGLES + 1).count() > shell_groups::MAX_TRIANGLES
-            {
-                return Err(KernelError::Failed("lumps: topology exceeds the shell grouping limit".into()));
-            }
-            let (mut point_count, mut triangle_count) = (0usize, 0usize);
-            let data: Vec<(f64, Mesh)> = shells
-                .iter()
-                .map(|sh| {
-                    let meshed = sh.robust_triangulation(tol);
-                    if meshed.face_iter().any(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none())) {
-                        return Err(KernelError::Failed("lumps: cannot mesh a complete shell boundary".into()));
-                    }
-                    let pm = meshed.to_polygon();
-                    point_count = point_count
-                        .checked_add(pm.positions().len())
-                        .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
-                    triangle_count = triangle_count
-                        .checked_add(pm.faces().triangle_iter().take(shell_groups::MAX_TRIANGLES + 1).count())
-                        .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
-                    if point_count > shell_groups::MAX_POINTS || triangle_count > shell_groups::MAX_TRIANGLES {
-                        return Err(KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()));
-                    }
-                    let mut m = Mesh::default();
-                    for p in pm.positions() {
-                        m.positions.push(Vec3::new(p.x, p.y, p.z));
-                    }
-                    for t in pm.faces().triangle_iter() {
-                        let idx = |k: usize| {
-                            t.get(k).and_then(|x| u32::try_from(x.pos).ok()).ok_or_else(|| KernelError::Failed("lumps: invalid mesh index".into()))
-                        };
-                        let indices = [idx(0)?, idx(1)?, idx(2)?];
-                        let [a, b, c] = m.tri(&indices).ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))?;
-                        // STEP sphere poles can produce zero-area duplicate triangles.
-                        // They have no boundary area or volume and are not ray crossings.
-                        if (b - a).cross(c - a) == Vec3::ZERO {
-                            continue;
-                        }
-                        m.triangles.push(indices);
-                        m.tri_face.push(0);
-                    }
-                    let origin = m.positions.first().copied().ok_or_else(|| KernelError::Failed("lumps: empty mesh".into()))?;
-                    let v = m
-                        .triangles
-                        .iter()
-                        .map(|t| {
-                            m.tri(t)
-                                .map(|[a, b, c]| (a - origin).dot((b - origin).cross(c - origin)) / 6.0)
-                                .ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .sum();
-                    Ok((v, m))
-                })
-                .collect::<Result<_>>()?;
+            let data = self.shell_meshes(tol)?;
             let (volumes, meshes): (Vec<_>, Vec<_>) = data.into_iter().unzip();
             let groups = shell_groups::groups(&meshes, &volumes, (self.size() * 1e-8).max(1e-9).max(clearance))?;
             if groups.len() == 1 {

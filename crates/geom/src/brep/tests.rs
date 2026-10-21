@@ -1,0 +1,497 @@
+use super::*;
+use std::f64::consts::{FRAC_PI_2, TAU};
+
+fn segment(a: f64, b: f64) -> Curve2 {
+    Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.], [b, 1.]] }
+}
+fn plane() -> Surface {
+    Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }
+}
+fn a_frame() -> Frame {
+    Frame { origin: [1., 2., 3.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }
+}
+
+/// Every edge's uses as the canonical walk meets them (faces are all forward here).
+fn list_uses(b: &mut Brep) {
+    for e in &mut b.edges {
+        e.uses.clear();
+    }
+    for (fi, f) in b.faces.iter().enumerate() {
+        for (li, l) in f.loops.iter().enumerate() {
+            if let Loop::Edges { edges } = l {
+                for (p, u) in edges.iter().enumerate() {
+                    let at = EdgeUseRef { face: fi as u32, r#loop: li as u32, position: p as u32, upper: !u.forward };
+                    b.edges[u.edge as usize].uses.push(at);
+                }
+            }
+        }
+    }
+}
+
+/// Planar faces, one per vertex cycle, grouped into shells; edges and vertices numbered in
+/// canonical order as the cycles first meet them.
+fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) -> Brep {
+    let mut b = Brep { version: VERSION, tolerance: 1e-7, regions, shells: Vec::new(), faces: Vec::new(), edges: Vec::new(), vertices: Vec::new() };
+    let mut vertex_of = vec![None; points.len()];
+    let mut vertex = |b: &mut Brep, p: usize| -> u32 {
+        *vertex_of[p].get_or_insert_with(|| {
+            b.vertices.push(Vertex { point: points[p], tolerance: 1e-7 });
+            b.vertices.len() as u32 - 1
+        })
+    };
+    let mut by_pair = std::collections::HashMap::new();
+    for cycles in shells {
+        let mut uses = Vec::new();
+        for cycle in cycles.iter() {
+            let mut loop_ = Vec::new();
+            for k in 0..cycle.len() {
+                let (a, z) = (cycle[k], cycle[(k + 1) % cycle.len()]);
+                let (edge, forward) = match by_pair.get(&(z, a)) {
+                    Some(&e) => (e, false),
+                    None => {
+                        let vs = [vertex(&mut b, a), vertex(&mut b, z)];
+                        b.edges.push(Edge {
+                            curve: Curve::Line { start: points[a], end: points[z] },
+                            interval: [0., 1.],
+                            vertices: vs,
+                            tolerance: 1e-7,
+                            uses: vec![],
+                        });
+                        let e = b.edges.len() as u32 - 1;
+                        by_pair.insert((a, z), e);
+                        (e, true)
+                    }
+                };
+                loop_.push(OrientedEdge { edge, forward, pcurve: segment(0., 1.) });
+            }
+            uses.push(OrientedFace { face: b.faces.len() as u32, forward: true });
+            b.faces.push(Face { surface: plane(), domain: [[-10., 10.], [-10., 10.]], loops: vec![Loop::Edges { edges: loop_ }] });
+        }
+        b.shells.push(Shell::Faces { faces: uses, wires: vec![] });
+    }
+    list_uses(&mut b);
+    b
+}
+
+fn infinite(shells: Vec<u32>) -> Region {
+    Region { shells, void: false }
+}
+const SQUARE: [[f64; 3]; 4] = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+fn sheet() -> Brep {
+    faceted(&SQUARE, &[&[&[0, 1, 2, 3]]], vec![infinite(vec![0])])
+}
+const TETRA: [[f64; 3]; 4] = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+const TETRA_FACES: [&[usize]; 4] = [&[0, 2, 1], &[0, 1, 3], &[1, 2, 3], &[0, 3, 2]];
+fn tetra() -> Brep {
+    faceted(&TETRA, &[&TETRA_FACES], vec![infinite(vec![0]), Region { shells: vec![0], void: false }])
+}
+/// A tetrahedron with a tetrahedral void inside it.
+fn hollow() -> Brep {
+    let mut points = TETRA.to_vec();
+    points.extend(TETRA.map(|p| p.map(|x| 0.2 + 0.1 * x)));
+    let inner: Vec<Vec<usize>> = TETRA_FACES.iter().map(|c| c.iter().rev().map(|i| i + 4).collect()).collect();
+    let inner: Vec<&[usize]> = inner.iter().map(Vec::as_slice).collect();
+    faceted(
+        &points,
+        &[&TETRA_FACES, &inner],
+        vec![infinite(vec![0]), Region { shells: vec![0, 1], void: false }, Region { shells: vec![1], void: true }],
+    )
+}
+/// The side of a cylinder: one face bounded by two circles and a seam edge used twice.
+fn tube() -> Brep {
+    let f = a_frame();
+    let circle = |z: f64| Curve::Circle { frame: Frame { origin: [1., 2., 3. + z], ..f.clone() }, radius: 2. };
+    let edge = |curve, interval, vertices| Edge { curve, interval, vertices, tolerance: 1e-7, uses: vec![] };
+    let mut b = Brep {
+        version: VERSION,
+        tolerance: 1e-7,
+        regions: vec![infinite(vec![0])],
+        shells: vec![Shell::Faces { faces: vec![OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![Face {
+            surface: Surface::Cylinder { frame: f.clone(), radius: 2. },
+            domain: [[0., TAU], [0., 5.]],
+            loops: vec![Loop::Edges {
+                edges: vec![
+                    OrientedEdge { edge: 0, forward: true, pcurve: segment(0., TAU) },
+                    OrientedEdge { edge: 1, forward: true, pcurve: segment(0., 1.) },
+                    OrientedEdge { edge: 2, forward: false, pcurve: segment(0., TAU) },
+                    OrientedEdge { edge: 1, forward: false, pcurve: segment(0., 1.) },
+                ],
+            }],
+        }],
+        edges: vec![
+            edge(circle(0.), [0., TAU], [0, 0]),
+            edge(Curve::Line { start: [3., 2., 3.], end: [3., 2., 8.] }, [0., 1.], [0, 1]),
+            edge(circle(5.), [0., TAU], [1, 1]),
+        ],
+        vertices: vec![Vertex { point: [3., 2., 3.], tolerance: 1e-7 }, Vertex { point: [3., 2., 8.], tolerance: 1e-7 }],
+    };
+    list_uses(&mut b);
+    b
+}
+/// The sheet with a vertex loop inside it, a wire shell and a vertex shell beside it.
+fn sheet_with_lower_forms() -> Brep {
+    let mut b = sheet();
+    let n = b.vertices.len() as u32;
+    // Vertex order: edge vertices first (the wire edge's), then the vertex loop's, then the shell's.
+    b.vertices.extend([[2., 0., 0.], [3., 0., 0.], [0.5, 0.5, 0.], [5., 5., 5.]].map(|point| Vertex { point, tolerance: 1e-7 }));
+    b.edges.push(Edge {
+        curve: Curve::Line { start: [2., 0., 0.], end: [3., 0., 0.] },
+        interval: [0., 1.],
+        vertices: [n, n + 1],
+        tolerance: 1e-7,
+        uses: vec![],
+    });
+    b.faces[0].loops.push(Loop::Vertex { vertex: n + 2 });
+    b.shells.push(Shell::Wire { edges: vec![4] });
+    b.shells.push(Shell::Vertex { vertex: n + 3 });
+    b.regions[0].shells.extend([1, 2]);
+    b
+}
+
+#[test]
+fn every_form_validates_and_round_trips_without_a_kernel() {
+    for (name, body) in [("sheet", sheet()), ("closed", tetra()), ("void", hollow()), ("seam", tube()), ("lower forms", sheet_with_lower_forms())] {
+        body.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
+        let bytes = serde_json::to_vec(&body).unwrap();
+        let restored: Brep = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body, restored, "{name}");
+        assert!(!String::from_utf8(bytes).unwrap().contains("truck"));
+    }
+}
+
+/// One defect each; every one is refused.
+#[test]
+fn one_defect_fixtures_are_refused() {
+    let cases: Vec<(&str, &str, Brep)> = vec![
+        ("version", "unsupported version", {
+            let mut b = sheet();
+            b.version = 3;
+            b
+        }),
+        ("tolerance", "tolerance", {
+            let mut b = sheet();
+            b.tolerance = f64::NAN;
+            b
+        }),
+        ("vertex tolerance", "tolerance", {
+            let mut b = sheet();
+            b.vertices[0].tolerance = 0.;
+            b
+        }),
+        ("coordinate", "non-finite or excessive coordinate", {
+            let mut b = sheet();
+            b.vertices[0].point[0] = f64::INFINITY;
+            b
+        }),
+        ("edge reference", "edge reference", {
+            let mut b = sheet();
+            if let Loop::Edges { edges } = &mut b.faces[0].loops[0] {
+                edges[0].edge = u32::MAX;
+            }
+            b
+        }),
+        ("edge vertices", "edge vertices", {
+            let mut b = sheet();
+            b.edges[0].vertices[0] = u32::MAX;
+            b
+        }),
+        ("disconnected loop", "disconnected loop", {
+            let mut b = sheet();
+            if let Loop::Edges { edges } = &mut b.faces[0].loops[0] {
+                edges.swap(1, 2);
+            }
+            list_uses(&mut b);
+            b
+        }),
+        ("reversed use", "disconnected loop", {
+            let mut b = sheet();
+            if let Loop::Edges { edges } = &mut b.faces[0].loops[0] {
+                edges[1].forward = false;
+            }
+            list_uses(&mut b);
+            b
+        }),
+        ("outer vertex loop", "outer loop is not an edge loop", {
+            let mut b = sheet_with_lower_forms();
+            b.faces[0].loops.swap(0, 1);
+            b
+        }),
+        ("missing use", "edge uses do not list the edge's uses", {
+            let mut b = tetra();
+            b.edges[0].uses.pop();
+            b
+        }),
+        ("repeated use", "edge use listed twice or not a use of the edge", {
+            let mut b = tetra();
+            let first = b.edges[0].uses[0];
+            b.edges[0].uses[1] = first;
+            b
+        }),
+        ("primary not first", "edge's primary use is not its first", {
+            let mut b = tetra();
+            b.edges[0].uses.reverse();
+            b
+        }),
+        ("upper", "edge use listed twice or not a use of the edge", {
+            let mut b = tetra();
+            b.edges[0].uses[1].upper = !b.edges[0].uses[1].upper;
+            b
+        }),
+        ("wire edge with uses", "wire edge with face uses", {
+            let mut b = sheet_with_lower_forms();
+            let u = b.edges[0].uses[0];
+            b.edges[4].uses.push(u);
+            b
+        }),
+        ("pcurve interval", "pcurve interval differs from its edge's", {
+            let mut b = tube();
+            if let Loop::Edges { edges } = &mut b.faces[0].loops[0] {
+                edges[0].pcurve = segment(0., TAU - 1e-3);
+            }
+            b
+        }),
+        ("edge interval past one turn", "parameter interval exceeds one turn", {
+            let mut b = tube();
+            b.edges[0].interval = [0., TAU + 0.1];
+            b
+        }),
+        ("edge interval outside a spline", "parameter interval outside the natural domain", {
+            let mut b = sheet();
+            b.edges[0].curve = Curve::Spline { knots: vec![0., 0., 1., 1.], points: vec![SQUARE[0], SQUARE[1]] };
+            b.edges[0].interval = [0., 1.5];
+            b
+        }),
+        ("empty edge interval", "empty parameter interval", {
+            let mut b = sheet();
+            b.edges[0].interval = [1., 1.];
+            b
+        }),
+        ("face domain outside the sphere", "parameter interval outside the natural domain", {
+            let mut b = sheet();
+            b.faces[0].surface = Surface::Sphere { frame: a_frame(), radius: 2. };
+            b.faces[0].domain = [[0., TAU], [-FRAC_PI_2 - 0.1, FRAC_PI_2]];
+            b
+        }),
+        ("face domain past one turn", "parameter interval exceeds one turn", {
+            let mut b = tube();
+            b.faces[0].domain[0] = [0., TAU + 0.1];
+            b
+        }),
+        ("face domain outside a spline surface", "parameter interval outside the natural domain", {
+            let mut b = sheet();
+            b.faces[0].surface = Surface::Spline {
+                u_knots: vec![0., 0., 1., 1.],
+                v_knots: vec![0., 0., 1., 1.],
+                points: vec![vec![[0.; 3], [0., 1., 0.]], vec![[1., 0., 0.], [1., 1., 0.]]],
+            };
+            b
+        }),
+        ("edges out of order", "edges out of canonical order", {
+            let mut b = sheet();
+            b.edges.swap(0, 1);
+            for f in &mut b.faces {
+                for l in &mut f.loops {
+                    if let Loop::Edges { edges } = l {
+                        for u in edges {
+                            u.edge = [1, 0, 2, 3][u.edge as usize];
+                        }
+                    }
+                }
+            }
+            list_uses(&mut b);
+            b
+        }),
+        ("vertices out of order", "vertices out of canonical order", {
+            let mut b = sheet();
+            b.vertices.swap(0, 1);
+            for e in &mut b.edges {
+                e.vertices = e.vertices.map(|v| [1, 0, 2, 3][v as usize]);
+            }
+            b
+        }),
+        ("faces out of order", "faces out of canonical order", {
+            let mut b = tetra();
+            if let Shell::Faces { faces, .. } = &mut b.shells[0] {
+                faces.swap(0, 1);
+            }
+            b
+        }),
+        ("orphan vertex", "vertices out of canonical order", {
+            let mut b = sheet();
+            b.vertices.push(Vertex { point: [9.; 3], tolerance: 1e-7 });
+            b
+        }),
+        ("void infinite region", "the infinite region is a void", {
+            let mut b = sheet();
+            b.regions[0].void = true;
+            b
+        }),
+        ("open outer shell", "an open, wire or vertex shell lies in one region", {
+            let mut b = sheet();
+            b.regions.push(Region { shells: vec![0], void: false });
+            b
+        }),
+        ("closed shell in one region", "a closed shell bounds two regions and encloses one", {
+            let mut b = tetra();
+            b.regions.pop();
+            b
+        }),
+        ("bounded region without shells", "bounded region without an outer shell", {
+            let mut b = tetra();
+            b.regions.push(Region { shells: vec![], void: true });
+            b
+        }),
+        ("unlisted shell", "a closed shell bounds two regions and encloses one", {
+            let mut b = hollow();
+            b.regions[1].shells.pop();
+            b.regions.pop();
+            b
+        }),
+        ("face used three times", "face used by neither one nor two oriented faces", {
+            let mut b = tetra();
+            if let Shell::Faces { faces, .. } = &mut b.shells[0] {
+                faces.push(OrientedFace { face: 0, forward: false });
+                faces.push(OrientedFace { face: 0, forward: true });
+            }
+            b
+        }),
+        ("face twice in one shell", "a face's two sides", {
+            let mut b = tetra();
+            if let Shell::Faces { faces, .. } = &mut b.shells[0] {
+                faces.push(OrientedFace { face: 0, forward: false });
+            }
+            b
+        }),
+        ("cone domain past its apex", "parameter interval outside the natural domain", {
+            let mut b = sheet();
+            b.faces[0].surface = Surface::Cone { frame: a_frame(), radius_at_origin: 1., half_angle: 0.25 * std::f64::consts::PI };
+            b.faces[0].domain = [[0., 1.], [-2., 1.]];
+            b
+        }),
+    ];
+    for (name, expected, body) in cases {
+        let error = body.validate().err().unwrap_or_else(|| panic!("{name} was accepted"));
+        assert_eq!(error.0, expected, "{name}");
+    }
+}
+
+#[test]
+fn a_reversed_face_is_walked_backwards() {
+    // The sheet seen from below: its first (only) side is reversed, so the canonical walk
+    // meets its loop's edges last to first.
+    let mut b = sheet();
+    if let Shell::Faces { faces, .. } = &mut b.shells[0] {
+        faces[0].forward = false;
+    }
+    assert!(b.validate().is_err());
+    // Renumber the edges (and vertices) in the backward walk's order.
+    let Loop::Edges { edges } = &mut b.faces[0].loops[0] else { panic!("an edge loop") };
+    let order: Vec<u32> = edges.iter().rev().map(|u| u.edge).collect();
+    let mut new = vec![0; order.len()];
+    for (i, e) in order.iter().enumerate() {
+        new[*e as usize] = i as u32;
+    }
+    for u in edges.iter_mut() {
+        u.edge = new[u.edge as usize];
+    }
+    let mut edges_ = b.edges.clone();
+    for (old, e) in b.edges.iter().enumerate() {
+        edges_[new[old] as usize] = e.clone();
+    }
+    b.edges = edges_;
+    let mut seen = Vec::new();
+    for e in &b.edges {
+        for v in e.vertices {
+            if !seen.contains(&v) {
+                seen.push(v);
+            }
+        }
+    }
+    let vertices = seen.iter().map(|&v| b.vertices[v as usize].clone()).collect();
+    b.vertices = vertices;
+    for e in &mut b.edges {
+        e.vertices = e.vertices.map(|v| seen.iter().position(|&s| s == v).unwrap() as u32);
+    }
+    for e in &mut b.edges {
+        e.uses.clear();
+    }
+    let Loop::Edges { edges } = &b.faces[0].loops[0] else { panic!("an edge loop") };
+    for (p, u) in edges.iter().enumerate().rev() {
+        b.edges[u.edge as usize].uses.push(EdgeUseRef { face: 0, r#loop: 0, position: p as u32, upper: !u.forward });
+    }
+    b.validate().unwrap();
+}
+
+#[test]
+fn spline_domains_weights_and_nesting_are_bounded() {
+    let mut budget = Budget(0);
+    assert!(knots(&[0., 0., 1., 1.], 2, &mut budget).is_ok());
+    for bad in [vec![0., 0., 0., 0.], vec![0., 1., 0., 1.], vec![0., 0., f64::INFINITY, 1.]] {
+        assert!(knots(&bad, 2, &mut Budget(0)).is_err());
+    }
+    let c = Curve::RationalSpline { knots: vec![0., 0., 1., 1.], homogeneous: vec![[0., 0., 0., 0.], [1., 0., 0., 1.]] };
+    assert!(curve(&c, 0, &mut Budget(0)).is_err());
+    let p = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [2., 0., 0.] };
+    assert!(surface(&p, 0, &mut Budget(0)).is_err());
+    assert!(curve(&Curve::Line { start: [0.; 3], end: [1.; 3] }, MAX_DEPTH + 1, &mut Budget(0)).is_err());
+    assert!(Budget(MAX_ITEMS).add(1).is_err());
+    assert_eq!(curve_natural(&Curve::Spline { knots: vec![0., 0., 0., 1., 2., 2., 2.], points: vec![[0.; 3]; 4] }), Natural::Range(0., 2.));
+}
+
+#[test]
+fn exact_procedural_records_are_validated_and_round_trip() {
+    let plane = |z: f64| Box::new(Surface::Plane { origin: [0., 0., z], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
+    let leader = Box::new(Curve::Polyline { points: vec![[0.; 3], [0.; 3], [1., 0., 0.]] });
+    let c = Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: leader.clone(), tolerance: 1e-6 };
+    curve(&c, 0, &mut Budget(0)).unwrap();
+    assert_eq!(curve_natural(&c), Natural::Range(0., 2.));
+    assert_eq!(serde_json::from_str::<Curve>(&serde_json::to_string(&c).unwrap()).unwrap(), c);
+    let line = Box::new(Curve::Line { start: [0.; 3], end: [1.; 3] });
+    for bad in [
+        Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: line.clone(), tolerance: 1e-6 },
+        Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: leader.clone(), tolerance: f64::NAN },
+        Curve::SurfaceIntersection { surfaces: [plane(f64::INFINITY), plane(1.)], leader, tolerance: 1e-6 },
+    ] {
+        assert!(curve(&bad, 0, &mut Budget(0)).is_err());
+    }
+    let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let s = Surface::PlacedRevolution { profile: line.clone(), origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: false };
+    surface(&s, 0, &mut Budget(0)).unwrap();
+    assert_eq!(surface_natural(&s), [Natural::Periodic, UNBOUNDED]);
+    assert_eq!(serde_json::from_str::<Surface>(&serde_json::to_string(&s).unwrap()).unwrap(), s);
+    let mut flat = identity;
+    flat[2] = [0.; 4];
+    let bad = Surface::PlacedRevolution { profile: line, origin: [0.; 3], axis: [0., 0., 1.], matrix: flat, forward: true };
+    assert!(surface(&bad, 0, &mut Budget(0)).is_err());
+}
+
+#[test]
+fn analytic_records_are_unbounded_with_independent_frames() {
+    let f = a_frame();
+    let surfaces = [
+        Surface::Cylinder { frame: f.clone(), radius: 2. },
+        Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.2 },
+        Surface::Sphere { frame: f.clone(), radius: 2. },
+        Surface::Torus { frame: f.clone(), major_radius: 4., minor_radius: 1. },
+    ];
+    for s in surfaces {
+        surface(&s, 0, &mut Budget(0)).unwrap();
+        let encoded = serde_json::to_string(&s).unwrap();
+        assert_eq!(serde_json::from_str::<Surface>(&encoded).unwrap(), s);
+        assert!(!encoded.contains("\"angle\"") && !encoded.contains("height") && !encoded.contains("longitude"));
+    }
+    for c in [Curve::Circle { frame: f.clone(), radius: 2. }, Curve::Ellipse { frame: f.clone(), radii: [2., 3.] }] {
+        curve(&c, 0, &mut Budget(0)).unwrap();
+        assert_eq!(serde_json::from_str::<Curve>(&serde_json::to_string(&c).unwrap()).unwrap(), c);
+        assert_eq!(curve_natural(&c), Natural::Periodic);
+        // A periodic edge may start anywhere and run up to one turn.
+        interval(&[-1., TAU - 1.], Natural::Periodic).unwrap();
+    }
+    let mut bad = f;
+    bad.y_axis = bad.x_axis;
+    assert!(frame(&bad, &mut Budget(0)).is_err());
+    assert!(interval(&[2., 1.], UNBOUNDED).is_err());
+    assert!(radius(f64::NAN).is_err());
+    assert!(surface(&Surface::Torus { frame: a_frame(), major_radius: 1., minor_radius: 2. }, 0, &mut Budget(0)).is_err());
+}

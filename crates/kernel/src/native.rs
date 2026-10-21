@@ -8,14 +8,14 @@ use std::sync::Arc;
 mod adapter;
 mod binary;
 mod metadata;
-#[allow(dead_code)]
 mod pcurve;
 mod preview;
 pub use preview::native_preview_mesh;
 
 // 01/02 were development-only prototypes; independent metadata records start at 03; 04 stores
-// procedural intersections and placed revolutions exactly, and the measured runtime values.
-const MAGIC: &[u8; 8] = b"SCBREP04";
+// procedural intersections and placed revolutions exactly, and the measured runtime values; 05
+// nests geometry schema 4 (regions, unbounded geometry, pcurves, canonical order).
+const MAGIC: &[u8; 8] = b"SCBREP05";
 // A body's own limits. A design's cache holds many bodies within the container's budgets, and
 // decoding is linear in the bytes, so one large part (an imported casting) fits.
 const MAX_BYTES: usize = 256 << 20;
@@ -39,10 +39,6 @@ struct Runtime {
     size: f64,
     /// The orientation mesh's missing-face count at its tolerance.
     coarse_missing: Option<(f64, u64)>,
-    /// [`Body::boundary_tol`]: the accuracy the file it was read from declares. Written only
-    /// when there is one, so a body without it is stored as before.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    boundary_tol: Option<f64>,
 }
 fn invalid(detail: impl std::fmt::Display) -> KernelError {
     KernelError::Invalid(format!("native B-rep: {detail}"))
@@ -72,9 +68,8 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
         if body.mesh.is_some() {
             return Err(invalid("mesh bodies are source blobs, not B-rep"));
         }
-        let runtime =
-            Runtime { size: body.size, coarse_missing: body.coarse_missing.map(|(tol, n)| (tol, n as u64)), boundary_tol: body.boundary_tol };
-        let saved = SavedBody { solid: adapter::encode(&body.solid)?, metadata: metadata::encode(body)?, runtime };
+        let runtime = Runtime { size: body.size, coarse_missing: body.coarse_missing.map(|(tol, n)| (tol, n as u64)) };
+        let saved = SavedBody { solid: adapter::encode(body, pcurve::pcurves)?, metadata: metadata::encode(body)?, runtime };
         // Structural validation does not invoke another geometric reconstruction.
         validate_topology(&saved)?;
         let value = serde_json::to_value(saved).map_err(invalid)?;
@@ -105,17 +100,13 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
         let saved: SavedBody = serde_json::from_value(value).map_err(invalid)?;
         validate_topology(&saved)?;
         let solid = adapter::decode(saved.solid)?;
-        let Runtime { size, coarse_missing, boundary_tol } = saved.runtime;
-        if !(size.is_finite() && size >= 0.0)
-            || coarse_missing.is_some_and(|(tol, n)| !tol.is_finite() || n > MAX_ITEMS as u64)
-            || boundary_tol.is_some_and(|t| !(t.is_finite() && t > 0.0))
-        {
+        let Runtime { size, coarse_missing } = saved.runtime;
+        if !(size.is_finite() && size >= 0.0) || coarse_missing.is_some_and(|(tol, n)| !tol.is_finite() || n > MAX_ITEMS as u64) {
             return Err(invalid("runtime values"));
         }
         let mut body = Body {
             solid: Arc::new(solid),
             size,
-            boundary_tol,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             coarse_missing: coarse_missing.map(|(tol, n)| (tol, n as usize)),
             mesh: None,
@@ -136,8 +127,7 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
 
 fn validate_topology(saved: &SavedBody) -> Result<()> {
     saved.solid.validate().map_err(invalid)?;
-    let faces: usize = saved.solid.shells.iter().map(|s| s.faces.len()).sum();
-    let edges: usize = saved.solid.shells.iter().map(|s| s.edges.len()).sum();
+    let (faces, edges) = (saved.solid.faces.len(), saved.solid.edges.len());
     let saved = &saved.metadata;
     if saved.version != solidcraft_geom::brep::envelope::VERSION {
         return Err(invalid("metadata version"));
@@ -239,18 +229,6 @@ mod tests {
             assert!((crate::measure(&a).unwrap().volume - crate::measure(&b).unwrap().volume).abs() < 1e-7);
         }
     }
-    /// A body read from a file keeps the accuracy the file declares through the model cache, so
-    /// a reopened design plans its faces as the import did; one without it is stored as before.
-    #[test]
-    fn a_files_declared_accuracy_survives_the_model_cache() {
-        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(4., 3., 1.)).unwrap();
-        let plain = encode_native_body(&cube).unwrap();
-        assert_eq!(decode_native_body(&plain).unwrap().boundary_tol, None);
-        let read = cube.with_boundary_tol(Some(1e-5));
-        let bytes = encode_native_body(&read).unwrap();
-        assert_ne!(bytes, plain);
-        assert_eq!(decode_native_body(&bytes).unwrap().boundary_tol, Some(1e-5));
-    }
     #[test]
     fn native_spheres_tori_and_open_faces_round_trip_without_conversion() {
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
@@ -277,7 +255,7 @@ mod tests {
             .iter()
             .map(|body| {
                 let bytes = encode_native_body(body).unwrap();
-                assert_eq!(&bytes[..8], b"SCBREP04");
+                assert_eq!(&bytes[..8], b"SCBREP05");
                 let mut raw = &bytes[8..];
                 let value = binary::read(&mut raw, 0, &mut 2_000_000).unwrap();
                 assert!(raw.is_empty());
@@ -285,7 +263,7 @@ mod tests {
             })
             .collect();
         let actual = serde_json::json!(records);
-        let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v4.json")).unwrap();
+        let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
         compare_wire(&expected, &actual);
     }
 
@@ -328,9 +306,9 @@ mod tests {
         for key in ["vertices", "index"] {
             let mut v = value.clone();
             if key == "vertices" {
-                v["solid"]["shells"][0]["edges"][0]["vertices"] = serde_json::json!([u64::MAX, 0]);
+                v["solid"]["edges"][0]["vertices"] = serde_json::json!([u64::MAX, 0]);
             } else {
-                v["solid"]["shells"][0]["faces"][0]["loops"][0][0]["edge"] = serde_json::json!(u64::MAX);
+                v["solid"]["faces"][0]["loops"][0]["edges"][0]["edge"] = serde_json::json!(u64::MAX);
             }
             let mut bad = MAGIC.to_vec();
             binary::write(&v, &mut bad, 0).unwrap();

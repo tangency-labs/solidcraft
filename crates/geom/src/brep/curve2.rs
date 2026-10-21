@@ -31,7 +31,6 @@ impl Curve2 {
     }
 }
 
-#[allow(dead_code)] // called by the schema 4 validator
 pub(super) fn curve2(c: &Curve2, budget: &mut Budget) -> Result<()> {
     budget.add(1)?;
     match c {
