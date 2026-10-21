@@ -154,11 +154,11 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
 /// An SMLib body as a kernel body, through its schema 4 record: SMLib's export mapped by
 /// `solidcraft_smlib` (canonical order, radians, pcurves), then this adapter's decode of a
 /// foreign record (analytic surfaces as truck's revolutions). The body is oriented as the record
-/// says; `Body::new` only measures it.
+/// says (`Body::oriented`), never by meshing it.
 #[cfg(feature = "smlib")]
 pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
     let record = brep.to_native().map_err(|e| KernelError::Failed(e.to_string()))?;
-    guard("decode SMLib B-rep", || Body::new(adapter::decode_from(record, adapter::Producer::Foreign)?))
+    guard("decode SMLib B-rep", || Body::oriented(adapter::decode_from(record, adapter::Producer::Foreign)?))
 }
 
 fn validate_topology(saved: &SavedBody) -> Result<()> {

@@ -281,3 +281,69 @@ fn smlib_hole_rim_fillet_decodes_with_its_volume() {
     let ours = crate::measure(&body).unwrap().volume;
     assert!((ours - smlib).abs() < 1e-3 * smlib, "decoded volume {ours}, SMLib's {smlib}");
 }
+
+/// SMLib's sphere cut by a box keeps its meridian seam from pole to pole: whole beside a cap
+/// cut away from it, split where the cap crosses it. Decoded, each body is oriented as its
+/// record says (never by truck's coarse mesh, which leaves the seam-bounded sphere out and
+/// turned one inside out), the sphere keeps its wrap on its seam and every face meshes: the
+/// volume is the sphere's less the cap, within 1e-3 (it came out −V, or short by the sphere).
+#[cfg(feature = "smlib")]
+#[test]
+fn smlib_spheres_cut_beside_or_across_their_seam_decode_with_their_volume() {
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    use std::f64::consts::PI;
+    let (r, h) = (5., 2.);
+    let exact = 4. / 3. * PI * r * r * r - PI * h * h * (3. * r - h) / 3.;
+    // The seam is the meridian on +x: a cap on −x or +y leaves it whole, one on +x splits it.
+    let caps =
+        [("−x", [-10., -10., -10.], [h - r, 10., 10.]), ("+x", [r - h, -10., -10.], [10., 10., 10.]), ("+y", [-10., r - h, -10.], [10., 10., 10.])];
+    for (name, lo, hi) in caps {
+        let ball = S::make_sphere([0.; 3], r).unwrap();
+        let tool = S::make_box(lo, [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]).unwrap();
+        let cut = ball.boolean(&tool, BooleanOp::Subtract).unwrap().unwrap();
+        let record = cut.to_native().unwrap();
+        record.check_geometry().unwrap();
+        crate::body::ORIENTED.with(|n| n.set(0));
+        let body = crate::native::body_from_smlib(&cut).unwrap();
+        assert_eq!(crate::body::ORIENTED.with(|n| n.get()), 0, "{name}: the decode meshed the body to orient it");
+        let forward: Vec<bool> = record
+            .shells
+            .iter()
+            .flat_map(|sh| match sh {
+                b::Shell::Faces { faces, .. } => faces.iter().map(|f| f.forward).collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let loaded: Vec<bool> = body.solid.boundaries().iter().flat_map(|sh| sh.face_iter().map(|f| f.orientation()).collect::<Vec<_>>()).collect();
+        assert_eq!(loaded, forward, "{name}: the body was turned inside out");
+        let mesh = body.tessellate(0.02).unwrap();
+        for f in 0..body.face_count() {
+            assert!(mesh.tri_face.iter().any(|&t| t as usize == f), "{name}: face {f} meshes");
+        }
+        let ours = crate::measure(&body).unwrap().volume;
+        assert!((ours - exact).abs() < 1e-3 * exact, "{name}: decoded volume {ours}, exact {exact}");
+    }
+    // A bar bored into the sphere's side away from its seam: truck's turning of revolved faces
+    // away from their wrap ran the wrap through the hole, and the face meshed as nothing. The
+    // volume the bar takes, by midpoint rule over its disc of the chord inside the ball.
+    let (c, big, y0, z0, x0, x1, rb) = ([25., 17.5, 2.5], 10., 22.5, 10., 12.5, 30., 2.5);
+    let n = 400;
+    let mut taken = 0.;
+    for i in 0..n {
+        let rho = rb * (f64::from(i) + 0.5) / f64::from(n);
+        for j in 0..n {
+            let t = 2. * PI * (f64::from(j) + 0.5) / f64::from(n);
+            let (y, z) = (y0 + rho * t.cos(), z0 + rho * t.sin());
+            let d = big * big - (y - c[1]).powi(2) - (z - c[2]).powi(2);
+            if d > 0. {
+                taken += ((c[0] + d.sqrt()).min(x1) - (c[0] - d.sqrt()).max(x0)).max(0.) * rho;
+            }
+        }
+    }
+    let exact = 4. / 3. * PI * big.powi(3) - taken * rb / f64::from(n) * 2. * PI / f64::from(n);
+    let ball = S::make_sphere(c, big).unwrap();
+    let bar = crate::cylinder(Vec3::new(x0, y0, z0), Vec3::X, rb, x1 - x0).unwrap();
+    let cut = ball.boolean(&crate::native::smlib_body(&bar).unwrap(), BooleanOp::Subtract).unwrap().unwrap();
+    let ours = crate::measure(&crate::native::body_from_smlib(&cut).unwrap()).unwrap().volume;
+    assert!((ours - exact).abs() < 1e-3 * exact, "bored: decoded volume {ours}, exact {exact}");
+}
