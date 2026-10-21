@@ -171,7 +171,7 @@ by lifting it; everything else is a cubic B-spline fitted within the tolerance.
 ## Validation and trust
 
 `Brep::validate` checks structure and resources without a kernel. It caps 1,024
-shells, 1,000,000 combined topology and geometry items, geometry nesting at 16,
+shells, 4,000,000 combined topology and geometry items (pcurve control points included), geometry nesting at 16,
 spline degree at 16 and control points per spline direction at 4,096. Numbers
 must be finite and at most 1e12 in magnitude. It checks knot order, active spline
 domains, multiplicities, rectangular grids, positive rational weights,

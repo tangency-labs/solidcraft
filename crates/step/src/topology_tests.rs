@@ -792,6 +792,31 @@ fn hostile_topology_is_an_error_never_a_panic() {
     }
 }
 
+/// The step-conformance parts (tests/step-conformance, CC0): every one reads, its faces facing
+/// out of its material, except the NURBS cylinder, dome and torus whose faces wind around a
+/// closed spline surface without a seam edge (refused for now).
+#[test]
+fn step_conformance_parts() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut paths: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
+    paths.sort();
+    assert_eq!(paths.len(), 17);
+    for path in paths {
+        let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let r = read_solids(&p21::parse(&std::fs::read_to_string(&path).unwrap()).unwrap());
+        if name.ends_with("_nurbs") {
+            assert!(r.solids.is_empty() && r.failures[0].message.contains("closed spline surface's seam"), "{name}: {:?}", r.failures);
+            continue;
+        }
+        assert!(r.failures.is_empty() && r.solids.len() == 1, "{name}: {:?}", r.failures);
+        let b = &r.solids[0].brep;
+        b.validate().unwrap();
+        b.check_geometry().unwrap();
+        assert_eq!(b.regions.len(), 2, "{name}");
+    }
+}
+
 /// Every solid of every STEP file in `SOLIDCRAFT_STEP_CORPUS` (the tangency-labs/models files)
 /// read into schema 4: solids read and refused (by reason), faces, edges, time. Run with
 /// `--ignored --nocapture`.

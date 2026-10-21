@@ -1821,16 +1821,19 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
-/// Each STEP file in `SOLIDCRAFT_STEP_CORPUS`: bodies, faces and edges as truck imports it and
-/// as `solidcraft_step::topology` reads it into schema 4 records. Counts may differ where truck
-/// splits faces (bands, balls) or edges; this reports, it does not judge. Run with
-/// `--ignored --nocapture`.
+/// Each STEP file in `SOLIDCRAFT_STEP_CORPUS`: bodies, faces, edges and volume as truck
+/// imports it and as `solidcraft_step::topology` reads it into schema 4 records (built back into
+/// truck solids for their volume, signed: negative means faces turned into the material).
+/// Counts may differ where truck splits faces (bands, balls) or edges and where schema 4 adds
+/// seams; volumes are coarse meshes' (1% of the size). This reports, it does not judge. Run
+/// with `--ignored --nocapture`.
 #[test]
 #[ignore = "needs SOLIDCRAFT_STEP_CORPUS"]
 fn corpus_truck_and_schema_4_counts() {
     let Ok(dir) = std::env::var("SOLIDCRAFT_STEP_CORPUS") else { return };
     let mut paths: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
     paths.sort();
+    let volume = |s: &mt::Solid| s.boundaries().iter().map(crate::body::shell_volume).sum::<Option<f64>>();
     for path in paths.iter().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))) {
         let text = std::fs::read_to_string(path).unwrap_or_default();
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1840,7 +1843,8 @@ fn corpus_truck_and_schema_4_counts() {
                 let mut seen = HashSet::new();
                 let once: Vec<&ImportedBody> = imp.bodies.iter().filter(|b| seen.insert(b.source_item)).collect();
                 let (f, e) = once.iter().fold((0, 0), |(f, e), b| (f + b.body.face_count(), e + b.body.edge_count()));
-                format!("{} bodies, {f} faces, {e} edges", once.len())
+                let v: f64 = once.iter().filter_map(|b| volume(&b.body.solid)).sum();
+                format!("{} bodies, {f} faces, {e} edges, volume {v:.4}", once.len())
             }
             Err(e) => format!("failed: {e}"),
         };
@@ -1853,6 +1857,26 @@ fn corpus_truck_and_schema_4_counts() {
         };
         let r = solidcraft_step::topology::read_solids(&ex);
         let (f, e) = r.solids.iter().fold((0, 0), |(f, e), s| (f + s.brep.faces.len(), e + s.brep.edges.len()));
-        println!("{name}: truck {truck}; schema 4 {} solids ({} refused), {f} faces, {e} edges", r.solids.len(), r.failures.len());
+        let (mut v, mut unbuilt) = (0.0, Vec::new());
+        for s in &r.solids {
+            // Truck holds a plane by three points: the same plane, within a rounding.
+            let mut record = s.brep.clone();
+            for f in &mut record.faces {
+                if let solidcraft_geom::brep::Surface::Plane { origin, u_axis, v_axis } = f.surface {
+                    let at = |d: [f64; 3]| [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]];
+                    f.surface = solidcraft_geom::brep::Surface::PlaneThrough { origin, u_point: at(u_axis), v_point: at(v_axis) };
+                }
+            }
+            match crate::native::solid_of_record(record) {
+                Ok(solid) => v += volume(&solid).unwrap_or(f64::NAN),
+                Err(err) => unbuilt.push(err.to_string()),
+            }
+        }
+        println!(
+            "{name}: truck {truck}; schema 4 {} solids ({} refused), {f} faces, {e} edges, volume {v:.4}{}",
+            r.solids.len(),
+            r.failures.len(),
+            if unbuilt.is_empty() { String::new() } else { format!(" ({} not built by truck: {})", unbuilt.len(), unbuilt[0]) }
+        );
     }
 }

@@ -102,6 +102,13 @@ pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
     solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
 }
 
+/// The truck solid of a schema 4 record, as a saved body's is built: tests compare records
+/// made elsewhere (the STEP reader's) with truck's own import.
+#[cfg(test)]
+pub(crate) fn solid_of_record(record: solidcraft_geom::brep::Brep) -> Result<truck_modeling::Solid> {
+    guard("decode a B-rep record", || adapter::decode(record))
+}
+
 /// Decode bounded untrusted data. Validate indices before topology extraction.
 /// Only a caller that has checked who produced the data may treat it as evaluated geometry.
 pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {

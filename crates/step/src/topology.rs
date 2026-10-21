@@ -913,6 +913,31 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
+        // Each use starts near where the one before it ends, along a bounded direction that
+        // does not wrap: a loop around a closed spline surface without a seam edge jumps across
+        // its domain.
+        let natural = surface.natural();
+        for (l, pc) in edge_loops.iter().zip(&pcs) {
+            let mut ends = Vec::with_capacity(l.len());
+            for (&(_, forward), c) in l.iter().zip(pc) {
+                let [a, b] = c.interval().ok_or("pcurve interval")?;
+                let (s, e) = (c.eval(a).ok_or("pcurve start")?, c.eval(b).ok_or("pcurve end")?);
+                ends.push(if forward { (s, e) } else { (e, s) });
+            }
+            for k in 0..ends.len() {
+                let (Some((start, _)), Some((_, end))) = (ends.get(k), ends.get(if k == 0 { ends.len() - 1 } else { k - 1 })) else { continue };
+                for d in 0..2 {
+                    // Only a bounded direction has a seam to jump; half its width is no gap.
+                    let Some(Natural::Range(a, b)) = natural.get(d) else { continue };
+                    if !(b - a).is_finite() {
+                        continue;
+                    }
+                    if !((start[d] - end[d]).abs() <= 0.5 * (b - a)) {
+                        return Err(unsupported("a loop across a closed spline surface's seam without a seam edge"));
+                    }
+                }
+            }
+        }
         let shapes: Vec<Option<f64>> = edge_loops.iter().zip(&pcs).map(|(l, pc)| loop_area(l, pc, periods)).collect();
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         let marked = face.outer.and_then(|o| positions.iter().position(|p| *p == o));
