@@ -359,15 +359,38 @@ mod tests {
     /// lifts to one point). Returns the wires whose closure is a whole number of periods (a loop
     /// round a pole or the surface), as (face, wire).
     fn check_pcurves(body: &Body, tol: f64) -> Vec<(usize, usize)> {
+        check_faces(&body.solid.face_iter().cloned().collect::<Vec<_>>(), tol)
+    }
+    fn check_faces(faces: &[truck_modeling::Face], tol: f64) -> Vec<(usize, usize)> {
         use truck_modeling::{BoundedCurve, MetricSpace, ParametricCurve, ParametricSurface};
         let mut winding = Vec::new();
-        for (f, face) in body.solid.face_iter().enumerate() {
+        for (f, face) in faces.iter().enumerate() {
             let surface = face.surface();
             let all = pcurve::pcurves(face, tol).unwrap_or_else(|e| panic!("face {f}: {e}"));
             let wires = face.boundaries();
             assert_eq!(all.len(), wires.len());
             let lift = |uv: [f64; 2]| surface.subs(uv[0], uv[1]);
+            let mut areas = Vec::new();
             for (w, (pcs, wire)) in all.iter().zip(&wires).enumerate() {
+                let ring: Vec<[f64; 2]> = pcs
+                    .iter()
+                    .zip(wire.edge_iter())
+                    .flat_map(|(pc, e)| {
+                        let [a, b] = pc.interval().unwrap();
+                        (0..16)
+                            .map(move |k| if e.orientation() { a + (b - a) * k as f64 / 16. } else { b - (b - a) * k as f64 / 16. })
+                            .map(|t| pcurve::eval(pc, t).unwrap())
+                    })
+                    .collect();
+                areas.push(
+                    (0..ring.len())
+                        .map(|i| {
+                            let (p, q) = (ring[i], ring[(i + 1) % ring.len()]);
+                            p[0] * q[1] - q[0] * p[1]
+                        })
+                        .sum::<f64>()
+                        * 0.5,
+                );
                 assert_eq!(pcs.len(), wire.len());
                 let mut ends = Vec::new();
                 for (i, (pc, edge)) in pcs.iter().zip(wire.edge_iter()).enumerate() {
@@ -423,6 +446,14 @@ mod tests {
                 }
                 if wraps {
                     winding.push((f, w));
+                }
+            }
+            // The outer loop (the most area) turns counter-clockwise in (u, v) for a face along
+            // its surface's normal, clockwise against it; holes the other way.
+            if !winding.iter().any(|(wf, _)| *wf == f) {
+                let outer = (0..areas.len()).max_by(|a, b| areas[*a].abs().total_cmp(&areas[*b].abs())).unwrap();
+                for (w, area) in areas.iter().enumerate() {
+                    assert_eq!(*area > 0., (w == outer) == face.orientation(), "face {f} wire {w}: turns the wrong way ({area})");
                 }
             }
         }
@@ -509,5 +540,188 @@ mod tests {
                 assert!(winding.is_empty(), "{name}");
             }
         }
+    }
+
+    /// Faces with seams, as imported faces have them (the kernel's own revolutions come in
+    /// pieces): a cylinder whose seam line is used twice between two full circles, each a closed
+    /// edge on one vertex, and a sphere bounded by one meridian used twice from pole to pole.
+    fn seam_faces() -> Vec<(&'static str, truck_modeling::Face)> {
+        use crate::face_params::iso_curve;
+        use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+        use std::f64::consts::{FRAC_PI_2, PI, TAU};
+        use truck_modeling::{self as mt, ParametricSurface};
+        let turn = |outer: Loop2| crate::revolve(&Plane::XZ, &[Region2 { outer, holes: vec![] }], Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
+        let tube = turn(Loop2::polygon(&[Vec2::new(3., 0.), Vec2::new(5., 0.), Vec2::new(5., 4.), Vec2::new(3., 4.)]));
+        let wall = tube
+            .solid
+            .face_iter()
+            .map(|f| f.surface())
+            .find(|s| matches!(s, mt::Surface::RevolutedCurve(_)) && (s.subs(0., 0.).x.hypot(s.subs(0., 0.).y) - 5.).abs() < 1e-9)
+            .unwrap();
+        let (p0, p1) = (mt::Vertex::new(wall.subs(0., 0.)), mt::Vertex::new(wall.subs(1., 0.)));
+        let seam = mt::Edge::new_unchecked(&p0, &p1, iso_curve(&wall, true, 0., 0., 1.).unwrap());
+        let low = mt::Edge::new_unchecked(&p0, &p0, iso_curve(&wall, false, 0., 0., TAU).unwrap());
+        let high = mt::Edge::new_unchecked(&p1, &p1, iso_curve(&wall, false, 1., 0., TAU).unwrap());
+        let cylinder = mt::Face::new_unchecked(vec![mt::Wire::from(vec![seam.clone(), high, seam.inverse(), low.inverse()])], wall);
+        let half = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 6., start: -FRAC_PI_2, sweep: PI },
+                Seg2::Line { a: Vec2::new(0., 6.), b: Vec2::new(0., -6.) },
+            ],
+        };
+        let ball = turn(half);
+        let round = ball.solid.face_iter().map(|f| f.surface()).find(|s| matches!(s, mt::Surface::RevolutedCurve(_))).unwrap();
+        let (s0, s1) = (mt::Vertex::new(round.subs(0., 0.)), mt::Vertex::new(round.subs(1., 0.)));
+        let meridian = mt::Edge::new_unchecked(&s0, &s1, iso_curve(&round, true, 0., 0., 1.).unwrap());
+        let sphere = mt::Face::new_unchecked(vec![mt::Wire::from(vec![meridian.clone(), meridian.inverse()])], round);
+        vec![("seam cylinder", cylinder), ("seam sphere", sphere)]
+    }
+
+    #[test]
+    fn pcurves_of_seams_lie_a_period_apart() {
+        use solidcraft_geom::brep::Curve2;
+        for (name, face) in seam_faces() {
+            for tol in [1e-3, 1e-6] {
+                assert!(check_faces(std::slice::from_ref(&face), tol).is_empty(), "{name}");
+                let wire = &pcurve::pcurves(&face, tol).unwrap()[0];
+                let at = |c: &Curve2, f: f64| {
+                    let [a, b] = c.interval().unwrap();
+                    pcurve::eval(c, a + (b - a) * f).unwrap()
+                };
+                // The seam's two uses: the same curve on either side of the period.
+                let (first, second) = if name == "seam cylinder" { (&wire[0], &wire[2]) } else { (&wire[0], &wire[1]) };
+                for f in [0., 0.3, 1.] {
+                    let (a, b) = (at(first, f), at(second, f));
+                    assert!((a[0] - b[0]).abs() < 1e-9 && ((b[1] - a[1]).abs() - std::f64::consts::TAU).abs() < 1e-9, "{name}: {a:?} {b:?}");
+                }
+                for c in wire {
+                    let (lo, hi) = (0..=16).map(|k| at(c, k as f64 / 16.)[1]).fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(v), h.max(v)));
+                    assert!(lo >= -1e-9 && hi <= std::f64::consts::TAU + 1e-9, "{name}: in the base period");
+                }
+            }
+        }
+    }
+
+    /// With `SOLIDCRAFT_PCURVE_SVG=<dir>`, each test body's face loops in (u, v), one panel per
+    /// face: the surface's base period framed, each edge use in its own colour with an arrow
+    /// along the wire.
+    #[test]
+    fn pcurve_pictures() {
+        let Ok(dir) = std::env::var("SOLIDCRAFT_PCURVE_SVG") else { return };
+        let box_ = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+        let mut sets: Vec<(String, Vec<truck_modeling::Face>)> = vec![("box".into(), box_.solid.face_iter().cloned().collect())];
+        sets.extend(curved_bodies().into_iter().map(|(n, b)| (n.to_string(), b.solid.face_iter().cloned().collect())));
+        sets.extend(seam_faces().into_iter().map(|(n, f)| (n.to_string(), vec![f])));
+        for (name, faces) in sets {
+            let svg = draw(&name, &faces, 1e-5);
+            std::fs::write(format!("{dir}/{}.svg", name.replace(' ', "-")), svg).unwrap();
+        }
+    }
+
+    fn draw(name: &str, faces: &[truck_modeling::Face], tol: f64) -> String {
+        use std::fmt::Write;
+        use std::ops::Bound::{Excluded, Included};
+        use truck_modeling::ParametricSurface;
+        const W: f64 = 300.;
+        const COLOURS: [&str; 8] = ["#d62728", "#1f77b4", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#e377c2", "#8c564b"];
+        let cols = faces.len().min(4);
+        let rows = faces.len().div_ceil(4);
+        let mut out = String::new();
+        write!(out, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" font-family="sans-serif" font-size="12"><rect width="100%" height="100%" fill="white"/><text x="10" y="20" font-size="16">{name}: face loops in (u, v)</text>"#, cols as f64 * W, rows as f64 * W + 30.).unwrap();
+        for (f, face) in faces.iter().enumerate() {
+            let (ox, oy) = ((f % 4) as f64 * W, (f / 4) as f64 * W + 30.);
+            let surface = face.surface();
+            let wires = pcurve::pcurves(face, tol).unwrap();
+            let lines: Vec<Vec<(usize, bool, Vec<[f64; 2]>)>> = wires
+                .iter()
+                .zip(face.boundaries())
+                .map(|(pcs, wire)| {
+                    pcs.iter()
+                        .zip(wire.edge_iter())
+                        .enumerate()
+                        .map(|(i, (c, e))| {
+                            let [a, b] = c.interval().unwrap();
+                            (i, e.orientation(), (0..=64).map(|k| pcurve::eval(c, a + (b - a) * k as f64 / 64.).unwrap()).collect())
+                        })
+                        .collect()
+                })
+                .collect();
+            // The frame: the base period along periodic directions, the surface's range along
+            // bounded ones, else the loops' extent.
+            let all: Vec<[f64; 2]> = lines.iter().flatten().flat_map(|l| l.2.clone()).collect();
+            let ext = |d: usize| all.iter().map(|p| p[d]).fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(v), h.max(v)));
+            let (ru, rv) = surface.parameter_range();
+            let range = |r: (std::ops::Bound<f64>, std::ops::Bound<f64>), d: usize| match r {
+                (Included(a) | Excluded(a), Included(b) | Excluded(b)) => (a, b),
+                _ => ext(d),
+            };
+            let frame = if matches!(surface, truck_modeling::Surface::Plane(_)) { [ext(0), ext(1)] } else { [range(ru, 0), range(rv, 1)] };
+            let view = |d: usize| {
+                let (e, r) = (ext(d), frame[d]);
+                let (lo, hi) = (e.0.min(r.0), e.1.max(r.1));
+                let pad = (hi - lo).max(1e-9) * 0.08;
+                (lo - pad, hi + pad)
+            };
+            let (vu, vv) = (view(0), view(1));
+            let px = |p: [f64; 2]| (ox + 50. + (p[0] - vu.0) / (vu.1 - vu.0) * (W - 70.), oy + W - 30. - (p[1] - vv.0) / (vv.1 - vv.0) * (W - 50.));
+            let kind = match surface {
+                truck_modeling::Surface::Plane(_) => "plane",
+                truck_modeling::Surface::BSplineSurface(_) => "B-spline",
+                truck_modeling::Surface::NurbsSurface(_) => "NURBS",
+                truck_modeling::Surface::RevolutedCurve(_) => "revolution",
+            };
+            let periodic = match (surface.u_period(), surface.v_period()) {
+                (Some(_), _) => ", u periodic",
+                (_, Some(_)) => ", v periodic",
+                _ => "",
+            };
+            let (a, b) = (px([frame[0].0, frame[1].1]), px([frame[0].1, frame[1].0]));
+            write!(out, r##"<rect x="{}" y="{}" width="{}" height="{}" fill="#f4f4f4" stroke="#888" stroke-dasharray="4 3"/><text x="{}" y="{}">face {f}: {kind}{periodic}</text>"##, a.0, a.1, b.0 - a.0, b.1 - a.1, ox + 10., oy + 14.).unwrap();
+            for (w, wire) in lines.iter().enumerate() {
+                for (i, fwd, pts) in wire {
+                    let colour = COLOURS[(i + 3 * w) % COLOURS.len()];
+                    let path: Vec<String> = pts
+                        .iter()
+                        .map(|p| {
+                            let q = px(*p);
+                            format!("{:.2} {:.2}", q.0, q.1)
+                        })
+                        .collect();
+                    write!(out, r#"<path d="M {}" fill="none" stroke="{colour}" stroke-width="2"/>"#, path.join(" L ")).unwrap();
+                    // An arrow at the middle, along the wire.
+                    let (m0, m1) = (px(pts[31]), px(pts[33]));
+                    let (dx, dy) = if *fwd { (m1.0 - m0.0, m1.1 - m0.1) } else { (m0.0 - m1.0, m0.1 - m1.1) };
+                    let len = dx.hypot(dy).max(1e-9);
+                    let (ux, uy) = (dx / len * 9., dy / len * 9.);
+                    let c = px(pts[32]);
+                    write!(
+                        out,
+                        r#"<polygon points="{:.2},{:.2} {:.2},{:.2} {:.2},{:.2}" fill="{colour}"/>"#,
+                        c.0 + ux,
+                        c.1 + uy,
+                        c.0 - ux - uy * 0.6,
+                        c.1 - uy + ux * 0.6,
+                        c.0 - ux + uy * 0.6,
+                        c.1 - uy - ux * 0.6
+                    )
+                    .unwrap();
+                    let s = px(if *fwd { pts[0] } else { pts[64] });
+                    write!(
+                        out,
+                        r#"<circle cx="{:.2}" cy="{:.2}" r="2.5" fill="black"/><text x="{:.2}" y="{:.2}" fill="{colour}">{w}.{i}</text>"#,
+                        s.0,
+                        s.1,
+                        c.0 + 6.,
+                        c.1 - 6.
+                    )
+                    .unwrap();
+                }
+            }
+            let (l0, l1) = (px([frame[0].0, frame[1].0]), px([frame[0].1, frame[1].1]));
+            write!(out, r##"<text x="{:.2}" y="{:.2}" fill="#555">u {:.3}</text><text x="{:.2}" y="{:.2}" fill="#555" text-anchor="end">{:.3}</text><text x="{:.2}" y="{:.2}" fill="#555" text-anchor="end">v {:.3}</text><text x="{:.2}" y="{:.2}" fill="#555" text-anchor="end">{:.3}</text>"##,
+                l0.0, oy + W - 12., frame[0].0, l1.0, oy + W - 12., frame[0].1, ox + 46., l0.1, frame[1].0, ox + 46., l1.1 + 10., frame[1].1).unwrap();
+        }
+        out.push_str("</svg>");
+        out
     }
 }
