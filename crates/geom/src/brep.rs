@@ -19,7 +19,7 @@ mod topology;
 pub use curve2::Curve2;
 
 pub const VERSION: u32 = 4;
-pub const MAX_ITEMS: usize = 1_000_000;
+pub const MAX_ITEMS: usize = 4_000_000;
 pub const MAX_SHELLS: usize = 1024;
 const MAX_DEPTH: usize = 16;
 const TAU: f64 = std::f64::consts::TAU;
