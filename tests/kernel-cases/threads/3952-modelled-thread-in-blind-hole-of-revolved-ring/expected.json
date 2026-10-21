@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3952"
+ ],
+ "what": "a modelled thread in a small blind hole drilled into a revolved ring, off its axis ('faceted boolean: inconsistent volumes')",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Revolved ring R12..30, 30 tall: pi (30^2 - 12^2) 30 = 71251.3214. A D2.5 flat-bottomed hole 8 deep at 21 mm from the axis (pi 1.25^2 8 = 39.2699), M3 (P=0.5, rho=1.25) over the hole's whole 8 mm (16 turns): 16 x 0.43729. The blind end can shift the groove's last end by under 0.25 mm3. V = 71205.0548 mm3. Tolerance 1e-3 (the ring dominates the volume; the check is that the thread builds a valid solid, which it once refused: faceted boolean: inconsistent volumes).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 71205.0548,
+ "bbox": {
+  "min": [
+   -30,
+   -30,
+   0
+  ],
+  "max": [
+   30,
+   30,
+   30
+  ]
+ }
+}

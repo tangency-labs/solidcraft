@@ -1,0 +1,230 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4093",
+  "why": "other area: sweeps (a guided helical sweep cut whose exported mesh has open boundaries; not the Thread feature)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4087",
+  "why": "feature request: the thread as a few selectable faces rather than many facets; no closed-form face count, no number to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4085",
+  "why": "no new geometry: M6 on a 7 mm shaft is a shaft thicker than the thread, the family of case 2705"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4033",
+  "why": "visual only: the thread's facets look faceted; the report has no design, only a face point"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3847",
+  "why": "other area: tessellation (display plans for threads and pointed ends of imported STEP bodies)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3745",
+  "why": "UI only: hover highlight of a large thread computed on the main thread"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3737",
+  "why": "UI only: orbit and zoom freeze in edge highlighting on the main thread"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3710",
+  "why": "no repro geometry: the report has only the face point of a private design (an app that stopped responding)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3519",
+  "why": "UI only: the Thread dialog was applied with no cylindrical face selected"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3467",
+  "why": "no repro geometry: 'planar boolean: shell not oriented and closed' with only the face point of a private design; the same family as case 3311-two-tapped-holes-both-modelled-threaded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3386",
+  "why": "other area: crashes (a crash report with only a face point, no design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3337",
+  "why": "no repro geometry: 'planar boolean: shell not oriented and closed' with only a face point; the same family as case 3311-two-tapped-holes-both-modelled-threaded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3307",
+  "why": "no repro: a hole with a thread size is a cosmetic thread by default (see case 2115-tapped-hole-drill-is-major-minus-pitch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3183",
+  "why": "no repro geometry: 'planar boolean: tree too deep' redefining a thread after a fillet; sizes of the private design unknown"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3165",
+  "why": "empty report (the body was not pasted)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3145",
+  "why": "feature request: threads without turning the whole body into facets; no number to grade (the multi-thread case 2526-three-modelled-threads-in-one-body covers the symptom)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3133",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3131",
+  "why": "no repro geometry: 'the face is too far from the thread's diameter' with only a face point; the family of case 2369"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3110",
+  "why": "not kernel geometry: the automatic-size lookup refuses a 78 mm shaft (no standard size); a cosmetic thread leaves the model unchanged"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2929",
+  "why": "test flakiness of the off-window-thread tests: not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2908",
+  "why": "test flakiness of the off-window-thread tests: not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2892",
+  "why": "no repro geometry: 'planar boolean: tree too deep' for an M22x2.5 modelled thread, with only a face point"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2796",
+  "why": "other area: crashes (a crash report with only a face point, no design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2470",
+  "why": "other area: crashes (a crash report with only a face point, no design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2467",
+  "why": "window-thread / UI responsiveness, not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2451",
+  "why": "other area: crashes (a crash report with only a face point, no design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2079",
+  "why": "tracker for modelled threads; the geometry is in cases 2038-* and 2526-*"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1794",
+  "why": "no repro geometry: 'no cylindrical face there to thread' with only a face point of a private design; the family of case 2038-internal-then-external-thread-on-one-body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1731",
+  "why": "no repro geometry: 'planar boolean: shell not oriented and closed' with only a face point; the family of case 3311-two-tapped-holes-both-modelled-threaded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1289",
+  "why": "other area: tessellation (imported STEP threads displayed with artifacts; the B-rep was fine)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1024",
+  "why": "test-process memory corruption on Windows in the thread tests, not a geometry result with a right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#873",
+  "why": "other area: booleans (a hexagon join beside a screw: 'join cannot preserve the original faces'; no thread involved)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#524",
+  "why": "design preference (thread adds material instead of cutting into the part) and a groove-end convention at shoulders with no derivable number; the hole-too-wide fill it was linked to is case 1443-m5x0.7-thread-in-5mm-hole"
+ },
+ {
+  "source": "tangency-labs/solidcraft#519",
+  "why": "feature request: a thread as 1 to 3 faces so it can be offset; no closed-form face count to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#424",
+  "why": "Insert Part bolts carry cosmetic threads by design (the comment asks for a modelled option); no geometry defect"
+ },
+ {
+  "source": "tangency-labs/solidcraft#287",
+  "why": "performance umbrella: multithreading, SIMD, caching; nothing to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3870",
+  "why": "other area: tessellation (hover and select a thread as one piece: display and picking groups)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3849",
+  "why": "other area: tessellation (display plans for STEP threads and pointed ends)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3738",
+  "why": "UI and data: tapped-hole catalogue of metric fine, UNC and UNF sizes with tabulated pilot drills; no closed form"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3622",
+  "why": "test flakiness: not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3609",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3340",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3135",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2868",
+  "why": "UI only: cosmetic thread markings as a display preference"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2679",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2468",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2265",
+  "why": "UI only: reopening a Thread feature lost its face selection"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2264",
+  "why": "UI only: modelled-thread preview in the dialog"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2243",
+  "why": "other area: import (STEP export read-back hangs meshing a seam cylinder hole)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2095",
+  "why": "performance: kernel profile timings of a thread's faceted cut"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1759",
+  "why": "UI only: the Thread dialog's size suggestion"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1675",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1527",
+  "why": "other area: booleans (last-resort nudge of a pleat loft join; not a thread)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1524",
+  "why": "assembly joints (gear, rack and screw couplings between motions): no kernel geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1300",
+  "why": "other area: tessellation (display of imported modelled threads)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1201",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1020",
+  "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ }
+]
