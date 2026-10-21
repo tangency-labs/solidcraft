@@ -189,6 +189,11 @@ fn sources_of(want: &Value) -> Vec<String> {
     want["sources"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect()
 }
 
+/// The number in `owner/repo#123`, for sorting.
+fn source_number(s: &str) -> u64 {
+    s.rsplit('#').next().and_then(|n| n.parse().ok()).unwrap_or(u64::MAX)
+}
+
 /// `tangency-labs/solidcraft#123` as a link.
 fn link(source: &str) -> String {
     match source.split_once('#') {
@@ -274,8 +279,20 @@ fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) ->
     let mut area_dirs: Vec<PathBuf> = std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     area_dirs.sort();
     for a in area_dirs {
-        let list = read(&a.join("skipped.json"));
-        let Some(items) = list.as_array().filter(|l| !l.is_empty()) else { continue };
+        // skipped.json, or several (skipped-<part>.json) where people triage an area in parts.
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&a)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("skipped") && n.ends_with(".json")))
+            .collect();
+        files.sort();
+        let mut items: Vec<Value> = files.iter().flat_map(|f| read(f).as_array().cloned().unwrap_or_default()).collect();
+        if items.is_empty() {
+            continue;
+        }
+        items.sort_by_key(|it| source_number(it["source"].as_str().unwrap_or("")));
+        let items = &items;
         md += &format!("### {}\n\n| Source | Why skipped |\n|---|---|\n", a.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
         for it in items {
             skipped += 1;
