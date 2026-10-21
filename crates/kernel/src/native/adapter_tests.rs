@@ -169,3 +169,34 @@ fn intersections_and_revolutions_reload_exactly() {
     assert_eq!(crate::encode_native_body(&decoded).unwrap(), bytes);
     assert_eq!(crate::measure(&decoded).unwrap().volume, crate::measure(&cut).unwrap().volume);
 }
+
+/// Each oriented edge's pcurve, lifted onto its face's surface, is its edge: checked at the
+/// ends and the middle of the edge's interval, on faces of either orientation.
+#[test]
+fn every_pcurve_lifts_onto_its_own_edge() {
+    use mt::{MetricSpace, ParametricCurve, ParametricSurface};
+    let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+    let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+    let bore = crate::cylinder(Vec3::new(10., 10., -1.), Vec3::Z, 3., 12.).unwrap();
+    let holed = crate::boolean(&rounded, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+    let sphere = crate::sphere(Vec3::ZERO, 12.).unwrap();
+    for (name, body) in [("cube", cube), ("holed", holed), ("sphere", sphere)] {
+        let record = encode(&body, super::super::pcurve::pcurves).unwrap();
+        for (f, face) in record.faces.iter().zip(body.solid.face_iter()) {
+            let surface = face.surface();
+            for l in &f.loops {
+                let b::Loop::Edges { edges } = l else { continue };
+                for u in edges {
+                    let e = &record.edges[u.edge as usize];
+                    let curve = load_edge_curve(e.curve.clone(), e.interval).unwrap();
+                    for s in [0., 0.5, 1.] {
+                        let t = e.interval[0] + s * (e.interval[1] - e.interval[0]);
+                        let [x, y] = super::super::pcurve::eval(&u.pcurve, t).unwrap();
+                        let d = surface.subs(x, y).distance(curve.subs(t));
+                        assert!(d <= e.tolerance, "{name}: edge {} at {s}: {d} mm off (forward face {})", u.edge, face.orientation());
+                    }
+                }
+            }
+        }
+    }
+}
