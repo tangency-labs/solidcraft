@@ -549,3 +549,105 @@ fn an_smlib_torus_stays_within_the_chord_tolerance() {
         assert!(chord <= tol * 1.05, "SMLib torus at {tol}: chord {chord}");
     }
 }
+
+// Modelled threads from SMLib: a screw-swept groove cut from a bore or a shaft. The groove's
+// walls are splines winding once per pitch for the thread's whole length, and they split the
+// bore or shaft into one face per turn.
+
+/// A groove of trapezoid `section` (radius, axial offset) in the plane through the z axis along
+/// y, carried `turns` turns of `pitch` about z from `base`, as an SMLib solid.
+#[cfg(feature = "smlib")]
+fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let origin = Vec3::new(0.0, 0.0, base);
+    let plane = Plane { origin, x: Vec3::Y, y: Vec3::Z };
+    let region = Region2 { outer: Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), holes: Vec::new() };
+    let Some(numbered) = crate::numbered::number_regions(std::slice::from_ref(&region)).pop() else { panic!("profile") };
+    let profile = numbered.outer.oriented(false);
+    let groove = ok(crate::smlib_sweeps::screw(&plane, &crate::smlib_sweeps::pieces([&profile]), origin, Vec3::Z, pitch, turns));
+    ok(crate::native::smlib_body(&groove))
+}
+
+#[cfg(feature = "smlib")]
+fn smlib_cut(a: &solidcraft_smlib::Brep, b: &solidcraft_smlib::Brep) -> solidcraft_smlib::Brep {
+    match a.boolean(b, solidcraft_smlib::BooleanOp::Subtract) {
+        Ok(Some(r)) => r,
+        other => panic!("cut: {other:?}"),
+    }
+}
+
+/// The ISO basic profile's groove for pitch `p` and major diameter `d`: internal, from 0.1 p
+/// inside the hole wall of radius `wall` out to the major radius; external, from the root out
+/// past the shaft's surface (radius `wall`).
+#[cfg(feature = "smlib")]
+fn iso_groove(p: f64, d: f64, wall: f64, internal: bool) -> [(f64, f64); 4] {
+    let h = p * 3f64.sqrt() / 2.0;
+    let slope = (PI / 6.0).tan();
+    let (r0, w0, r1, w1) = if internal {
+        let r_in = wall.min(d / 2.0 - 5.0 * h / 8.0) - 0.1 * p;
+        (r_in, (p / 8.0 + 2.0 * (d / 2.0 - r_in) * slope) / 2.0, d / 2.0, p / 16.0)
+    } else {
+        let (r_root, r_out) = (d / 2.0 - 5.0 * h / 8.0, wall.max(d / 2.0) + 0.05 * p);
+        (r_root, p / 8.0, r_out, (p / 4.0 + 2.0 * (r_out - r_root) * slope) / 2.0)
+    };
+    [(r0, -w0), (r1, -w1), (r1, w1), (r0, w0)]
+}
+
+/// Each face's triangles, in 3D, cover as much area as its surface over the triangles' own
+/// parameters, within 5% (a coarse tolerance on a small curved face, a few percent): nothing
+/// zigzags across the face, which multiplies its area. The surface's area by the midpoint rule
+/// on sixteen pieces of each parameter triangle.
+#[cfg(feature = "smlib")]
+fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan) {
+    for fp in &plan.faces {
+        let Some(s) = fp.surface.and_then(|i| plan.surfaces.get(i as usize)) else { continue };
+        let at = |i: u32| {
+            fp.fixed.get(i as usize).copied().unwrap_or_else(|| {
+                let q = fp.uv[i as usize];
+                s.eval(q[0], q[1]).0
+            })
+        };
+        let (mut flat, mut surface) = (0.0, 0.0);
+        for t in &fp.triangles {
+            let [a, b, c] = t.map(|i| fp.uv[i as usize]);
+            let area = 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])).abs();
+            flat += 0.5 * (at(t[1]) - at(t[0])).cross(at(t[2]) - at(t[0])).len();
+            const N: usize = 4;
+            for i in 0..N {
+                for j in 0..N - i {
+                    // The upright piece, and the inverted one beside it where there is one.
+                    let pieces: &[(f64, f64)] =
+                        if i + j + 1 < N { &[(1.0 / 3.0, 1.0 / 3.0), (2.0 / 3.0, 2.0 / 3.0)] } else { &[(1.0 / 3.0, 1.0 / 3.0)] };
+                    for &(di, dj) in pieces {
+                        let (x, y) = ((i as f64 + di) / N as f64, (j as f64 + dj) / N as f64);
+                        let q = [a[0] + (b[0] - a[0]) * x + (c[0] - a[0]) * y, a[1] + (b[1] - a[1]) * x + (c[1] - a[1]) * y];
+                        if let Some((_, su, sv)) = s.derivs(q[0], q[1]) {
+                            surface += su.cross(sv).len() * area / (N * N) as f64;
+                        }
+                    }
+                }
+            }
+        }
+        assert!((flat - surface).abs() <= 0.05 * surface, "{name}: face {} has {flat} mm² of triangles over {surface} mm² of surface", fp.face);
+    }
+}
+
+/// An M10 thread over the lower half of a 30 mm shaft. The groove's root band leaves the shaft's
+/// end face obliquely: a strip a quarter pitch wide winding ten turns, narrower everywhere than
+/// a triangle's side, with no four corners to blend. The butterfly of a round face made it a
+/// grid of ~200 000 points whose triangles zigzagged along the strip (six times the band's area,
+/// and off the surface by more than the tolerance); it is its boundary nodes alone now.
+#[cfg(feature = "smlib")]
+#[test]
+fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
+    let Ok(shaft) = solidcraft_smlib::Brep::make_cylinder([0.0; 3], 5.0, 30.0) else { panic!("shaft") };
+    let threaded = smlib_cut(&shaft, &smlib_groove(iso_groove(1.5, 10.0, 5.0, false), -1.5, 1.5, 11.0));
+    let body = ok(crate::native::body_from_smlib(&threaded));
+    for tol in [0.1, 0.01] {
+        let m = closed_display_mesh("thread run out", &body, tol);
+        let chord = max_chord(&body, &m);
+        assert!(chord <= tol * 1.05, "thread run out at {tol}: chord {chord}");
+        assert!(m.triangles.len() < 60_000, "thread run out at {tol}: {} triangles", m.triangles.len());
+        assert_faces_lie_flat("thread run out", &ok(body.display_plan_angular(tol, crate::DISPLAY_ANGLE)));
+    }
+}

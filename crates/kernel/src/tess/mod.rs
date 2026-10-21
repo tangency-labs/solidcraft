@@ -755,9 +755,10 @@ fn plan_face(
     // Constrained Delaunay in (u, v) scaled to millimetres: equilateral seeds of side `h`,
     // refined where triangles leave the surface, are too long or bend too much, then shaped by
     // Ruppert refinement.
+    let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| uvs.get(r.clone())).collect();
+    let step = [h / speed[0], h / speed[1]];
     let delaunay = || {
-        let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| uvs.get(r.clone())).collect();
-        let seeds = cdt::lattice(bbox, [h / speed[0], h / speed[1]], &polys, speed);
+        let seeds = cdt::lattice(bbox, step, &polys, speed);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
         let fill = cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: !matches!(s, EvalSurface::Plane { .. }), lenient: false };
@@ -815,8 +816,16 @@ fn plan_face(
                 // the iso-line grid cut along its motorcycle traces and trimmed by its boundary,
                 // else Delaunay. A plane: the butterfly of a round face, else Delaunay (a plane
                 // is shaded the same by any triangles, and its Delaunay needs no refinement).
+                // A curved strip, straight and within a side across one parameter (its division
+                // there has no line inside) and with no room for a point of its own (a thread's
+                // root band, which runs out obliquely so it has no four corners), is its boundary
+                // nodes alone, refined where the surface leaves them: patches and grid lines
+                // across it would only crowd it (the butterfly's cuts run lengthwise through a
+                // long strip, seeded the whole way). A strip curved across (a fillet narrower
+                // than a side) keeps the layouts that follow its curvature.
                 let face = Region { s, uvs: &uvs, fixed: &fixed, ranges: &ranges, rules, h, speed, us: &us, vs: &vs };
-                let trimmed = if seamed {
+                let strip = !planar && (us.len() <= 2 || vs.len() <= 2) && !cdt::has_room(bbox, step, &polys, speed);
+                let trimmed = if seamed || strip {
                     None
                 } else if planar {
                     if ranges.len() == 1 { plan_pieces(&face) } else { None }
