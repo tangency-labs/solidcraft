@@ -145,7 +145,8 @@ pub enum Call {
     Canonical {
         /// Control points (1 to [`MAX_POINTS`]).
         points: Vec<[f64; 3]>,
-        /// Unique knots.
+        /// Unique knots (finite: a NaN or infinite knot corrupts upstream's heap,
+        /// UB-238).
         knots: Vec<f64>,
         /// Multiplicity per knot (same length as `knots`, each at most [`MAX_MULT`]).
         mults: Vec<usize>,
@@ -263,6 +264,11 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             if mults.len() != knots.len() || mults.iter().any(|&m| m > MAX_MULT) {
                 return Err(bad("multiplicities"));
             }
+            // UB-238: a NaN knot makes CreateCanonical write past a heap block (glibc
+            // aborts later, in N_EndNurbs's free or the next realloc)
+            if knots.iter().any(|k| !k.is_finite()) {
+                return Err(bad("non-finite knot"));
+            }
             if *degree > 64 || *form > 6 {
                 return Err(bad("degree or form"));
             }
@@ -320,4 +326,27 @@ pub fn run(call: &Call) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UB-238 (`--fuzz 30000` fuzz21932, fuzz21945): a NaN knot is refused before the
+    /// shim runs.
+    #[test]
+    fn canonical_refuses_a_non_finite_knot() {
+        for bad_knot in [f64::NAN, f64::INFINITY] {
+            let call = Call::Canonical {
+                points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                knots: vec![0.0, bad_knot],
+                mults: vec![2, 2],
+                weights: None,
+                degree: 1,
+                form: 0,
+            };
+            let error = encode(&call).unwrap_err().to_string();
+            assert!(error.contains("non-finite knot"), "{error}");
+        }
+    }
 }
