@@ -1,0 +1,350 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4155",
+  "why": "user error: an edge flange on a body that is not sheet metal (\"there is no sheet metal body\"), working as designed; no geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4100",
+  "why": "assembly bookkeeping when deleting an inserted STEP, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4094",
+  "why": "feature request: a contour flange that joins an existing sheet; the chained edge flange workaround it describes already builds, so there is no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3819",
+  "why": "sketch pattern preview, UI only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3722",
+  "why": "origin plane colours, UI only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3719",
+  "why": "feature request for cables, not sheet metal geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3516",
+  "why": "feature request: an edge flange extent defined by vertices or edges; no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3502",
+  "why": "user error: an edge flange on a body that is not sheet metal (\"there is no sheet metal body\"), working as designed; no geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3500",
+  "why": "user error: an edge flange on a body that is not sheet metal (\"there is no sheet metal body\"), working as designed; no geometry to grade (the report has no steps at all)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3370",
+  "why": "other area: fillets"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3187",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3170",
+  "why": "feature request: overlapping corner joins (butt, partial or full overlap); nothing to compare against yet"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3154",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2987",
+  "why": "user error: an edge flange on a body that is not sheet metal (\"there is no sheet metal body\"), working as designed; no geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2763",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2732",
+  "why": "feature wish list for flange parameters, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2729",
+  "why": "feature request: per-segment flanges on one edge, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2621",
+  "why": "sketch dragging behaviour, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2399",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild (a small body joined at a sheet corner, then flanged)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2298",
+  "why": "chat backend, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2286",
+  "why": "chat UI, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2272",
+  "why": "face naming, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2009",
+  "why": "no repro that fixes a right answer: screenshots of an extrude joined to a flange and a chamfer; the flat pattern part is the refusal in #3324"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1603",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild (a folded drip tray edited through its parameters)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1483",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1475",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1391",
+  "why": "other area: booleans (a prism joined flush to a lofted tube's end face: Union: no result)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1326",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1325",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1284",
+  "why": "flat-pattern DXF output only, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1231",
+  "why": "a user's design: only the refused selection is recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1089",
+  "why": "flat-pattern DXF output only, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#758",
+  "why": "feature specification for surface.offset, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#732",
+  "why": "perforation: the hole count follows the layout (staggered or square, margins), which has no closed form; the cut budget part is graded in 529-a-hundred-slots-and-four-folds"
+ },
+ {
+  "source": "tangency-labs/solidcraft#622",
+  "why": "UI only, the agent cursor's menus"
+ },
+ {
+  "source": "tangency-labs/solidcraft#602",
+  "why": "other area: threads (threads on objects, crash)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#566",
+  "why": "other area: shell (a swept bar and sheet metal parts refused by shell)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#535",
+  "why": "face naming, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#533",
+  "why": "assemblies: inserting a design as a linked component, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#495",
+  "why": "sketch attachment to thickness faces, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#470",
+  "why": "sketch attachment to a sheet panel, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#391",
+  "why": "other area: booleans (a text deboss cut on a filleted and shelled body: boolean Cut, no result)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#390",
+  "why": "other area: booleans (a draft on a flange end face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#271",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#59",
+  "why": "the hem's default side is the owner's decision (the oracle case 73-sm-hem fixes it inward); no right answer to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#50",
+  "why": "UI only, no geometry (viewport highlight)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#40",
+  "why": "sketch projection ids, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#30",
+  "why": "profile picks by index, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4096",
+  "why": "open draft for the contour flange request #4094; a feature, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3946",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3937",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3908",
+  "why": "other area: fillets (chamfering the rims of a flange's holes; closed unmerged)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3581",
+  "why": "sketch move, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3472",
+  "why": "open pull request for the overlap corner join feature #3170; a feature, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3439",
+  "why": "sketch dimensions, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3397",
+  "why": "assembly joint drive, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3188",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2894",
+  "why": "other area: fillets (chamfers past the faces)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2409",
+  "why": "construction geometry references, not solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2275",
+  "why": "face naming, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1929",
+  "why": "robustness goldens, test infrastructure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1851",
+  "why": "robustness goldens, test infrastructure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1683",
+  "why": "parameter references of hole positions, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1556",
+  "why": "other area: booleans (the retry for #1391)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1501",
+  "why": "parameter references of a mirror plane's origin, no failing geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1484",
+  "why": "UI only, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1446",
+  "why": "other area: booleans (a text cut in one exact boolean)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1324",
+  "why": "flat-pattern DXF output only, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1251",
+  "why": "test infrastructure (feature walks)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1041",
+  "why": "perforation field: the hole count follows the layout (margins to the outline and bends), no closed form"
+ },
+ {
+  "source": "tangency-labs/solidcraft#982",
+  "why": "test infrastructure (offline web test)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#956",
+  "why": "other area: sweeps (loft vertex pairing)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#894",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#893",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#889",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#888",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#700",
+  "why": "file format and naming, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#677",
+  "why": "face attachments of sheet metal features, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#607",
+  "why": "the bend table and bend lines after cut-outs: bend table values are not a graded quantity of the rig"
+ },
+ {
+  "source": "tangency-labs/solidcraft#539",
+  "why": "face naming (an ignored regression test), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#534",
+  "why": "assemblies: an ignored regression test for #533, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#482",
+  "why": "file format note, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#474",
+  "why": "sketch attachment to a sheet panel, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#299",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#286",
+  "why": "docs wording only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#118",
+  "why": "other area: booleans (error messages of a failed boolean)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#117",
+  "why": "profile picks by curves, not geometry"
+ }
+]
