@@ -1,8 +1,12 @@
 {
-  "sources": ["tangency-labs/solidcraft#1666", "tangency-labs/solidcraft#1670"],
-  "what": "a loft between two 18-vertex polylines whose side faces are twisted ruled (bilinear) patches: each used to be exported as two flat triangles with crossing diagonals",
-  "source": "analytic",
-  "method": "A ruled loft joining vertex i of the bottom polygon (z=0) to vertex i of the top polygon (z=90.5) has, at height t*90.5, the polygon with vertices (1-t)p_i + t q_i. Its shoelace area is quadratic in t, so Simpson's rule is exact: V = h/6 (A0 + 4 A(1/2) + A1) with h=90.5, A0=247.28368 (shoelace of the bottom polygon), A1=156 (the top polygon is the 52 x 3 rectangle), A(1/2)=area of the polygon of midpoints. That gives 17993.405 (a 2000-slice numerical integral of the same area agrees to 1e-8).",
-  "body_count": 1,
-  "volume_mm3": 17993.405
+ "sources": [
+  "tangency-labs/solidcraft#1666",
+  "tangency-labs/solidcraft#1670"
+ ],
+ "what": "a loft between two 18-vertex polylines whose side faces are twisted ruled (bilinear) patches: each used to be exported as two flat triangles with crossing diagonals",
+ "source": "analytic",
+ "method": "A ruled loft joining vertex i of the bottom polygon (z=0) to vertex i of the top polygon (z=90.5) has, at height t*90.5, the polygon with vertices (1-t)p_i + t q_i. Its shoelace area is quadratic in t, so Simpson's rule is exact: V = h/6 (A0 + 4 A(1/2) + A1) with h=90.5, A0=247.28368 (shoelace of the bottom polygon), A1=156 (the top polygon is the 52 x 3 rectangle), A(1/2)=area of the polygon of midpoints. That gives 17993.405 (a 2000-slice numerical integral of the same area agrees to 1e-8). Watertight: each body's mesh has no open or over-shared edge (the reports were holes in the exported mesh).",
+ "body_count": 1,
+ "volume_mm3": 17993.405,
+ "watertight": true
 }

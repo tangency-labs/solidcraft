@@ -1,9 +1,13 @@
 {
-  "sources": ["tangency-labs/solidcraft#1666", "tangency-labs/solidcraft#1670"],
-  "what": "a loft from a 20x20 square to the same square turned 45 degrees, 30 mm higher: its four side faces are strongly twisted ruled patches, the case a two-triangle mesh gets visibly wrong",
-  "source": "analytic",
-  "method": "At height 30t the section is the polygon of (1-t)p_i + t q_i (p_i the square's corners at angles 45+90k deg, q_i those at 90+90k deg, both radius 10 sqrt 2). Its shoelace area is quadratic in t, so Simpson is exact: A0=A1=400, A(1/2)= 2 r^2 (1 - ... ) computed from the midpoint polygon (a square of circumradius r cos(22.5 deg): area 2 r^2 cos^2(22.5 deg) = 400 cos^2(22.5 deg)=341.42). V = 30/6 (400 + 4*341.4214 + 400) = 5*(2165.6854)=10828.427. Faces: 4 sides and 2 caps.",
-  "body_count": 1,
-  "volume_mm3": 10828.427,
-  "faces": 6
+ "sources": [
+  "tangency-labs/solidcraft#1666",
+  "tangency-labs/solidcraft#1670"
+ ],
+ "what": "a loft from a 20x20 square to the same square turned 45 degrees, 30 mm higher: its four side faces are strongly twisted ruled patches, the case a two-triangle mesh gets visibly wrong",
+ "source": "analytic",
+ "method": "At height 30t the section is the polygon of (1-t)p_i + t q_i (p_i the square's corners at angles 45+90k deg, q_i those at 90+90k deg, both radius 10 sqrt 2). Its shoelace area is quadratic in t, so Simpson is exact: A0=A1=400, A(1/2)= 2 r^2 (1 - ... ) computed from the midpoint polygon (a square of circumradius r cos(22.5 deg): area 2 r^2 cos^2(22.5 deg) = 400 cos^2(22.5 deg)=341.42). V = 30/6 (400 + 4*341.4214 + 400) = 5*(2165.6854)=10828.427. Faces: 4 sides and 2 caps. Watertight: each body's mesh has no open or over-shared edge (the reports were holes in the exported mesh).",
+ "body_count": 1,
+ "volume_mm3": 10828.427,
+ "faces": 6,
+ "watertight": true
 }
