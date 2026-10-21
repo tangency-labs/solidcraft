@@ -8,6 +8,8 @@ use std::sync::Arc;
 mod adapter;
 mod binary;
 mod metadata;
+#[allow(dead_code)]
+mod pcurve;
 mod preview;
 pub use preview::native_preview_mesh;
 
