@@ -81,8 +81,8 @@ pub struct Case {
     pub expect: Expect,
 }
 
-/// One operation (an `SM_API` call). `id` is the body it writes (replacing any body of
-/// that name); `a`, `b` and `body` name bodies written by earlier steps.
+/// One operation (an `SM_API` call, or a deferred higher-level recipe). `id` is the
+/// body it writes; `a`, `b` and `body` name bodies written by earlier steps.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Step {
@@ -173,6 +173,35 @@ pub enum Step {
         /// Offset distance (negative: inward).
         distance: f64,
     },
+    /// SolidCraft #3170: four inside flanges on an XY rectangle, then close the
+    /// corner between flanges 0 (front) and 3 (left). Flange order is front,
+    /// right, rear, left; negative angles reverse the bend direction.
+    SheetCorner {
+        /// Body written.
+        id: String,
+        /// Rectangle width and depth, starting at the origin.
+        base_size: [f64; 2],
+        /// Sheet thickness.
+        thickness: f64,
+        /// Inside bend radius.
+        bend_radius: f64,
+        /// Neutral-axis fraction used for the flat pattern.
+        k_factor: f64,
+        /// Flange height, using SolidCraft's inside-height convention.
+        height: f64,
+        /// Signed bend angle in degrees.
+        angle_degrees: f64,
+        /// Clearance between the covered end and covering wall's inner face.
+        gap: f64,
+        /// Notch relief width and depth.
+        relief_size: [f64; 2],
+        /// Corner notch size.
+        corner_relief: f64,
+        /// Which of flanges 0 and 3 covers the other.
+        covering: usize,
+        /// Overlap length: half the thickness for Partial, the thickness for Full.
+        overlap: f64,
+    },
 }
 
 /// A grid of positions: `pitch[0] * i + pitch[1] * j` for `i < count[0]`,
@@ -199,6 +228,25 @@ pub struct Expect {
     /// At most this many faces on cylinders.
     #[serde(default)]
     pub cylinder_faces_max: Option<usize>,
+    /// Sheet-corner geometry and flat-pattern invariants from SolidCraft #3170.
+    #[serde(default)]
+    pub sheet_corner: Option<SheetCornerExpect>,
+}
+
+/// A valid folded solid, one connected non-overlapping flat pattern whose area
+/// changes when the corner is joined, and volume matching flat area times thickness.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SheetCornerExpect {
+    /// Minimum signed distances of flange ends 0 and 3 to the other wall's inner
+    /// plane. Covering is negative overlap; covered is positive gap.
+    pub end_face_distances: [f64; 2],
+    /// Absolute tolerance of the signed-distance checks, in millimetres.
+    pub distance_tol: f64,
+    /// Number of connected flat-pattern regions.
+    pub flat_regions: usize,
+    /// Relative tolerance of volume against flat area times thickness.
+    pub volume_relative_tol: f64,
 }
 
 /// An analytic volume.
@@ -292,14 +340,18 @@ impl Step {
             | Self::Difference { id, .. }
             | Self::Intersection { id, .. }
             | Self::Fillet { id, .. }
-            | Self::OffsetFaces { id, .. } => id,
+            | Self::OffsetFaces { id, .. }
+            | Self::SheetCorner { id, .. } => id,
         }
     }
 
     /// The bodies this step reads.
     pub fn inputs(&self) -> Vec<&str> {
         match self {
-            Self::Box { .. } | Self::Sphere { .. } | Self::Cylinder { .. } => Vec::new(),
+            Self::Box { .. }
+            | Self::Sphere { .. }
+            | Self::Cylinder { .. }
+            | Self::SheetCorner { .. } => Vec::new(),
             Self::Union { a, b, .. }
             | Self::Difference { a, b, .. }
             | Self::Intersection { a, b, .. } => vec![a, b],
@@ -347,6 +399,46 @@ pub fn validate(case: &Case) -> Result<(), String> {
             Step::OffsetFaces {
                 faces, distance, ..
             } => faces.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
+            Step::SheetCorner {
+                base_size,
+                thickness,
+                bend_radius,
+                k_factor,
+                height,
+                angle_degrees,
+                gap,
+                relief_size,
+                corner_relief,
+                covering,
+                overlap,
+                ..
+            } => {
+                if !matches!(covering, 0 | 3)
+                    || !base_size
+                        .iter()
+                        .chain(relief_size)
+                        .all(|x| x.is_finite() && *x > 0.0)
+                    || ![
+                        *thickness,
+                        *bend_radius,
+                        *height,
+                        *gap,
+                        *corner_relief,
+                        *overlap,
+                    ]
+                    .iter()
+                    .all(|x| x.is_finite() && *x > 0.0)
+                    || !k_factor.is_finite()
+                    || !(0.0..=1.0).contains(k_factor)
+                    || !angle_degrees.is_finite()
+                    || *angle_degrees == 0.0
+                    || angle_degrees.abs() >= 180.0
+                    || overlap > thickness
+                {
+                    return Err(format!("step {i} has invalid sheet-corner parameters"));
+                }
+                true
+            }
             Step::Union { .. } | Step::Difference { .. } | Step::Intersection { .. } => true,
         };
         if !finite {
@@ -360,6 +452,17 @@ pub fn validate(case: &Case) -> Result<(), String> {
     if let Some(v) = &case.expect.volume {
         if !(v.value.is_finite() && v.tol.is_finite() && v.tol > 0.0) {
             return Err("volume value and tol must be finite, tol positive".into());
+        }
+    }
+    if let Some(e) = &case.expect.sheet_corner {
+        if !e.end_face_distances.iter().all(|x| x.is_finite())
+            || !e.distance_tol.is_finite()
+            || e.distance_tol <= 0.0
+            || !e.volume_relative_tol.is_finite()
+            || e.volume_relative_tol <= 0.0
+            || e.flat_regions == 0
+        {
+            return Err("invalid sheet-corner expectations".into());
         }
     }
     Ok(())
@@ -511,6 +614,12 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 symbol: "offset of selected faces (SmApiOffsetBrepFull moves every face)".into(),
             }))
         }
+        Step::SheetCorner { .. } => {
+            return Err(Run::Deferred(Deferral {
+                blocked_by: "no SM_API entry point".into(),
+                symbol: "sheet flange corner joining and flat pattern (SolidCraft #3170)".into(),
+            }))
+        }
     };
     bodies.insert(step.id().to_string(), body);
     Ok(())
@@ -551,7 +660,7 @@ pub fn run_rust(case: &Case) -> Run {
 /// One expectation checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
-    /// `lumps`, `volume`, `cylinder_faces_max`.
+    /// `lumps`, `volume`, `cylinder_faces_max`, `sheet_corner`.
     pub name: &'static str,
     /// `pass`, `fail` or `unchecked`.
     pub status: &'static str,
@@ -587,6 +696,13 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
             name: "cylinder_faces_max",
             status: "unchecked",
             detail: format!("at most {n}; solidcore has no cylinder surface kind yet"),
+        });
+    }
+    if e.sheet_corner.is_some() {
+        out.push(Check {
+            name: "sheet_corner",
+            status: "unchecked",
+            detail: "sheet-corner distances, validity, flat pattern and volume/area invariants need a sheet adapter".into(),
         });
     }
     out
@@ -765,7 +881,7 @@ mod tests {
         let cases = all();
         assert_eq!(
             cases.len(),
-            24,
+            40,
             "{:?}",
             cases.iter().map(|c| &c.id).collect::<Vec<_>>()
         );
@@ -777,7 +893,7 @@ mod tests {
             );
             let e = &l.case.expect;
             assert!(
-                e.lumps.is_some() || e.volume.is_some(),
+                e.lumps.is_some() || e.volume.is_some() || e.sheet_corner.is_some(),
                 "{}: nothing to check",
                 l.id
             );
@@ -826,6 +942,7 @@ mod tests {
                 formula: String::new(),
             }),
             cylinder_faces_max: None,
+            sheet_corner: None,
         };
         let ok = Measured {
             volume: 268.02,
@@ -857,6 +974,117 @@ mod tests {
         });
         assert_eq!(verdict(&e, &d).0, "DEFERRED");
         assert_eq!(verdict(&e, &Run::Error("x".into())).0, "ERROR");
+    }
+
+    #[test]
+    fn sheet_corner_preserves_the_original_matrix_and_defers_explicitly() {
+        let cases = load(&cases_dir(&crate::case::repo_root()), Some("3170-*")).unwrap();
+        assert_eq!(cases.len(), 16);
+        let mut matrix = std::collections::BTreeSet::new();
+        for loaded in cases {
+            let [Step::SheetCorner {
+                base_size,
+                thickness,
+                bend_radius,
+                k_factor,
+                height,
+                angle_degrees,
+                gap,
+                relief_size,
+                corner_relief,
+                covering,
+                overlap,
+                ..
+            }] = loaded.case.steps.as_slice()
+            else {
+                panic!(
+                    "{}: expected the original sheet-corner operation",
+                    loaded.id
+                );
+            };
+            assert_eq!(*base_size, [120.0, 90.0]);
+            assert_eq!((*thickness, *bend_radius, *k_factor), (2.0, 1.0, 0.5));
+            assert_eq!((*height, *gap), (38.6, 0.5));
+            assert_eq!((*relief_size, *corner_relief), ([2.0, 1.0], 8.0));
+            assert!([90.0, 72.0, -90.0, -72.0].contains(angle_degrees));
+            assert!([1.0, 2.0].contains(overlap));
+            assert!(matrix.insert((*angle_degrees as i32, *overlap as i32, *covering)));
+            let expected = loaded.case.expect.sheet_corner.as_ref().unwrap();
+            let distances = if *covering == 0 {
+                [-overlap, *gap]
+            } else {
+                [*gap, -overlap]
+            };
+            assert_eq!(expected.end_face_distances, distances);
+            assert_eq!(expected.distance_tol, 1e-9);
+            assert_eq!(expected.flat_regions, 1);
+            assert_eq!(expected.volume_relative_tol, 1e-3);
+            let run = run_rust(&loaded.case);
+            let Run::Deferred(ref deferred) = run else {
+                panic!(
+                    "{}: missing sheet adapter must not pass: {run:?}",
+                    loaded.id
+                );
+            };
+            assert_eq!(deferred.blocked_by, "no SM_API entry point");
+            assert!(deferred.symbol.contains("#3170"));
+            assert_eq!(verdict(&loaded.case.expect, &run).0, "DEFERRED");
+            assert_eq!(
+                verdict(
+                    &loaded.case.expect,
+                    &Run::Done(Measured {
+                        volume: 1.0,
+                        lumps: 1
+                    })
+                )
+                .0,
+                "UNCHECKED"
+            );
+        }
+    }
+
+    #[test]
+    fn sheet_corner_rejects_invalid_parameters_and_expectations() {
+        let file: Value = serde_json::from_str(include_str!(
+            "../../../fixtures/solidcraft/3170-sheet-corner-overlap.json"
+        ))
+        .unwrap();
+        let original = &file["cases"][0];
+        for (key, value) in [
+            ("base_size", json!([120, 0])),
+            ("thickness", json!(0)),
+            ("bend_radius", json!(-1)),
+            ("height", json!(0)),
+            ("k_factor", json!(1.1)),
+            ("angle_degrees", json!(0)),
+            ("angle_degrees", json!(180)),
+            ("gap", json!(-0.5)),
+            ("relief_size", json!([2, 0])),
+            ("corner_relief", json!(-8)),
+            ("covering", json!(1)),
+            ("overlap", json!(3)),
+        ] {
+            let mut changed = original.clone();
+            changed["steps"][0][key] = value;
+            let case: Case = serde_json::from_value(changed).unwrap();
+            assert!(validate(&case).is_err(), "accepted invalid {key}");
+        }
+        for key in ["distance_tol", "volume_relative_tol", "flat_regions"] {
+            let mut changed = original.clone();
+            changed["expect"]["sheet_corner"][key] = json!(0);
+            let case: Case = serde_json::from_value(changed).unwrap();
+            assert!(validate(&case).is_err(), "accepted invalid {key}");
+        }
+        let mut case: Case = serde_json::from_value(original.clone()).unwrap();
+        case.expect
+            .sheet_corner
+            .as_mut()
+            .unwrap()
+            .end_face_distances[0] = f64::NAN;
+        assert!(validate(&case).is_err());
+        let mut changed = original.clone();
+        changed["steps"][0]["coverng"] = json!(0);
+        assert!(serde_json::from_value::<Case>(changed).is_err());
     }
 
     #[test]

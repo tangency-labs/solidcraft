@@ -525,9 +525,11 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
 * **Steps** (`"op"`): `box`, `sphere`, `cylinder` (`axis`, default +Z), `union`,
   `difference` (optional `pattern`: the tool cut once per grid position, one cut after
   the other), `intersection`, `fillet` (edges by a point on each), `offset_faces` (faces
-  by a point on each). Each writes the body `id`; the last writes `result`.
+  by a point on each), `sheet_corner` (the deferred sheet-flange recipe below). Each
+  writes the body `id`; the last writes `result`.
 * **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left), `volume`
-  (`value`, absolute `tol`, the `formula` it came from), `cylinder_faces_max`.
+  (`value`, absolute `tol`, the `formula` it came from), `cylinder_faces_max`,
+  `sheet_corner` (signed end distances and flat-pattern invariants).
 * **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no check failed but one cannot be measured
   yet: `cylinder_faces_max` until solidcore has a cylinder surface kind), `ERROR` (a step
   returned an error other than `Unported`), `DEFERRED`. A step that reaches unported code
@@ -548,6 +550,43 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   glob): per case its source links, verdict, deferral, measured values and checks.
 * `cargo test -p difftest --lib solidcraft` checks that every case file loads, every
   case runs to a verdict, and every deferral names a plan unit.
+
+### Sheet flange corner overlap (SolidCraft #3170, PR #3472)
+
+`fixtures/solidcraft/3170-sheet-corner-overlap.json` ports
+`overlapping_corners_keep_surface_clearance_and_flat_material` from SolidCraft
+PR #3472 (published revision `0420e385`). The 16 original combinations are signed
+90/72 degree bends, Partial/Full overlap (1/2 mm), and front/left covering choices.
+Each starts with a 120 x 90 mm XY base, thickness 2 mm, radius 1 mm, K factor 0.5,
+gap 0.5 mm and four 38.6 mm inside flanges, in front/right/rear/left order. The
+corner between flanges 0 and 3 is joined after the initial butt closure. Notch relief
+is 2 x 1 mm, with corner relief 8 mm, matching the original aluminium rule.
+
+The minimum signed distance of each end face (at both thickness faces) to its
+neighbour's inner plane must be negative overlap for the covering flange and positive
+gap for the covered flange, within the original `1e-9` mm absolute tolerance. The
+folded solid must be valid, its flat pattern must be one non-overlapping region, its
+flat area must change after joining, and
+`abs(volume - flat_area * thickness) < volume * 1e-3` must hold. No mesh, saved B-rep
+or value measured with another CAD product is used as ground truth.
+
+**Current status: all 16 geometry cases are DEFERRED.** There is no sheet-flange,
+corner-join and flat-pattern adapter in this runner. `sheet_corner` records the
+original operation rather than substituting already-trimmed boxes, which would not
+exercise the bug. It defers on `no SM_API entry point`. Even if a future adapter only
+returns volume and lump count, the sheet expectations remain `UNCHECKED`, not `PASS`,
+until it also measures and scores every sheet invariant. Passing the harness tests
+proves that the cases are preserved and classified correctly, not that solidcore
+already implements the sheet feature. Butt/standalone joins, per-corner expressions
+and UI behavior are outside this original 16-case port.
+
+```sh
+nice -n 10 cargo test -p difftest --lib solidcraft
+nice -n 10 cargo run -p difftest -- --solidcraft-cases '3170-*' --no-report
+```
+
+This case builds on the whole-operation harness in solidcore PR #345; it does not
+change any unit status, kernel implementation or floating-point tolerance.
 
 ## Notes
 
