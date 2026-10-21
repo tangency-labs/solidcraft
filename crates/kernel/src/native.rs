@@ -240,9 +240,7 @@ fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Br
     let loops_alike = a.faces.iter().zip(&b.faces).all(|(fa, fb)| {
         fa.loops.len() == fb.loops.len()
             && fa.loops.iter().zip(&fb.loops).all(|pair| match pair {
-                (Loop::Edges { edges: x }, Loop::Edges { edges: y }) => {
-                    x.len() == y.len() && x.iter().zip(y).all(|(u, w)| u.edge == w.edge && u.forward == w.forward)
-                }
+                (Loop::Edges { edges: x }, Loop::Edges { edges: y }) => same_cycle(x, y),
                 (Loop::Vertex { vertex: x }, Loop::Vertex { vertex: y }) => x == y,
                 _ => false,
             })
@@ -253,6 +251,25 @@ fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Br
         d <= x.tolerance + y.tolerance + a.tolerance + b.tolerance
     });
     loops_alike && ends_alike && at_same_place
+}
+
+/// Whether two loops walk the same edges: in the same order from some edge on, or in the
+/// opposite order with each edge the other way round. SMLib walks a face whose surface it turned
+/// (a hole's wall) the other way, starting where it likes; its faces and edges are numbered
+/// alike all the same.
+#[cfg(feature = "smlib")]
+fn same_cycle(x: &[solidcraft_geom::brep::OrientedEdge], y: &[solidcraft_geom::brep::OrientedEdge]) -> bool {
+    let n = x.len();
+    if n != y.len() {
+        return false;
+    }
+    let Some(first) = x.first() else { return true };
+    let at = |k: usize| y.get(k % n);
+    (0..n).filter(|k| at(*k).is_some_and(|e| e.edge == first.edge)).any(|k| {
+        let ahead = x.iter().enumerate().all(|(i, u)| at(k + i).is_some_and(|w| w.edge == u.edge && w.forward == u.forward));
+        let back = x.iter().enumerate().all(|(i, u)| at(k + n - i).is_some_and(|w| w.edge == u.edge && w.forward != u.forward));
+        ahead || back
+    })
 }
 
 fn validate_topology(saved: &SavedBody) -> Result<()> {
