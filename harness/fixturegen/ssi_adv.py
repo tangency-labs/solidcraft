@@ -26,20 +26,6 @@ FILES = os.path.join(ROOT, "upstream/TestFiles/pt_TestFiles")
 OUT = os.path.join(ROOT, "fixtures/surface.surface_p2/ssi_adv.json")
 APPROX_TOL = 1.0e-3  # my_test_one_ssi -> my_test_ssi(pBrep1, pBrep2, 1.0e-3, ...)
 
-# Pairs whose tangent/singular start points need the SmAdvSurfaceIntersector
-# ComputeSingularityPoint override in SurfaceIntersector::compute_point_values: on main
-# the Rust side calls the base stub (SM_ERR) and drops them. PR #140 adds that dispatch;
-# with it all of these compare equal. Remove this list when #140 is on main.
-PENDING_PR140 = {
-    "ssi_tor_sph_tan.smp",
-    "ssi_tor_sph_tan2.smp",
-    "ssi_tor_in_tor_tang_hyper.smp",
-    "ssi_tor_in_tor_tan_ellip.smp",
-    "ssi_rev_rev_sing.smp",
-    "ssi_cyl_cyl_sing2.smp",
-    "ssi_clasic_ruled.smp",
-    "ssi_cylcyl_90_tan.smp",
-}
 
 CALL = re.compile(
     r'my_test_one_ssi\(_T\("\.\./\.\./TestFiles/pt_TestFiles/([A-Za-z0-9_]+\.smp)"\),'
@@ -164,8 +150,6 @@ def main():
         if key in seen:
             continue  # the same call again (upstream repeats some under other flags)
         seen.add(key)
-        if name in PENDING_PR140:
-            continue
         b0, b1 = part(name)
         stem = name[: -len(".smp")]
         for i, (s0, d0) in enumerate(b0):

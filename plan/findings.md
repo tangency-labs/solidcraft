@@ -14653,9 +14653,9 @@ New fixtures replicate upstream prog_test calls in `surface.surface_p2` (`ssi_ad
   where upstream's virtual call reaches `SmAdvSurfaceIntersector::ComputeSingularityPoint`
   (`SmAdvSurfaceIntersector.cpp:116`), so `FindBoundaryStartPoints` skips those points and
   traces stop at them. PR #140 adds this dispatch (`advanced` flag); on #140's head all 56
-  pairs pass or defer (0 failures). The eight files are listed in
-  `harness/fixturegen/ssi_adv.py` `PENDING_PR140`; remove the list and regenerate once #140
-  is on `main`.
+  pairs pass or defer (0 failures). The eight files are back in the fixture (all 56 pairs;
+  on #140's head at `c70653a63` they pass, 545 to 5679 values each), so this unit fails on
+  `main` until #140's dispatch lands.
 - **`surface.surface_p11` `LiftCurve` `PS_lift_crv2` on `PS_lift_srf2`: fixed** (case
   `lift_crv2_kinked_uv_trim_curve` added): `sm_IntersectAndSplit`'s plane intersection
   solutions named no object, so `IdenticalSolutions` merged only within `100 * SM_EFF_ZERO`
