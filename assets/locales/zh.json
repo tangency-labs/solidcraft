@@ -1759,7 +1759,7 @@
   "ui.ai_preset": "预设",
   "ui.ai_protocol": "协议",
   "ui.ai_remove": "移除",
-  "ui.ai_request_limit": "每条消息 24 次请求后已停止；再发送一条消息即可继续",
+  "ui.ai_request_limit": "每条消息 {limit} 次请求后已停止；再发送一条消息即可继续",
   "ui.ai_reset": "重置",
   "ui.ai_settings": "AI 设置…",
   "ui.ai_show_features": "显示 AI 功能",
