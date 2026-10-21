@@ -100,14 +100,16 @@ fn run_case(o: &Options, kernel: &str, case: &Path) -> Value {
         Ok(c) => c,
         Err(e) => return base("fail", format!("solidcraft-cli: {e}")),
     };
+    // A case may need longer than the run's timeout (`timeout_s`, at most 30 min).
+    let timeout = read(&case.join("expected.json"))["timeout_s"].as_u64().map_or(o.timeout, |s| Duration::from_secs(s.min(1800)).max(o.timeout));
     let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) if start.elapsed() > o.timeout => {
+            Ok(None) if start.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return base("hang", format!("no result after {} s", o.timeout.as_secs()));
+                return base("hang", format!("no result after {} s", timeout.as_secs()));
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
             Err(e) => return base("fail", format!("wait: {e}")),

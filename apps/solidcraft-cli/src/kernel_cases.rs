@@ -56,6 +56,63 @@ fn scratch(area: &str, name: &str) -> Result<String, String> {
     Ok(d.to_string_lossy().to_string())
 }
 
+/// Chord tolerance of the mesh a `watertight` case is checked on (mm).
+const MESH_TOL: f64 = 0.01;
+
+/// A mesh's edges used by one triangle only (open) and by more than two (over-shared). Vertices
+/// closer than `weld` (mm) are one vertex: a mesh repeats a vertex for each face, and faces
+/// meeting at an edge may place it a rounding error apart.
+fn open_edges(positions: &[solidcraft_engine::geom::Vec3], triangles: &[[u32; 3]], weld: f64) -> (usize, usize) {
+    use std::collections::HashMap;
+    let weld = if weld.is_finite() && weld > 0.0 { weld } else { 1e-4 };
+    let cell = |p: &solidcraft_engine::geom::Vec3| [p.x, p.y, p.z].map(|x| (x / weld).floor() as i64);
+    // Union-find over positions, joining each vertex with any within `weld` in the 27 cells round it.
+    let mut parent: Vec<usize> = (0..positions.len()).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while let Some(&p) = parent.get(i) {
+            if p == i {
+                break;
+            }
+            let gp = parent.get(p).copied().unwrap_or(p);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = gp;
+            }
+            i = p;
+        }
+        i
+    }
+    let mut grid: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
+    for (i, p) in positions.iter().enumerate() {
+        let c = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let Some(near) = grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) else { continue };
+                    for &j in near {
+                        if positions.get(j).is_some_and(|q| q.dist(*p) <= weld) {
+                            let (a, b) = (find(&mut parent, i), find(&mut parent, j));
+                            if let Some(slot) = parent.get_mut(a) {
+                                *slot = b;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        grid.entry(c).or_default().push(i);
+    }
+    let mut uses: HashMap<(usize, usize), usize> = HashMap::new();
+    for t in triangles {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (a, b) = (find(&mut parent, a as usize), find(&mut parent, b as usize));
+            if a != b {
+                *uses.entry((a.min(b), a.max(b))).or_default() += 1;
+            }
+        }
+    }
+    (uses.values().filter(|&&n| n == 1).count(), uses.values().filter(|&&n| n > 2).count())
+}
+
 /// An error that means "this kernel can't do it yet", not a wrong answer.
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
@@ -170,6 +227,22 @@ fn check_case(dir: &str) -> Value {
             "faces": m.merged.faces, "edges": m.merged.edges, "vertices": m.merged.vertices,
         }));
         shells += m.shells as u64;
+        if want["watertight"].as_bool() == Some(true) {
+            let tol = want["tolerance"]["mesh_mm"].as_f64().unwrap_or(MESH_TOL);
+            let (open, over) = match b.body.tessellate(tol) {
+                Ok(mesh) => open_edges(&mesh.positions, &mesh.triangles, want["tolerance"]["weld_mm"].as_f64().unwrap_or(1e-4)),
+                Err(e) => {
+                    c.push("watertight", json!(format!("{}: {e}", b.name)), json!("no open edges"), false);
+                    continue;
+                }
+            };
+            c.push(
+                "watertight",
+                json!(format!("{}: {open} open, {over} over-shared mesh edges", b.name)),
+                json!("no open edges"),
+                open == 0 && over == 0,
+            );
+        }
         if want_valid {
             // Closed shells, and every validity check this build has.
             if want_shells.is_none() {
@@ -201,9 +274,14 @@ fn check_case(dir: &str) -> Value {
     let diag = |b: ([f64; 3], [f64; 3])| ((b.1[0] - b.0[0]).powi(2) + (b.1[1] - b.0[1]).powi(2) + (b.1[2] - b.0[2]).powi(2)).sqrt();
     let want_bbox = v3(&want["bbox"]["min"]).zip(v3(&want["bbox"]["max"]));
     let abs = want["tolerance"]["abs_mm"].as_f64().unwrap_or_else(|| ABS_FRAC * want_bbox.map(diag).unwrap_or_else(|| diag(got.bbox)).max(1.0));
+    // A count is exact, or an inclusive range `[min, max]` where the geometry only bounds it.
     let count = |c: &mut Checks, k: &str, g: u64| {
         if has(k) {
-            c.push(k, json!(g), want[k].clone(), want[k].as_u64() == Some(g));
+            let ok = match want[k].as_array() {
+                Some(r) => r.first().and_then(Value::as_u64).is_some_and(|lo| g >= lo) && r.get(1).and_then(Value::as_u64).is_some_and(|hi| g <= hi),
+                None => want[k].as_u64() == Some(g),
+            };
+            c.push(k, json!(g), want[k].clone(), ok);
         }
     };
     count(&mut c, "body_count", got.body_count as u64);
