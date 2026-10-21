@@ -95,40 +95,51 @@ mod imp {
     }
 
     /// The edges `picks` select: each one's index in the body's edge order and the point halfway
-    /// along it, for SMLib to pick.
-    fn resolve(body: &Body, picks: &[Vec3]) -> Result<Picked> {
+    /// along it, for SMLib to pick. A pick as near to a smooth join (a seam where a face meets
+    /// itself, or faces meeting tangentially: never a blend's edge) as to a sharp edge, such as
+    /// one at the vertex where a cylinder's seam meets its rim, takes the sharp edge.
+    pub(super) fn resolve(body: &Body, picks: &[Vec3]) -> Result<Picked> {
         if picks.iter().any(|p| !p.is_finite()) {
             return Err(KernelError::Invalid("edge picks must be finite points".into()));
         }
-        let edges = body.edges((body.size() * 2e-3).max(1e-3))?;
+        let mesh = body.tessellate((body.size() * 2e-3).max(1e-3))?;
+        let seams = crate::topo::seam_flags(body, &mesh);
+        let (smooth, _) = crate::smooth_edges::flags(body, &mesh);
         let reach = pick_tolerance(body);
+        let tie = (body.size() * 1e-6).max(1e-6);
         let mut out = Picked { edges: Vec::with_capacity(picks.len()), points: Vec::with_capacity(picks.len()) };
         for p in picks {
-            let mut best: Option<(f64, &crate::body::EdgeInfo)> = None;
-            for e in &edges {
-                for w in e.points.windows(2) {
-                    if let [a, b] = w {
-                        let d = p.dist_to_segment(*a, *b);
-                        if best.is_none_or(|(bd, _)| d < bd) {
-                            best = Some((d, e));
-                        }
+            // The nearest edge, and the nearest that is no seam.
+            let (mut any, mut edge): (Option<(f64, usize)>, Option<(f64, usize)>) = (None, None);
+            for (i, line) in mesh.edges.iter().enumerate() {
+                let d =
+                    line.windows(2).filter_map(|w| if let [a, b] = w { Some(p.dist_to_segment(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min);
+                let seam = seams.get(i).copied().unwrap_or(false) || smooth.get(i).copied().unwrap_or(false);
+                for (slot, take) in [(&mut any, true), (&mut edge, !seam)] {
+                    if take && slot.is_none_or(|(bd, _)| d < bd) {
+                        *slot = Some((d, i));
                     }
                 }
             }
-            let Some((_, e)) = best.filter(|(d, _)| *d <= reach) else {
+            let chosen = match (any, edge) {
+                (Some((d, _)), Some(e)) if e.0 <= d + tie => Some(e),
+                (a, _) => a,
+            };
+            let Some((_, i)) = chosen.filter(|(d, _)| *d <= reach) else {
                 return Err(KernelError::Invalid(format!("no edge near the pick at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)));
             };
-            out.edges.push(e.index);
-            out.points.push([e.mid.x, e.mid.y, e.mid.z]);
+            let (mid, _) = crate::body::polyline_mid(mesh.edges.get(i).map(Vec::as_slice).unwrap_or(&[]));
+            out.edges.push(i);
+            out.points.push([mid.x, mid.y, mid.z]);
         }
         Ok(out)
     }
 
-    struct Picked {
+    pub(super) struct Picked {
         /// Each pick's edge in the body's edge order.
-        edges: Vec<usize>,
+        pub(super) edges: Vec<usize>,
         /// A point halfway along each.
-        points: Vec<[f64; 3]>,
+        pub(super) points: Vec<[f64; 3]>,
     }
 
     fn sizes_ok(what: &str, sizes: &[f64]) -> Result<()> {
@@ -291,6 +302,19 @@ mod tests {
         let b = cube();
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
+    }
+
+    #[test]
+    fn a_pick_where_a_seam_meets_a_rim_takes_the_rim() {
+        // Every point of the top rim's circle, the seam's top end among them, is on the rim.
+        let c = crate::cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 8.0, 10.0).unwrap();
+        assert!(c.edge_count() > 2, "the cylinder has a seam");
+        for k in 0..8 {
+            let a = k as f64 * std::f64::consts::FRAC_PI_4;
+            let picked = imp::resolve(&c, &[Vec3::new(8.0 * a.cos(), 8.0 * a.sin(), 10.0)]).unwrap();
+            let [_, _, z] = picked.points[0];
+            assert!((z - 10.0).abs() < 1e-9, "the pick at {a} took an edge through z = {z}");
+        }
     }
 
     #[test]

@@ -542,7 +542,7 @@ pub(crate) fn edge_order<'a, P: 'a, C: 'a, S: 'a>(
     (edges, bounds)
 }
 
-fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
+pub(crate) fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
     let len: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
     let mut acc = 0.0;
     for w in pts.windows(2) {
