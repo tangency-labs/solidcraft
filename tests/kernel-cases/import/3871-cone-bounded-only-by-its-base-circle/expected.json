@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3871",
+  "tangency-labs/solidcraft#3901",
+  "tangency-labs/solidcraft#3880"
+ ],
+ "what": "a cone whose face is bounded only by its base circle (no vertex at the point) must reach its point, not come in as a flat disc",
+ "source": "analytic",
+ "method": "cone r=10 h=30: V = pi r^2 h / 3 = 1000 pi = 3141.5927; A = pi r^2 + pi r s with s = sqrt(100+900) = 1307.6181; 2 faces",
+ "body_count": 1,
+ "volume_mm3": 3141.5927,
+ "area_mm2": 1307.6181,
+ "faces": 2,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   30
+  ]
+ }
+}

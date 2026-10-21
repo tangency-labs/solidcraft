@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3098"
+ ],
+ "what": "a block whose 12 straight edges are degree-1 B-spline curves over a knot span of 1e-7 (as NX writes short edges); the faces must be kept",
+ "source": "analytic",
+ "method": "box 30x20x10: V = 6000; A = 2(600+300+200) = 2200; 6 faces, 12 edges, 8 vertices",
+ "body_count": 1,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}
