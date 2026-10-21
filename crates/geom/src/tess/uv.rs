@@ -6,7 +6,7 @@ use super::EvalSurface;
 use crate::Vec3;
 
 /// The parameter box of a surface and its periods.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Domain {
     /// Bounded ranges (`None`: unbounded, as a plane's).
     pub range: [Option<(f64, f64)>; 2],
