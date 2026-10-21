@@ -603,6 +603,33 @@ fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
     }
 }
 
+/// Each loop is projected on its own, so along a closed direction a hole can come out a whole
+/// period away from the outer loop: a dome's outer loop opened at its pole spans v in [-1, 0]
+/// while the hole projects into [0, 1], outside it (tangency-labs/solidcore#433). Every other
+/// loop is moved by whole periods to the copy whose middle is nearest the outer loop's (the
+/// loop of largest area); a face that does not wind lies within one period, so that is the
+/// copy inside it.
+fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
+    let Some(outer) = loops.iter().map(|l| area2(&l.uv).abs()).enumerate().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i) else { return };
+    let middle = |l: &seam::Loop, d: usize| {
+        let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+        0.5 * (lo + hi)
+    };
+    for d in 0..2 {
+        let Some(per) = dom.period[d] else { continue };
+        let Some(centre) = loops.get(outer).map(|l| middle(l, d)) else { continue };
+        for (i, l) in loops.iter_mut().enumerate() {
+            let k = ((middle(l, d) - centre) / per).round();
+            if i == outer || !k.is_finite() || k == 0.0 {
+                continue;
+            }
+            for q in &mut l.uv {
+                q[d] -= k * per;
+            }
+        }
+    }
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 fn plan_face(
@@ -681,6 +708,7 @@ fn plan_face(
         for l in projected.iter_mut() {
             open_pole_to_pole(s, &dom, l);
         }
+        holes_beside_outer(&dom, &mut projected);
     }
     // Split poles.
     let mut fixed: Vec<Vec3> = Vec::new();
