@@ -407,8 +407,10 @@ fn smlib_spline_edges_on_part_of_their_curve_decode() {
     use solidcraft_smlib::BooleanOp;
     let block = crate::box_solid(Vec3::new(7.5, 15., 0.), Vec3::new(25., 32.5, 27.5)).unwrap();
     let post = crate::cylinder(Vec3::new(12.5, 20., 10.), Vec3::Z, 5., 30.).unwrap();
-    let (a, c) = (crate::native::smlib_body(&block).unwrap(), crate::native::smlib_body(&post).unwrap());
-    let common = a.boolean(&c, BooleanOp::Intersect).unwrap().unwrap();
+    // Both as truck holds them, the post a rational spline and the block's sides bilinear
+    // patches (the import otherwise sends SMLib's cylinder and planes, whose cut leaves circles).
+    let keeping = |body: &Body| solidcraft_smlib::Brep::from_record_keeping_splines(&crate::brep_record(body).unwrap(), true).unwrap();
+    let common = keeping(&block).boolean(&keeping(&post), BooleanOp::Intersect).unwrap().unwrap();
     let record = common.to_native().unwrap();
     assert!(
         record.edges.iter().any(|e| matches!(e.curve.natural(), b::Natural::Range(lo, hi) if [lo, hi] != e.interval)

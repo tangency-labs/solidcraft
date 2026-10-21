@@ -1,14 +1,16 @@
-//! Revolutions as SMLib's analytic surfaces. A `placed_revolution` record holds a surface the
-//! way truck does (a profile turned about an axis, then placed); SMLib has no such surface, but
-//! every one truck makes for a cylinder, cone, sphere or torus is one of those exactly: a line
-//! along the axis, a line in a plane through it, a circle centred on it, a circle in a plane
-//! through it. Each such face becomes that analytic surface, its range mapped from the
-//! revolution's parameters, and checked point by point over the face's range; where the
-//! analytic surface's natural normal is the other way round, the face is turned over (its loops
-//! reversed, its uses in the shells flipped), which leaves the solid as it was.
+//! Revolutions and extruded circles as SMLib's analytic surfaces.
+//!
+//! A `placed_revolution` record holds a surface the way truck does (a profile turned about an
+//! axis, then placed); SMLib has no such surface, but every one truck makes for a cylinder, cone,
+//! sphere or torus is one of those exactly: a line along the axis, a line in a plane through it, a
+//! circle centred on it, a circle in a plane through it. A rational spline that is a circular arc
+//! swept straight along its axis (truck's extruded circles) is a cylinder. Each such face becomes
+//! that analytic surface with the face's range on it, checked point by point over the face's
+//! domain; where the analytic surface's natural normal is the other way round, the face is turned
+//! over (its loops reversed, its uses in the shells flipped), which leaves the solid as it was.
 //!
 //! A revolution of any other profile, or one placed by a matrix that is not a rigid motion, is
-//! refused.
+//! refused; any other spline stays a spline.
 
 use std::borrow::Cow;
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -21,39 +23,95 @@ use super::{R, Unsupported};
 
 const NOT_ANALYTIC: Unsupported = Unsupported::NotYet("revolved surfaces other than cylinders, cones, spheres and tori");
 
-/// `brep` with every revolution replaced by its analytic surface (borrowed when it has none).
+/// `brep` with every revolution and extruded circle replaced by its analytic surface (borrowed
+/// when it has none).
 pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
-    if !brep.faces.iter().any(|f| matches!(f.surface, b::Surface::PlacedRevolution { .. })) {
-        return Ok(Cow::Borrowed(brep));
-    }
-    let mut out = brep.clone();
     let size = extent(brep);
+    let tol = brep.tolerance.max(1e-9 * size);
+    let mut out: Option<b::Brep> = None;
     let mut turned = Vec::new();
-    for (i, f) in out.faces.iter_mut().enumerate() {
-        let b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } = &f.surface else { continue };
-        let rev = Revolution::new(profile, *origin, *axis, matrix, *forward)?;
-        let (mut surface, mut domain, v) = rev.analytic(f.domain)?;
+    for (i, f) in brep.faces.iter().enumerate() {
+        let found = match &f.surface {
+            b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
+                Some(Revolution::new(profile, *origin, *axis, matrix, *forward)?.analytic(f.domain)?)
+            }
+            b::Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
+                extruded_circle(u_knots, v_knots, homogeneous, f.domain, 1e-9 * size.max(1.0))
+            }
+            _ => None,
+        };
+        let Some((mut surface, mut range)) = found else { continue };
         // The angle about the axis starts at 0: the frame turns to the face's first angle (SMLib
         // refuses an analytic range past 360°). A torus's tube angle can't turn so: it starts
         // within the first turn, where SMLib's degree domains are at home.
-        let start = domain[0][0];
-        turn_frame(&mut surface, start);
-        domain[0] = [0.0, domain[0][1] - start];
+        turn_frame(&mut surface, range[0][0]);
+        range[0] = [0.0, range[0][1] - range[0][0]];
         if matches!(surface, b::Surface::Torus { .. }) {
-            domain[1] = first_turn(domain[1]);
+            range[1] = first_turn(range[1]);
         }
-        let map = Map { rev: &rev, start, v: &v };
-        let flip = agree((&f.surface, f.domain), (&surface, domain), map, brep.tolerance.max(1e-9 * size))?;
-        f.surface = surface;
-        f.domain = domain;
+        let flip = agree((&f.surface, f.domain), (&surface, range), tol)?;
+        let face = out.get_or_insert_with(|| brep.clone()).faces.get_mut(i).ok_or(Unsupported::Invalid("face"))?;
+        face.surface = surface;
+        face.domain = range;
         if flip {
             turned.push(i);
         }
     }
+    let Some(mut out) = out else { return Ok(Cow::Borrowed(brep)) };
     for i in turned {
         turn_over(&mut out, i)?;
     }
     Ok(Cow::Owned(out))
+}
+
+/// A rational spline that is a circular arc swept straight along the arc's axis, as a cylinder
+/// with the face's range on it: one direction linear (two rows of control points), the second
+/// row the first moved by one vector at right angles to the circle the first row runs on, the
+/// weights alike. `None` where it is not.
+fn extruded_circle(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], domain: [[f64; 2]; 2], tol: f64) -> Option<(b::Surface, [[f64; 2]; 2])> {
+    let linear = |k: &[f64]| k.len() == 4 && k[0] == k[1] && k[2] == k[3] && k[1] < k[2];
+    let (rows, arc_knots, arc_range, line_knots, line_range): ([Vec<[f64; 4]>; 2], &[f64], [f64; 2], &[f64], [f64; 2]) =
+        if net.iter().all(|r| r.len() == 2) && linear(v_knots) && !linear(u_knots) {
+            ([net.iter().map(|r| r[0]).collect(), net.iter().map(|r| r[1]).collect()], u_knots, domain[0], v_knots, domain[1])
+        } else if net.len() == 2 && linear(u_knots) && !linear(v_knots) {
+            ([net.first()?.clone(), net.get(1)?.clone()], v_knots, domain[1], u_knots, domain[0])
+        } else {
+            return None;
+        };
+    let cart = |h: &[f64; 4]| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
+    let (first, second) = (&rows[0], &rows[1]);
+    let d = cart(second.first()?) - cart(first.first()?);
+    let alike = first.iter().zip(second).all(|(p, q)| (p[3] - q[3]).abs() <= 1e-12 * p[3].abs() && (cart(q) - cart(p) - d).len() <= tol);
+    if !alike || first.len() != second.len() || !(d.len() > tol) {
+        return None;
+    }
+    let arc = CurveEval::new(&b::Curve::RationalSpline { knots: arc_knots.to_vec(), homogeneous: first.clone() }).ok()?;
+    let (center, radius, normal) = circle(&arc, arc_range)?;
+    let z = d.normalized()?;
+    if normal.cross(z).len() > 1e-9 {
+        return None;
+    }
+    let x = (arc.point(arc_range[0])? - center).normalized()?;
+    let y = z.cross(x);
+    // The arc's angles from x, unwrapped along its range.
+    let mut angle = 0.0;
+    let mut prev = 0.0;
+    for i in 1..=32 {
+        let q = arc.point(arc_range[0] + (arc_range[1] - arc_range[0]) * f64::from(i) / 32.0)? - center;
+        let mut a = q.dot(y).atan2(q.dot(x));
+        while a - prev > std::f64::consts::PI {
+            a -= TAU;
+        }
+        while a - prev < -std::f64::consts::PI {
+            a += TAU;
+        }
+        prev = a;
+        angle = a;
+    }
+    let height = |s: f64| (s - line_knots[1]) / (line_knots[2] - line_knots[1]) * d.len();
+    let sorted = |a: f64, b: f64| if a <= b { [a, b] } else { [b, a] };
+    let frame = b::Frame { origin: arr(center), x_axis: arr(x), y_axis: arr(y) };
+    Some((b::Surface::Cylinder { frame, radius }, [sorted(0.0, angle), sorted(height(line_range[0]), height(line_range[1]))]))
 }
 
 /// An analytic surface's frame turned by `angle` about its axis: u then counts from there.
@@ -171,7 +229,7 @@ impl Revolution {
 
     /// The analytic surface and the face's range on it: u the angle about z from the profile's
     /// half-plane, v as the surface's kind has it.
-    fn analytic(&self, domain: [[f64; 2]; 2]) -> R<(b::Surface, [[f64; 2]; 2], V)> {
+    fn analytic(&self, domain: [[f64; 2]; 2]) -> R<(b::Surface, [[f64; 2]; 2])> {
         let (t, angle) = self.ranges(domain);
         let at = |s: f64| self.profile.point(s).ok_or(Unsupported::Invalid("revolution profile"));
         let samples: Vec<Vec3> = (0..=16).map(|i| at(t[0] + (t[1] - t[0]) * f64::from(i) / 16.0)).collect::<R<_>>()?;
@@ -205,7 +263,7 @@ impl Revolution {
                 if !(r0 > 0.0) {
                     return Err(NOT_ANALYTIC);
                 }
-                return Ok((b::Surface::Cylinder { frame: frame(foot), radius: r0 }, [angle, v], V::Height { foot, z: self.z }));
+                return Ok((b::Surface::Cylinder { frame: frame(foot), radius: r0 }, [angle, v]));
             }
             // A cone on one side of its apex only.
             let r = |h: f64| r0 + h * dr / dh;
@@ -213,7 +271,7 @@ impl Revolution {
                 return Err(NOT_ANALYTIC);
             }
             let cone = b::Surface::Cone { frame: frame(foot), radius_at_origin: r0, half_angle: (dr / dh).atan() };
-            return Ok((cone, [angle, v], V::Height { foot, z: self.z }));
+            return Ok((cone, [angle, v]));
         }
         // A circular profile.
         let (center, radius, normal) = circle(&self.profile, t).ok_or(NOT_ANALYTIC)?;
@@ -248,73 +306,59 @@ impl Revolution {
                 return Err(NOT_ANALYTIC);
             }
             let v = [v[0].max(-FRAC_PI_2), v[1].min(FRAC_PI_2)];
-            return Ok((b::Surface::Sphere { frame: frame(foot), radius }, [angle, v], V::Angle { center, x, z: self.z }));
+            return Ok((b::Surface::Sphere { frame: frame(foot), radius }, [angle, v]));
         }
         let major = off.dot(x);
         if !(major > radius) {
             return Err(NOT_ANALYTIC);
         }
         let torus = b::Surface::Torus { frame: frame(foot), major_radius: major, minor_radius: radius };
-        Ok((torus, [angle, sorted(first, last)], V::Angle { center, x, z: self.z }))
-    }
-
-    /// The analytic (u, v) of the record's (u, v): the angle is the revolution's own, v that of
-    /// the profile's point (at angle 0), unwrapped to within half a turn of `near`.
-    fn map(&self, v: &V, uv: [f64; 2], start: f64, near: f64) -> Option<[f64; 2]> {
-        let (t, angle) = if self.forward { (uv[0], uv[1]) } else { (uv[1], uv[0]) };
-        let p = self.profile.point(t)?;
-        Some([angle - start, v.of(p, near)])
+        Ok((torus, [angle, sorted(first, last)]))
     }
 }
 
-/// From a revolution's (u, v) to its analytic surface's: the revolution, the angle the
-/// surface's u starts at, and how its v is found.
-struct Map<'a> {
-    rev: &'a Revolution,
-    start: f64,
-    v: &'a V,
-}
-
-/// How the analytic v of a profile point is found.
-enum V {
-    /// Height along `z` above `foot` (cylinder, cone).
-    Height { foot: Vec3, z: Vec3 },
-    /// The angle about `center` from `x` towards `z` (sphere latitude, torus meridian).
-    Angle { center: Vec3, x: Vec3, z: Vec3 },
-}
-
-impl V {
-    fn of(&self, p: Vec3, near: f64) -> f64 {
-        match self {
-            V::Height { foot, z } => (p - *foot).dot(*z),
-            V::Angle { center, x, z } => {
-                let q = p - *center;
-                let mut a = q.dot(*z).atan2(q.dot(*x));
-                while a - near > std::f64::consts::PI {
-                    a -= TAU;
-                }
-                while a - near < -std::f64::consts::PI {
-                    a += TAU;
-                }
-                a
-            }
+/// The (u, v) of point `p` on an analytic surface, angles unwrapped to within half a turn of
+/// `near`.
+fn analytic_uv(s: &b::Surface, p: Vec3, near: [f64; 2]) -> Option<[f64; 2]> {
+    let unwrap = |mut a: f64, n: f64| {
+        while a - n > std::f64::consts::PI {
+            a -= TAU;
         }
-    }
+        while a - n < -std::f64::consts::PI {
+            a += TAU;
+        }
+        a
+    };
+    let (frame, round) = match s {
+        b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. } | b::Surface::Sphere { frame, .. } => (frame, 0.0),
+        b::Surface::Torus { frame, major_radius, .. } => (frame, *major_radius),
+        _ => return None,
+    };
+    let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
+    let z = x.cross(y);
+    let q = p - v3(frame.origin);
+    let (qx, qy, qz) = (q.dot(x), q.dot(y), q.dot(z));
+    let u = unwrap(qy.atan2(qx), near[0]);
+    let r = qx.hypot(qy);
+    Some(match s {
+        b::Surface::Sphere { .. } => [u, qz.atan2(r)],
+        b::Surface::Torus { .. } => [u, unwrap(qz.atan2(r - round), near[1])],
+        _ => [u, qz],
+    })
 }
 
-/// Checks the analytic surface against the revolution over the face's range, 5 × 5 points
-/// within `tol`, and says whether their natural normals are opposite (the face must be turned
-/// over), read at the range's middle.
-fn agree(record: (&b::Surface, [[f64; 2]; 2]), analytic: (&b::Surface, [[f64; 2]; 2]), map: Map, tol: f64) -> R<bool> {
-    let ((record, domain), (analytic, range), Map { rev, start, v }) = (record, analytic, map);
-    let bad = Unsupported::Invalid("a revolution its analytic surface does not match");
+/// Checks the analytic surface against the record's over the face's domain, 5 × 5 points within
+/// `tol`, and says whether their natural normals are opposite (the face must be turned over),
+/// read at the domain's middle.
+fn agree((record, domain): (&b::Surface, [[f64; 2]; 2]), (analytic, range): (&b::Surface, [[f64; 2]; 2]), tol: f64) -> R<bool> {
+    let bad = Unsupported::Invalid("a surface its analytic form does not match");
     let s = SurfaceEval::new(record).map_err(|_| bad.clone())?;
     let a = SurfaceEval::new(analytic).map_err(|_| bad.clone())?;
     let [[u0, u1], [v0, v1]] = domain;
-    let near = 0.5 * (range[1][0] + range[1][1]);
+    let near = [0.5 * (range[0][0] + range[0][1]), 0.5 * (range[1][0] + range[1][1])];
     let normals = |u: f64, w: f64| -> R<f64> {
         let (p, du, dv) = s.derivs(u, w).ok_or(bad.clone())?;
-        let uv = rev.map(v, [u, w], start, near).ok_or(bad.clone())?;
+        let uv = analytic_uv(analytic, p, near).ok_or(bad.clone())?;
         let (q, au, av) = a.derivs(uv[0], uv[1]).ok_or(bad.clone())?;
         if !((p - q).len() <= tol) {
             return Err(bad.clone());

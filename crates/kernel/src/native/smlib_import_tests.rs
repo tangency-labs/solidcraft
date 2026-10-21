@@ -61,3 +61,22 @@ fn smlib_results_go_back_into_smlib() {
         assert!((got - exact).abs() <= 1e-6 * exact, "{name}: SMLib volume {got}, exact {exact}");
     }
 }
+
+/// Truck's cylinders are circles extruded as rational splines: they go into SMLib as its
+/// cylinder, so a boolean with one intersects a plane with a cylinder, not with a spline.
+#[test]
+fn extruded_circles_go_as_cylinders() {
+    use solidcraft_smlib::flat;
+    let body = cylinder(v(0., 50., -60.), v(0., 0., 1.), 40.0, 120.0).unwrap();
+    let record = super::brep_record(&body).unwrap();
+    assert!(record.faces.iter().any(|f| matches!(f.surface, solidcraft_geom::brep::Surface::RationalSpline { .. })));
+    let arrays = solidcraft_smlib::import::arrays(&record, true).unwrap();
+    let kinds = &arrays.ints[&flat::FACE_SURFACE_TYPE];
+    assert!(kinds.iter().all(|k| *k == i64::from(flat::SURFACE_PLANE) || *k == i64::from(flat::SURFACE_CYLINDER)), "{kinds:?}");
+    assert_eq!(kinds.iter().filter(|k| **k == i64::from(flat::SURFACE_CYLINDER)).count(), record.faces.len() - 2);
+    // A box cut by it is a valid SMLib solid (as a spline it had edges 0.78 mm off its faces).
+    let block = box_solid(v(-14., 0., -14.), v(14., 20., 14.)).unwrap();
+    let r = super::smlib_body(&block).unwrap().boolean(&super::smlib_body(&body).unwrap(), solidcraft_smlib::BooleanOp::Subtract).unwrap().unwrap();
+    let check = r.check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+}

@@ -195,7 +195,7 @@ fn revolutions_become_the_same_surface_as_a_rational_spline() {
             let (angles, prof) = ([0.4, 0.4 + 1.9 * std::f64::consts::PI], [0.0, 1.0]);
             let domain = if forward { [prof, angles] } else { [angles, prof] };
             let mut a = Arrays::default();
-            surface(&mut a, &rev, domain).unwrap();
+            surface(&mut a, &rev, domain, true).unwrap();
             let (nurbs, range) = first_nurbs(&a);
             let (re, ne) = (SurfaceEval::new(&rev).unwrap(), SurfaceEval::new(&nurbs).unwrap());
             let det = {

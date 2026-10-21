@@ -84,8 +84,22 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 /// rules (SMLib then skips its healer); otherwise SMLib heals it on import.
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     brep.validate().map_err(|e| Unsupported::Invalid(e.0))?;
-    let brep = revolved::analytic(brep)?;
-    let brep = brep.as_ref();
+    let brep = analytic::analytic(brep)?;
+    laid_out(brep.as_ref(), trusted, true)
+}
+
+/// [`arrays`] with every surface as the record holds it: a round face truck holds as a rational
+/// spline (an extruded circle) stays one, and a plane off unit orthogonal axes goes as its
+/// bilinear patch, to compare what SMLib makes of splines with what it makes of its own analytic
+/// surfaces. A revolution is still refused (SMLib has no such surface).
+pub fn arrays_keeping_splines(brep: &b::Brep, trusted: bool) -> R<Arrays> {
+    brep.validate().map_err(|e| Unsupported::Invalid(e.0))?;
+    laid_out(brep, trusted, false)
+}
+
+/// The flat arrays; `analytic`: a plane on any axes goes as SMLib's plane (else, off unit
+/// orthogonal axes, as the bilinear patch it is).
+fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     let mut a = Arrays::default();
 
     // Regions and shells. Each region gets its own copy of each shell it lists.
@@ -156,7 +170,7 @@ pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     for f in &brep.faces {
         a.i(flat::FACE_LOOP_COUNT).push(int(f.loops.len())?);
         a.i(flat::FACE_TRIM_TYPE).push(0);
-        let spline = surface(&mut a, &f.surface, f.domain)?;
+        let spline = surface(&mut a, &f.surface, f.domain, analytic)?;
         for l in &f.loops {
             match l {
                 b::Loop::Vertex { vertex } => {
@@ -234,7 +248,7 @@ fn nurbs_face(a: &mut Arrays, u_knots: &[f64], v_knots: &[f64], nu: usize, nv: u
 }
 
 /// The face's surface and range; true for a B-spline surface (which carries trims).
-fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2]) -> R<bool> {
+fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_planes: bool) -> R<bool> {
     let [[u0, u1], [v0, v1]] = domain;
     let analytic = |a: &mut Arrays, kind: u8, ids: [i32; 3], f: &b::Frame| {
         a.i(flat::FACE_SURFACE_TYPE).push(i64::from(kind));
@@ -244,8 +258,10 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2]) -> R<bool> {
         a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
     };
     match s {
-        b::Surface::Plane { origin, u_axis, v_axis } => plane(a, *origin, *u_axis, *v_axis, domain)?,
-        b::Surface::PlaneThrough { origin, u_point, v_point } => plane(a, *origin, sub(*u_point, *origin), sub(*v_point, *origin), domain)?,
+        b::Surface::Plane { origin, u_axis, v_axis } => plane(a, *origin, *u_axis, *v_axis, domain, analytic_planes)?,
+        b::Surface::PlaneThrough { origin, u_point, v_point } => {
+            plane(a, *origin, sub(*u_point, *origin), sub(*v_point, *origin), domain, analytic_planes)?
+        }
         b::Surface::Cylinder { frame, radius } => {
             analytic(a, flat::SURFACE_CYLINDER, [flat::FACE_CYLINDER_ORIGIN, flat::FACE_CYLINDER_AXIS, flat::FACE_CYLINDER_REF_DIRECTION], frame);
             a.r(flat::FACE_CYLINDER_RADIUS).push(*radius);
@@ -393,8 +409,18 @@ fn net_rows(a: &mut Arrays, cps: impl Iterator<Item = ([f64; 3], f64)>) {
 /// U × V as the record's. The range is the record's domain mapped onto those axes (its bounding
 /// box: a face's range need not be tight, and SMLib rebuilds an analytic face's trims from its
 /// edges). Truck's planes run through three points, their axes the face's own sides.
-fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f64; 2]; 2]) -> R<()> {
+/// Off unit orthogonal axes and not `analytic`, it goes as the exact bilinear patch over the
+/// domain instead.
+fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f64; 2]; 2], analytic: bool) -> R<()> {
     let [[u0, u1], [v0, v1]] = domain;
+    let unit = |x: [f64; 3]| (dot(x, x).sqrt() - 1.0).abs() <= 1e-12;
+    if !analytic && !(unit(u) && unit(v) && dot(u, v).abs() <= 1e-12) {
+        nurbs_face(a, &[u0, u0, u1, u1], &[v0, v0, v1, v1], 2, 2)?;
+        let at = |s: f64, t: f64| add(origin, add(scale(u, s), scale(v, t)));
+        net(a, [at(u0, v0), at(u0, v1), at(u1, v0), at(u1, v1)].into_iter().map(|p| (p, 1.0)));
+        a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
+        return Ok(());
+    }
     let n = cross(u, v);
     let (lu, ln) = (dot(u, u).sqrt(), dot(n, n).sqrt());
     if !(lu > 0.0 && ln > 0.0 && lu.is_finite() && ln.is_finite()) {
@@ -491,7 +517,7 @@ fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
     Ok(())
 }
 
-mod revolved;
+mod analytic;
 
 #[cfg(test)]
 mod tests;
@@ -500,6 +526,12 @@ impl crate::Brep {
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let a = arrays(brep, trusted).map_err(crate::Error::Record)?;
+        crate::flat::Flat::from_arrays(&a)?.import()
+    }
+
+    /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
+    pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
+        let a = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record)?;
         crate::flat::Flat::from_arrays(&a)?.import()
     }
 }
