@@ -98,6 +98,10 @@ pub(crate) struct Frame {
     active: Option<(ContentOwner, ContentRequest)>,
     last_bodies: Vec<String>,
     last_plane: Option<String>,
+    /// The feature and joint a row lit last frame, cleared only while the viewport still shows
+    /// them: the timeline sets `hover_feature` earlier in the frame.
+    last_feature: Option<u64>,
+    last_joint: Option<u64>,
     plane_underlay: Option<String>,
     finalized: bool,
 }
@@ -239,6 +243,16 @@ fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let plane_underlay = app.tree.content.plane_underlay.take();
     if old_plane.is_some() && app.viewport.hover_plane == old_plane {
         app.viewport.hover_plane = plane_underlay;
+    }
+    if let Some(feature) = app.tree.content.last_feature.take()
+        && app.viewport.hover_feature == Some(feature)
+    {
+        app.viewport.hover_feature = None;
+    }
+    if let Some(joint) = app.tree.content.last_joint.take()
+        && app.viewport.hover_joint == Some(joint)
+    {
+        app.viewport.hover_joint = None;
     }
     (old_bodies, old_plane)
 }
@@ -457,6 +471,14 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.content.plane_underlay = app.viewport.hover_plane.take();
             app.tree.content.last_plane.clone_from(&actions.hover_plane);
             app.viewport.hover_plane.clone_from(&actions.hover_plane);
+        }
+        if let Some(feature) = actions.hover_feature {
+            app.viewport.hover_feature = Some(feature);
+            app.tree.content.last_feature = Some(feature);
+        }
+        if let Some(joint) = actions.hover_joint {
+            app.viewport.hover_joint = Some(joint);
+            app.tree.content.last_joint = Some(joint);
         }
         crate::browser::apply_content_actions(app, actions);
     }

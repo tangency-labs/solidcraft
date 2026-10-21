@@ -945,6 +945,9 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
+    /// The feature row under the pointer: lit as hovering its timeline item lights it.
+    pub(crate) hover_feature: Option<u64>,
+    pub(crate) hover_joint: Option<u64>,
     drop: Option<(crate::semantic_content::ContentSource, DropAction)>,
     /// What the selection and the 3D view's pointer light in the tree.
     lit: Lit,
@@ -1834,7 +1837,7 @@ fn component_rows_inner(
         features::rows(app, ui, id, &[], d, acts);
     }
     if id == 0 && !render {
-        crate::dialogs_assembly::browser_joints(app, ui, d);
+        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, ui, d);
     }
     for path in &root.children {
         occurrence_rows(app, ui, path, d, acts, cache);

@@ -1966,14 +1966,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 }
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
-/// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+/// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     if joints.is_empty() {
-        return;
+        return None;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
@@ -1993,9 +1993,10 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         toggle(app, key, start_open);
     }
     if !open {
-        return;
+        return None;
     }
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
@@ -2015,6 +2016,9 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         );
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
+        }
+        if r.hovered {
+            hovered = Some(id);
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -2036,6 +2040,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A click on a joint's browser row: it becomes the pick (or, with Ctrl, toggles in or out of
@@ -2293,14 +2298,18 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     for (id, picked) in drawn {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == id) else { continue };
+        // Its browser row under the pointer lights it as a hovered body's edges are lit.
+        let hovered = app.viewport.hover_joint == Some(id);
         let col = if picked {
             t.sel_edge
+        } else if hovered {
+            t.hover_edge
         } else if j.suppressed {
             t.text_dim
         } else {
             t.accent
         };
-        let width = if picked { 2.5 } else { 1.5 };
+        let width = if picked || hovered { 2.5 } else { 1.5 };
         let stroke = Stroke::new(width, col);
         let Some(c) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
         // The motion axis (z), both ways.
