@@ -1,0 +1,69 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     -7.25,
+     0
+    ],
+    "length": 100,
+    "width": 14.5,
+    "height": 10,
+    "body_name": "Frame"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     98.5,
+     0,
+     -1
+    ],
+    "length": 2,
+    "width": 2,
+    "height": 12,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "offset": 98,
+    "name": "Cutter"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -0.0022,
+     -1
+    ],
+    "p1": [
+     3,
+     11
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Cutter",
+    "through_all": true,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Frame"
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,56 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     0,
+     1.5
+    ],
+    "length": 52,
+    "width": 52,
+    "height": 3,
+    "body_name": "Plate",
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     -5.2,
+     -5.2,
+     3
+    ],
+    "radius": 0.7,
+    "height": 3.5,
+    "operation": "join",
+    "name": "Pin"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Pin"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 5,
+    "spacing1": 2.6,
+    "dir2": [
+     0,
+     1,
+     0
+    ],
+    "count2": 5,
+    "spacing2": 2.6,
+    "name": "Pins"
+   }
+  }
+ ]
+}

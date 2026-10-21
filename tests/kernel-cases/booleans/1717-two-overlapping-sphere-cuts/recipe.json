@@ -1,0 +1,36 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 5
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     12,
+     20,
+     0
+    ],
+    "operation": "cut",
+    "radius": 10
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     17,
+     20,
+     0
+    ],
+    "operation": "cut",
+    "radius": 10
+   }
+  }
+ ]
+}

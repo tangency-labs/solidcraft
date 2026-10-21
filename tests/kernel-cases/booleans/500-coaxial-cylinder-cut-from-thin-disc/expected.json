@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#500"
+ ],
+ "what": "a radius 20 cylinder cut out of a coaxial radius 40 disc spanning x -1..1 lost about 2.6% of the volume",
+ "source": "analytic",
+ "method": "disc r40 thickness 2 minus the through bore r20: V = pi (40^2 - 20^2) * 2 = 2400 pi = 7539.822; faces: two annular ends, outer and inner cylinder = 4",
+ "body_count": 1,
+ "volume_mm3": 7539.822368615503,
+ "faces": 4
+}

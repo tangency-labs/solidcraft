@@ -1,0 +1,60 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 5,
+    "body_name": "Coin"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 5,
+    "name": "Rim"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 14
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 10
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Rim",
+    "profiles": [
+     {
+      "point": [
+       12,
+       0
+      ]
+     }
+    ],
+    "distance": 3,
+    "operation": "join"
+   }
+  }
+ ]
+}
