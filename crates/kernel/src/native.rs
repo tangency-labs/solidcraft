@@ -82,6 +82,26 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
     })
 }
 
+/// The schema 4 record of a solid body, in canonical order with its pcurves: what another
+/// backend (SMLib) builds the body from. Mesh bodies have none.
+pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
+    guard("B-rep record", || {
+        if body.mesh.is_some() {
+            return Err(invalid("mesh bodies are source blobs, not B-rep"));
+        }
+        adapter::encode(body)
+    })
+}
+
+/// The body in SMLib, built from its schema 4 record. The record is trusted (SMLib's healer is
+/// skipped): the kernel's records keep SMLib's rules, and healing moved a cylinder's volume by
+/// 9e-7 where the record as given is exact to 1e-7.
+#[cfg(feature = "smlib")]
+pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
+    let record = brep_record(body)?;
+    solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
+}
+
 /// Decode bounded untrusted data. Validate indices before topology extraction.
 /// Only a caller that has checked who produced the data may treat it as evaluated geometry.
 pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
@@ -194,6 +214,9 @@ fn value_nodes(v: &Value) -> usize {
         _ => 1,
     }
 }
+#[cfg(all(test, feature = "smlib"))]
+mod smlib_import_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

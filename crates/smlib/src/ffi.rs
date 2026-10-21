@@ -7,7 +7,7 @@
 use std::ffi::{c_char, c_void};
 
 /// `SMLIB_ABI_VERSION` this crate was written against.
-pub const ABI_VERSION: i32 = 1;
+pub const ABI_VERSION: i32 = 2;
 
 pub const OK: i32 = 0;
 pub const ERR_EXCEPTION: i32 = -1000;
@@ -180,6 +180,7 @@ mod calls {
 pub use calls::*;
 
 pub mod check;
+pub mod flat;
 pub mod history;
 pub mod measure;
 
