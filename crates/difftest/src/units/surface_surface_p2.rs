@@ -22,7 +22,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::curve::Curve as SmCurve;
+use solidcore::curve::curve::{Curve as SmCurve, CurveKind};
 use solidcore::curve::line::{BoundedLineOptions, Line};
 use solidcore::geom::a_object;
 use solidcore::geom::assert_array::{AssertArray, ObjectKey};
@@ -222,6 +222,12 @@ enum OpIn {
         dom: [f64; 4],
         other: BssIn,
         other_dom: [f64; 4],
+        /// `pOptApproxTol3d` (`None`: upstream's default).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tol: Option<f64>,
+        /// Translates both surfaces first (`prog_test` `my_test_one_ssi`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        translate: Option<[f64; 3]>,
     },
     Lift2 {
         v: Vec<[f64; 3]>,
@@ -770,10 +776,15 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             dom,
             other,
             other_dom,
+            tol,
+            translate,
         } => {
             o.extend_from_slice(dom);
             push_bss(&mut o, other)?;
             o.extend_from_slice(other_dom);
+            o.extend([flag(tol.is_some()), tol.unwrap_or(0.0)]);
+            o.push(flag(translate.is_some()));
+            o.extend_from_slice(&translate.unwrap_or([0.0; 3]));
         }
         OpIn::Lift2 { v } | OpIn::Lift3 { v } | OpIn::Geom { e: v } => {
             for x in v {
@@ -1187,6 +1198,44 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
     }
 }
 
+/// `GlobalSurfaceIntersect`'s outputs: `n`, `same` (the arrays agree in length) and per
+/// curve the 3D curve and the two UV curves (each its type code, `0` for none, then
+/// [`dump_curve`] for a B-spline), the curve type and the deviation.
+fn put_intersection(o: &mut Vec<f64>, r: &sp2::SurfaceIntersection) {
+    let n = r.curves_3d.len();
+    o.push(n as f64);
+    let same = r.surface1_uv_curves.len() == n
+        && r.surface2_uv_curves.len() == n
+        && r.curve_types.len() == n
+        && r.deviations.len() == n;
+    o.push(flag(same));
+    if !same {
+        return;
+    }
+    let put = |o: &mut Vec<f64>, c: Option<&SmCurve>| match c {
+        None => o.push(0.0),
+        Some(c) => {
+            o.push(c.type_code() as f64);
+            if let CurveKind::BSpline(b) = c.kind() {
+                dump_curve(o, b);
+            }
+        }
+    };
+    for (((c3, (u1, u2)), t), d) in r
+        .curves_3d
+        .iter()
+        .zip(r.surface1_uv_curves.iter().zip(&r.surface2_uv_curves))
+        .zip(&r.curve_types)
+        .zip(&r.deviations)
+    {
+        put(o, Some(c3));
+        put(o, u1.as_ref());
+        put(o, u2.as_ref());
+        o.push(f64::from(*t as i32));
+        o.push(*d);
+    }
+}
+
 fn dump_curve(o: &mut Vec<f64>, c: &BSplineCurve) {
     o.push(c.dim() as f64);
     o.push(flag(c.gw_nurb().is_some()));
@@ -1537,20 +1586,30 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
             dom,
             other,
             other_dom,
+            tol,
+            translate,
         } => {
-            let other = Surface::from(bss_of(other)?);
+            let mut other = Surface::from(bss_of(other)?);
+            let mut this = s.clone();
             record(|o| {
-                let x = s.as_ref().ok_or_else(base_err)?;
+                let k = Kernel::default();
+                let x = this.as_mut().ok_or_else(base_err)?;
+                if let Some(t) = translate {
+                    let mut ax = Axis2Placement::default();
+                    ax.translate(v3(*t));
+                    x.transform(&k, &ax, None)?;
+                    other.transform(&k, &ax, None)?;
+                }
                 let r = x.global_surface_intersect(
-                    &Kernel::default(),
+                    &k,
                     &dom_of(*dom),
                     &other,
                     &dom_of(*other_dom),
                     [true, true],
-                    None,
+                    *tol,
                     None,
                 )?;
-                o.push(r.curves_3d.len() as f64);
+                put_intersection(o, &r);
                 Ok(())
             })
         }

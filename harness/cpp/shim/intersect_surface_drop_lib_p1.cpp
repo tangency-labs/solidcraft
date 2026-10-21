@@ -66,6 +66,7 @@
 #include <nurbs.h>
 
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #define SmDropPt sc_sdl1_SmDropPt
@@ -162,11 +163,31 @@ struct Owned
     }
 };
 
-// `0 a[3] b[3]` SmLine (its NURB made), `1 c[3] x[3] y[3] d0 d1 r` SmCircle, or
-// `2 p ncp cpts(x y z w) knots` SmBSplineCurve (dim 3).
+// `nbytes bytes`: a file path.
+std::string read_path(Rd& rd)
+{
+    int64_t n = rd.idx(1, 4096);
+    std::string p;
+    for (int64_t i = 0; i < n; i++)
+        p.push_back((char)rd.idx(1, 255));
+    return p;
+}
+
+// `0 a[3] b[3]` SmLine (its NURB made), `1 c[3] x[3] y[3] d0 d1 r` SmCircle,
+// `2 p ncp cpts(x y z w) knots` SmBSplineCurve (dim 3), or `3 path` SmBSplineCurve::ReadFromFile.
 SmCurve* read_curve(Rd& rd, const SmContext& ctx, Owned& own)
 {
-    int64_t kind = rd.idx(0, 2);
+    int64_t kind = rd.idx(0, 3);
+    if (kind == 3)
+    {
+        std::string path = read_path(rd);
+        SmBSplineCurve* c = NULL;
+        SmBSplineCurve::ReadFromFile(ctx, path.c_str(), c);
+        if (c == NULL)
+            throw Bad();
+        own.curves.push_back(c);
+        return c;
+    }
     if (kind == 0)
     {
         SmPoint3d a = rd.vec();
@@ -212,13 +233,23 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx, Owned& own)
     return c;
 }
 
-// `0 o x y scale dom` SmPlane, `1 p q nu nv net(x y z w) u v` SmBSplineSurface, or
+// `0 o x y scale dom` SmPlane, `1 p q nu nv net(x y z w) u v` SmBSplineSurface,
 // `2 gen point[3] axis[3] swap` SmSurfOfRevolution::CreateCanonical with the generator a
-// line `0 a b` or a circle `1 c x y d0 d1 r` (see read_curve). NULL when CreateCanonical
-// fails.
+// line `0 a b` or a circle `1 c x y d0 d1 r` (see read_curve), or `3 path`
+// SmBSplineSurface::ReadFromFile. NULL when CreateCanonical fails.
 SmSurface* read_surface(Rd& rd, const SmContext& ctx, Owned& own)
 {
-    int64_t kind = rd.idx(0, 2);
+    int64_t kind = rd.idx(0, 3);
+    if (kind == 3)
+    {
+        std::string path = read_path(rd);
+        SmBSplineSurface* s = NULL;
+        SmBSplineSurface::ReadFromFile(ctx, path.c_str(), s);
+        if (s == NULL)
+            throw Bad();
+        own.surfaces.push_back(s);
+        return s;
+    }
     if (kind == 0)
     {
         SmPoint3d o = rd.vec();
@@ -751,9 +782,11 @@ void run(Rd& rd, std::vector<double>& o)
     {
         SmSurface* s = read_surface(rd, ctx, own);
         SmCurve* c = read_curve(rd, ctx, own);
-        SmExtent2d d = rd.dom4();
-        double i0 = rd.num();
-        double i1 = rd.num();
+        bool has_dom = rd.idx(0, 1) != 0;
+        SmExtent2d d = has_dom ? rd.dom4() : SmExtent2d();
+        bool has_ivl = rd.idx(0, 1) != 0;
+        double i0 = has_ivl ? rd.num() : 0.0;
+        double i1 = has_ivl ? rd.num() : 0.0;
         double tol = rd.num();
         SmBoolean keep = (SmBoolean)rd.idx(0, 1);
         SmBoolean on = (SmBoolean)rd.idx(0, 1);
@@ -762,9 +795,12 @@ void run(Rd& rd, std::vector<double>& o)
             o.push_back(NO_SURFACE);
             return;
         }
+        if (!has_dom)
+            d = s->GetNaturalUVDomain();
+        SmExtent1d ivl = has_ivl ? SmExtent1d(i0, i1) : c->GetNaturalInterval();
         double md = -1.0, mv = -1.0;
         SmTArray<SmBSplineCurve*> uvs;
-        SmStatus stt = s->sc_sdl1_DropAndTrimCurve(ctx, d, *c, SmExtent1d(i0, i1), tol, md, mv, uvs, keep, on, NULL);
+        SmStatus stt = s->sc_sdl1_DropAndTrimCurve(ctx, d, *c, ivl, tol, md, mv, uvs, keep, on, NULL);
         o.push_back(st(stt));
         if (stt == SM_SUCCESS)
         {

@@ -15,6 +15,10 @@
 //! as the `out` values. Solution objects are `0` (this curve), `1` (the other curve), `2`
 //! (an analytic replacement made by a curve cache).
 //!
+//! `{"o", "x", "y", "scale"?, "repeat"?}` transforms (`gci` `xf1`, `xf2`) are applied on both sides
+//! (`SmAxis2Placement::SetCanonical` + `SmCurve::Transform` / `Curve::transform`) before
+//! the op; a circle with `quintic` is `SM_CO_QUINTIC`.
+//!
 //! Deferred cases (unit `curve.curve_p5`): the Newton curve/curve intersections of the
 //! leaf pair solves and of `sm_RefineCCSolutions` (`SmCCIntersectENFO::Evaluate`), the
 //! gap refinement and closed-curve recombination of the coincidence check, and the
@@ -83,6 +87,26 @@ struct CircleIn {
     radius: f64,
     a0: f64,
     a1: f64,
+    /// `SM_CO_QUINTIC` (degree 5) instead of `SM_CO_QUADRATIC`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    quintic: bool,
+}
+
+/// A transform applied to a curve before the op, `repeat` times
+/// (`SmAxis2Placement::SetCanonical(o, x, y)`, then `SmCurve::Transform` with `scale`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct XformIn {
+    o: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<[f64; 3]>,
+    #[serde(default = "one_u64")]
+    repeat: u64,
+}
+
+fn one_u64() -> u64 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +147,11 @@ fn resolve(c: &CurveIn) -> Result<CurveIn, HarnessError> {
         ci.radius,
         ci.a0,
         ci.a1,
-        solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
+        if ci.quintic {
+            solidcore::nurbs::b_spline_curve::NurbCircleParam::Quintic
+        } else {
+            solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic
+        },
     )
     .map_err(|e| harness(format!("circle: {e}")))?;
     let cur = arc.gw_nurb().ok_or_else(|| harness("circle without NURB"))?;
@@ -173,6 +201,21 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) -> Result<(), HarnessError> {
     Ok(())
 }
 
+
+/// The transforms block `nt (O X Y has_s S)*nt` (see the ffi module docs).
+fn push_xf(v: &mut Vec<f64>, xf: &[XformIn]) {
+    v.push(xf.iter().map(|t| t.repeat).sum::<u64>() as f64);
+    for t in xf {
+        for _ in 0..t.repeat {
+            v.extend_from_slice(&t.o);
+            v.extend_from_slice(&t.x);
+            v.extend_from_slice(&t.y);
+            v.push(b(t.scale.is_some()));
+            v.extend_from_slice(&t.scale.unwrap_or([1.0; 3]));
+        }
+    }
+}
+
 fn to_output(flat: &[f64]) -> Output {
     let status = flat.first().copied().unwrap_or(f64::NAN);
     let rest = flat.get(1..).unwrap_or(&[]).to_vec();
@@ -199,6 +242,18 @@ fn build_line(l: &LineIn) -> Line {
         &Extent1d::from_min_max(l.domain[0], l.domain[1]),
         &opts,
     )
+}
+
+/// `c` transformed by `xf` in order (`Curve::transform`).
+fn apply_xf(k: &Kernel, c: &mut Curve, xf: &[XformIn]) -> Result<(), HarnessError> {
+    for t in xf {
+        let a2p = Axis2Placement::new(v3(t.o), v3(t.x), v3(t.y));
+        for _ in 0..t.repeat {
+            c.transform(k, &a2p, t.scale.map(v3))
+                .map_err(|e| harness(format!("transform: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
@@ -437,6 +492,7 @@ fn gen_circle(rng: &mut Rng) -> CurveIn {
         radius: rng.uniform(0.5, 10.0),
         a0,
         a1: a0 + rng.uniform(20.0, 360.0),
+        quintic: false,
     })
 }
 
@@ -462,6 +518,7 @@ fn gen_closed_curve(rng: &mut Rng) -> CurveIn {
                 radius: rng.uniform(0.5, 10.0),
                 a0,
                 a1: a0 + 360.0,
+                quintic: false,
             });
             resolve(&c).unwrap_or(c)
         }
@@ -637,9 +694,15 @@ fn gen_tol(rng: &mut Rng) -> f64 {
 enum OpIn {
     Gci {
         c1: CurveIn,
+        /// Transforms applied to `c1` first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        xf1: Vec<XformIn>,
         ivl1: [f64; 2],
         /// `None`: the other curve is `c1` itself (a self intersection).
         c2: Option<CurveIn>,
+        /// Transforms applied to `c2` first (none for a self intersection).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        xf2: Vec<XformIn>,
         ivl2: [f64; 2],
         tol: f64,
         #[serde(default)]
@@ -652,17 +715,21 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
     match op {
         OpIn::Gci {
             c1,
+            xf1,
             ivl1,
             c2,
+            xf2,
             ivl2,
             tol,
             skip,
         } => {
             curve_block(&mut v, c1)?;
+            push_xf(&mut v, xf1);
             v.extend_from_slice(ivl1);
             v.push(b(c2.is_none()));
             if let Some(c2) = c2 {
                 curve_block(&mut v, c2)?;
+                push_xf(&mut v, xf2);
             }
             v.extend_from_slice(ivl2);
             v.extend([*tol, b(*skip)]);
@@ -690,15 +757,22 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
     match op {
         OpIn::Gci {
             c1,
+            xf1,
             ivl1,
             c2,
+            xf2,
             ivl2,
             tol,
             skip,
         } => {
-            let a = build(c1)?;
+            let mut a = build(c1)?;
+            apply_xf(&k, &mut a, xf1)?;
             let other = match c2 {
-                Some(c) => Some(build(c)?),
+                Some(c) => {
+                    let mut o = build(c)?;
+                    apply_xf(&k, &mut o, xf2)?;
+                    Some(o)
+                }
                 None => None,
             };
             let bb = other.as_ref().unwrap_or(&a);
@@ -830,8 +904,10 @@ fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
     };
     OpIn::Gci {
         c1,
+        xf1: Vec::new(),
         ivl1,
         c2,
+        xf2: Vec::new(),
         ivl2,
         tol: gen_tol(rng),
         skip: rng.chance(0.15),

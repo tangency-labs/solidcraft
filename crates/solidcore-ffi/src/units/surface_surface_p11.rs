@@ -5,7 +5,10 @@
 //! `[0,1]^2`) or an analytic `SmPlane` (kind 1: origin `net[0]`, x axis `net[1]`, y axis
 //! `net[2]`, unit scales). Every value must be finite; plane axes must be non-zero and
 //! not parallel (`SmAxis2Placement::SetCanonical` fails on them and leaves the axes
-//! undefined); domains must not be inverted. No counts cross the FFI.
+//! undefined); domains must not be inverted. No counts cross the FFI except the
+//! control point count of [`lift_curve`]'s inline UV curve, checked against its arrays.
+use std::ffi::CString;
+
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -30,6 +33,25 @@ mod sys {
             xyz: *const f64,
             domains: *const f64,
             tol: f64,
+            output: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_surface_surface_p11_lift(
+            surf_path: *const std::ffi::c_char,
+            kind: i32,
+            xyz: *const f64,
+            has_domain: i32,
+            domain: *const f64,
+            curve_path: *const std::ffi::c_char,
+            degree: i32,
+            ncp: i64,
+            cpts: *const f64,
+            knots: *const f64,
+            has_interval: i32,
+            interval: *const f64,
+            tol: f64,
+            skip_checks: i32,
             output: *mut f64,
             cap: i64,
             out_len: *mut i64,
@@ -170,6 +192,176 @@ pub fn local_surface_intersect(
                 i32::from(previous_uv.is_some()),
                 previous.as_ptr(),
                 i32::from(boundary_testing),
+                buffer.as_mut_ptr(),
+                buffer.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// The surface of [`lift_curve`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiftSurface {
+    /// `SmBSplineSurface::ReadFromFile(path)` (an upstream test file; its contents are
+    /// trusted, not validated).
+    File(String),
+    /// A patch or plane as for [`local_surface_intersect`] (its `domain` is not used:
+    /// [`lift_curve`] takes the domain separately).
+    Inline(Box<SurfaceInput>),
+}
+
+/// The UV curve of [`lift_curve`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiftUvCurve {
+    /// `SmBSplineCurve::ReadFromFile(path)` (an upstream test file; trusted).
+    File(String),
+    /// A non-rational 2D B-spline: degree, control points `(u, v)` and knots.
+    Inline {
+        /// Degree, `1..=8`.
+        degree: i64,
+        /// Control points, `degree + 1 ..= 64` of them.
+        cpts: Vec<[f64; 2]>,
+        /// `cpts.len() + degree + 1` clamped non-decreasing knots, interior
+        /// multiplicity at most `degree`.
+        knots: Vec<f64>,
+    },
+}
+
+/// Largest magnitude of an inline UV control point or knot.
+pub const MAX_UV: f64 = 1e6;
+
+fn path(p: &str) -> Result<CString, FfiError> {
+    CString::new(p).map_err(|_| FfiError::InvalidArgument("path with NUL".into()))
+}
+
+/// Clamped, non-decreasing, finite knots with interior multiplicity at most `p`.
+fn knots_ok(knots: &[f64], ncp: usize, p: usize) -> bool {
+    let (Some(&k0), Some(&km)) = (knots.first(), knots.last()) else {
+        return false;
+    };
+    if knots.len() != ncp + p + 1
+        || knots.iter().any(|k| !(k.is_finite() && k.abs() <= MAX_UV))
+        || knots.windows(2).any(|w| w.first() > w.last())
+        || km <= k0
+        || knots.iter().take(p + 1).any(|&k| k != k0)
+        || knots.iter().rev().take(p + 1).any(|&k| k != km)
+    {
+        return false;
+    }
+    let mut run = 0usize;
+    let mut last = f64::NAN;
+    for &k in knots.iter().filter(|&&k| k != k0 && k != km) {
+        run = if k == last { run + 1 } else { 1 };
+        last = k;
+        if run > p {
+            return false;
+        }
+    }
+    true
+}
+
+/// `surface.LiftCurve(ctx, domain, uv_curve, interval, tol, max_dist, curve,
+/// skip_checks)` (`domain` / `interval` default to the natural ones): `[status,
+/// max_dist, type, dim, degree, ncp, cpts (x y z w), nknots, knots, mults, interval
+/// min, max]` (only the status when `LiftCurve` fails).
+///
+/// # Errors
+/// Rejected before C++: an invalid inline surface (as [`local_surface_intersect`]), an
+/// inline UV curve outside the limits of [`LiftUvCurve::Inline`] or with control points
+/// that are not finite or larger than [`MAX_UV`], an inverted or non-finite domain, an
+/// interval that is inverted, not finite or (for an inline curve) not inside the
+/// curve's knot range, a tolerance that is not finite and positive (`SmApproxTol3d`
+/// treats other values as its default). Shim failures (a file that does not read)
+/// return `FfiError::Status`.
+#[allow(clippy::too_many_arguments)]
+pub fn lift_curve(
+    surface: &LiftSurface,
+    domain: Option<[f64; 4]>,
+    uv_curve: &LiftUvCurve,
+    interval: Option<[f64; 2]>,
+    tol: f64,
+    skip_continuity_checks: bool,
+) -> Result<Vec<f64>, FfiError> {
+    let invalid = || FfiError::InvalidArgument("unsafe surface p11 lift input".into());
+    let (surf_path, kind, xyz) = match surface {
+        LiftSurface::File(p) => (Some(path(p)?), 0, vec![0.0; 27]),
+        LiftSurface::Inline(s) => {
+            check_surface(&SurfaceInput {
+                domain: [0.0, 0.0, 1.0, 1.0],
+                ..**s
+            })?;
+            (None, s.kind, s.net.iter().flatten().copied().collect())
+        }
+    };
+    if let Some(d) = domain {
+        if d.iter().any(|v| !v.is_finite()) || d[0] > d[2] || d[1] > d[3] {
+            return Err(invalid());
+        }
+    }
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid());
+    }
+    let (curve_path, degree, cpts, knots) = match uv_curve {
+        LiftUvCurve::File(p) => (Some(path(p)?), 0, Vec::new(), Vec::new()),
+        LiftUvCurve::Inline {
+            degree,
+            cpts,
+            knots,
+        } => {
+            let p = usize::try_from(*degree).map_err(|_| invalid())?;
+            if !(1..=8).contains(&p)
+                || !(p + 1..=64).contains(&cpts.len())
+                || cpts
+                    .iter()
+                    .flatten()
+                    .any(|v| !(v.is_finite() && v.abs() <= MAX_UV))
+                || !knots_ok(knots, cpts.len(), p)
+            {
+                return Err(invalid());
+            }
+            if let Some(i) = interval {
+                let (k0, km) = (
+                    knots.first().copied().unwrap_or(f64::NAN),
+                    knots.last().copied().unwrap_or(f64::NAN),
+                );
+                if !(k0 <= i[0] && i[1] <= km) {
+                    return Err(invalid());
+                }
+            }
+            (None, p as i32, cpts.iter().flatten().copied().collect(), knots.clone())
+        }
+    };
+    if let Some(i) = interval {
+        if i.iter().any(|v| !v.is_finite()) || i[0] > i[1] {
+            return Err(invalid());
+        }
+    }
+    let dom = domain.unwrap_or([0.0; 4]);
+    let ivl = interval.unwrap_or([0.0; 2]);
+    let ncp = (cpts.len() / 2) as i64;
+    let null = std::ptr::null::<std::ffi::c_char>();
+    call_with_buffer(1024, |buffer, len| {
+        // SAFETY: paths are NUL-terminated C strings or NULL; `xyz` holds 27 values,
+        // `dom` 4, `ivl` 2; an inline curve's `cpts` holds `2 * ncp` and `knots`
+        // `ncp + degree + 1` values (checked above); the shim copies output only within
+        // the buffer capacity.
+        unsafe {
+            sys::sc_surface_surface_p11_lift(
+                surf_path.as_ref().map_or(null, |p| p.as_ptr()),
+                kind,
+                xyz.as_ptr(),
+                i32::from(domain.is_some()),
+                dom.as_ptr(),
+                curve_path.as_ref().map_or(null, |p| p.as_ptr()),
+                degree,
+                ncp,
+                cpts.as_ptr(),
+                knots.as_ptr(),
+                i32::from(interval.is_some()),
+                ivl.as_ptr(),
+                tol,
+                i32::from(skip_continuity_checks),
                 buffer.as_mut_ptr(),
                 buffer.len() as i64,
                 &raw mut *len,

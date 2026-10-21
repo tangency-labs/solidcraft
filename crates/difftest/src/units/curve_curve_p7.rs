@@ -16,6 +16,10 @@
 //! Rust error upstream cannot produce) and the rest as the `out` values. Solution nodes
 //! are compared as pre-order indices in their trees.
 //!
+//! `{"o", "x", "y", "scale"?, "repeat"?}` transforms (`property` `xf`) are applied on both sides
+//! (`SmAxis2Placement::SetCanonical` + `SmCurve::Transform` / `Curve::transform`) before
+//! the op; a circle with `quintic` is `SM_CO_QUINTIC`.
+//!
 //! Deferred cases (unit `curve.curve_p5`): the leaf pairs that reach a Newton
 //! intersection (`LocalCurveIntersect`, through `SmCCIntersectENFO::Evaluate`) and the
 //! property solves that reach `SmCurve::LocalPropertyAnalysis` (every span the property
@@ -91,6 +95,26 @@ struct CircleIn {
     radius: f64,
     a0: f64,
     a1: f64,
+    /// `SM_CO_QUINTIC` (degree 5) instead of `SM_CO_QUADRATIC`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    quintic: bool,
+}
+
+/// A transform applied to a curve before the op, `repeat` times
+/// (`SmAxis2Placement::SetCanonical(o, x, y)`, then `SmCurve::Transform` with `scale`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct XformIn {
+    o: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<[f64; 3]>,
+    #[serde(default = "one_u64")]
+    repeat: u64,
+}
+
+fn one_u64() -> u64 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +186,9 @@ enum OpIn {
     },
     Property {
         curve: CurveIn,
+        /// Transforms applied to `curve` first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        xf: Vec<XformIn>,
         ivl: [f64; 2],
         prop: i32,
         val: f64,
@@ -185,7 +212,11 @@ fn resolve(c: &CurveIn) -> Result<CurveIn, HarnessError> {
         ci.radius,
         ci.a0,
         ci.a1,
-        solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
+        if ci.quintic {
+            solidcore::nurbs::b_spline_curve::NurbCircleParam::Quintic
+        } else {
+            solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic
+        },
     )
     .map_err(|e| harness(format!("circle: {e}")))?;
     let cur = arc.gw_nurb().ok_or_else(|| harness("circle without NURB"))?;
@@ -270,6 +301,7 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
         }
         OpIn::Property {
             curve,
+            xf,
             ivl,
             prop,
             val,
@@ -278,6 +310,7 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
             comb,
         } => {
             curve_block(&mut v, curve)?;
+            push_xf(&mut v, xf);
             v.extend_from_slice(ivl);
             v.extend([f64::from(*prop), 1.0, *val]);
             push_vecs(&mut v, vecs);
@@ -286,6 +319,20 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
         }
     };
     Ok((code, v))
+}
+
+/// The transforms block `nt (O X Y has_s S)*nt` (see the ffi module docs).
+fn push_xf(v: &mut Vec<f64>, xf: &[XformIn]) {
+    v.push(xf.iter().map(|t| t.repeat).sum::<u64>() as f64);
+    for t in xf {
+        for _ in 0..t.repeat {
+            v.extend_from_slice(&t.o);
+            v.extend_from_slice(&t.x);
+            v.extend_from_slice(&t.y);
+            v.push(b(t.scale.is_some()));
+            v.extend_from_slice(&t.scale.unwrap_or([1.0; 3]));
+        }
+    }
 }
 
 fn to_output(flat: &[f64]) -> Output {
@@ -308,6 +355,18 @@ fn cpp(op: &OpIn) -> Result<Output, HarnessError> {
 
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::from_array(p)
+}
+
+/// `c` transformed by `xf` in order (`Curve::transform`).
+fn apply_xf(k: &Kernel, c: &mut Curve, xf: &[XformIn]) -> Result<(), HarnessError> {
+    for t in xf {
+        let a2p = Axis2Placement::new(v3(t.o), v3(t.x), v3(t.y));
+        for _ in 0..t.repeat {
+            c.transform(k, &a2p, t.scale.map(v3))
+                .map_err(|e| harness(format!("transform: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
@@ -615,6 +674,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         OpIn::CciLocal { cci, leaf1, leaf2 } => rust_cci(cci, Some((*leaf1, *leaf2))),
         OpIn::Property {
             curve,
+            xf,
             ivl,
             prop,
             val,
@@ -623,7 +683,8 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             comb,
         } => {
             let k = Kernel::default();
-            let c = build(curve)?;
+            let mut c = build(curve)?;
+            apply_xf(&k, &mut c, xf)?;
             let prop = CurvePropertyType::from_code(*prop).ok_or_else(|| harness("property"))?;
             let vs: Vec<Vec3> = vecs.iter().map(|&x| v3(x)).collect();
             let opts = PropertyAnalysisOptions {
@@ -779,6 +840,7 @@ fn gen_circle(rng: &mut Rng, closed: bool) -> CurveIn {
         } else {
             a0 + rng.uniform(30.0, 330.0)
         },
+        quintic: false,
     });
     resolve(&c).unwrap_or(c)
 }
@@ -1068,6 +1130,7 @@ fn gen_property(k: &Kernel, rng: &mut Rng) -> OpIn {
     OpIn::Property {
         ivl: gen_ivl(rng, &curve),
         curve,
+        xf: Vec::new(),
         prop,
         val,
         vecs,

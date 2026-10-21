@@ -15,6 +15,10 @@
 //! `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust
 //! error upstream cannot produce) and the rest as the `out` values.
 //!
+//! `{"o", "x", "y", "scale"?, "repeat"?}` transforms (`gps` `xf`) are applied on both sides
+//! (`SmAxis2Placement::SetCanonical` + `SmCurve::Transform` / `Curve::transform`) before
+//! the op; `gps` `pts` are more points, each its own solve (`status_i` / `out_i`).
+//!
 //! Deferred cases (unit `curve.curve_p5`): `GlobalPointSolve` of the directed and
 //! projected operations (`SmCurve::LocalPropertyAnalysis`) and of minimise / intersect
 //! on curved B-splines (the cache's analytic conversion reaches `SmCurve::IsArc`), and
@@ -106,6 +110,23 @@ fn one() -> f64 {
     1.0
 }
 
+/// A transform applied to the curve before the op, `repeat` times
+/// (`SmAxis2Placement::SetCanonical(o, x, y)`, then `SmCurve::Transform` with `scale`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct XformIn {
+    o: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<[f64; 3]>,
+    #[serde(default = "one_u64")]
+    repeat: u64,
+}
+
+fn one_u64() -> u64 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum CurveIn {
@@ -186,6 +207,20 @@ fn push_vecs(v: &mut Vec<f64>, vecs: &[[f64; 3]]) {
     }
 }
 
+/// The transforms block `nt (O X Y has_s S)*nt` (see the ffi module docs).
+fn push_xf(v: &mut Vec<f64>, xf: &[XformIn]) {
+    v.push(xf.iter().map(|t| t.repeat).sum::<u64>() as f64);
+    for t in xf {
+        for _ in 0..t.repeat {
+            v.extend_from_slice(&t.o);
+            v.extend_from_slice(&t.x);
+            v.extend_from_slice(&t.y);
+            v.push(b(t.scale.is_some()));
+            v.extend_from_slice(&t.scale.unwrap_or([1.0; 3]));
+        }
+    }
+}
+
 fn push_opt(v: &mut Vec<f64>, x: Option<f64>) {
     v.extend([b(x.is_some()), x.unwrap_or(0.0)]);
 }
@@ -250,6 +285,18 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
         CurveIn::Line(l) => Ok(Curve::from(build_line(l))),
         CurveIn::Circle(_) => Err(harness("unresolved circle")),
     }
+}
+
+/// `c` transformed by `xf` in order (`Curve::transform`).
+fn apply_xf(k: &Kernel, c: &mut Curve, xf: &[XformIn]) -> Result<(), HarnessError> {
+    for t in xf {
+        let a2p = Axis2Placement::new(v3(t.o), v3(t.x), v3(t.y));
+        for _ in 0..t.repeat {
+            c.transform(k, &a2p, t.scale.map(v3))
+                .map_err(|e| harness(format!("transform: {e}")))?;
+        }
+    }
+    Ok(())
 }
 
 fn pv(o: &mut Vec<f64>, v: Vec3) {
@@ -365,9 +412,15 @@ fn objs() -> [u64; 2] {
 enum OpIn {
     Gps {
         curve: CurveIn,
+        /// Transforms applied to `curve` first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        xf: Vec<XformIn>,
         ivl: [f64; 2],
         sop: i32,
         p: [f64; 3],
+        /// More points, each solved like `p` (as its own solve; outputs `*_i`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pts: Vec<[f64; 3]>,
         tol: f64,
         target: Option<f64>,
         vecs: Vec<[f64; 3]>,
@@ -449,6 +502,7 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
     match op {
         OpIn::Gps {
             curve,
+            xf,
             ivl,
             sop,
             p,
@@ -456,8 +510,10 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
             target,
             vecs,
             req,
+            ..
         } => {
             curve_block(&mut v, curve)?;
+            push_xf(&mut v, xf);
             v.extend([ivl[0], ivl[1], f64::from(*sop)]);
             v.extend_from_slice(p);
             v.push(*tol);
@@ -537,7 +593,44 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
     Ok((op_of(op), v))
 }
 
+/// A `Gps` with extra points `pts`: one solve per point (`p` first) by `f`, point `i > 0`
+/// reported as `status_i` / `out_i`; deferred when any solve is. `None` for other cases.
+fn per_point(
+    op: &OpIn,
+    f: impl Fn(&OpIn) -> Result<Output, HarnessError>,
+) -> Result<Option<Output>, HarnessError> {
+    let OpIn::Gps { p, pts, .. } = op else {
+        return Ok(None);
+    };
+    if pts.is_empty() {
+        return Ok(None);
+    }
+    let mut all = Output::new();
+    for (i, q) in std::iter::once(p).chain(pts).enumerate() {
+        let mut one = op.clone();
+        if let OpIn::Gps { p, pts, .. } = &mut one {
+            *p = *q;
+            pts.clear();
+        }
+        let o = f(&one)?;
+        if o.deferred.is_some() {
+            return Ok(Some(o));
+        }
+        let sfx = if i == 0 { String::new() } else { format!("_{i}") };
+        for (key, v) in o.ints {
+            all.ints.insert(format!("{key}{sfx}"), v);
+        }
+        for (key, v) in o.values {
+            all.values.insert(format!("{key}{sfx}"), v);
+        }
+    }
+    Ok(Some(all))
+}
+
 fn cpp(op: &OpIn) -> Result<Output, HarnessError> {
+    if let Some(o) = per_point(op, cpp)? {
+        return Ok(o);
+    }
     let (code, input) = cpp_input(op)?;
     match ffi::eval(code, &input) {
         Ok(flat) => Ok(to_output(&flat)),
@@ -636,11 +729,15 @@ fn solution_of(s: &SolIn) -> Solution<Obj> {
 }
 
 fn rust(op: &OpIn) -> Result<Output, HarnessError> {
+    if let Some(o) = per_point(op, rust)? {
+        return Ok(o);
+    }
     let k = Kernel::default();
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::Gps {
             curve,
+            xf,
             ivl,
             sop,
             p,
@@ -648,8 +745,10 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             target,
             vecs,
             req,
+            ..
         } => {
-            let c = build(curve)?;
+            let mut c = build(curve)?;
+            apply_xf(&k, &mut c, xf)?;
             let vs: Vec<Vec3> = vecs.iter().map(|x| v3(*x)).collect();
             let opts = GlobalPointSolveOptions {
                 target_distance: *target,
@@ -1140,9 +1239,11 @@ fn gen_gps(k: &Kernel, rng: &mut Rng) -> OpIn {
         .collect();
     OpIn::Gps {
         curve,
+        xf: Vec::new(),
         ivl,
         sop,
         p,
+        pts: Vec::new(),
         tol: *rng.choose(&[1e-5, 1e-6, 1e-3, 0.05]).unwrap_or(&1e-5),
         target,
         vecs,

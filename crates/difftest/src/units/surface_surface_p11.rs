@@ -4,23 +4,40 @@
 //! plane normal, a previous point and boundary testing. Cases whose C++ path reaches
 //! `sm_IntersectSrfBndryCrv` (`surface.surface_p8`) or `LocalSurfaceSolve`
 //! (`surface.surface_p3`) are deferred.
+//!
+//! Op 2 is `SmSurface::LiftCurve` (`SmSurface.cpp:24054`): a UV curve (an upstream
+//! `.dat` file read as `SmBSplineCurve::ReadFromFile` does, or an inline 2D B-spline)
+//! lifted onto a surface (a file read as `SmBSplineSurface::ReadFromFile` does, or a
+//! patch / plane as above) over its natural or a given domain and interval; the
+//! status, `rdMaxDistToSurf` and the whole lifted curve are compared.
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
+use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
-use solidcore::nurbs::math::{CPoint, NOW};
+use solidcore::nurbs::crv_basic::Curve as NlCurve;
+use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p11::LocalSurfaceIntersectOptions;
+use solidcore::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
 use solidcore::surface::surface::Surface;
+use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surface_p11 as ffi;
 
 /// Differential runner for `LocalSurfaceIntersect`.
 pub struct Runner;
+
+/// Generated `LiftCurve` cases per run, whatever `--seeds` says (it can only raise
+/// this).
+pub const LIFT_CASES: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SurfaceIn {
@@ -45,6 +62,56 @@ struct Inputs {
     previous_uv: Option<[f64; 2]>,
     #[serde(default)]
     boundary_testing: bool,
+}
+
+/// Just the op of a case.
+#[derive(Debug, Deserialize)]
+struct OpOnly {
+    #[serde(default)]
+    op: i32,
+}
+
+/// The surface of a `LiftCurve` case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum LiftSurfaceIn {
+    /// An upstream `.dat` B-spline surface file (`SmBSplineSurface::ReadFromFile`); the
+    /// domain is its natural one unless given.
+    File {
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        domain: Option<[f64; 4]>,
+    },
+    /// A patch or plane; its `domain` is the `LiftCurve` domain.
+    Inline(SurfaceIn),
+}
+
+/// The UV curve of a `LiftCurve` case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum LiftCurveIn {
+    /// An upstream `.dat` B-spline curve file (`SmBSplineCurve::ReadFromFile`).
+    File { file: String },
+    /// A non-rational 2D B-spline.
+    Inline {
+        degree: i64,
+        cpts: Vec<[f64; 2]>,
+        knots: Vec<f64>,
+    },
+}
+
+/// Op 2: `surface.LiftCurve(ctx, domain, curve, interval, tol, max_dist, lifted,
+/// skip_continuity_checks)`; the interval is the curve's natural one unless given.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LiftInputs {
+    op: i32,
+    surface: LiftSurfaceIn,
+    curve: LiftCurveIn,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    interval: Option<[f64; 2]>,
+    tol: f64,
+    #[serde(default)]
+    skip_continuity_checks: bool,
 }
 
 fn harness(e: impl std::fmt::Display) -> HarnessError {
@@ -150,6 +217,150 @@ fn run_rust_isb(i: &Inputs) -> Result<Output, HarnessError> {
     })
 }
 
+/// The ASCII database stream `SmCurve::ReadFromFile` / `SmSurface::ReadFromFile` read
+/// `path` from, for a file without an `Object` header (database version 30): a leading
+/// line feed is skipped, and a first line starting with `header` (`C` / `S`) too.
+fn read_file_db(path: &str, header: u8) -> Result<DatabaseReader, HarnessError> {
+    let bytes = std::fs::read(path).map_err(|e| harness(format!("{path}: {e}")))?;
+    let mut rest: &[u8] = &bytes;
+    if let Some((b'\n', tail)) = rest.split_first() {
+        rest = tail;
+    }
+    match rest.first() {
+        Some(b'O') => return Err(harness(format!("{path}: versioned file not supported"))),
+        Some(&c) if c == header => {
+            let at = rest.iter().position(|&b| b == b'\n').map_or(rest.len(), |p| p + 1);
+            rest = rest.get(at..).unwrap_or(&[]);
+        }
+        _ => {}
+    }
+    let mut db = DatabaseReader::new();
+    db.open_for_read(rest.to_vec(), FileType::Ascii);
+    Ok(db)
+}
+
+/// The `SmBSplineCurve` part of a lifted curve, with its NURB.
+fn bspline_part(c: &Curve) -> Result<std::borrow::Cow<'_, BSplineCurve>, HarnessError> {
+    use std::borrow::Cow;
+    match c.kind() {
+        CurveKind::BSpline(b) => Ok(Cow::Borrowed(b)),
+        CurveKind::Line(l) => l.base_with_nurb().map_err(harness),
+        CurveKind::Ellipse(e) => Ok(Cow::Borrowed(e.base())),
+        CurveKind::Hyperbola(h) => Ok(Cow::Borrowed(h.base())),
+        CurveKind::Parabola(p) => Ok(Cow::Borrowed(p.base())),
+        _ => Err(harness("lifted curve is not an SmBSplineCurve")),
+    }
+}
+
+/// `[status, max_dist, type, dim, degree, ncp, cpts (x y z w), nknots, knots, mults,
+/// interval min, max]` as an output.
+fn lift_output(flat: &[f64]) -> Output {
+    match flat {
+        [status, ..] if *status != 0.0 => Output::err("LiftCurve failed"),
+        [_, max_dist, ty, dim, rest @ ..] => Output::new()
+            .scalar("max_dist", *max_dist)
+            .int("type", *ty as i64)
+            .int("dim", *dim as i64)
+            .values("curve", rest.to_vec()),
+        _ => Output::err("short output"),
+    }
+}
+
+fn lift_flat(c: &Curve, max_dist: f64) -> solidcore::Result<Vec<f64>> {
+    let b = bspline_part(c).map_err(|_| solidcore::SolidError::sm_err("difftest::lift"))?;
+    let mut o = vec![0.0, max_dist, c.type_code() as f64, c.dim() as f64];
+    o.push(b.degree()? as f64);
+    let cp = b.control_points()?;
+    o.push(cp.len() as f64);
+    for p in cp {
+        o.extend([p.x, p.y, p.z, p.w]);
+    }
+    let (k, m) = c.knots(None)?;
+    o.push(k.len() as f64);
+    o.extend_from_slice(&k);
+    o.extend(m.iter().map(|&x| x as f64));
+    let ivl = c.natural_interval();
+    o.extend([ivl.min(), ivl.max()]);
+    Ok(o)
+}
+
+fn run_rust_lift(i: &LiftInputs) -> Result<Output, HarnessError> {
+    let k = Kernel::default();
+    let (s, dom) = match &i.surface {
+        LiftSurfaceIn::File { file, domain } => {
+            let mut db = read_file_db(file, b'S')?;
+            let s = Surface::read_from_db(&k, B_SPLINE_SURFACE_TYPE, &mut db, 30)
+                .map_err(|e| harness(format!("{file}: {e}")))?;
+            let d = domain.map_or_else(|| s.natural_uv_domain(), domain_of);
+            (s, d)
+        }
+        LiftSurfaceIn::Inline(si) => (surface(si)?, domain(si.domain)),
+    };
+    let c = match &i.curve {
+        LiftCurveIn::File { file } => {
+            let mut db = read_file_db(file, b'C')?;
+            Curve::read_from_db(&k, BSPLINE_CURVE_TYPE, &mut db, 3, 30)
+                .map_err(|e| harness(format!("{file}: {e}")))?
+        }
+        LiftCurveIn::Inline {
+            degree,
+            cpts,
+            knots,
+        } => {
+            let p = usize::try_from(*degree).map_err(harness)?;
+            let pw = cpts.iter().map(|c| CPoint::new(c[0], c[1], NOZ, NOW)).collect();
+            let cur = NlCurve::new(pw, p, knots.clone()).map_err(harness)?;
+            Curve::from(BSplineCurve::from_nurb(cur, 2, false))
+        }
+    };
+    let ivl = i
+        .interval
+        .map_or_else(|| c.natural_interval(), |v| Extent1d::from_min_max(v[0], v[1]));
+    let r = s
+        .lift_curve(&k, &dom, &c, &ivl, i.tol, i.skip_continuity_checks)
+        .and_then(|l| lift_flat(&l.curve, l.max_approx_dev));
+    Ok(match r {
+        Ok(flat) => lift_output(&flat),
+        Err(e) => Output::unported(&e).unwrap_or_else(|| lift_output(&[1.0])),
+    })
+}
+
+fn domain_of(d: [f64; 4]) -> Extent2d {
+    domain(d)
+}
+
+fn run_cpp_lift(i: &LiftInputs) -> Result<Output, HarnessError> {
+    let (surface, dom) = match &i.surface {
+        LiftSurfaceIn::File { file, domain } => (ffi::LiftSurface::File(file.clone()), *domain),
+        LiftSurfaceIn::Inline(s) => (
+            ffi::LiftSurface::Inline(Box::new(ffi_surface(s))),
+            Some(s.domain),
+        ),
+    };
+    let curve = match &i.curve {
+        LiftCurveIn::File { file } => ffi::LiftUvCurve::File(file.clone()),
+        LiftCurveIn::Inline {
+            degree,
+            cpts,
+            knots,
+        } => ffi::LiftUvCurve::Inline {
+            degree: *degree,
+            cpts: cpts.clone(),
+            knots: knots.clone(),
+        },
+    };
+    let flat = ffi::lift_curve(
+        &surface,
+        dom,
+        &curve,
+        i.interval,
+        i.tol,
+        i.skip_continuity_checks,
+    )
+    .map_err(harness)?;
+    Ok(lift_output(&flat))
+}
+
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     if i.op == 1 {
@@ -240,14 +451,29 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(600),
             ..ctx.clone()
         };
-        crate::runner::default_cases(self, &ctx)
+        let mut v = crate::runner::default_cases(self, &main)?;
+        // LiftCurve cases: their own seed stream (`<unit>:lift`), so the other ops'
+        // generated cases are unchanged; named `liftNNNN`.
+        let lift = CaseContext {
+            seeds: ctx.seeds.max(LIFT_CASES),
+            ..ctx.clone()
+        };
+        for mut c in lift.generated_cases("surface.surface_p11:lift", generate_lift) {
+            c.name = c.name.replacen("gen", "lift", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if case.parse::<OpOnly>()?.op == 2 {
+            return run_cpp_lift(&case.parse()?);
+        }
         let i: Inputs = case.parse()?;
         if i.op == 1 {
             let flat =
@@ -269,6 +495,9 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        if case.parse::<OpOnly>()?.op == 2 {
+            return run_rust_lift(&case.parse()?);
+        }
         run_rust(&case.parse()?)
     }
 
@@ -276,6 +505,7 @@ impl UnitDiff for Runner {
         if rng.chance(0.2) {
             return generate_isb(rng);
         }
+
         let tiny = rng.chance(0.1);
         let huge = !tiny && rng.chance(0.1);
         let (lo, hi) = if tiny {
@@ -466,6 +696,110 @@ fn generate_isb(rng: &mut Rng) -> Option<Value> {
         plane_normal: None,
         previous_uv: None,
         boundary_testing: false,
+    })
+    .ok()
+}
+
+/// A `LiftCurve` case: a 2D B-spline UV curve (an iso line, possibly on the domain
+/// boundary, a line segment or a random curve inside the domain) lifted onto a patch
+/// over its natural domain or a sub-domain, over the curve's natural interval or a
+/// sub-interval.
+fn generate_lift(rng: &mut Rng) -> Option<Value> {
+    let scale = match rng.below(10) {
+        0 => rng.uniform(1e-4, 1e-2),
+        1 => rng.uniform(100.0, 1000.0),
+        _ => rng.uniform(0.5, 3.0),
+    };
+    let height = scale * rng.uniform(0.0, 0.6);
+    // patches only: a plane defers on curve.crv_on_surf (SmCrvOnSurf over a non-B-spline
+    // surface, unported) and would keep this green unit partial; the runner and FFI
+    // still take planes (`kind` 1)
+    let (kind, net) = (0, patch(rng, scale, height));
+    let dom = sub_domain(rng);
+    let degree = 1 + rng.below(3) as i64;
+    let ncp = degree as usize + 1 + rng.below(4) as usize;
+    let at = |rng: &mut Rng, lo: f64, hi: f64| lo + (hi - lo) * rng.unit();
+    let cpts: Vec<[f64; 2]> = match rng.below(4) {
+        // an iso line (u or v constant), on the boundary half of the time
+        0 => {
+            let along_v = rng.chance(0.5);
+            let (lo, hi) = if along_v { (dom[0], dom[2]) } else { (dom[1], dom[3]) };
+            let c = if rng.chance(0.5) {
+                if rng.chance(0.5) {
+                    lo
+                } else {
+                    hi
+                }
+            } else {
+                at(rng, lo, hi)
+            };
+            let (a, b) = if along_v { (dom[1], dom[3]) } else { (dom[0], dom[2]) };
+            let (s0, s1) = (at(rng, a, a + 0.3 * (b - a)), at(rng, b - 0.3 * (b - a), b));
+            (0..ncp)
+                .map(|j| {
+                    let t = s0 + (s1 - s0) * j as f64 / (ncp - 1) as f64;
+                    if along_v {
+                        [c, t]
+                    } else {
+                        [t, c]
+                    }
+                })
+                .collect()
+        }
+        // a straight segment
+        1 => {
+            let p0 = [at(rng, dom[0], dom[2]), at(rng, dom[1], dom[3])];
+            let p1 = [at(rng, dom[0], dom[2]), at(rng, dom[1], dom[3])];
+            (0..ncp)
+                .map(|j| {
+                    let t = j as f64 / (ncp - 1) as f64;
+                    [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]
+                })
+                .collect()
+        }
+        // a random curve inside the domain
+        _ => (0..ncp)
+            .map(|_| [at(rng, dom[0], dom[2]), at(rng, dom[1], dom[3])])
+            .collect(),
+    };
+    let (k0, k1) = if rng.chance(0.3) {
+        let a = rng.uniform(-5.0, 5.0);
+        (a, a + rng.uniform(0.1, 10.0))
+    } else {
+        (0.0, 1.0)
+    };
+    let p = degree as usize;
+    let mut inner: Vec<f64> = (0..ncp - p - 1).map(|_| at(rng, k0, k1)).collect();
+    inner.sort_by(f64::total_cmp);
+    let mut knots = vec![k0; p + 1];
+    knots.extend(inner);
+    knots.extend(vec![k1; p + 1]);
+    let interval = rng.chance(0.35).then(|| {
+        let a = at(rng, k0, k0 + 0.4 * (k1 - k0));
+        [a, at(rng, a + 0.1 * (k1 - k0), k1)]
+    });
+    let tol = scale
+        * match rng.below(4) {
+            0 => 1e-2,
+            1 => 1e-4,
+            2 => 1e-6,
+            _ => rng.uniform(1e-5, 1e-1),
+        };
+    serde_json::to_value(LiftInputs {
+        op: 2,
+        surface: LiftSurfaceIn::Inline(SurfaceIn {
+            kind,
+            net,
+            domain: if kind == 1 { [0.0, 0.0, 1.0, 1.0] } else { dom },
+        }),
+        curve: LiftCurveIn::Inline {
+            degree,
+            cpts,
+            knots,
+        },
+        interval,
+        tol,
+        skip_continuity_checks: rng.chance(0.2),
     })
     .ok()
 }

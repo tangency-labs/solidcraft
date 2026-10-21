@@ -32,7 +32,7 @@
 //! | `DropFast`       | `DropPointFast`                  | `D V`                                        |
 //! | `ConvertUv`      | `ConvertUVFromSTEPToNURBS` / `ConvertUVFromNURBSToSTEP` | `u v`                 |
 //! | `SEval`          | `SmSurfaceEval`                  | `ctor u v V k` then `k` x `kind a b c`       |
-//! | `Gssi`           | `GlobalSurfaceIntersect`         | `D` surface (`oob form` + data) `D`          |
+//! | `Gssi`           | `GlobalSurfaceIntersect`         | `D` surface (`oob form` + data) `D` `has_tol tol has_move V` |
 //! | `Lift2`, `Lift3` | `smsurf_Lift*Derivative`         | 7 / 12 `V`                                   |
 //! | `ScaleStep`      | `smsurf_ScaleSTEPAngularDerivatives` | `hu hv u_ang v_ang` `(hu+1)(hv+1)` `V`   |
 //! | `Geom`           | `smsurf_EvaluateGeometric`       | 9 `V` (row major `[i][j]`)                   |
@@ -69,7 +69,7 @@ use crate::validate::{bad, check_knots, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest control point index accepted by [`eval`].
-pub const MAX_INDEX: usize = 64;
+pub const MAX_INDEX: usize = 128;
 /// Largest NURB degree accepted by [`eval`].
 pub const MAX_DEGREE: usize = 9;
 /// Largest coordinate magnitude accepted by [`eval`].
@@ -502,6 +502,13 @@ fn validate_surface_op(op: Op, rd: &mut Reader<'_>, dom: Option<[f64; 4]>) -> Re
             rd.domain()?;
             bspline_block(rd)?;
             rd.domain()?;
+            let has_tol = rd.flag()?;
+            let tol = rd.finite()?;
+            if has_tol && tol <= 0.0 {
+                return Err(bad("intersection tolerance: need a positive value"));
+            }
+            rd.flag()?;
+            rd.vec3()?;
         }
         _ => return Err(bad("not a surface op")),
     }

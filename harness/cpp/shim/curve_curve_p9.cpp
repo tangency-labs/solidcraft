@@ -15,6 +15,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmContext.h>
 #include <SmCurve.h>
@@ -149,6 +150,23 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
         for (int64_t i = 0; i < nvec; i++)
             vecs[i] = rd.vec();
         SmSolutionRequestedType req = (SmSolutionRequestedType)rd.idx();
+        if (rd.flag())
+        {
+            SmPoint3d org = rd.vec();
+            SmVector3d x = rd.vec();
+            SmVector3d y = rd.vec();
+            SmAxis2Placement a2p;
+            a2p.SetCanonical(org, x, y);
+            SmStatus ts = c->Transform(a2p);
+            if (ts != SM_SUCCESS)
+            {
+                o.push_back(st(ts));
+                if (!same)
+                    delete other;
+                delete c;
+                break;
+            }
+        }
         SmSolutionArray sols;
         SmStatus s = c->GlobalCurveSolve(SmExtent1d(a, b), *other, SmExtent1d(a2, b2), sop, tol,
                                          has_target ? &target : NULL, nvec > 0 ? vecs : NULL, req,

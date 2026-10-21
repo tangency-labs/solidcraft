@@ -467,6 +467,62 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "cci_coincidence_nurbs_partly_coincident",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#0 (upstream tests/prog_test/src/smCurveTest.cpp:3975 my_test_cci_coincidence: GlobalCurveIntersect(pNurb1, pNurb2) via my_test_GlobalCC_intersect (expects 3))",
+      "values_compared": 28
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_overlapping_lines",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#1 (upstream tests/prog_test/src/smCurveTest.cpp:3988 my_test_cci_coincidence: GlobalCurveIntersect(pLine, pLine2) (expects 1))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_circles_radius_gap",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#2 (upstream tests/prog_test/src/smCurveTest.cpp:3992 my_test_cci_coincidence: GlobalCurveIntersect(pCir4 quintic r=0.500005, pCir3 quadratic r=0.499999) (expects 1))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_circles_quintic_quadratic",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#3 (upstream tests/prog_test/src/smCurveTest.cpp:4001 my_test_cci_coincidence: GlobalCurveIntersect(pCir1 quintic, pCir2 quadratic) (expects 1))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_circles_rotated_start",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#4 (upstream tests/prog_test/src/smCurveTest.cpp:4014 my_test_cci_coincidence: GlobalCurveIntersect(pCir5, pCir6 after Transform(SetCanonical(0, (0,1,0), (-1,0,0))) at :4012) (expects 2))",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_circles_opposite_direction",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#5 (upstream tests/prog_test/src/smCurveTest.cpp:4022 my_test_cci_coincidence: GlobalCurveIntersect(pCir5, pCir7 after Transform(SetCanonical(0, (1,0,0), (0,-1,0))) at :4020) (expects 1))",
+      "values_compared": 12
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cci_coincidence_circles_rotated_opposite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p8/upstream_prog_test.json#6 (upstream tests/prog_test/src/smCurveTest.cpp:4030 my_test_cci_coincidence: GlobalCurveIntersect(pCir5, pCir8 after Transform(SetCanonical(0, (0,1,0), (1,0,0))) at :4028) (expects 2))",
+      "values_compared": 23
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -24469,8 +24525,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3058,
-  "cases_total": 3058,
+  "cases_passed": 3065,
+  "cases_total": 3065,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

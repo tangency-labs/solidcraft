@@ -5283,6 +5283,550 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_00_circle1_sdmin_negz",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#0 (upstream tests/prog_test/src/smSurfaceTest.cpp:1490 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle1 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, -z; asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_01_line_sdmin_negz",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#1 (upstream tests/prog_test/src/smSurfaceTest.cpp:1492 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve line (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, -z; asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_02_circle1_sdmin_posz",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#2 (upstream tests/prog_test/src/smSurfaceTest.cpp:1494 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle1 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, +z; asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_03_line_sdmin_posz",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#3 (upstream tests/prog_test/src/smSurfaceTest.cpp:1496 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve line (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, +z; asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_04_circle1_sdmin_tilt",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:1498 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle1 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, unit(0.2,0.2,-1); asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_05_line_sdmin_tilt",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#5 (upstream tests/prog_test/src/smSurfaceTest.cpp:1500 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve line (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; 3D_SIGNED_DIRECTED_MINIMIZE, unit(0.2,0.2,-1); asserts 1; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_06_circle1_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#6 (upstream tests/prog_test/src/smSurfaceTest.cpp:1503 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle1 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_07_circle1_normalize",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#7 (upstream tests/prog_test/src/smSurfaceTest.cpp:1507 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle1 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; NORMALIZE; asserts 4; the second upstream vector slot is unset and unused)",
+      "values_compared": 26
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_08_circle2_min",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#8 (upstream tests/prog_test/src/smSurfaceTest.cpp:1510 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle2 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MINIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_09_circle2_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#9 (upstream tests/prog_test/src/smSurfaceTest.cpp:1511 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle2 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_10_circle3_min",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#10 (upstream tests/prog_test/src/smSurfaceTest.cpp:1516 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle3 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MINIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_11_circle3_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#11 (upstream tests/prog_test/src/smSurfaceTest.cpp:1517 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle3 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_12_circle4_min",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#12 (upstream tests/prog_test/src/smSurfaceTest.cpp:1519 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle4 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MINIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_13_circle4_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#13 (upstream tests/prog_test/src/smSurfaceTest.cpp:1521 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle4 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_14_circle5_min",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#14 (upstream tests/prog_test/src/smSurfaceTest.cpp:1524 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle5 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MINIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_15_circle5_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#15 (upstream tests/prog_test/src/smSurfaceTest.cpp:1526 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle5 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_16_circle6_min",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#16 (upstream tests/prog_test/src/smSurfaceTest.cpp:1529 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle6 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MINIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_cs_nurb_17_circle6_max",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#17 (upstream tests/prog_test/src/smSurfaceTest.cpp:1531 my_test_cs_nurb: GlobalCurveSolve of my_create_crease_surf (my_load_surf3_pts, 9x7 cubic) vs the SmBSplineCurve circle6 (CreateLineSegment / CreateCircleSegment SM_CO_QUADRATIC, as my_create_line/my_create_circle build it), SM_ZONE_TOL_3D, no target, SM_SR_ALL; MAXIMIZE; the second upstream vector slot is unset and unused)",
+      "values_compared": 8
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#18 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 1 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_02",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#19 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 2 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_03",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#20 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 3 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_04",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#21 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 4 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#22 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 5 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_06",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#23 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 6 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_07",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#24 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 7 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_08",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#25 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 8 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_09",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#26 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 9 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#27 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 10 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#28 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 11 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_12",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#29 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 12 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_13",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#30 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 13 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_14",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#31 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 14 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#32 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 15 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_16",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#33 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 16 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_17",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#34 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 17 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_18",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#35 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 18 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_19",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#36 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 19 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_shovel_20",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#37 (upstream tests/prog_test/src/smSurfaceTest.cpp:4349 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 20 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); no count asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#38 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 1 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_02",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#39 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 2 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_03",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#40 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 3 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_04",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#41 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 4 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#42 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 5 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_06",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#43 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 6 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_07",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#44 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 7 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_08",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#45 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 8 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_09",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#46 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 9 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb1_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#47 (upstream tests/prog_test/src/smSurfaceTest.cpp:4405 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 10 of 10 (SM_CO_QUADRATIC, radius i/10*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 15 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_01",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#48 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 1 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_02",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#49 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 2 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_03",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#50 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 3 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_04",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#51 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 4 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_05",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#52 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 5 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_06",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#53 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 6 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_07",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#54 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 7 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_08",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#55 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 8 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_09",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#56 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 9 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_10",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#57 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 10 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_11",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#58 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 11 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_12",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#59 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 12 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_13",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#60 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 13 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_14",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#61 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 14 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_15",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#62 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 15 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_16",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#63 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 16 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_17",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#64 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 17 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_18",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#65 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 18 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_19",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#66 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 19 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "prog_projection_nurb2_20",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p7/upstream_prog_test.json#67 (upstream tests/prog_test/src/smSurfaceTest.cpp:4411 my_test_projection -> my_test_parallel_projection (tests/prog_test/src/smSurfaceTest.cpp:782): CreateParallelProjectionCurves along (0,0,-1) of circle 20 of 20 (SM_CO_QUADRATIC, radius i/20*max(box width)/2, centred at the top centre of CalculateBoundingBox(natural domain), computed with the green nurbs.b_spline_surface_p1/b_spline_curve_p1 port); 29 curves in total asserted)",
+      "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -29289,8 +29833,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 1,
   "cases_failed": 0,
-  "cases_passed": 3659,
-  "cases_total": 3660,
+  "cases_passed": 3727,
+  "cases_total": 3728,
   "deferred_by_unit": {
     "intersect.surface_intersector_p2": 1
   },

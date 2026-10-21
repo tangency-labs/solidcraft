@@ -27,7 +27,7 @@
 //! | `FixCurves`    | `sm_FixBoundaryCurves(poly, dom, tx, ty, change = FALSE)` | `change poly` |
 //! | `Dups`         | `sm_RemoveDuplicateDropPointSolutions` (`m_vStart = (u, v)`, value = index) | `count (index u v)*` |
 //! | `Iso`          | `DropIsoCurve`                                            | `status [ok max_drop max_dev has [curve]]` |
-//! | `Trim`         | `DropAndTrimCurve(.., keep, on_surface, NULL)`            | `status [max_drop max_dev n curves]` |
+//! | `Trim`         | `DropAndTrimCurve(.., keep, on_surface, NULL)` (natural domain / interval when not given) | `status [max_drop max_dev n curves]` |
 //!
 //! A surface of revolution whose `CreateCanonical` fails makes the record
 //! [[`NO_SURFACE`]]. [`run`] accepts only finite inputs of magnitude at most
@@ -65,6 +65,8 @@ pub const NOW: f64 = -f64::MAX;
 pub const REJECTED: f64 = -2.0;
 /// The record of an op whose surface of revolution could not be made.
 pub const NO_SURFACE: f64 = -3.0;
+/// Longest file path.
+pub const MAX_PATH: usize = 4096;
 /// Values per drop point.
 pub const PT_LEN: usize = 38;
 
@@ -108,6 +110,12 @@ pub enum SurfaceIn {
         /// `bSwapUV`.
         swap: bool,
     },
+    /// `SmBSplineSurface::ReadFromFile(ctx, path, s)`: an upstream test file (contents
+    /// trusted, not validated).
+    File {
+        /// The file.
+        path: String,
+    },
 }
 
 /// A 3D curve.
@@ -141,6 +149,12 @@ pub enum CurveIn {
         cpts: Vec<[f64; 4]>,
         /// Knots (`n + p + 2`).
         knots: Vec<f64>,
+    },
+    /// `SmBSplineCurve::ReadFromFile(ctx, path, c)`: an upstream test file (contents
+    /// trusted, not validated).
+    File {
+        /// The file.
+        path: String,
     },
 }
 
@@ -283,10 +297,10 @@ pub enum Op {
         surface: SurfaceIn,
         /// The curve.
         curve: CurveIn,
-        /// `crUVDomain`.
-        domain: [f64; 4],
-        /// `crInterval` (`SmExtent1d(a, b)`).
-        interval: [f64; 2],
+        /// `crUVDomain` (`None`: `GetNaturalUVDomain()`).
+        domain: Option<[f64; 4]>,
+        /// `crInterval` (`SmExtent1d(a, b)`; `None`: `GetNaturalInterval()`).
+        interval: Option<[f64; 2]>,
         /// `sApproxTol3d`.
         tol: f64,
         /// `bKeepAllDropCurves`.
@@ -390,6 +404,17 @@ impl Enc {
         self.int(usize::from(x));
         Ok(())
     }
+    /// `nbytes bytes`: a file path (1 to [`MAX_PATH`] bytes, no NUL).
+    fn path(&mut self, p: &str) -> Result<(), FfiError> {
+        let b = p.as_bytes();
+        if b.is_empty() || b.len() > MAX_PATH || b.contains(&0) {
+            return Err(bad("file path"));
+        }
+        self.int(b.len());
+        self.v.extend(b.iter().map(|&x| f64::from(x)));
+        Ok(())
+    }
+
     fn cpt(&mut self, c: &[f64; 4]) -> Result<(), FfiError> {
         self.nums(&c[..3])?;
         self.v.push(c[3]);
@@ -454,6 +479,10 @@ impl Enc {
                     self.cpt(c)?;
                 }
                 self.nums(knots)
+            }
+            CurveIn::File { path } => {
+                self.int(3);
+                self.path(path)
             }
         }
     }
@@ -523,12 +552,18 @@ impl Enc {
                         g.curve(gen)?;
                         self.v.extend(g.v);
                     }
-                    CurveIn::BSpline { .. } => return Err(bad("revolution generator")),
+                    CurveIn::BSpline { .. } | CurveIn::File { .. } => {
+                        return Err(bad("revolution generator"))
+                    }
                 }
                 self.nums(point)?;
                 self.nums(axis)?;
                 self.flag(*swap);
                 Ok(())
+            }
+            SurfaceIn::File { path } => {
+                self.int(3);
+                self.path(path)
             }
         }
     }
@@ -702,8 +737,14 @@ impl Enc {
                 self.int(13);
                 self.surface(surface)?;
                 self.curve(curve)?;
-                self.nums(domain)?;
-                self.nums(interval)?;
+                self.flag(domain.is_some());
+                if let Some(d) = domain {
+                    self.nums(d)?;
+                }
+                self.flag(interval.is_some());
+                if let Some(i) = interval {
+                    self.nums(i)?;
+                }
                 self.num(*tol)?;
                 self.flag(*keep_all);
                 self.flag(*on_surface);

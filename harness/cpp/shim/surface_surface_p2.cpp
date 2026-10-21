@@ -1204,12 +1204,56 @@ void surface_op(int32_t op, Rd& rd, const SmContext& ctx, SmSurface* s, std::vec
         SmExtent2d d = rd.domain();
         SmBSplineSurface* other = read_bspline(rd, ctx);
         SmExtent2d d2 = rd.domain();
+        bool has_tol = rd.flag();
+        SmApproxTol3d tol = rd.num();
+        bool has_move = rd.flag();
+        SmVector3d move = rd.vec();
+        // prog_test my_test_one_ssi: both B-reps translated by the same vector first
+        if (has_move)
+        {
+            SmAxis2Placement ax;
+            ax.Translate(move);
+            SmStatus ts = s->Transform(ax, NULL);
+            if (ts == SM_SUCCESS)
+                ts = other->Transform(ax, NULL);
+            if (ts != SM_SUCCESS)
+            {
+                o.push_back(st(ts));
+                delete other;
+                break;
+            }
+        }
+        // all outputs requested, as smTopoTest my_test_ssi does
         SmBoolean edges[2] = {TRUE, TRUE};
         SmTArray<SmCurve*> c3, c1, c2;
-        SmStatus stt =
-            s->GlobalSurfaceIntersect(ctx, d, *other, d2, edges, NULL, NULL, &c3, &c1, &c2, NULL, NULL);
+        SmTArray<SmTsectCurveType> types;
+        SmTArray<double> devs;
+        SmStatus stt = s->GlobalSurfaceIntersect(ctx, d, *other, d2, edges, has_tol ? &tol : NULL,
+                                                 NULL, &c3, &c1, &c2, &types, &devs);
         o.push_back(st(stt));
-        o.push_back((double)c3.GetSize());
+        // on success: `n`, `same` (the output arrays agree in length) and per curve: 3D
+        // curve, UV curve on this, UV curve on other (each `GetType()`, `0` when null, then
+        // `put_curve` for a B-spline), type, deviation
+        if (stt == SM_SUCCESS)
+        {
+            ULONG n = c3.GetSize();
+            o.push_back((double)n);
+            bool same = c1.GetSize() == n && c2.GetSize() == n && types.GetSize() == n &&
+                        devs.GetSize() == n;
+            o.push_back(flg(same));
+            for (ULONG i = 0; same && i < n; i++)
+            {
+                const SmCurve* cs[3] = {c3[i], c1[i], c2[i]};
+                for (const SmCurve* c : cs)
+                {
+                    o.push_back(c != NULL ? (double)c->GetType() : 0.0);
+                    if (c != NULL && c->IsKindOf(SmBSplineCurve_TYPE))
+                        put_curve(o, (const SmBSplineCurve*)c);
+                }
+                o.push_back((double)types[i]);
+                o.push_back(devs[i]);
+            }
+        }
         for (ULONG i = 0; i < c3.GetSize(); i++)
             delete c3[i];
         for (ULONG i = 0; i < c1.GetSize(); i++)

@@ -2626,6 +2626,66 @@
       "values_compared": 4
     },
     {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_drop_trim_ps10_1_sub_piece_natural_boundary",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_prog_test.json#0 (upstream tests/prog_test/src/smSurfaceTest.cpp:2144 my_test_drop_curve: drop curve to sub-piece of surface natural boundary; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_drop_trim_ps10_2_non_iso_large_aspect",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_prog_test.json#1 (upstream tests/prog_test/src/smSurfaceTest.cpp:2182 my_test_drop_curve: nonIsoCurve drop to large aspect ratio surface (large radius, long slender circular face); pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_drop_trim_ps10_3_small_cylinder_end_on_boundary",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_prog_test.json#2 (upstream tests/prog_test/src/smSurfaceTest.cpp:2227 my_test_drop_curve: small cylinder with curve ending on natural boundary; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_drop_trim_ps10_4_short_curve_not_over_surface",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_prog_test.json#3 (upstream tests/prog_test/src/smSurfaceTest.cpp:2266 my_test_drop_curve: very large aspect ratio surface, very short curve not over the surface - no drop result; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "prog_drop_trim_ps10_5_long_natural_boundary_large_aspect",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/intersect.surface_drop_lib_p1/upstream_prog_test.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:2304 my_test_drop_curve: long natural boundary drop to very large aspect surface; pSurface->DropAndTrimCurve(ctx, GetNaturalUVDomain(), *pCurveToDrop, GetNaturalInterval(), 1.0e-2, dMaxDistToSurf, dDeviation, sProjCurves) (defaults: bKeepAllDropCurves TRUE, bOptCurveIsOnSurface FALSE, pOptDropCurveFail NULL))",
+      "values_compared": 0
+    },
+    {
       "max_rel_err": 0.0,
       "name": "rectangle_bottom_edge_iso",
       "outcome": "pass",
@@ -14959,12 +15019,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 15,
+  "cases_deferred": 20,
   "cases_failed": 0,
   "cases_passed": 1847,
-  "cases_total": 1862,
+  "cases_total": 1867,
   "deferred_by_unit": {
-    "intersect.surface_drop_curve": 15
+    "intersect.surface_drop_curve": 20
   },
   "max_rel_err": 0.0,
   "pass": true,

@@ -219,6 +219,302 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "curve_properties_circle_plane_tangency",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#0 (upstream tests/prog_test/src/smCurveTest.cpp:8006 my_test_curve_properties: quintic circle PLANE_INTERSECTION D=-0.99999 N=(0,1,0) (expects 2))",
+      "values_compared": 929
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_plane_classify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#1 (upstream tests/prog_test/src/smCurveTest.cpp:7268 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 0 Transform(+2.5 x)))",
+      "values_compared": 968
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_plane_classify_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#2 (upstream tests/prog_test/src/smCurveTest.cpp:7333 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 1 Transform(+2.5 x)))",
+      "values_compared": 981
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_plane_intersection",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#3 (upstream tests/prog_test/src/smCurveTest.cpp:7393 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 2 Transform(+2.5 x)))",
+      "values_compared": 1033
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_silhouette_vector",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#4 (upstream tests/prog_test/src/smCurveTest.cpp:7437 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 3 Transform(+2.5 x)))",
+      "values_compared": 994
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_silhouette_point",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#5 (upstream tests/prog_test/src/smCurveTest.cpp:7475 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 4 Transform(+2.5 x)))",
+      "values_compared": 981
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_parallel_to_vector",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#6 (upstream tests/prog_test/src/smCurveTest.cpp:7515 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 5 Transform(+2.5 x)))",
+      "values_compared": 994
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_inflection_points",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#7 (upstream tests/prog_test/src/smCurveTest.cpp:7549 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 6 Transform(+2.5 x)))",
+      "values_compared": 1007
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_min_first_derivative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#8 (upstream tests/prog_test/src/smCurveTest.cpp:7584 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 7 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_max_first_derivative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#9 (upstream tests/prog_test/src/smCurveTest.cpp:7609 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 7 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_min_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#10 (upstream tests/prog_test/src/smCurveTest.cpp:7643 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 8 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_max_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#11 (upstream tests/prog_test/src/smCurveTest.cpp:7668 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 8 Transform(+2.5 x)))",
+      "values_compared": 1007
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_first_derivative_length",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#12 (upstream tests/prog_test/src/smCurveTest.cpp:7705 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 9 Transform(+2.5 x)))",
+      "values_compared": 1111
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#13 (upstream tests/prog_test/src/smCurveTest.cpp:7743 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 10 Transform(+2.5 x)))",
+      "values_compared": 1137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_x_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#14 (upstream tests/prog_test/src/smCurveTest.cpp:7780 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 11 Transform(+2.5 x)))",
+      "values_compared": 1020
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_y_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#15 (upstream tests/prog_test/src/smCurveTest.cpp:7817 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 12 Transform(+2.5 x)))",
+      "values_compared": 942
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_z_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#16 (upstream tests/prog_test/src/smCurveTest.cpp:7846 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 12 Transform(+2.5 x)))",
+      "values_compared": 903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_xyz_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#17 (upstream tests/prog_test/src/smCurveTest.cpp:7885 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 13 Transform(+2.5 x)))",
+      "values_compared": 1059
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_planar_nurb_tangent_to_circle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#18 (upstream tests/prog_test/src/smCurveTest.cpp:7929 my_test_one_curve_prop (planar nurb from my_test_curve_properties:8048, after 14 Transform(+2.5 x)))",
+      "values_compared": 981
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_plane_classify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#19 (upstream tests/prog_test/src/smCurveTest.cpp:7268 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 0 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_plane_classify_neg",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#20 (upstream tests/prog_test/src/smCurveTest.cpp:7333 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 1 Transform(+2.5 x)))",
+      "values_compared": 903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_plane_intersection",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#21 (upstream tests/prog_test/src/smCurveTest.cpp:7393 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 2 Transform(+2.5 x)))",
+      "values_compared": 903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_silhouette_vector",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#22 (upstream tests/prog_test/src/smCurveTest.cpp:7437 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 3 Transform(+2.5 x)))",
+      "values_compared": 1072
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_silhouette_point",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#23 (upstream tests/prog_test/src/smCurveTest.cpp:7475 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 4 Transform(+2.5 x)))",
+      "values_compared": 1007
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_parallel_to_vector",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#24 (upstream tests/prog_test/src/smCurveTest.cpp:7515 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 5 Transform(+2.5 x)))",
+      "values_compared": 903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_inflection_points",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#25 (upstream tests/prog_test/src/smCurveTest.cpp:7549 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 6 Transform(+2.5 x)))",
+      "values_compared": 903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_min_first_derivative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#26 (upstream tests/prog_test/src/smCurveTest.cpp:7584 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 7 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_max_first_derivative",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#27 (upstream tests/prog_test/src/smCurveTest.cpp:7609 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 7 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_min_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#28 (upstream tests/prog_test/src/smCurveTest.cpp:7643 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 8 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_max_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#29 (upstream tests/prog_test/src/smCurveTest.cpp:7668 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 8 Transform(+2.5 x)))",
+      "values_compared": 916
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_first_derivative_length",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#30 (upstream tests/prog_test/src/smCurveTest.cpp:7705 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 9 Transform(+2.5 x)))",
+      "values_compared": 1111
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_radius_of_curvature",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#31 (upstream tests/prog_test/src/smCurveTest.cpp:7743 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 10 Transform(+2.5 x)))",
+      "values_compared": 1163
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_x_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#32 (upstream tests/prog_test/src/smCurveTest.cpp:7780 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 11 Transform(+2.5 x)))",
+      "values_compared": 1020
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_y_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#33 (upstream tests/prog_test/src/smCurveTest.cpp:7817 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 12 Transform(+2.5 x)))",
+      "values_compared": 942
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_z_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#34 (upstream tests/prog_test/src/smCurveTest.cpp:7846 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 12 Transform(+2.5 x)))",
+      "values_compared": 1007
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_xyz_normal",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#35 (upstream tests/prog_test/src/smCurveTest.cpp:7885 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 13 Transform(+2.5 x)))",
+      "values_compared": 1163
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "curve_prop_3d_nurb_tangent_to_circle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/curve.curve_p7/upstream_prog_test.json#36 (upstream tests/prog_test/src/smCurveTest.cpp:7929 my_test_one_curve_prop (3d nurb from my_test_curve_properties:8084, after 14 Transform(+2.5 x)))",
+      "values_compared": 1046
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -24221,8 +24517,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3027,
-  "cases_total": 3027,
+  "cases_passed": 3064,
+  "cases_total": 3064,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

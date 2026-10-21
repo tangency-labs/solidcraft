@@ -13,7 +13,8 @@
 //! inside_out}}` (domain in degrees), as in unit
 //! `curve.curve_p8`): `gcs` (`GlobalCurveSolve`: `c2: null` solves the first curve
 //! against itself; `sop` the `SmSolverOperationType`, `target` the optional target
-//! distance, `vecs` the option vectors, `requested` the `SmSolutionRequestedType`),
+//! distance, `vecs` the option vectors, `requested` the `SmSolutionRequestedType`,
+//! optional `transform1` an `[origin, x, y]` placement `c1` is `Transform`ed by first),
 //! `self_intersect`, `tight_box`, `tight_pseudo_box` (`basis`), `on_plane` (`p`, `n`,
 //! `tol`, optional `ivl`) and `positive_side` (`planes`: point and normal pairs). Both
 //! sides produce the flat record documented in the ffi module; the runner reports its
@@ -751,6 +752,11 @@ enum OpIn {
         /// The `SmSolutionRequestedType` value.
         #[serde(default = "one_i")]
         requested: i32,
+        /// Optional `[origin, x, y]` of an `SmAxis2Placement` (`SetCanonical`, status
+        /// ignored) that `c1` is `Transform`ed by before the solve (as in the upstream
+        /// tests that move a curve).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transform1: Option<[[f64; 3]; 3]>,
     },
     SelfIntersect {
         c: CurveIn,
@@ -794,6 +800,7 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
             target,
             vecs,
             requested,
+            transform1,
         } => {
             curve_block(&mut v, c1)?;
             v.extend_from_slice(ivl1);
@@ -813,6 +820,10 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
                 v.extend_from_slice(x);
             }
             v.push(f64::from(*requested));
+            v.push(b(transform1.is_some()));
+            for x in transform1.iter().flatten() {
+                v.extend_from_slice(x);
+            }
             Op::Gcs
         }
         OpIn::SelfIntersect { c, ivl, tol } => {
@@ -883,8 +894,13 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             target,
             vecs,
             requested,
+            transform1,
         } => {
-            let a = build(c1)?;
+            let mut a = build(c1)?;
+            if let Some([org, x, y]) = transform1 {
+                let frame = Axis2Placement::new(v3(*org), v3(*x), v3(*y));
+                tri!(o, a.transform(&k, &frame, None));
+            }
             let other = match c2 {
                 Some(c) => Some(build(c)?),
                 None => None,
@@ -1282,6 +1298,7 @@ fn gen_gcs(k: &Kernel, rng: &mut Rng) -> OpIn {
         target,
         vecs,
         requested: i32::from(!rng.chance(0.3)),
+        transform1: None,
     }
 }
 

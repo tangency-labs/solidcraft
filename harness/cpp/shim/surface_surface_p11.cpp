@@ -12,11 +12,13 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
 #include <SmCurve.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmNurbsCrv.h>
 #include <SmPlane.h>
 #include <SmSolutionArray.h>
 #include <SmSurface.h>
@@ -155,6 +157,112 @@ SC_EXPORT int32_t sc_surface_surface_p11_isb(const int32_t* kinds, const double*
         delete curves[i];
     delete a;
     delete b;
+    if (bad)
+        return SC_ERR_ARG;
+    return sc_copy_out(out.data(), (int64_t)out.size(), output, cap, out_len);
+    SC_CATCH
+}
+
+// SmSurface::LiftCurve (SmSurface.cpp:24054) of a UV curve on a surface. The surface is read
+// with SmBSplineSurface::ReadFromFile(surf_path) when surf_path is given, else made from kind
+// and xyz as above; the UV curve is read with SmBSplineCurve::ReadFromFile(curve_path) when
+// curve_path is given, else it is a non-rational 2D SmBSplineCurve(gw_CURVE*, 2, FALSE) of
+// degree `degree` with ncp control points (u, v; z = NL_NOZ) and ncp + degree + 1 knots. The
+// domain (umin, vmin, umax, vmax) and interval are the surface's natural UV domain and the
+// curve's natural interval unless given. Output: [status, max_dist, type, dim, degree, ncp,
+// cpts (x y z w), nknots, knots, mults, interval min, max] of the lifted curve (only the status
+// when LiftCurve fails). The curve values come from GetOrCreateGwNurbPointer and GetKnots.
+SC_EXPORT int32_t sc_surface_surface_p11_lift(const char* surf_path, int32_t kind, const double* xyz,
+                                              int32_t has_domain, const double* domain,
+                                              const char* curve_path, int32_t degree, int64_t ncp,
+                                              const double* cpts, const double* knots,
+                                              int32_t has_interval, const double* interval, double tol,
+                                              int32_t skip_checks, double* output, int64_t cap,
+                                              int64_t* out_len)
+{
+    SC_TRY
+    SmContext context;
+    SmSurface* s = NULL;
+    if (surf_path != NULL)
+    {
+        SmBSplineSurface* bs = NULL;
+        SmBSplineSurface::ReadFromFile(context, surf_path, bs);
+        s = bs;
+    }
+    else
+        s = sc_p11_surface(context, kind, xyz);
+    if (s == NULL)
+        return SC_ERR_ARG;
+    SmBSplineCurve* uv = NULL;
+    if (curve_path != NULL)
+        SmBSplineCurve::ReadFromFile(context, curve_path, uv);
+    else
+    {
+        gw_INDEX n = (gw_INDEX)(ncp - 1);
+        gw_INDEX m = (gw_INDEX)(ncp + degree);
+        gw_CURVE* cur = sm_AllocateNurbCurve(n, (gw_DEGREE)degree, m);
+        if (cur != NULL)
+        {
+            for (gw_INDEX i = 0; i <= n; i++)
+            {
+                cur->pol->Pw[i].x = cpts[2 * i];
+                cur->pol->Pw[i].y = cpts[2 * i + 1];
+                cur->pol->Pw[i].z = NL_NOZ;
+                cur->pol->Pw[i].w = NL_NOW;
+            }
+            for (gw_INDEX i = 0; i <= m; i++)
+                cur->knt->U[i] = knots[i];
+            uv = new (context) SmBSplineCurve(cur, 2, FALSE);
+        }
+    }
+    if (uv == NULL)
+    {
+        delete s;
+        return SC_ERR_ARG;
+    }
+    SmExtent2d dom = has_domain ? SmExtent2d(domain[0], domain[1], domain[2], domain[3]) : s->GetNaturalUVDomain();
+    SmExtent1d ivl = has_interval ? SmExtent1d(interval[0], interval[1]) : uv->GetNaturalInterval();
+    double max_dist = -1.0;
+    SmBSplineCurve* lifted = NULL;
+    SmStatus r = s->LiftCurve(context, dom, *uv, ivl, SmApproxTol3d(tol), max_dist, lifted,
+                              skip_checks ? TRUE : FALSE);
+    std::vector<double> out;
+    out.push_back(r == SM_SUCCESS ? 0.0 : (double)r);
+    bool bad = false;
+    if (r == SM_SUCCESS)
+    {
+        gw_CURVE* cur = lifted != NULL ? lifted->GetOrCreateGwNurbPointer() : NULL;
+        SmTArray<double> ks;
+        SmTArray<ULONG> mults;
+        if (cur == NULL || lifted->GetKnots(ks, &mults) != SM_SUCCESS)
+            bad = true;
+        else
+        {
+            out.push_back(max_dist);
+            out.push_back((double)lifted->GetType());
+            out.push_back((double)lifted->GetDim());
+            out.push_back((double)cur->p);
+            out.push_back((double)(cur->pol->n + 1));
+            for (gw_INDEX i = 0; i <= cur->pol->n; i++)
+            {
+                out.push_back(cur->pol->Pw[i].x);
+                out.push_back(cur->pol->Pw[i].y);
+                out.push_back(cur->pol->Pw[i].z);
+                out.push_back(cur->pol->Pw[i].w);
+            }
+            out.push_back((double)ks.GetSize());
+            for (ULONG i = 0; i < ks.GetSize(); i++)
+                out.push_back(ks[i]);
+            for (ULONG i = 0; i < mults.GetSize(); i++)
+                out.push_back((double)mults[i]);
+            SmExtent1d nat = lifted->GetNaturalInterval();
+            out.push_back(nat.GetMin());
+            out.push_back(nat.GetMax());
+        }
+    }
+    delete lifted;
+    delete uv;
+    delete s;
     if (bad)
         return SC_ERR_ARG;
     return sc_copy_out(out.data(), (int64_t)out.size(), output, cap, out_len);

@@ -16,8 +16,11 @@
 //! |------------|-------------------------------------------------|------------|---------|
 //! | `CciSolve` | `SmCCIGlobalSolver::SolveIt`                     | `c1 self [c2] cache1 [cache2] a1 b1 a2 b2 sop tol proj ptype` vecs | `[status nsol sol*]` |
 //! | `CciLocal` | `SmCCIGlobalSolver::LocalSolve` on one leaf pair | as `CciSolve`, then `leaf1 leaf2` | `nleaf1 nleaf2 [status [needs nsol sol*]]` |
-//! | `Property` | `SmCurve::GlobalPropertyAnalysis`                | curve `a b prop has_val val` vecs `tol comb` | `status [nsol sol* npt P[3]* nvec V[3]*]` |
+//! | `Property` | `SmCurve::GlobalPropertyAnalysis`                | curve xforms `a b prop has_val val` vecs `tol comb` | `status [nsol sol* npt P[3]* nvec V[3]*]` |
 //!
+//! `xforms` is `nt (O[3] X[3] Y[3] has_s S[3])*nt`, transforms applied to the curve before
+//! them in order (`SmAxis2Placement::SetCanonical(O, X, Y)`, then `SmCurve::Transform`
+//! with the scale `S` when `has_s`; B-splines only, `nt = 0` for none).
 //! A solution `sol` is `type nvar nobj o0 o1 n0 n1 sval s[P] eval e[P]` with
 //! `P = max(nvar, 2)`; objects are `0` (first curve), `1` (second), `2` (another), `-1`
 //! (`NULL`); nodes are pre-order indices in the first / second tree (`-1` = `NULL`). The
@@ -44,6 +47,8 @@ pub const MAX_DEGREE: usize = 9;
 pub const MAX_COORD: f64 = 1e6;
 /// Parameters may lie this many interval lengths outside the curve's range.
 pub const MAX_REL_DIST: f64 = 2.0;
+/// Most transforms after a curve block.
+pub const MAX_TRANSFORMS: usize = 16;
 /// Largest `lMinimumNumberOfSegments` of the cache.
 pub const MAX_SEGMENTS: usize = 64;
 /// Smallest `dMinimumParametricRatio` of the cache.
@@ -315,6 +320,42 @@ fn proj_vecs(rd: &mut Reader<'_>, need: usize, unit: &[usize]) -> Result<(), Ffi
     Ok(())
 }
 
+/// Whether the next curve block is a B-spline (kind `0`).
+fn next_is_bspline(rd: &Reader<'_>) -> bool {
+    rd.input.get(rd.at) == Some(&0.0)
+}
+
+/// The transforms `nt (O[3] X[3] Y[3] has_s S[3])*nt` after a curve block, applied to it
+/// in order (`SmAxis2Placement::SetCanonical(O, X, Y)`, then `SmCurve::Transform` with
+/// the scale `S` when `has_s`): B-splines only, at most [`MAX_TRANSFORMS`], origins of
+/// magnitude at most `MAX_COORD / MAX_TRANSFORMS`, non-parallel axes and scales of
+/// magnitude within `[1e-3, 1]` (so transformed points stay within a few `MAX_COORD`).
+fn transforms(rd: &mut Reader<'_>, bspline: bool) -> Result<(), FfiError> {
+    let nt = rd.index(MAX_TRANSFORMS)?;
+    if nt > 0 && !bspline {
+        return Err(bad("transforms apply to B-splines only"));
+    }
+    let sq = |v: [f64; 3]| v.iter().map(|c| c * c).sum::<f64>();
+    for _ in 0..nt {
+        let o = rd.vec3()?;
+        if o.iter().any(|c| c.abs() > MAX_COORD / MAX_TRANSFORMS as f64) {
+            return Err(bad("transform: origin too far"));
+        }
+        let [x0, x1, x2] = rd.nonzero3()?;
+        let [y0, y1, y2] = rd.nonzero3()?;
+        let cross = [x1 * y2 - x2 * y1, x2 * y0 - x0 * y2, x0 * y1 - x1 * y0];
+        if sq(cross) < 1e-6 * sq([x0, x1, x2]) * sq([y0, y1, y2]) {
+            return Err(bad("transform: parallel axes"));
+        }
+        let has_scale = rd.flag()?;
+        let s = rd.vec3()?;
+        if has_scale && s.iter().any(|c| !(1e-3..=1.0).contains(&c.abs())) {
+            return Err(bad("transform: scale outside [1e-3, 1]"));
+        }
+    }
+    Ok(())
+}
+
 fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
     match op {
         Op::CciSolve | Op::CciLocal => {
@@ -351,7 +392,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             }
         }
         Op::Property => {
+            let bspline = next_is_bspline(rd);
             let c = cached_curve(rd)?;
+            transforms(rd, bspline)?;
             interval(rd, &c)?;
             rd.index(28)?; // property
                            // the property solvers read values and vectors without NULL checks

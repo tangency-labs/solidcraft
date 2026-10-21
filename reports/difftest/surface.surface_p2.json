@@ -547,7 +547,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.surface_p2/cases.json#67 (upstream SmSurface::GlobalSurfaceIntersect (my_test_ssi inputs: two crossing bilinear patches))",
-      "values_compared": 2
+      "values_compared": 95
     },
     {
       "max_rel_err": 0.0,
@@ -556,6 +556,470 @@
       "pass": true,
       "source": "fixture:fixtures/surface.surface_p2/cases.json#68 (upstream SmSurface::CreatePlaneWith3DCurves (SM_API SmApiCreatePlanarFace inputs))",
       "values_compared": 1
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_coin_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#0 (upstream tests/prog_test/src/smAdvancedTest.cpp:1095 my_test_one_ssi ssi_ext_ext_coin.smp faces 0x0 of 1x1; upstream expects 11 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_cyl_none_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#1 (upstream tests/prog_test/src/smAdvancedTest.cpp:1100 my_test_one_ssi ssi_ext_cyl_none.smp faces 0x0 of 1x1; upstream expects 0 curves over all pairs)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_cyl_touch_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#2 (upstream tests/prog_test/src/smAdvancedTest.cpp:1105 my_test_one_ssi ssi_ext_cyl_touch.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 115
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_cyl_2int_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#3 (upstream tests/prog_test/src/smAdvancedTest.cpp:1109 my_test_one_ssi ssi_ext_cyl_2int.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 187
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_none_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#4 (upstream tests/prog_test/src/smAdvancedTest.cpp:1113 my_test_one_ssi ssi_ext_ext_none.smp faces 0x0 of 1x1; upstream expects 0 curves over all pairs)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_inside_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#5 (upstream tests/prog_test/src/smAdvancedTest.cpp:1118 my_test_one_ssi ssi_ext_ext_inside.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 371
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_opposite_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#6 (upstream tests/prog_test/src/smAdvancedTest.cpp:1122 my_test_one_ssi ssi_ext_ext_opposite.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 371
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_touch_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#7 (upstream tests/prog_test/src/smAdvancedTest.cpp:1126 my_test_one_ssi ssi_ext_ext_touch.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 91
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_overlap_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#8 (upstream tests/prog_test/src/smAdvancedTest.cpp:1130 my_test_one_ssi ssi_ext_ext_overlap.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 371
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_ext_ext_same_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#9 (upstream tests/prog_test/src/smAdvancedTest.cpp:1134 my_test_one_ssi ssi_ext_ext_same.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 371
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_360_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#10 (upstream tests/prog_test/src/smAdvancedTest.cpp:1138 my_test_one_ssi ssi_rev_rev_360.smp faces 0x0 of 1x1; upstream expects 3 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_opposite_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#11 (upstream tests/prog_test/src/smAdvancedTest.cpp:1142 my_test_one_ssi ssi_rev_rev_opposite.smp faces 0x0 of 1x1; upstream expects 3 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_90_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#12 (upstream tests/prog_test/src/smAdvancedTest.cpp:1152 my_test_one_ssi ssi_rev_rev_90.smp faces 0x0 of 1x1; upstream expects 3 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_rot180_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#13 (upstream tests/prog_test/src/smAdvancedTest.cpp:1157 my_test_one_ssi ssi_rev_rev_rot180.smp faces 0x0 of 1x1; upstream expects 6 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_180_pts_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#14 (upstream tests/prog_test/src/smAdvancedTest.cpp:1162 my_test_one_ssi ssi_rev_rev_180_pts.smp faces 0x0 of 1x1; upstream expects 6 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_coin_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#15 (upstream tests/prog_test/src/smAdvancedTest.cpp:1171 my_test_one_ssi ssi_rev_rev_coin.smp faces 0x0 of 1x1; upstream expects 5 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev_coin_touch_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#16 (upstream tests/prog_test/src/smAdvancedTest.cpp:1179 my_test_one_ssi ssi_rev_rev_coin_touch.smp faces 0x0 of 1x1; upstream expects 7 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_sph_full_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#17 (upstream tests/prog_test/src/smAdvancedTest.cpp:1185 my_test_one_ssi ssi_rev_sph_full.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 1271
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_cyl_full_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#18 (upstream tests/prog_test/src/smAdvancedTest.cpp:1191 my_test_one_ssi ssi_rev_cyl_full.smp faces 0x0 of 1x1; upstream expects 6 curves over all pairs)",
+      "values_compared": 2175
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_cone_full_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#19 (upstream tests/prog_test/src/smAdvancedTest.cpp:1197 my_test_one_ssi ssi_rev_cone_full.smp faces 0x0 of 1x1; upstream expects 6 curves over all pairs)",
+      "values_compared": 1815
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::ComputePointValues",
+        "unit": "intersect.surface_intersector_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_tor_purpen_tor_sing_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#20 (upstream tests/prog_test/src/smAdvancedTest.cpp:1202 my_test_one_ssi ssi_tor_purpen_tor_sing.smp faces 0x0 of 1x1; upstream expects 14 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_2pl_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#21 (upstream tests/prog_test/src/smAdvancedTest.cpp:1228 my_test_one_ssi ssi_2pl.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 95
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cylcyl1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#22 (upstream tests/prog_test/src/smAdvancedTest.cpp:1233 my_test_one_ssi ssi_cylcyl1.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 3157
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::ComputePointValues",
+        "unit": "intersect.surface_intersector_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_pln_rev1_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#23 (upstream tests/prog_test/src/smAdvancedTest.cpp:1238 my_test_one_ssi ssi_pln_rev1.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_pln_rev2_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#24 (upstream tests/prog_test/src/smAdvancedTest.cpp:1243 my_test_one_ssi ssi_pln_rev2.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_pln_rev3_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#25 (upstream tests/prog_test/src/smAdvancedTest.cpp:1251 my_test_one_ssi ssi_pln_rev3.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 1312
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_plncyl1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#26 (upstream tests/prog_test/src/smAdvancedTest.cpp:1256 my_test_one_ssi ssi_plncyl1.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 365
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_plncyl2_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#27 (upstream tests/prog_test/src/smAdvancedTest.cpp:1260 my_test_one_ssi ssi_plncyl2.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 2075
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::ComputePointValues",
+        "unit": "intersect.surface_intersector_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rev_rev1_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#28 (upstream tests/prog_test/src/smAdvancedTest.cpp:1265 my_test_one_ssi ssi_rev_rev1.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::ComputePointValues",
+        "unit": "intersect.surface_intersector_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_bumppy_plane2_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#29 (upstream tests/prog_test/src/smAdvancedTest.cpp:1270 my_test_one_ssi ssi_bumppy_plane2.smp faces 0x0 of 1x1; upstream expects 50 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_bumppy_plane_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#30 (upstream tests/prog_test/src/smAdvancedTest.cpp:1277 my_test_one_ssi ssi_bumppy_plane.smp faces 0x0 of 1x1; upstream expects 84 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceIntersector::ComputePointValues",
+        "unit": "intersect.surface_intersector_p2"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cyl_cyl_sing_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#31 (upstream tests/prog_test/src/smAdvancedTest.cpp:1289 my_test_one_ssi ssi_cyl_cyl_sing.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_coincident_planes_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#32 (upstream tests/prog_test/src/smAdvancedTest.cpp:1304 my_test_one_ssi ssi_coincident_planes.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_coincident_cyls_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#33 (upstream tests/prog_test/src/smAdvancedTest.cpp:1312 my_test_one_ssi ssi_coincident_cyls.smp faces 0x0 of 1x1; upstream expects 3 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_coincident_spheres_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#34 (upstream tests/prog_test/src/smAdvancedTest.cpp:1321 my_test_one_ssi ssi_coincident_spheres.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_coincident_spheres2_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#35 (upstream tests/prog_test/src/smAdvancedTest.cpp:1326 my_test_one_ssi ssi_coincident_spheres2.smp faces 0x0 of 1x1; upstream expects 4 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurfaceDropCurve::DoTrace",
+        "unit": "intersect.surface_drop_curve"
+      },
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_coincident_torii_f0_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#36 (upstream tests/prog_test/src/smAdvancedTest.cpp:1334 my_test_one_ssi ssi_coincident_torii.smp faces 0x0 of 1x1; upstream expects 8 curves over all pairs)",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_tor_sph_touch_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#37 (upstream tests/prog_test/src/smAdvancedTest.cpp:1339 my_test_one_ssi ssi_tor_sph_touch.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_rhino_bug1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#38 (upstream tests/prog_test/src/smAdvancedTest.cpp:1344 my_test_one_ssi ssi_rhino_bug1.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 95
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_sph_plane1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#39 (upstream tests/prog_test/src/smAdvancedTest.cpp:1356 my_test_one_ssi ssi_sph_plane1.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 1535
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_sph_plane2_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#40 (upstream tests/prog_test/src/smAdvancedTest.cpp:1366 my_test_one_ssi ssi_sph_plane2.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 2345
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cone_plane1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#41 (upstream tests/prog_test/src/smAdvancedTest.cpp:1375 my_test_one_ssi ssi_cone_plane1.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 187
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cone_cyl1_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#42 (upstream tests/prog_test/src/smAdvancedTest.cpp:1380 my_test_one_ssi ssi_cone_cyl1.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 547
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cone_cyl2_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#43 (upstream tests/prog_test/src/smAdvancedTest.cpp:1385 my_test_one_ssi ssi_cone_cyl2.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 457
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cone_2pln_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#44 (upstream tests/prog_test/src/smAdvancedTest.cpp:1390 my_test_one_ssi ssi_cone_2pln.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 2075
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_cyl_bicub_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#45 (upstream tests/prog_test/src/smAdvancedTest.cpp:1395 my_test_one_ssi ssi_cyl_bicub.smp faces 0x0 of 1x1; upstream expects 2 curves over all pairs)",
+      "values_compared": 2122
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_tor_overlap_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#46 (upstream tests/prog_test/src/smAdvancedTest.cpp:1400 my_test_one_ssi ssi_tor_overlap.smp faces 0x0 of 1x1; upstream expects 6 curves over all pairs)",
+      "values_compared": 5460
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "ssi_adv_ssi_spiral_f0_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/ssi_adv.json#47 (upstream tests/prog_test/src/smAdvancedTest.cpp:1405 my_test_one_ssi ssi_spiral.smp faces 0x0 of 1x1; upstream expects 1 curves over all pairs)",
+      "values_compared": 2975
     },
     {
       "max_rel_err": 0.0,
@@ -133015,11 +133479,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 1,
+  "cases_deferred": 21,
   "cases_failed": 0,
-  "cases_passed": 16625,
-  "cases_total": 16626,
+  "cases_passed": 16653,
+  "cases_total": 16674,
   "deferred_by_unit": {
+    "intersect.surface_drop_curve": 15,
+    "intersect.surface_intersector_p2": 5,
     "surface.surface_p2": 1
   },
   "max_rel_err": 0.0,

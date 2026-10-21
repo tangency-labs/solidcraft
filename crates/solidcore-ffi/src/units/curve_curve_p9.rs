@@ -17,7 +17,7 @@
 //!
 //! | [`Op`]           | upstream                     | parameters                                                   | outputs                  |
 //! |------------------|------------------------------|--------------------------------------------------------------|--------------------------|
-//! | `Gcs`            | `GlobalCurveSolve`           | curve `a b same [curve] a2 b2 op tol has_target target nvec vec*nvec requested` | `n sol*n` |
+//! | `Gcs`            | `GlobalCurveSolve`           | curve `a b same [curve] a2 b2 op tol has_target target nvec vec*nvec requested has_xf [O X Y]` | `n sol*n` |
 //! | `SelfIntersect`  | `GlobalCurveSelfIntersect`   | curve `a b tol`                                              | `n sol*n`                |
 //! | `TightBox`       | `CalculateTightBoundingBox`  | curve `a b`                                                  | `umin vmin wmin umax vmax wmax` |
 //! | `TightPseudoBox` | `CalculateTightPseudoBox`    | curve `a b B0[3] B1[3] B2[3]`                                | `basis[9] (min max)*3`   |
@@ -27,7 +27,9 @@
 //! `same` passes this curve itself as the other one (no second block); `op` is an
 //! `SmSolverOperationType` from [`PLAIN_OPS`] (no vectors, `nvec` `0`) or
 //! [`VECTOR_OPS`] (`nvec` `3`); `has_target` passes `&target` (required for
-//! `SM_SO_AT_DISTANCE`); `requested` is `SM_SR_SINGLE` (`0`) or `SM_SR_ALL` (`1`). A
+//! `SM_SO_AT_DISTANCE`); `requested` is `SM_SR_SINGLE` (`0`) or `SM_SR_ALL` (`1`);
+//! `has_xf` `1` builds an `SmAxis2Placement` with `SetCanonical(O, X, Y)` (non-zero,
+//! non-parallel axes) and `Transform`s this curve by it before the solve. A
 //! solution `sol` is `type nvar nobj o0 o1 value s0 s1 [evalue e0 e1]` (the end for a
 //! range); objects are `0` (this curve), `1` (the other), `2` (another object), `-1`
 //! (`NULL`). `IsOnPlane`'s `max_dist` starts as `SM_UNDEF_DOUBLE`; `has_ivl` `0` passes
@@ -329,6 +331,13 @@ fn check_projection_vectors(code: i32, vecs: &[[f64; 3]; 3]) -> Result<(), FfiEr
     Ok(())
 }
 
+/// Whether `x` and `y` are far from parallel (`SetCanonical` then builds a proper frame).
+fn independent(x: [f64; 3], y: [f64; 3]) -> bool {
+    let len = |v: [f64; 3]| v.iter().map(|c| c * c).sum::<f64>().sqrt();
+    let dot: f64 = x.iter().zip(&y).map(|(a, b)| a * b).sum();
+    (dot / (len(x) * len(y))).abs() < 1.0 - 1e-6
+}
+
 fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
     match op {
         Op::Gcs => {
@@ -358,6 +367,14 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             }
             check_projection_vectors(code, &vecs)?;
             rd.index(1)?;
+            if rd.flag()? {
+                rd.vec3()?;
+                let x = rd.nonzero3()?;
+                let y = rd.nonzero3()?;
+                if !independent(x, y) {
+                    return Err(bad("transform axes parallel"));
+                }
+            }
         }
         Op::SelfIntersect => {
             let c = curve_block(rd)?;

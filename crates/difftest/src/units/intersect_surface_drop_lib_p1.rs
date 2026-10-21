@@ -15,6 +15,12 @@
 //! on both sides (the Rust side applies the same predicate with its own evaluations).
 //!
 //! Deferred cases: `TestSpanAccuracy` spans that reach `smsurf_IsPointOnNormal`
+//! Curves and surfaces may be upstream `.dat` files (database version 30), read on the
+//! C++ side by `SmBSplineCurve::ReadFromFile` / `SmBSplineSurface::ReadFromFile` and on
+//! the Rust side by the same steps (`read_file_db`, then `ReadFromDB`); a `Trim` case
+//! without a domain or interval uses the natural ones, as upstream's `prog_test` does.
+//!
+//! Deferred cases: `TestSpanAccuracy` spans that reach `smsurf_IsPointOnNormal`
 //! (`surface.surface_p3`), every `DropAndTrimCurve` (`SmSurfaceDropCurve::DoTrace`,
 //! `intersect.surface_drop_curve`), and surface evaluations of kinds whose evaluators are
 //! not ported yet.
@@ -24,6 +30,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hermite_curve::HermiteCurve;
@@ -46,7 +53,9 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
+use solidcore::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
 use solidcore::surface::surface::Surface;
+use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::topology::ObjectHandle;
 use solidcore::SolidError;
 use solidcore_ffi::units::intersect_surface_drop_lib_p1 as ffi;
@@ -86,6 +95,10 @@ enum CurveIn {
         cpts: Vec<[f64; 4]>,
         knots: Vec<f64>,
     },
+    /// An upstream `.dat` file read as `SmBSplineCurve::ReadFromFile` does.
+    File {
+        file: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +123,10 @@ enum SurfIn {
         point: [f64; 3],
         axis: [f64; 3],
         swap: bool,
+    },
+    /// An upstream `.dat` file read as `SmBSplineSurface::ReadFromFile` does.
+    File {
+        file: String,
     },
 }
 
@@ -193,8 +210,12 @@ enum Inputs {
     Trim {
         surface: SurfIn,
         curve: CurveIn,
-        domain: [f64; 4],
-        interval: [f64; 2],
+        /// `None`: the surface's natural UV domain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        domain: Option<[f64; 4]>,
+        /// `None`: the curve's natural interval.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        interval: Option<[f64; 2]>,
         tol: f64,
         keep_all: bool,
         on_surface: bool,
@@ -218,6 +239,7 @@ fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
             cpts: cpts.clone(),
             knots: knots.clone(),
         },
+        CurveIn::File { file } => ffi::CurveIn::File { path: file.clone() },
     }
 }
 
@@ -243,6 +265,7 @@ fn ffi_surface(s: &SurfIn) -> ffi::SurfaceIn {
             u: u.clone(),
             v: v.clone(),
         },
+        SurfIn::File { file } => ffi::SurfaceIn::File { path: file.clone() },
         SurfIn::Revolution {
             gen,
             point,
@@ -474,7 +497,34 @@ fn rust_curve(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
                 .map_err(|e| harness(format!("curve: {e}")))?;
             Ok(Curve::from(BSplineCurve::from_nurb(cur, 3, false)))
         }
+        CurveIn::File { file } => {
+            let mut db = read_file_db(file, b'C')?;
+            Curve::read_from_db(k, BSPLINE_CURVE_TYPE, &mut db, 3, 30)
+                .map_err(|e| harness(format!("{file}: {e}")))
+        }
     }
+}
+
+/// The ASCII database stream `SmCurve::ReadFromFile` / `SmSurface::ReadFromFile` read
+/// `path` from, for a file without an `Object` header (database version 30): a leading
+/// line feed is skipped, and a first line starting with `header` (`C` / `S`) too.
+fn read_file_db(path: &str, header: u8) -> Result<DatabaseReader, HarnessError> {
+    let bytes = std::fs::read(path).map_err(|e| harness(format!("{path}: {e}")))?;
+    let mut rest: &[u8] = &bytes;
+    if let Some((b'\n', tail)) = rest.split_first() {
+        rest = tail;
+    }
+    match rest.first() {
+        Some(b'O') => return Err(harness(format!("{path}: versioned file not supported"))),
+        Some(&c) if c == header => {
+            let at = rest.iter().position(|&b| b == b'\n').map_or(rest.len(), |p| p + 1);
+            rest = rest.get(at..).unwrap_or(&[]);
+        }
+        _ => {}
+    }
+    let mut db = DatabaseReader::new();
+    db.open_for_read(rest.to_vec(), FileType::Ascii);
+    Ok(db)
 }
 
 /// The surface; `Ok(None)` when a surface of revolution cannot be made.
@@ -512,6 +562,13 @@ fn rust_surface(k: &Kernel, s: &SurfIn) -> Result<Option<Surface>, HarnessError>
             SurfOfRevolution::create_canonical(k, g, v3(*point), v3(*axis), *swap)
                 .ok()
                 .map(Surface::from)
+        }
+        SurfIn::File { file } => {
+            let mut db = read_file_db(file, b'S')?;
+            Some(
+                Surface::read_from_db(k, B_SPLINE_SURFACE_TYPE, &mut db, 30)
+                    .map_err(|e| harness(format!("{file}: {e}")))?,
+            )
         }
     })
 }
@@ -897,11 +954,16 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;
+            let dom = domain.map_or_else(|| s.natural_uv_domain(), ext);
+            let ivl = interval.map_or_else(
+                || c.natural_interval(),
+                |i| Extent1d::from_min_max(i[0], i[1]),
+            );
             let r = s.drop_and_trim_curve::<ObjectHandle>(
                 k,
-                &ext(*domain),
+                &dom,
                 &c,
-                &Extent1d::from_min_max(interval[0], interval[1]),
+                &ivl,
                 *tol,
                 *keep_all,
                 *on_surface,
@@ -1604,8 +1666,8 @@ fn gen_trim(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     Some(Inputs::Trim {
         surface,
         curve: CurveIn::Line { a: pa, b: pb },
-        domain: nat,
-        interval: [0.0, 1.0],
+        domain: Some(nat),
+        interval: Some([0.0, 1.0]),
         tol: 1.0e-6,
         keep_all: rng.chance(0.5),
         on_surface: rng.chance(0.5),

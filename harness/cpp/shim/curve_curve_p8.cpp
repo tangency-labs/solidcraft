@@ -13,6 +13,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmContext.h>
 #include <SmCurve.h>
@@ -70,6 +71,23 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
     return new (ctx) SmHermiteCurve(p1, d1, p2, d2, dim);
 }
 
+// The transforms `nt (O X Y has_s S)*nt` after a curve block, applied to `c` in order.
+void read_transforms(Rd& rd, SmCurve* c)
+{
+    int64_t nt = rd.idx();
+    for (int64_t i = 0; i < nt; i++)
+    {
+        SmPoint3d o = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        bool has_s = rd.flag();
+        SmVector3d s = rd.vec();
+        SmAxis2Placement a2p;
+        a2p.SetCanonical(o, x, y);
+        c->Transform(a2p, has_s ? &s : NULL);
+    }
+}
+
 // A solution `type nvar nobj o0 o1 value s0 s1 [evalue e0 e1]`; objects `0` = a, `1` = b,
 // `2` = another object, `-1` = NULL.
 void put_sol(std::vector<double>& o, const SmSolution& s, const void* a, const void* b)
@@ -98,10 +116,16 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
     case OP_GCI:
     {
         SmCurve* c = read_curve(rd, ctx);
+        read_transforms(rd, c);
         double a = rd.num();
         double b = rd.num();
         bool same = rd.flag();
-        SmCurve* other = same ? c : read_curve(rd, ctx);
+        SmCurve* other = c;
+        if (!same)
+        {
+            other = read_curve(rd, ctx);
+            read_transforms(rd, other);
+        }
         double a2 = rd.num();
         double b2 = rd.num();
         double tol = rd.num();

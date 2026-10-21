@@ -13075,6 +13075,50 @@ operation, not to the whole B-rep.
   536 deferred, 0 failed, unchanged (its face paths go through the unported
   `topology.brep_p8` and `primitive_creation_p*`).
 
+## Upstream prog_test parity cases (2026-10-21, `tests/upstream-parity`): what they found
+
+New fixtures replicate upstream prog_test calls in `surface.surface_p2` (`ssi_adv.json`,
+`smAdvancedTest.cpp` `my_test_ssi_adv`), `curve.curve_p1/p7/p8/p9`, `surface.surface_p7/p8`,
+`surface.surface_p11` and `intersect.surface_drop_lib_p1` (`upstream_prog_test.json`).
+
+- **`surface.surface_p2` SSI: tangent and singular start points dropped.** Eight
+  `my_test_ssi_adv` part files (`ssi_tor_sph_tan`, `ssi_tor_sph_tan2`,
+  `ssi_tor_in_tor_tang_hyper`, `ssi_tor_in_tor_tan_ellip`, `ssi_rev_rev_sing`,
+  `ssi_cyl_cyl_sing2`, `ssi_clasic_ruled`, `ssi_cylcyl_90_tan`) disagree on `main`: Rust finds
+  0 or fewer curves (e.g. `ssi_tor_sph_tan`: C++ 4 boundary start points, Rust 0). Cause:
+  `SurfaceIntersector::compute_point_values` (`intersect/surface_intersector/p2.rs`, the
+  near-parallel-normals branch) calls the base `compute_singularity_point_base` (`SM_ERR`)
+  where upstream's virtual call reaches `SmAdvSurfaceIntersector::ComputeSingularityPoint`
+  (`SmAdvSurfaceIntersector.cpp:116`), so `FindBoundaryStartPoints` skips those points and
+  traces stop at them. PR #140 adds this dispatch (`advanced` flag); on #140's head all 56
+  pairs pass or defer (0 failures). The eight files are listed in
+  `harness/fixturegen/ssi_adv.py` `PENDING_PR140`; remove the list and regenerate once #140
+  is on `main`.
+- **`surface.surface_p11` `LiftCurve`: `PS_lift_crv2` on `PS_lift_srf2` disagrees**
+  (`smSurfaceTest.cpp:2587`, the "kinked UVTrimCurve" case upstream itself expects to trip
+  `AssertValid`; left out of the fixture). Same max distance 0.009390995684972677, type
+  14033, dim 3, degree 3, but C++ has 235 control points / 79 knots and Rust 232 / 78. The
+  C0 split segment [12.99999867340698, 13]: Rust's 10-sample degenerate check finds all
+  samples within tol/100 and skips it; C++ keeps it (extra knots 12.99999867332897,
+  12.99999999992199; later knots shift by about 1.3e-6). Suspected: the `SmCrvOnSurf`
+  evaluation near the kink inside the `GetDomainWithContinuity` segment (clamping), i.e.
+  `domain_with_continuity` or CrvOnSurf clamping. Open.
+- **Upstream assertion that the C++ itself fails** (`surface.surface_p8`,
+  `smSurfaceTest.cpp` `my_test_csi_tangency`): for the lines with y < 1 the test asserts 2
+  hits, but C++ returns one range-of-values solution (e.g. `prog_csi_tangency_line_00`: t
+  0.4776 to 0.5224); Rust returns the same, so the cases are kept. The circle cases match the
+  assertions.
+- **Back-edges that now block these cases although their units are partial** (library
+  wiring, not done here): `intersect/surface_drop_lib/p1.rs` `drop_curve_trace`
+  (`UNPORTED(intersect.surface_drop_curve)`; defers the 5 `PS10_drp` DropAndTrimCurve cases;
+  `SurfaceDropCurve::drop_trace` exists), and `Surface::create_silhouette_curves`
+  (`surface/surface/p1.rs`, `UNPORTED(intersect.surface_tracer)`; `SurfaceSilhouette` and its
+  trace exist; the non-perspective post-processing of `SmSurface.cpp` ~9632-9695 is also
+  missing), which keeps `smAdvancedTest.cpp` `my_test_sil_adv` out of reach.
+- **`curve.curve_p1` fuzz: `Curve::tessellate` allocated from `min_segments` unchecked**
+  (`tess` with `minseg = 4294967296` aborted the Rust side): fixed on `main` by PR #322
+  (`Line::tessellate` reserves with `try_reserve_exact`, `InvalidInput`).
+
 ## Fuzz "Rust-only hangs" (surface.surface_point_solve_p2, offset.offset_executive_p1; 2026-10-21)
 
 The fuzz sweep (#321-#325) reported two Rust-only timeouts as possible port divergences.
