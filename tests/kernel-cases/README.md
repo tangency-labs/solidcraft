@@ -75,7 +75,7 @@ parts): every issue and PR looked at that did not become a case, with one line e
 | `what` | One line: the geometry that went wrong. |
 | `source` | `analytic` (numbers worked out by hand; `method` gives the formulas) or `invariants` (no number is known: only the outcome, validity and counts are graded). |
 | `method` | How the numbers were derived, or which invariants hold and why. |
-| `outcome` | `solid` (default: the script succeeds) or `refused` (the right answer is a clean error, never a panic or a hang). |
+| `outcome` | `solid` (default: the script succeeds), `refused` (the right answer is a clean error, never a panic or a hang), or `solid_or_refused` (either a clean error or a result graded as usual, where the geometry has no single manifold answer, such as two bodies touching along a curve only). |
 | `valid` | Default `true`: every body is one closed shell (or `shells` in all) that passes the record's structure and geometry checks and, in builds with SMLib, SMLib's `check(All)`. `false` only where the result is legitimately not a solid (a sheet). Where SMLib can't take the record yet (a surface kind its conversion lacks), its check gives no verdict and is not graded. |
 | `shells` | The total number of shells, where it isn't one per body: a body with a sealed void (2), several lumps kept in one body. |
 | `body_count`, `faces`, `edges`, `vertices` | Exact counts, where the geometry fixes them. Faces and edges count whole analytic surfaces and curves once (a full cylinder side is one face). |

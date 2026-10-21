@@ -81,10 +81,15 @@ fn check_case(dir: &str) -> Value {
         out["error"] = json!(format!("this build runs booleans on the {running} kernel, not {}", kernel()));
         return out;
     }
-    let refused = want["outcome"].as_str() == Some("refused");
+    // `refused`: only a clean refusal is right; `solid_or_refused`: a clean refusal, or a result
+    // graded as usual (where the geometry has no manifold answer, such as bodies touching along a
+    // curve only).
+    let outcome = want["outcome"].as_str().unwrap_or("solid");
+    let refused = outcome == "refused";
+    let may_refuse = refused || outcome == "solid_or_refused";
     let mut s = solidcraft_engine::Session::default();
     let ran = s.run_script(&commands);
-    match (ran, refused) {
+    match (ran, may_refuse) {
         (Err(e), _) if crashed(&e.to_string()) => {
             out["status"] = json!("crash");
             out["error"] = json!(e.to_string());
@@ -102,12 +107,12 @@ fn check_case(dir: &str) -> Value {
             out["error"] = json!(e);
             return out;
         }
-        (Ok(_), true) => {
+        (Ok(_), true) if refused => {
             out["status"] = json!("fail");
             out["error"] = json!("succeeded where the case expects a refusal");
             return out;
         }
-        (Ok(_), false) => {}
+        (Ok(_), _) => {}
     }
 
     // Every body in the world, imported components included.

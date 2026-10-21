@@ -1,10 +1,11 @@
 {
- "sources": [
-  "tangency-labs/solidcraft#168"
- ],
- "what": "a rim on a coin's top face that meets the coin along one circle only (no shared area, no shared volume): it must not be joined into it",
- "source": "analytic",
- "method": "coin r10 h5: 500 pi; rim = ring r10..14 standing on z=5 for 3: pi*(196-100)*3 = 288 pi. They share only the circle r10 at z=5, so the result is two bodies (or a refusal, never one joined body); volume 788 pi = 2475.664. body_count 2",
- "body_count": 2,
- "volume_mm3": 2475.5750110287568
+  "sources": [
+    "tangency-labs/solidcraft#168"
+  ],
+  "what": "a rim on a coin's top face that meets the coin along one circle only (no shared area, no shared volume): it must not be joined into it",
+  "source": "analytic",
+  "outcome": "solid_or_refused",
+  "method": "coin r10 h5: 500 pi; rim = ring r10..14 standing on z=5 for 3: pi*(196-100)*3 = 288 pi. They share only the circle r10 at z=5, so the right answer is a clean refusal or two bodies, never one joined body; volume 788 pi = 2475.664. body_count 2",
+  "body_count": 2,
+  "volume_mm3": 2475.5750110287568
 }
