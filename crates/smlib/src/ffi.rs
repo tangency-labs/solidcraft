@@ -179,6 +179,8 @@ mod calls {
 
 pub use calls::*;
 
+pub mod history;
+
 /// Where [`set_log`] sends SMLib's log lines.
 #[cfg(feature = "native")]
 static SINK: std::sync::OnceLock<fn(i32, String)> = std::sync::OnceLock::new();

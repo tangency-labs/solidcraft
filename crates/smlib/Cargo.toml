@@ -26,6 +26,7 @@ native = []
 
 [dependencies]
 log = { workspace = true }
+solidcraft-geom = { workspace = true }
 
 [build-dependencies]
 cc = { version = "1.2", features = ["parallel"] }
