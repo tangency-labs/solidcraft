@@ -1155,11 +1155,6 @@ pub fn refresh_sketch_links(
                 }
                 sk.set_link_source(&l.id, r.source);
                 let _ = sk.set_link_wires(&l.id, &r.wires);
-                // Words built from text parameters change shape when the parameters do: that
-                // rebuild is the text following them, not a reference that changed under it.
-                let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());
-                let others = |sk: &Sketch| (sk.constraints.len(), sk.curves.len().saturating_sub(sk.link_curves(&l.id).len()));
-                let before = others(sk);
                 let mut geom = r.geom.clone();
                 // A source that turned or moved within the sketch plane since the link was read
                 // is matched where it was, then moved: its curves keep their ids.
@@ -1171,8 +1166,8 @@ pub fn refresh_sketch_links(
                     let back = m.inverse();
                     geom = geom.iter().map(|g| back.geom(g)).collect();
                 }
-                match sk.update_link(&l.id, &geom) {
-                    Ok(rebuilt) => {
+                match sk.update_link_detail(&l.id, &geom) {
+                    Ok(update) => {
                         if let Some(m) = &motion {
                             for i in sk.link_points(&l.id) {
                                 if let Some(p) = sk.points.get_mut(i) {
@@ -1185,12 +1180,13 @@ pub fn refresh_sketch_links(
                         {
                             placement.seen = Some(now);
                         }
-                        // A rebuilt projection is only worth a warning when it took something of
-                        // the user's with it: a constraint, a dimension or a curve drawn on it.
-                        if rebuilt {
-                            if !words_follow && others(sk) != before {
-                                warn.push(format!("projected {} changed shape and was rebuilt; constraints on it were removed", l.source.describe()));
-                            }
+                        if update.rebuilt && !update.dropped.is_empty() {
+                            warn.push(format!(
+                                "projected {} changed shape; removed {} on geometry that is gone ({})",
+                                l.source.describe(),
+                                if update.dropped.len() == 1 { "1 constraint".to_string() } else { format!("{} constraints", update.dropped.len()) },
+                                update.dropped.join(", ")
+                            ));
                         } else if r.moved {
                             warn.push(format!("projected {} was re-found on the nearest geometry", l.source.describe()));
                         }

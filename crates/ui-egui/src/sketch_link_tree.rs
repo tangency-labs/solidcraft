@@ -192,4 +192,28 @@ mod tests {
         h.frames(3);
         assert!(crate::scenario::handle_at(&format!("browser:sketch-link:{sketch}:{face}")).is_some());
     }
+
+    #[test]
+    fn a_lost_projection_is_repaired_by_picking_its_new_source() {
+        let (mut h, sketch, face, _, a2) = harness();
+        h.app.run("selection.delete", json!({"items":[{"type":"occurrence","path":[a2]}]})).unwrap();
+        h.app.edit_sketch(sketch);
+        h.frames(3);
+        let target = Target::SketchLink { sketch, link: face.clone() };
+        let repair = crate::context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.repairLink").expect("a lost link offers Repair");
+        assert!(repair.enabled);
+        crate::context_menu::run_item(&mut h.app, &repair, egui::Pos2::ZERO);
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.repair_link"));
+        // A:1's top face, the same shape as the one that went.
+        h.settle();
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(20.0, 20.0, 10.0);
+        h.app.cam.distance = 200.0;
+        let at = h.call("ui.at", json!({"world":[5,5,10]}))["result"].clone();
+        h.step(&json!({ "click": at })).unwrap();
+        h.frames(3);
+        let sk = h.app.session.doc.sketch(sketch).unwrap();
+        assert_eq!(status(&h.app, sketch, sk.link(&face).unwrap()), None, "{:?}", h.app.status);
+        assert!(sk.link(&face).unwrap().placement.as_ref().is_some_and(|p| !p.source.contains(&a2)), "it follows A:1 now");
+        assert!(h.app.tool.is_none(), "the tool ends once repaired");
+    }
 }

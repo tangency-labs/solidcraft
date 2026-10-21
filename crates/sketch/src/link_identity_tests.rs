@@ -427,3 +427,47 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
     let end = sk.points[sk.link_points(&link)[1]].pos;
     assert_eq!(end, Vec2::new(17.0, 5.0), "the line moved to the new geometry");
 }
+
+/// A square face with its corners cut (a chamfer added before the sketch's feature).
+fn chamfered(size: f64, cut: f64) -> Vec<LinkGeom> {
+    let (s, c) = (size, size - cut);
+    let pts = [
+        Vec2::new(-c, -s),
+        Vec2::new(c, -s),
+        Vec2::new(s, -c),
+        Vec2::new(s, c),
+        Vec2::new(c, s),
+        Vec2::new(-c, s),
+        Vec2::new(-s, c),
+        Vec2::new(-s, -c),
+    ];
+    (0..8).map(|i| LinkGeom::Line(pts[i], pts[(i + 1) % 8])).collect()
+}
+
+#[test]
+fn rebuilt_face_keeps_constraints_on_edges_that_survive_and_reports_the_rest() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    let top = sk
+        .link_curves(&link)
+        .into_iter()
+        .find(|c| sk.curve_link_geom(*c) == Some(LinkGeom::Line(Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0))))
+        .unwrap();
+    let top_id = sk.curves[top].id.clone();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, -10.0)).unwrap();
+    let on_edge = sk.add_point(Vec2::new(3.0, 10.0), None).unwrap();
+    let at_corner = sk.add_point(Vec2::new(10.0, -10.0), None).unwrap();
+    let on_edge_id = sk.points[on_edge].id.clone();
+    let kept = sk.add_constraint(ConstraintKind::PointOnCurve { p: on_edge, c: top }, None).unwrap();
+    let lost = sk.add_constraint(ConstraintKind::Coincident { p: at_corner, q: corner }, None).unwrap();
+
+    let update = sk.update_link_detail(&link, &chamfered(10.0, 2.0)).unwrap();
+    assert!(update.rebuilt);
+    assert_eq!(update.dropped, vec![lost], "only the constraint on the cut-away corner goes");
+    let top = sk.curve_index(&top_id).expect("the shortened top edge keeps its id");
+    assert_eq!(sk.curve_link_geom(top), Some(LinkGeom::Line(Vec2::new(8.0, 10.0), Vec2::new(-8.0, 10.0))));
+    let c = sk.constraints.iter().find(|c| c.id == kept).expect("point-on-edge survives the rebuild");
+    let on_edge = sk.point_index(&on_edge_id).unwrap();
+    assert!(matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == on_edge && c == top));
+    assert!(solve(&mut sk).ok());
+}

@@ -204,6 +204,18 @@ that edge only. Projected curves and points are drawn in the projected colour (l
 the lost colour), and dashed when switched to construction with **Normal/Construction**: then
 they bound no profile but stay linked and keep following their source.
 
+**Constraining to the model.** Projected geometry is fixed where its source puts it, so
+constrain and dimension the sketch's own geometry to it. The constraint tools and Dimension
+take a model edge or vertex, or another sketch's curve, directly: the click projects it into the
+sketch first (the status line says so) and uses the projection. A constraint only between
+projections is refused (it could change nothing), a dimension on projected geometry alone can
+only be driven, and Fix says projected geometry is fixed already. When a source changes shape
+(a fillet or chamfer added before the sketch), the projection is made again and its curves and
+points keep their ids wherever the new geometry continues the old (a shortened edge on the same
+line, a hole of the same size), so the constraints and dimensions on them stay; those on
+geometry that is gone, such as a corner cut away, are removed and the sketch's warning names
+them.
+
 **Projecting from another part.** Geometry picked on another component is read from the exact
 placement it was picked on: an edge of the second copy of a part (`A:2`) follows `A:2` when
 it is moved or turned, and moving `A:1` changes nothing. The projection is worked out in the
@@ -242,9 +254,12 @@ eye hides it without changing the sketch (it still bounds profiles), and its men
 
 A projection whose source is gone keeps the last geometry it was stored with (Update
 References stores it) and says it is lost; it is never moved onto another copy of the part
-or a nearby edge. `sketch.repair_link {link, ref}` points it at a new source, keeping its
-curve ids and the constraints on them when the new geometry has the same shape.
-`sketch.references` lists every projection with its source, placements and status.
+or a nearby edge. **Repair Link…** in a lost projection's menu (while its sketch is edited)
+starts a pick: the edge, face or vertex clicked next becomes its source
+(`sketch.repair_link {link, ref}`), keeping its curve ids and the constraints on them when the
+new geometry has the same shape. `sketch.references` lists every projection with its source,
+placements and status; `stale` means the model already shows the projection where its source
+is now and only the stored sketch is behind (editing the sketch or Update References stores it).
 
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch

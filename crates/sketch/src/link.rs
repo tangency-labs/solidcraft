@@ -649,6 +649,61 @@ fn point_roles(curves: &[LCurve], point_count: usize) -> Vec<[usize; 10]> {
     roles
 }
 
+/// What [`Sketch::update_link_detail`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkUpdate {
+    /// The link changed shape and its entities were made again.
+    pub rebuilt: bool,
+    /// Constraints on geometry the rebuild took away (their ids); they were removed.
+    pub dropped: Vec<String>,
+}
+
+/// Pairs `(score, old, new)` taken best (lowest) score first, each old and new used once.
+fn greedy(mut pairs: Vec<(f64, usize, usize)>) -> Vec<(usize, usize)> {
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut old, mut new) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+    let mut out = Vec::new();
+    for (_, k, n) in pairs {
+        if !old.contains(&k) && !new.contains(&n) {
+            old.insert(k);
+            new.insert(n);
+            out.push((k, n));
+        }
+    }
+    out
+}
+
+/// How well `now` continues `was` across a rebuild (lower is better), or `None` when it is not
+/// the same curve: a line on the same infinite line overlapping it (scored by how much of it
+/// is lost), a circle or arc with the same centre and radius, an ellipse, conic or spline whose
+/// defining points stayed within `tol`.
+fn carrier_match(was: &LinkGeom, now: &LinkGeom, tol: f64) -> Option<f64> {
+    match (was, now) {
+        (LinkGeom::Line(a, b), LinkGeom::Line(c, d)) => {
+            let dir = (*b - *a).normalized()?;
+            let len = a.dist(*b);
+            let off = |p: Vec2| (p - *a).cross(dir).abs();
+            if off(*c) > tol || off(*d) > tol {
+                return None;
+            }
+            let (t0, t1) = ((*c - *a).dot(dir), (*d - *a).dot(dir));
+            let overlap = t0.max(t1).min(len) - t0.min(t1).max(0.0);
+            (overlap > tol).then_some(len - overlap + (c.dist(*d) - overlap).abs())
+        }
+        (LinkGeom::Circle(c0, r0), LinkGeom::Circle(c1, r1)) => (c0.dist(*c1) <= tol && (r0 - r1).abs() <= tol).then_some(0.0),
+        (LinkGeom::Arc { c: c0, a: a0, b: b0 }, LinkGeom::Arc { c: c1, a: a1, b: b1 }) => {
+            (c0.dist(*c1) <= tol && (c0.dist(*a0) - c1.dist(*a1)).abs() <= tol).then(|| a0.dist(*a1) + b0.dist(*b1))
+        }
+        (LinkGeom::Ellipse { .. }, LinkGeom::Ellipse { .. })
+        | (LinkGeom::Conic { .. }, LinkGeom::Conic { .. })
+        | (LinkGeom::Spline { .. }, LinkGeom::Spline { .. }) => {
+            let d = was.spot().dist(now.spot());
+            (d <= tol).then_some(d)
+        }
+        _ => None,
+    }
+}
+
 impl Sketch {
     pub fn link(&self, id: &str) -> Option<&Link> {
         self.links.iter().find(|l| l.id == id)
@@ -870,6 +925,20 @@ impl Sketch {
     /// constraints and dimensions on them survive; otherwise the link is rebuilt. Returns
     /// `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
+        self.update_link_detail(id, geom).map(|u| u.rebuilt)
+    }
+
+    /// [`Sketch::update_link`], also telling which constraints a rebuild removed. A rebuilt
+    /// link's entities take the ids of the old ones in the same place (a point where a point
+    /// was, a line on the same line, a circle with the same centre and radius), so the
+    /// constraints and dimensions on them stay; only those on geometry that is gone are removed.
+    pub fn update_link_detail(&mut self, id: &str, geom: &[LinkGeom]) -> Result<LinkUpdate> {
+        let rebuilt = self.update_link_inner(id, geom)?;
+        Ok(LinkUpdate { rebuilt: rebuilt.is_some(), dropped: rebuilt.unwrap_or_default() })
+    }
+
+    /// `None` when the link kept its entities, else the ids of the constraints the rebuild removed.
+    fn update_link_inner(&mut self, id: &str, geom: &[LinkGeom]) -> Result<Option<Vec<String>>> {
         if self.link(id).is_none() {
             return Err(SketchError::Unknown(id.into()));
         }
@@ -1010,7 +1079,7 @@ impl Sketch {
                 && lone_old.len() == points.len()
                 && (points.len() == lay.pts.len() && same_geometry(&old, &fresh) || only_stations_gone(&old, &fresh))
             {
-                return Ok(false);
+                return Ok(None);
             }
         }
         // A resized face can enumerate the same boundary in another order. Match the
@@ -1154,7 +1223,7 @@ impl Sketch {
                         *r = *value;
                     }
                 }
-                return Ok(false);
+                return Ok(None);
             }
             // A face resized by more than the match above allows (#9001: an angle's wall made
             // thicker moves the inner corner by more than a tenth of the face) is still the same
@@ -1205,7 +1274,7 @@ impl Sketch {
                     *slot = *r;
                 }
             }
-            return Ok(false);
+            return Ok(None);
         }
         // A face seen edge-on was once saved as two lines on the same two points, one each way;
         // it is one line now. Keep the first line (an offset or a constraint may name it) and
@@ -1224,8 +1293,11 @@ impl Sketch {
             if let Some(p) = self.points.get_mut(p1) {
                 p.pos = b;
             }
+            let before: Vec<String> = self.constraints.iter().map(|c| c.id.clone()).collect();
             self.remove_curves(&[second]);
-            return Ok(true);
+            // Constraints on the dropped line go with it, and are reported as a rebuild's are.
+            let dropped = before.into_iter().filter(|c| !self.constraints.iter().any(|k| &k.id == c)).collect();
+            return Ok(Some(dropped));
         }
         // Rebuild: drop the old entities (constraints on them go too) and make new ones. A curve
         // that was switched to construction stays construction: each new curve takes the line
@@ -1236,8 +1308,16 @@ impl Sketch {
                 Some((std::mem::discriminant(&self.curves.get(*ci)?.kind), self.curve_link_geom(*ci)?.spot(), self.curves.get(*ci)?.construction))
             })
             .collect();
+        let constraints = self.constraints.clone();
+        let point_ids: Vec<String> = self.points.iter().map(|p| p.id.clone()).collect();
+        let curve_ids: Vec<String> = self.curves.iter().map(|c| c.id.clone()).collect();
+        let old_points: Vec<(String, Vec2)> = points.iter().filter_map(|i| self.points.get(*i).map(|p| (p.id.clone(), p.pos))).collect();
+        let old_curves: Vec<(String, LinkGeom)> =
+            curves.iter().filter_map(|i| Some((self.curves.get(*i)?.id.clone(), self.curve_link_geom(*i)?))).collect();
         self.drop_link_entities(id);
         self.build_link(id, &lay)?;
+        self.keep_link_ids(id, &old_points, &old_curves);
+        let dropped = self.restore_constraints(constraints, &point_ids, &curve_ids);
         if was.iter().any(|(.., construction)| *construction) && was.len() <= 4096 {
             for ci in self.link_curves(id) {
                 let Some(spot) = self.curve_link_geom(ci).map(|g| g.spot()) else { continue };
@@ -1248,7 +1328,7 @@ impl Sketch {
                 }
             }
         }
-        Ok(true)
+        Ok(Some(dropped))
     }
 
     /// Where this sketch's points were in `stored`, the same sketch before its links were
@@ -1327,6 +1407,80 @@ impl Sketch {
         self.remove_points(&pts);
         // Removal prunes empty links; this one stays.
         self.links = keep;
+    }
+
+    /// Give a rebuilt link's new entities the ids of its old ones in the same place, so
+    /// constraints, dimensions and anything else naming them keep pointing at the same
+    /// geometry. Each old id goes to at most one new entity; a match must be clear (within a
+    /// thousandth of the link's size), never a guess between neighbours.
+    fn keep_link_ids(&mut self, id: &str, old_points: &[(String, Vec2)], old_curves: &[(String, LinkGeom)]) {
+        let new_points = self.link_points(id);
+        let new_curves = self.link_curves(id);
+        // Every pair is compared; a link this big keeps the fresh ids.
+        const MAX_PAIRS: usize = 4_000_000;
+        if old_points.len().saturating_mul(new_points.len()) > MAX_PAIRS || old_curves.len().saturating_mul(new_curves.len()) > MAX_PAIRS {
+            return;
+        }
+        let size: Aabb2 = old_points.iter().map(|(_, p)| *p).chain(new_points.iter().filter_map(|i| self.point(*i))).collect();
+        let tol = ((size.max - size.min).len() * 1e-3).max(1e-6);
+        if !tol.is_finite() {
+            return;
+        }
+        // Points: nearest pairs first, each side used once.
+        let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+        for (k, (_, was)) in old_points.iter().enumerate() {
+            for (n, i) in new_points.iter().enumerate() {
+                if let Some(d) = self.point(*i).map(|q| q.dist(*was))
+                    && d <= tol
+                {
+                    pairs.push((d, k, n));
+                }
+            }
+        }
+        for (k, n) in greedy(pairs) {
+            if let (Some((old, _)), Some(i)) = (old_points.get(k), new_points.get(n))
+                && let Some(p) = self.points.get_mut(*i)
+            {
+                p.id = old.clone();
+            }
+        }
+        // Curves: the same kind on the same carrier (line, circle), best overlap first.
+        let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+        for (k, (_, was)) in old_curves.iter().enumerate() {
+            for (n, i) in new_curves.iter().enumerate() {
+                if let Some(score) = self.curve_link_geom(*i).and_then(|now| carrier_match(was, &now, tol)) {
+                    pairs.push((score, k, n));
+                }
+            }
+        }
+        for (k, n) in greedy(pairs) {
+            if let (Some((old, _)), Some(i)) = (old_curves.get(k), new_curves.get(n))
+                && let Some(c) = self.curves.get_mut(*i)
+            {
+                c.id = old.clone();
+            }
+        }
+    }
+
+    /// Put back `constraints` (the list before a link was rebuilt, over entities numbered as
+    /// `point_ids` / `curve_ids` were) on the entities that now carry those ids. Returns the
+    /// ids of the constraints that lost an entity and were left out.
+    fn restore_constraints(&mut self, constraints: Vec<crate::model::Constraint>, point_ids: &[String], curve_ids: &[String]) -> Vec<String> {
+        let points: std::collections::HashMap<&str, usize> = self.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let curves: std::collections::HashMap<&str, usize> = self.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+        let pm = |i: usize| point_ids.get(i).and_then(|id| points.get(id.as_str()).copied());
+        let cm = |i: usize| curve_ids.get(i).and_then(|id| curves.get(id.as_str()).copied());
+        let mut kept = Vec::with_capacity(constraints.len());
+        let mut dropped = Vec::new();
+        for mut c in constraints {
+            if c.kind.remap(&pm, &cm) {
+                kept.push(c);
+            } else {
+                dropped.push(c.id);
+            }
+        }
+        self.constraints = kept;
+        dropped
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.

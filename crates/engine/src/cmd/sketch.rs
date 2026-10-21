@@ -1821,6 +1821,9 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) 
     let mut residual = None;
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
         let k = f(sk)?;
+        if only_projections(sk, &k) {
+            return Err(bad(cmd, PROJECTED_ONLY));
+        }
         let rep = solve(&mut sk.clone());
         before = Some(rep.dof);
         let order = entity_order(sk, p);
@@ -1836,6 +1839,32 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) 
     })?;
     let by = redundancy(s, p, cmd, before, &info, residual, &id)?;
     constraint_result(p, cmd, id, info, by, Value::Null)
+}
+
+/// Why Fix changes nothing on projected geometry.
+pub(super) const PROJECTED_FIXED: &str =
+    "projected geometry is always fixed where its source puts it; Break Link turns it into geometry you can fix and move";
+
+/// Why a constraint on projected geometry alone is refused.
+const PROJECTED_ONLY: &str = "projected geometry stays where its source puts it, so a constraint only between projections can change nothing;      constrain the sketch's own geometry to the projection instead";
+
+/// Every entity `k` refers to is held in place (fixed or projected) and at least one is
+/// projected: nothing it names can move, so it can only restate the source or conflict with it.
+pub(super) fn only_projections(sk: &Sketch, k: &ConstraintKind) -> bool {
+    let (points, curves) = (std::cell::RefCell::new(Vec::new()), std::cell::RefCell::new(Vec::new()));
+    k.clone().remap(
+        &|p| {
+            points.borrow_mut().push(p);
+            Some(p)
+        },
+        &|c| {
+            curves.borrow_mut().push(c);
+            Some(c)
+        },
+    );
+    let (points, curves) = (points.into_inner(), curves.into_inner());
+    let projected = points.iter().any(|p| sk.points.get(*p).is_some_and(|q| q.link.is_some())) || curves.iter().any(|c| sk.is_linked_curve(*c));
+    projected && points.iter().all(|p| sk.point_locked(*p)) && curves.iter().all(|c| sk.curve_locked(*c))
 }
 
 /// A sketch entity a constraint is applied to.
@@ -2720,6 +2749,10 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
                 curves.push(sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?);
             }
         }
+        // Only projections (not text): say why nothing changes rather than nothing at all.
+        let projection = |link: Option<&str>| link.and_then(|l| sk.link(l)).is_some_and(|l| l.kind != solidcraft_sketch::LinkKind::Text);
+        let only_projected = pts.iter().all(|q| projection(sk.points.get(*q).and_then(|x| x.link.as_deref())))
+            && curves.iter().all(|c| projection(sk.curves.get(*c).and_then(|x| x.link.as_deref())));
         let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
@@ -2749,7 +2782,11 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
                 sk.constraints.retain(|k| !matches!(k.kind, ConstraintKind::Fix { p } if ids.contains(&p)));
             }
         }
-        Ok(json!({"fixed": fix, "changed": n}))
+        let mut out = json!({"fixed": fix, "changed": n});
+        if only_projected {
+            out["note"] = json!(PROJECTED_FIXED);
+        }
+        Ok(out)
     })?;
     Ok(json!({"result": n, "sketch": info}))
 }
@@ -2785,7 +2822,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let value = expr(p, "value");
     let text_at = p.get("text_at").and_then(vec2);
-    let driven = bool_(p, "driven").unwrap_or(false);
+    let mut driven = bool_(p, "driven").unwrap_or(false);
     // `name = expression` defines the user parameter `name` and dimensions with it (#2916).
     let (defines, value) = match value.as_ref().and_then(|v| solidcraft_doc::expr::definition(v.as_str())) {
         Some((name, rhs)) => {
@@ -3001,6 +3038,19 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "cannot dimension that combination of entities")),
         };
         let is_angle = k.is_angle();
+        // Projected geometry is sized by its source: a dimension on it alone can only measure.
+        if !driven && only_projections(sk, &k) {
+            if !str_(p, "if_redundant").is_some_and(|m| m.eq_ignore_ascii_case("driven")) {
+                return Err(bad(
+                    cmd,
+                    "that dimension measures only projected geometry, which its source sizes; add it as a driven (reference) dimension with driven: true",
+                ));
+            }
+            if let Some((name, _)) = &defines {
+                return Err(bad(cmd, format!("value: a dimension on projected geometry only measures, so it cannot define `{name}`")));
+            }
+            driven = true;
+        }
         if driven {
             // A reference dimension: measures, no parameter.
             let name = k.name();

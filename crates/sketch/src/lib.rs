@@ -56,8 +56,8 @@ pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
 pub use fonts::{DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, installed_families, set_font_file_check};
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{
-    Link, LinkGeom, LinkKind, LinkPlacement, LinkSource, MAX_LINK_ENTITIES, MAX_LINK_OMIT, MAX_PLACEMENT_PATH, SKETCH_AXIS_HALF, TextExprs,
-    sketch_axis_geom,
+    Link, LinkGeom, LinkKind, LinkPlacement, LinkSource, LinkUpdate, MAX_LINK_ENTITIES, MAX_LINK_OMIT, MAX_PLACEMENT_PATH, SKETCH_AXIS_HALF,
+    TextExprs, sketch_axis_geom,
 };
 pub use model::{
     Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, SPoint, Sketch, SketchError,
