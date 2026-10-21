@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3368"
+ ],
+ "what": "a finely faceted body (a 1200-sided prism) with a curved partner: a vertical bore and a horizontal cross hole drilled through it (the case where the B-rep ladder is bounded but must still decide)",
+ "source": "analytic",
+ "method": "A regular N-gon of circumradius R (one vertex on +x) has area N/2 R^2 sin(2 pi/N). Plate: 1200-gon R=30, h=10: V0 = 28274.2047. Vertical bore R=5 at (-15,12), through the whole thickness, inside the outline: -pi*25*10 = -785.3982. Cross hole R=3 along x at y=0, z=5 (z 2..8, inside the thickness): it spans the polygon's full chord on the x axis, which is 2R = 60 because vertices sit at angles 0 and 180 deg: -pi*9*60 = -1696.4600 (the hole is clear of the bore: bore y 7..17, hole y -3..3). V = 25792.3465 mm3.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 25792.3465,
+ "bbox": {
+  "min": [
+   -30,
+   -30,
+   0
+  ],
+  "max": [
+   30,
+   30,
+   10
+  ]
+ }
+}

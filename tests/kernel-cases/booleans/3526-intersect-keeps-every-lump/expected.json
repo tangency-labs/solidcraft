@@ -5,8 +5,8 @@
   ],
   "what": "intersect of a two-lump target (two spheres joined while apart) with a box holding the bottom half of each",
   "source": "analytic",
-  "method": "box x -10..40, y -10..10, z -10..0 holds the z<=0 half of each r=4 sphere (centres (0,0,0), (30,0,0)): V = 2 * (2/3) pi 4^3 = 268.083. The body must not be removed. valid is false only because the one body holds two separate shells, which the rig's one-shell check does not allow",
+  "method": "box x -10..40, y -10..10, z -10..0 holds the z<=0 half of each r=4 sphere (centres (0,0,0), (30,0,0)): V = 2 * (2/3) pi 4^3 = 268.083. The body must not be removed. One body with two shells",
   "body_count": 1,
-  "volume_mm3": 268.0826,
-  "valid": false
+  "shells": 2,
+  "volume_mm3": 268.0826
 }

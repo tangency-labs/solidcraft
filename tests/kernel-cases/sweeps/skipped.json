@@ -1,0 +1,290 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4139",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"boolean Union: no result\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4093",
+  "why": "reproduction script cut off in the source (a 3-turn guided thread sweep cut; the generator stops mid-way) and the run takes about 48 s, over the case budget"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4092",
+  "why": "reproduction JSON cut off in the source (the 50-command script stops mid-way, rib shapes not given in the text)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4037",
+  "why": "empty report: the loft failure arrived with no content"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4006",
+  "why": "other area: import (STEP export of a revolve written as a cone of semi-angle pi/2; the revolve itself is right, and the import rig holds this as 4006-plane-written-as-cone-of-nearly-right-angle)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4005",
+  "why": "other area: import (STEP export writes a cylinder as a cone of semi-angle 8e-12; the revolve itself is right, and the import rig holds this as 4005-cylinder-written-as-near-zero-cone)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3960",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"boolean Union: no result\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3837",
+  "why": "not geometry: exploded view steps, easing and trail lines (assembly presentation)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3806",
+  "why": "other area: import (IGES surface of revolution of an arc read as a whole sphere; held by the import rig as 3806-iges-revolved-arc-spherical-cap-dome)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3790",
+  "why": "feature request: square and triangular pipe sections, no geometry to grade (the pipe takes a circular section only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3781",
+  "why": "UI feature request: a target-body picker in the Extrude, Sweep and Revolve dialogs (the command already takes targets, held by the loft targets case 271)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3752",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"boolean Union: no result\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3726",
+  "why": "UI: the dialog was opened with no sections picked (\"select the sections, one sketch each first\"); no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3724",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"boolean Union: no result\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3717",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"boolean Union: no result\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3697",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join, \"unexpected result\" with only a screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3691",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (a 90 degree revolve joined to the bottom of a letter L; the design is only in an attached file)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3636",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (coil join, Union no result; the target body is not given and the pitch was typed with a decimal comma)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3635",
+  "why": "feature request: start and end conditions for extrude, hole and loft; no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3545",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3433",
+  "why": "not geometry: GPU path tracer shader cache"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3308",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (loft join of two sketches)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3241",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3215",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (a 15-profile revolve cut that runs for minutes)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3076",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve join of three profiles against a body with 29 curved faces)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3063",
+  "why": "UI: the dialog was opened with no sections picked; the reporter wants a spline loft that is not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2993",
+  "why": "not reproduced and no geometry: a circle swept along a fit-point spline follows the path on current builds; the design with the failing sketch placement was not attached"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2990",
+  "why": "other area: shell (shelling a loft; held by the shell rig as 3669-shell-lofted-square-frustum)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2954",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (twisted annular sweep cut; the design was lost)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2883",
+  "why": "UI: the dialog was opened with no profiles picked (\"select profiles of two or more sketches first\"); working as designed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2816",
+  "why": "not reproduced and no geometry: a surface sweep that went the opposite way from the path; the sketches were not attached (the sweep starts at the path end nearest the profile)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2811",
+  "why": "other area: fillets (performance of filleting many rib roots)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2802",
+  "why": "UI: leave sketch mode when Extrude starts; no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2747",
+  "why": "no geometry: \"revolve does not work on a selected face of a cube\" with no axis or dimensions; a face profile has no axis lying in its plane to revolve about"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2673",
+  "why": "tessellation: artefacts on the arc of a revolved half pill seen in a screenshot, with no dimensions that fix the sketch (display is owned elsewhere)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2656",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (sweep cut along an arc and a line)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2576",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (loft join of two sketches)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2515",
+  "why": "empty report: no body, no parameters, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2442",
+  "why": "empty report: the sweep failure arrived with no content"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2350",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (crash while running a 5-section loft join named RainRidge; sketches not given)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2333",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (a 5 degree symmetric revolve join to skin a hole in a cylinder; no dimensions)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2216",
+  "why": "UI: an edge cannot be picked as a sweep path (\"select the path first\"); no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2004",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (revolve cut, \"implausible result volume 298.2432\")"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1988",
+  "why": "UI: hidden bodies are joined by a loft join (visibility scoping of the join participants); the loft with explicit targets is held by case 271"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1775",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (loft cut of two sketches)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1402",
+  "why": "no geometry: an auto-report with only the failing command's parameters (sketch and profile ids), no sketch, axis or body to rebuild from (sweep join of six profiles; design not attached)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1213",
+  "why": "other area: fillets (a round or chamfer on the end circle of a bent lofted tube)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#442",
+  "why": "other area: booleans (inspect.interference misses a 0.36 mm3 overlap with a small rib)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#171",
+  "why": "not geometry: the CLI panics when its stdout pipe is closed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3987",
+  "why": "other area: import (revolve, sweep and loft joined to a part nested in a STEP assembly)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3901",
+  "why": "other area: import (STEP conformance parts, cones to a point)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3880",
+  "why": "other area: import (STEP conformance regression sweep)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3840",
+  "why": "not geometry: the pull request for the exploded view steps (#3837)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3818",
+  "why": "other area: tessellation (hovering a long helical edge)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3813",
+  "why": "other area: import (the fix for #3806, IGES revolved arc)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3318",
+  "why": "other area: booleans (symmetric through-all lens cut on a revolved ring that shares its outline cylinder; the reproduction is an example file not given in the report)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2815",
+  "why": "UI: the pull request finishing the sketch when Extrude or Revolve starts"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2791",
+  "why": "other area: booleans (lens-profile cut into a revolved quarter sphere; the profile is not given in the report)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2486",
+  "why": "other area: shell (shelling revolved barrels; held by the shell rig)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2276",
+  "why": "not geometry: inspect.parameter_sweep checks a design over a parameter range (a design-check command, not a sweep feature)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2242",
+  "why": "UI: the arc sweep value box covered the end-point pick (the sketch arc \"sweep\", not a solid sweep)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1981",
+  "why": "not geometry: joint sweep (driving an assembly joint), not a solid sweep"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1928",
+  "why": "other area: import (STEP export of revolved faces scaled across their axis)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1555",
+  "why": "not geometry: headless pictures on the GPU"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1496",
+  "why": "other area: import (STEP export of shelled revolved bodies)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1099",
+  "why": "not geometry: startup crash on D3D12, tessellation pipeline fallback"
+ },
+ {
+  "source": "tangency-labs/solidcraft#709",
+  "why": "UI: unit labels in the primitive dialogs"
+ },
+ {
+  "source": "tangency-labs/solidcraft#705",
+  "why": "UI: Extrude and Revolve leave the Profiles field empty when the last sketch is used"
+ },
+ {
+  "source": "tangency-labs/solidcraft#536",
+  "why": "not geometry: inspect.interference pruning for large body counts"
+ },
+ {
+  "source": "tangency-labs/solidcraft#407",
+  "why": "not geometry: component placement frames when an extrude or revolve uses a sketch of another component (assembly)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#174",
+  "why": "not geometry: the fix for the closed stdout pipe panic (#171)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#85",
+  "why": "not geometry: batch rollback and deleting a sketch removes its pipe (document history)"
+ }
+]

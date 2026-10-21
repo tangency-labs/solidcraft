@@ -26,6 +26,8 @@ struct Options {
     area: Option<String>,
     timeout: Duration,
     jobs: usize,
+    /// Where to keep every case's full result as JSON.
+    results: Option<String>,
 }
 
 fn options(rest: &[&str]) -> Result<Options, String> {
@@ -38,7 +40,7 @@ fn options(rest: &[&str]) -> Result<Options, String> {
     };
     let secs = arg("--timeout").map(|t| t.parse::<u64>().map_err(|e| format!("--timeout: {e}"))).transpose()?.unwrap_or(DEFAULT_TIMEOUT_S);
     let jobs = arg("--jobs").map(|j| j.parse::<usize>().map_err(|e| format!("--jobs: {e}"))).transpose()?.unwrap_or(4).clamp(1, 32);
-    Ok(Options { kernels, cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs })
+    Ok(Options { kernels, cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, results: arg("--results") })
 }
 
 fn read(path: &Path) -> Value {
@@ -323,6 +325,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
         return Err(format!("no cases (recipe.json + expected.json) under {}", dir.display()));
     }
     let results = run_all(&o, &list);
+    if let Some(path) = &o.results {
+        let text = serde_json::to_string_pretty(&results).map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
+    }
     println!("{}", write_report(&o, &dir, &list, &results)?);
     Ok(())
 }

@@ -10,12 +10,22 @@ pub struct Validity {
     /// The record: structure, then geometry against topology within tolerances.
     pub record: Result<(), String>,
     /// SMLib's `check(All)` of the record; `None` in a build without SMLib.
-    pub smlib: Option<Result<(), String>>,
+    pub smlib: Option<SmlibCheck>,
+}
+
+/// SMLib's verdict on a body.
+#[derive(Clone, Debug)]
+pub enum SmlibCheck {
+    Valid,
+    Invalid(String),
+    /// The record can't be built in SMLib yet (a geometry kind the conversion doesn't take): no
+    /// verdict, and no fault of the body's.
+    NotSupported(String),
 }
 
 impl Validity {
     pub fn ok(&self) -> bool {
-        self.record.is_ok() && self.smlib.as_ref().is_none_or(Result::is_ok)
+        self.record.is_ok() && !matches!(self.smlib, Some(SmlibCheck::Invalid(_)))
     }
 }
 
@@ -30,16 +40,23 @@ pub fn validity(body: &Body) -> Validity {
 }
 
 #[cfg(feature = "smlib")]
-fn smlib_validity(body: &Body) -> Option<Result<(), String>> {
-    let checked = crate::smlib_body(body).map_err(|e| e.to_string()).and_then(|b| {
-        let r = b.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("SMLib check: {e}"))?;
-        if r.is_valid() { Ok(()) } else { Err(format!("SMLib check: {r}")) }
-    });
-    Some(checked)
+fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
+    let b = match crate::smlib_body(body) {
+        Ok(b) => b,
+        Err(e) => {
+            let e = e.to_string();
+            return Some(if e.contains("not supported yet") { SmlibCheck::NotSupported(e) } else { SmlibCheck::Invalid(e) });
+        }
+    };
+    Some(match b.check(solidcraft_smlib::CheckLevel::All) {
+        Ok(r) if r.is_valid() => SmlibCheck::Valid,
+        Ok(r) => SmlibCheck::Invalid(format!("SMLib check: {r}")),
+        Err(e) => SmlibCheck::Invalid(format!("SMLib check: {e}")),
+    })
 }
 
 #[cfg(not(feature = "smlib"))]
-fn smlib_validity(_: &Body) -> Option<Result<(), String>> {
+fn smlib_validity(_: &Body) -> Option<SmlibCheck> {
     None
 }
 

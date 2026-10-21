@@ -226,5 +226,17 @@
  {
   "source": "tangency-labs/solidcraft#1020",
   "why": "CPU or window threads (off-thread evaluation, freezes), not modelled threads: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#987",
+  "why": "auto-report with a fillet's four edge picks and a screenshot only ('a ghost in the thread creation'): no design, no thread parameters, nothing to rebuild or compute"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3130",
+  "why": "auto-report with command parameters only (an M5 drilled hole at a point the comment reads as off the part): no design; a drilled M5 hole in a block works, so there is no geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3824",
+  "why": "auto-report with command parameters only (an M5 drilled hole from sketch point 8, failing 'no cylindrical face there to thread'): the sketch's face is not in the report, and a drilled M5 hole from a point on a flat block face works"
  }
 ]

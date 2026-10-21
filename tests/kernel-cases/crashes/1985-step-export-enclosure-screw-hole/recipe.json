@@ -834,7 +834,7 @@
   {
    "command": "file.export",
    "params": {
-    "path": "/tmp/kernel-case-1985.step",
+    "path": "$OUT/kernel-case-1985.step",
     "format": "step"
    }
   },

@@ -4,8 +4,8 @@
   ],
   "what": "a cut over the bottom edge of a revolved cylinder that holds a sealed spherical void on its axis: the body must not come out empty or refused",
   "source": "analytic",
-  "method": "revolved cylinder r24 h60 minus the sealed sphere r2 at z=30 minus the box x 20..30, y -10..10, z -5..10 where it meets the cylinder: {x>=20, |y|<=10, x^2+y^2<=24^2} is Int from -10 to 10 of (sqrt(576-y^2) - 20) dy = 10*sqrt(476) + 576*asin(10/24) - 400 = 65.725 over z in 0..10. V = pi*24^2*60 - 4/3*pi*2^3 - 10*area = 107882.68. One body that holds two shells (outer and the void), so valid is false: the rig reads more than one shell as not a solid",
-  "valid": false,
+  "method": "revolved cylinder r24 h60 minus the sealed sphere r2 at z=30 minus the box x 20..30, y -10..10, z -5..10 where it meets the cylinder: {x>=20, |y|<=10, x^2+y^2<=24^2} is Int from -10 to 10 of (sqrt(576-y^2) - 20) dy = 10*sqrt(476) + 576*asin(10/24) - 400 = 65.725 over z in 0..10. V = pi*24^2*60 - 4/3*pi*2^3 - 10*area = 107882.68. One body with two shells (outer and the void)",
   "body_count": 1,
+  "shells": 2,
   "volume_mm3": 107882.68287918373
 }
