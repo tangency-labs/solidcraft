@@ -45,6 +45,7 @@ fn surface_of(shell: mt::Shell) -> Body {
         display_of: None,
         meshes: None,
         phased: false,
+        tolerances: None,
         regularization_protected: false,
     }
 }

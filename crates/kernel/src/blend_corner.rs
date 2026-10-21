@@ -33,6 +33,10 @@ pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
     if edges.iter().any(|(p, r)| !(p.is_finite() && r.is_finite() && *r > 1e-6 && *r < 1e6)) {
         return Err(KernelError::Invalid("fillet size must be positive".into()));
     }
+    if crate::blend_smlib::selected()? {
+        let (points, radii): (Vec<Vec3>, Vec<f64>) = edges.iter().copied().unzip();
+        return crate::blend_smlib::fillet_each(body, &points, &radii);
+    }
     // Each step's result carries its history over `[body]`.
     let counts = crate::record::counts(&[body]);
     let mut cur = crate::boolean_record::healed(body)?;

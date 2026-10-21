@@ -24,8 +24,10 @@
 //! - **Pcurves:** computed from each edge record on its face's surface record
 //!   (`solidcraft_geom::brep::pcurve`), never SMLib's UV trims, moved by whole periods into the
 //!   face's domain.
-//! - **Tolerances:** SMLib's intersection tolerance, or 10⁻⁶ of the body's size (at least 10⁻⁵ mm)
-//!   when larger, for the body, every edge and every vertex.
+//! - **Tolerances:** each edge's and vertex's own as SMLib reports it (`EDGE_TOLERANCE`,
+//!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
+//!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
+//!   floor where larger) for the body, every edge and every vertex.
 use std::f64::consts::TAU;
 
 use std::collections::HashMap;
@@ -214,6 +216,8 @@ const F64_IDS: &[i32] = &[
     FACE_TORUS_REF_DIRECTION,
     FACE_TORUS_MAJOR_RADIUS,
     FACE_TORUS_MINOR_RADIUS,
+    EDGE_TOLERANCE,
+    VERTEX_TOLERANCE,
 ];
 
 // The kind values as the arrays hold them (int64); a local item shadows the glob import.
@@ -561,6 +565,7 @@ fn onto(r: [f64; 2], natural: b::Natural) -> [f64; 2] {
 // ---- The mapping ----------------------------------------------------------------------------
 
 /// One face before renumbering: loops relative to the record's normal, as (edge, forward).
+#[derive(Clone)]
 struct Face {
     surface: b::Surface,
     domain: [[f64; 2]; 2],
@@ -607,11 +612,26 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         return Err(invalid("extent"));
     }
     let floor = (1e-6 * size).max(1e-5);
-    let tolerance = match flat.f(TOLERANCE) {
+    let largest = match flat.f(TOLERANCE) {
         [t] if t.is_finite() && *t > floor => *t,
         [_] => floor,
         _ => return Err(invalid("tolerance")),
     };
+    // Each edge's and vertex's own tolerance where SMLib gives them (never below the floor); the
+    // body's is then the floor, and only what needs more carries more. Without them, every
+    // tolerance is the largest SMLib reports for the body.
+    let own = |id: i32, n: usize| -> Res<Option<Vec<f64>>> {
+        match flat.f(id) {
+            [] => Ok(None),
+            t if t.len() == n && t.iter().all(|x| x.is_finite() && *x > 0.0) => Ok(Some(t.iter().map(|x| x.max(floor)).collect())),
+            _ => Err(invalid("edge or vertex tolerances")),
+        }
+    };
+    let n_vertex_points = flat.f(VERTEX_POSITION).len() / 3;
+    let edge_tolerances = own(EDGE_TOLERANCE, flat.i(EDGE_CURVE_TYPE).len())?;
+    let vertex_tolerances = own(VERTEX_TOLERANCE, n_vertex_points)?;
+    let tolerance = if edge_tolerances.is_some() && vertex_tolerances.is_some() { floor } else { largest };
+    let tolerances = Tolerances { body: tolerance, edges: edge_tolerances, vertices: vertex_tolerances };
 
     // Topology blocks.
     let n_faceuses = flat.i(FACEUSE_FACE).len();
@@ -695,7 +715,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         faces.push(Face { surface, domain, agrees: true, loops: out });
     }
     for face in &mut faces {
-        if outer_area(face, &edges, tolerance)? < 0.0 {
+        if outer_area(face, &edges, largest)? < 0.0 {
             face.agrees = false;
             for l in &mut face.loops {
                 if let Loop::Edges(uses) = l {
@@ -796,10 +816,22 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     }
     let shells: Vec<Vec<(u32, bool)>> = order.iter().filter_map(|s| shells.get(*s as usize).cloned()).collect();
 
-    canonical(Parts { faces, edges, shells, regions }, n_vertices, flat, tolerance).map(|(brep, order)| (brep, report, order))
+    let parts = Parts { faces, edges, shells, regions };
+    let made = match canonical(parts.clone(), n_vertices, flat, &tolerances) {
+        // SMLib's own tolerance for an edge or vertex can understate what its approximated
+        // geometry needs here (a blend's end curve 2.3e-5 mm off its plane at 2e-5): then the
+        // largest SMLib reports for the body, everywhere, as without per-edge tolerances.
+        Err(e) if tolerances.edges.is_some() || tolerances.vertices.is_some() => {
+            let uniform = Tolerances { body: largest, edges: None, vertices: None };
+            canonical(parts, n_vertices, flat, &uniform).map_err(|_| e)
+        }
+        other => other,
+    };
+    made.map(|(brep, order)| (brep, report, order))
 }
 
 /// The mapped records before renumbering.
+#[derive(Clone)]
 struct Parts {
     faces: Vec<Face>,
     edges: Vec<Edge>,
@@ -811,9 +843,28 @@ struct Parts {
 /// the faces (a face whose first oriented face is reversed walked backwards), vertices through
 /// the edges and then the vertex loops, with each face's pcurves; validated. With it, the
 /// canonical index of each array face and edge.
-fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res<(b::Brep, Order)> {
+/// The record's tolerances: the body's, and each array edge's and vertex's own where given.
+struct Tolerances {
+    body: f64,
+    edges: Option<Vec<f64>>,
+    vertices: Option<Vec<f64>>,
+}
+
+impl Tolerances {
+    fn edge(&self, e: usize) -> f64 {
+        self.edges.as_ref().and_then(|t| t.get(e)).copied().unwrap_or(self.body)
+    }
+
+    fn vertex(&self, v: usize) -> f64 {
+        self.vertices.as_ref().and_then(|t| t.get(v)).copied().unwrap_or(self.body)
+    }
+}
+
+fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerances) -> Res<(b::Brep, Order)> {
+    let tolerance = tolerances.body;
     let Parts { mut faces, mut edges, shells, regions } = parts;
     let n_edges = edges.len();
+    // A copy made by the split keeps the tolerance of the array edge or vertex it copies.
     let (edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
@@ -899,7 +950,8 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
     let mut edge_records = Vec::with_capacity(edge_order.len());
     for ((&e, vertices), uses) in edge_order.iter().zip(edge_vertices).zip(edge_uses) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
-        edge_records.push(b::Edge { curve: edge.curve.clone(), interval: edge.interval, vertices, tolerance, uses });
+        let source = edge_source.get(e as usize).copied().ok_or_else(|| invalid("edge"))?;
+        edge_records.push(b::Edge { curve: edge.curve.clone(), interval: edge.interval, vertices, tolerance: tolerances.edge(source), uses });
     }
     let mut face_records = Vec::with_capacity(face_order.len());
     for (fi, &f) in face_order.iter().enumerate() {
@@ -935,7 +987,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
         .iter()
         .map(|&v| {
             let at = vertex_source.get(v as usize).copied().ok_or_else(|| invalid("vertex"))?;
-            Ok(b::Vertex { point: v3(positions, at, "vertex")?, tolerance })
+            Ok(b::Vertex { point: v3(positions, at, "vertex")?, tolerance: tolerances.vertex(at) })
         })
         .collect::<Res<Vec<_>>>()?;
     let shells = shells
@@ -1069,7 +1121,7 @@ fn pcurves(surface: &b::Surface, domain: [[f64; 2]; 2], loops: &[Loop], edges: &
         let mut loop_uses = Vec::with_capacity(l.len());
         for &(e, forward) in l {
             let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(b::pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward });
+            loop_uses.push(b::pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: edge.tolerance });
         }
         uses.push(loop_uses);
     }
