@@ -67,7 +67,7 @@ mod run {
 
     /// What one kernel made of one case: its volume, face, edge and solid counts, history shape
     /// and times, or why it made nothing.
-    #[derive(Clone, Debug, Default)]
+    #[derive(Clone, Debug)]
     struct Outcome {
         error: Option<String>,
         empty: bool,
@@ -83,6 +83,28 @@ mod run {
         /// SMLib only: the result's SMLib→truck export, and why it failed.
         export_ms: f64,
         export_error: Option<String>,
+        /// SMLib only: truck's measure of the exported result (NaN when there is none), which
+        /// tells a wrong body from a wrong SMLib measure.
+        export_volume: f64,
+    }
+
+    impl Default for Outcome {
+        fn default() -> Outcome {
+            Outcome {
+                error: None,
+                empty: false,
+                volume: 0.0,
+                faces: 0,
+                edges: 0,
+                solids: 0,
+                history: None,
+                ms: 0.0,
+                import_ms: 0.0,
+                export_ms: 0.0,
+                export_error: None,
+                export_volume: f64::NAN,
+            }
+        }
     }
 
     /// A history's shape: faces Kept, Modified, Split, Merged, Generated; edges from an operand
@@ -208,7 +230,10 @@ mod run {
                 let t0 = Instant::now();
                 let back = solidcraft_kernel::body_from_smlib(&r);
                 o.export_ms = ms_since(t0);
-                o.export_error = back.err().map(|e| e.to_string());
+                match back.map_err(|e| e.to_string()).and_then(|b| measure(&b).map_err(|e| format!("measure: {e}"))) {
+                    Ok(m) => o.export_volume = m.volume,
+                    Err(e) => o.export_error = Some(e),
+                }
                 return (o, Some(r));
             }
         }
@@ -552,6 +577,7 @@ mod run {
             import_ms: f("import_ms"),
             export_ms: f("export_ms"),
             export_error: s("export_error"),
+            export_volume: f("export_volume"),
         }
     }
 
@@ -600,6 +626,7 @@ mod run {
             "import_ms": o.import_ms,
             "export_ms": o.export_ms,
             "export_error": o.export_error,
+            "export_volume": o.export_volume,
         })
     }
 
@@ -647,6 +674,19 @@ mod run {
             (None, false) => {
                 format!("{:.3} · {}f {}e {}s · {}", o.volume, o.faces, o.edges, o.solids, o.history.map_or("no history".into(), |h| h.text()))
             }
+        }
+    }
+
+    /// The export's time, and what went wrong with it or where truck's measure of the exported
+    /// body leaves SMLib's own; a dash where SMLib made no body.
+    fn exported(o: &Outcome) -> String {
+        match &o.export_error {
+            Some(e) => format!("{:.1} (failed: {})", o.export_ms, e.replace('|', "/")),
+            None if !o.export_volume.is_finite() => "–".into(),
+            None if o.error.is_some() || (o.export_volume - o.volume).abs() > VOLUME_REL * o.volume.abs().max(1e-9) => {
+                format!("{:.1} (truck measures {:.3})", o.export_ms, o.export_volume)
+            }
+            None => format!("{:.1}", o.export_ms),
         }
     }
 
@@ -740,11 +780,7 @@ mod run {
                     }
                 }
                 let want_text = want.map_or("–".into(), |w| if w == 0.0 { "empty".into() } else { format!("{w:.3}") });
-                let back = match (&s.export_error, s.error.is_some() || s.empty) {
-                    (_, true) => "–".into(),
-                    (Some(e), false) => format!("{:.1} (failed: {})", s.export_ms, e.replace('|', "/")),
-                    (None, false) => format!("{:.1}", s.export_ms),
-                };
+                let back = exported(&s);
                 let _ = writeln!(
                     md,
                     "| {name} | {} | {want_text} | {} | {} | {what} | {:.1} | {:.1} | {:.1} | {back} |",
@@ -777,10 +813,7 @@ mod run {
                     None => format!("{:.3} ({}f {}e {}s)", o.volume, o.faces, o.edges, o.solids),
                 },
             };
-            let export = m.filter(|o| s.op.is_some() && o.error.is_none()).map_or("–".into(), |o| match &o.export_error {
-                Some(e) => format!("{:.1} (failed: {})", o.export_ms, e.replace('|', "/")),
-                None => format!("{:.1}", o.export_ms),
-            });
+            let export = m.filter(|_| s.op.is_some()).map_or("–".into(), exported);
             let _ = writeln!(
                 seq_md,
                 "| {} | {:.3} ({}s) | {} | {} | {} | {} | {} | {export} |",
@@ -806,8 +839,8 @@ mod run {
         let _ = writeln!(report, "{} cases × 3 operations: {}.\n", cases.len(), summary.join(", "));
         let _ = writeln!(
             report,
-            "Failed: truck {truck_fail}/{ops}, SMLib {smlib_fail}/{ops}; SMLib results that don't export back to truck: \
-             {export_fail}. Against the {analytic_ops} analytic volumes: truck within {VOLUME_REL:e} on {truck_exact}, \
+            "Failed: truck {truck_fail}/{ops}, SMLib {smlib_fail}/{ops}; SMLib results that don't export back to truck \
+             (or that truck can't measure): {export_fail}. Against the {analytic_ops} analytic volumes: truck within {VOLUME_REL:e} on {truck_exact}, \
              SMLib within 1e-6 on {smlib_exact}.\n"
         );
         let _ = writeln!(report, "## Times (ms, operations that didn't fail)\n");
