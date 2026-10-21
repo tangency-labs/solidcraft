@@ -336,3 +336,21 @@ fn imprint_cuts_faces_where_a_tool_meets_them() {
     let far = Brep::make_box([50.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
     assert!(cube.imprint(&far).unwrap().is_none());
 }
+
+#[test]
+fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
+    let c = cube(20.0);
+    let deg = std::f64::consts::PI / 180.0;
+    let wedge = 0.5 * 20.0 * 20.0 * (5.0 * deg).tan() * 20.0;
+    let side = [[20.0, 10.0, 10.0]];
+    let up = [0.0, 0.0, 1.0];
+    let leaned = c.draft(&side, 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap();
+    assert!((leaned.volume(ACC).unwrap() - (8000.0 - wedge)).abs() < 1e-6);
+    let out = c.draft(&side, 0.1, [0.0; 3], up, up, -5.0 * deg).unwrap();
+    assert!((out.volume(ACC).unwrap() - (8000.0 + wedge)).abs() < 1e-6);
+    // The top isn't parallel to the pull.
+    assert_eq!(c.draft(&[[10.0, 10.0, 20.0]], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Unsupported);
+    assert_eq!(c.draft(&side, 0.1, [0.0; 3], up, up, 0.0).unwrap_err(), Error::Argument);
+    assert_eq!(c.draft(&[], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Argument);
+    assert_untouched(&c, 8000.0, [6, 12, 8]);
+}

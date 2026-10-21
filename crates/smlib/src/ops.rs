@@ -170,6 +170,27 @@ impl Brep {
         ffi::ops::thicken(&self.0, thickness, symmetric).map(Brep).map_err(error)
     }
 
+    /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
+    /// (0 < |angle| < 89.94 degrees) about the line where each meets the neutral plane through
+    /// `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going along
+    /// `pull`; the faces around them extended or trimmed to meet them. A face that isn't flat, or
+    /// isn't parallel to `pull`, is [`Error::Unsupported`].
+    pub fn draft(
+        &self,
+        faces: &[[f64; 3]],
+        tolerance: f64,
+        neutral_origin: [f64; 3],
+        neutral_normal: [f64; 3],
+        pull: [f64; 3],
+        angle: f64,
+    ) -> Result<Brep> {
+        init()?;
+        if faces.is_empty() || faces.len() > MAX_POINTS {
+            return Err(Error::Argument);
+        }
+        ffi::ops::draft(&self.0, faces, tolerance, &neutral_origin, &neutral_normal, &pull, angle).map(Brep).map_err(pick_error)
+    }
+
     fn pick_op(&self, kind: ffi::ops::Pick, points: &[[f64; 3]], tolerance: f64, size: f64, allow_none: bool) -> Result<Brep> {
         init()?;
         if points.len() > MAX_POINTS || (points.is_empty() && !allow_none) {
