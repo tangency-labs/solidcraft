@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#391"
+ ],
+ "what": "text debossed 0.6 mm into the flat flange top of a filleted and shelled tapered housing, well away from the curved walls",
+ "source": "invariants",
+ "method": "the flange top (z=6) is planar and the text is clear of the walls, so the deboss must succeed and leave one valid closed body; the letter area is font dependent, so only the outcome and validity are graded",
+ "body_count": 1
+}

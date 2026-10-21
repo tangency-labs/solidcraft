@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4009"
+ ],
+ "what": "shell with no face removed: a closed hollow body with a sealed internal void",
+ "source": "analytic",
+ "method": "outer box 40x30x12.5, void = inward offset box 35x25x7.5 (2.5 wall every side). V=15000-6562.5=8437.5; area=outer 2(1200+500+375)=4150 + void 2(875+187.5+262.5)... computed in python; faces 6+6=12; one body with an outer and an inner shell; centroid (20,15,6.25) by symmetry",
+ "body_count": 1,
+ "volume_mm3": 8437.5,
+ "area_mm2": 6800.0,
+ "faces": 12,
+ "center_of_mass": [
+  20,
+  15,
+  6.25
+ ]
+}

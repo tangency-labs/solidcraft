@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#745",
+  "tangency-labs/solidcraft#3893"
+ ],
+ "what": "Offset Face on a planar end of a body that has a spline-outlined boss far from the moved face",
+ "source": "invariants",
+ "method": "the move is refused today only because the unrelated boss wall is freeform. The operation must succeed and give one valid closed solid; the box end at x=0 moves out by 1 mm (the boss area is a spline integral, so no absolute volume is asserted; the 200 mm3 change is graded in the cut-away variant 745-offset-face-then-cut-boss-away)",
+ "body_count": 1
+}

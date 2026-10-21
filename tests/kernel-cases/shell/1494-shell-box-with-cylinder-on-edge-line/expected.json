@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1494"
+ ],
+ "what": "a 47.5x45x30 box with a cylinder r7.5 joined on its side whose axis lies in the plane of the box's front face (y=0), shelled 1 mm open at the bottom",
+ "source": "invariants",
+ "method": "the cylinder wall's seam lies on the front plane, giving a five-face saddle corner at (47.5,0,2.5). No closed-form volume (the cavity corners follow the offset surfaces); the shell must succeed and give one valid closed body",
+ "body_count": 1
+}
