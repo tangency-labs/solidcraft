@@ -78,7 +78,7 @@ use std::borrow::Cow;
 
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
-use crate::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver, FilletSurfaceGeneratorType};
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
@@ -457,8 +457,7 @@ fn point_on_plane_solve(
 /// `SmFilletGeom::RailEdgeuseIntersect(lRailIndex, pSideEU, dGuess, rbFound,
 /// rTsectPnt, rdEdgeuseParameter)` (part 6) on geometry `g`'s solver in `solvers`:
 /// whether the rail meets the side edge use, the intersection point and the edge use
-/// parameter. While it runs the solver holds `g` (as a [`FilletGeomRef`] of its id) as
-/// its geometry for surfaces, as upstream's `SetFilletGeomForSurfaces(this)`.
+/// parameter. While it runs the solver holds `g` as its geometry for surfaces, as upstream's `SetFilletGeomForSurfaces(this)`.
 #[allow(clippy::too_many_arguments)]
 fn rail_edgeuse_intersect(
     fb: &FilletBrep,
@@ -474,10 +473,7 @@ fn rail_edgeuse_intersect(
     let fs = solvers.get_mut(si).ok_or_else(|| {
         SolidError::invalid_input(OP_RAIL_EU, "fillet solver id not in the solver table")
     })?;
-    let this_ref = FilletGeomRef {
-        index: g.0 as usize,
-    };
-    fb.rail_edgeuse_intersect(k, g, this_ref, fs, target, rail_index, side_eu, guess)
+    fb.rail_edgeuse_intersect(k, g, fs, target, rail_index, side_eu, guess)
 }
 
 /// `SmTemporaryRadiusChange(pFS, lRailIndex, pSideEU)` (unit

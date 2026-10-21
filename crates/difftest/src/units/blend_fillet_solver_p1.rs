@@ -77,7 +77,7 @@ use solidcore::surface::torus::{Torus, TorusOptions};
 use solidcore::surface::volume::Volume;
 use solidcore::topology::edgeuse::p1 as eu;
 use solidcore::topology::{Brep, Edge, EdgeId, EdgeuseId, FaceId, Vertex};
-use solidcore::SolidError;
+use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::blend_fillet_solver_p1::{self as ffi, Op, StaticOp};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
@@ -852,8 +852,8 @@ fn put_bss(o: &mut Vec<f64>, s: &BSplineSurface) {
     o.extend_from_slice(sur.v_knots());
 }
 
-/// `put_crv` of the static shim:`1 t0 t1 P(t0) P(mid) P(t1)`, `-1` for none.
-fn put_crv(o: &mut Vec<f64>, c: Option<&Curve>) {
+/// `put_crv` of the static shim: `1 t0 t1 P(t0) P(mid) P(t1)`, `-1` for none.
+fn put_crv(k: &Kernel, o: &mut Vec<f64>, c: Option<&Curve>) {
     let Some(c) = c else {
         o.push(-1.0);
         return;
@@ -1415,7 +1415,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Split => {
             let k = Kernel::default();
             let mut pseudo = FilletBrep::new();
-            let cc: CurveClassification<H> = CurveClassification::new(&k);
+            let cc: CurveClassification<EntityRef> = CurveClassification::new(&k);
             let r = (|| -> Result<usize, SolidError> {
                 let mut fs =
                     FilletSolver::new_in(&k, &mut pseudo, FilletSolverId(0), 1.0e-6, 0.1, 0.01)?;
@@ -1686,17 +1686,17 @@ impl ClassObject for H {
 /// intervals classifies nothing).
 struct NoGeometry;
 
-impl ClassGeometry<H> for NoGeometry {
-    fn curve(&self, _o: H) -> Option<&Curve> {
+impl<O> ClassGeometry<O> for NoGeometry {
+    fn curve(&self, _o: O) -> Option<&Curve> {
         None
     }
-    fn surface(&self, _o: H) -> Option<&Surface> {
+    fn surface(&self, _o: O) -> Option<&Surface> {
         None
     }
-    fn volume(&self, _o: H) -> Option<&Volume> {
+    fn volume(&self, _o: O) -> Option<&Volume> {
         None
     }
-    fn point(&self, _o: H) -> Option<Point3> {
+    fn point(&self, _o: O) -> Option<Point3> {
         None
     }
 }

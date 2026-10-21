@@ -2805,11 +2805,9 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 343,
+  "cases_passed": 350,
   "cases_total": 350,
-  "deferred_by_unit": {
-    "blend.fillet_geom_p1": 7
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,

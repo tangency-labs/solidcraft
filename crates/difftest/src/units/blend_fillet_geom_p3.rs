@@ -36,7 +36,7 @@ use solidcore::blend::fillet_geom::p1::{
 };
 use solidcore::blend::fillet_geom::p3::new_solver_fillet_geom;
 use solidcore::blend::fillet_solver::p1::{
-    FilletGeomRef, FilletSolver, FilletSolverOps, OffsetSurfaceSlot,
+    FilletSolver, FilletSolverOps, OffsetSurfaceSlot,
 };
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::extent1d::Extent1d;
@@ -980,7 +980,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::FilletIntFillet { e } => {
             let e = *m.edges.get(*e).ok_or_else(|| harness("edge"))?;
             let corner = m.fb.fillet_edge(e).map_err(h)?.fillet_corner();
-            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, &bases)
+            m.fb.calc_edge_fillet_int_fillet(&k, e, corner, &bases, &tg.brep)
         }
         OpIn::ReCalc {
             g,
@@ -999,12 +999,14 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .map(bspline_of)
                 .transpose()?
                 .map(Curve::from);
-            // the solver's own geometry (made by its constructor) is none of the model's
-            let geometry_id = |_: FilletGeomRef| Ok(FilletGeomId(u32::MAX));
             let solver = m
                 .solvers
                 .get_mut(si.0 as usize)
                 .ok_or_else(|| harness("solver"))?;
+            // the solver's own geometry (made by its constructor) is none of the model's
+            if solver.solver().fillet_geoms.is_empty() {
+                solver.solver_mut().fillet_geoms.push(FilletGeomId(u32::MAX));
+            }
             m.fb.re_calc_fillet_geom(
                 &k,
                 g,
@@ -1013,7 +1015,6 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 *analytic,
                 dir.map(|d| Vec3::new(d[0], d[1], d[2])),
                 reference.as_ref(),
-                &geometry_id,
             )
         }
     };

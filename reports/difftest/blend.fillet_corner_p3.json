@@ -13125,14 +13125,375 @@
       "values_compared": 259
     },
     {
-      "deferred": {
-        "symbol": "SmFilletSolver::SplitFilletGeomAtSideEdge",
-        "unit": "blend.fillet_solver_p1"
+      "inputs": {
+        "case": "corner",
+        "corner": {
+          "adjusted": false,
+          "all": [
+            [0, 0],
+            [1, 0],
+            [2, 0],
+            [3, 0]
+          ],
+          "arc_edges": [],
+          "bevel": false,
+          "blending": true,
+          "chamfer": false,
+          "degenerate": false,
+          "edges": [4, 5],
+          "ext": true,
+          "kind": 7,
+          "line_edges": [],
+          "orig_faces": [],
+          "setback": 0.0,
+          "solver": [
+            [1, 0],
+            [2, 1]
+          ],
+          "tan": 0.1255646970612361,
+          "tol": 0.0,
+          "tsects": [
+            {
+              "e": 0,
+              "s0": 0,
+              "s1": 1,
+              "t": 1.0,
+              "uv0": [0.05383253179686409, 0.6267227754586333],
+              "uv1": [0.514913349745509, 0.7640998321185527],
+              "which": 0
+            },
+            {
+              "e": 1,
+              "s0": 0,
+              "s1": 1,
+              "t": 1.0000000005531793,
+              "uv0": [0.05383253179686409, 0.6267227754586333],
+              "uv1": [0.5699965191317435, 0.07420850864852074],
+              "which": 0
+            }
+          ],
+          "v_edge": -1,
+          "v_sub": 0,
+          "verts": [0, 3, 4]
+        },
+        "model": {
+          "edges": [
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [0.0, 0.0, 0.01470696531058578, 1.0],
+                  [0.1, 0.0, 0.01470696531058578, 1.0]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0.0, 0.0, 1.0, 1.0]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 1,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [0.0, 0.0, 0.01470696531058578, 1.0],
+                  [-0.1, 0.0, 0.01470696531058578, 1.0]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0.0, 0.0, 1.0, 1.0]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 1,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 1,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 2,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [0.0, 0.01470696531058578, 0.0, 1.0],
+                  [0.1, 0.01470696531058578, 0.0, 1.0]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0.0, 0.0, 1.0, 1.0]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 0,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 0,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 1,
+              "vs": 3
+            },
+            {
+              "corner": -1,
+              "curve": {
+                "cpts": [
+                  [0.0, -0.01470696531058578, 0.0, 1.0],
+                  [-0.1, -0.01470696531058578, 0.0, 1.0]
+                ],
+                "dim": 3,
+                "p": 1,
+                "u": [0.0, 0.0, 1.0, 1.0]
+              },
+              "etype": 9,
+              "eus": [
+                {
+                  "geom": 1,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": 1,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 2,
+              "vs": 4
+            },
+            {
+              "corner": -1,
+              "etype": 5,
+              "eus": [
+                {
+                  "geom": -1,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 3,
+              "vs": 0
+            },
+            {
+              "corner": -1,
+              "etype": 4,
+              "eus": [
+                {
+                  "geom": -1,
+                  "vu_uv": [0.0, 0.0]
+                },
+                {
+                  "geom": -1,
+                  "vu_uv": [0.0, 0.0]
+                }
+              ],
+              "fbe": [-1, -1],
+              "status": 0,
+              "ve": 4,
+              "vs": 3
+            }
+          ],
+          "faces": [
+            {
+              "net": [
+                [
+                  [0.0, 0.0, 0.0, 1.0],
+                  [0.0, 0.0, 0.1, 1.0]
+                ],
+                [
+                  [0.1, 0.0, 0.0, 1.0],
+                  [0.1, 0.0, 0.1, 1.0]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [0.0, 0.0, 1.0, 1.0],
+              "v": [0.0, 0.0, 1.0, 1.0]
+            },
+            {
+              "net": [
+                [
+                  [0.0, 0.0, 0.0, 1.0],
+                  [0.0, 0.0, 0.1, 1.0]
+                ],
+                [
+                  [0.0, 0.1, 0.0, 1.0],
+                  [0.0, 0.1, 0.1, 1.0]
+                ]
+              ],
+              "p": 1,
+              "q": 1,
+              "u": [0.0, 0.0, 1.0, 1.0],
+              "v": [0.0, 0.0, 1.0, 1.0]
+            }
+          ],
+          "fillet_brep": [],
+          "geoms": [
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [0, 2],
+              "sides": [],
+              "status": 0
+            },
+            {
+              "gtype": 0,
+              "other1": [],
+              "other2": [],
+              "rails": [1, 3],
+              "sides": [],
+              "status": 0
+            }
+          ],
+          "targets": [
+            {
+              "cpts": [
+                [0.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.1, 1.0]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0.0, 0.0, 1.0, 1.0]
+            },
+            {
+              "cpts": [
+                [0.0, 0.0, 0.0, 1.0],
+                [0.1, 0.0, 0.0, 1.0]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0.0, 0.0, 1.0, 1.0]
+            },
+            {
+              "cpts": [
+                [0.0, 0.0, 0.0, 1.0],
+                [-0.1, -0.0, 0.0, 1.0]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0.0, 0.0, 1.0, 1.0]
+            },
+            {
+              "cpts": [
+                [0.0, 0.0, 0.0, 1.0],
+                [0.0, -0.1, 0.0, 1.0]
+              ],
+              "dim": 3,
+              "p": 1,
+              "u": [0.0, 0.0, 1.0, 1.0]
+            }
+          ],
+          "vertices": [
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 109,
+              "pc_face": -1,
+              "pc_index": 0,
+              "pc_kind": 2,
+              "pc_sub": 0,
+              "point": [0.0, 0.0, 0.01470696531058578],
+              "status": 0,
+              "t_param": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 9
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": -1,
+              "pc_kind": 0,
+              "pc_sub": 0,
+              "point": [0.1, 0.0, 0.01470696531058578],
+              "status": 0,
+              "t_param": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 7
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": -1,
+              "pc_kind": 0,
+              "pc_sub": 0,
+              "point": [-0.1, 0.0, 0.01470696531058578],
+              "status": 0,
+              "t_param": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 7
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": -1,
+              "pc_kind": 0,
+              "pc_sub": 0,
+              "point": [0.0, 0.01470696531058578, 0.0],
+              "status": 0,
+              "t_param": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 8
+            },
+            {
+              "corner": -1,
+              "mates": [-1, -1],
+              "pc_class": 100,
+              "pc_face": -1,
+              "pc_index": -1,
+              "pc_kind": 0,
+              "pc_sub": 0,
+              "point": [0.0, -0.01470696531058578, 0.0],
+              "status": 0,
+              "t_param": 0.0,
+              "uv": [0.0, 0.0],
+              "vtype": 13
+            }
+          ]
+        },
+        "op": "adjust_tangent"
       },
       "max_rel_err": 0.0,
       "name": "gen0067",
-      "outcome": "deferred",
+      "outcome": "rejected",
       "pass": false,
+      "rejected": "upstream would dereference null",
       "source": "generated:seed=10924742201818549685",
       "values_compared": 0
     },
@@ -18391,17 +18752,16 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 358,
+  "cases_deferred": 357,
   "cases_failed": 0,
   "cases_passed": 592,
-  "cases_rejected": 55,
+  "cases_rejected": 56,
   "cases_total": 1005,
   "deferred_by_unit": {
     "blend.fillet_corner_p1": 111,
     "blend.fillet_corner_p2": 126,
     "blend.fillet_executive_p1": 6,
     "blend.fillet_geom_p5": 13,
-    "blend.fillet_solver_p1": 1,
     "intersect.surface_drop_lib_p3": 78,
     "surface.cone_p1": 11,
     "surface.surf_of_extrusion_p2": 12

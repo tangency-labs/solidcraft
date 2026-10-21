@@ -163,8 +163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0020",
@@ -387,8 +387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0047",
@@ -438,16 +438,12 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0053",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818592",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -530,16 +526,12 @@
       "values_compared": 301
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818603",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -734,16 +726,12 @@
       "values_compared": 135
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818626",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -878,16 +866,12 @@
       "values_compared": 271
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0104",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818643",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -978,16 +962,12 @@
       "values_compared": 381
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0116",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818655",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1006,16 +986,12 @@
       "values_compared": 171
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0119",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818658",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -1042,16 +1018,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0123",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818662",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -1183,8 +1155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0139",
@@ -1203,8 +1175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0141",
@@ -1258,28 +1230,20 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0147",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818686",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0148",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818687",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "deferred": {
@@ -1342,16 +1306,12 @@
       "values_compared": 76
     },
     {
-      "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0156",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818695",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1402,21 +1362,17 @@
       "values_compared": 82
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0163",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818702",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0164",
@@ -1467,8 +1423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0169",
@@ -1523,8 +1479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -1598,16 +1554,12 @@
       "values_compared": 54
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0184",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818723",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1618,16 +1570,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818725",
-      "values_compared": 0
+      "values_compared": 16
     },
     {
       "max_rel_err": 0.0,
@@ -1638,16 +1586,12 @@
       "values_compared": 298
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0188",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818727",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -1746,16 +1690,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0201",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818740",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "max_rel_err": 0.0,
@@ -1766,16 +1706,12 @@
       "values_compared": 2134
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0203",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818742",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1794,16 +1730,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0206",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818745",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -1922,16 +1854,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0221",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818760",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -2014,16 +1942,12 @@
       "values_compared": 516
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0232",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818771",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2042,21 +1966,17 @@
       "values_compared": 125
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0235",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818774",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFilletGeom::FindEdgeTangentAtPoint",
-        "unit": "blend.fillet_geom_p6"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0236",
@@ -2138,16 +2058,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818785",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2174,28 +2090,20 @@
       "values_compared": 12949
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818789",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0251",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818790",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2214,16 +2122,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0254",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818793",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2298,16 +2202,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0264",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818803",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2466,28 +2366,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0283",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818822",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0284",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818823",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -2514,16 +2406,12 @@
       "values_compared": 171
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0288",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818827",
-      "values_compared": 0
+      "values_compared": 11
     },
     {
       "deferred": {
@@ -2578,16 +2466,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFilletEdge::ShouldSwapFaces",
-        "unit": "blend.fillet_geom_p6"
-      },
       "max_rel_err": 0.0,
       "name": "gen0295",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207373017645818834",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -2623,15 +2507,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 55,
+  "cases_deferred": 26,
   "cases_failed": 0,
-  "cases_passed": 245,
+  "cases_passed": 274,
   "cases_total": 300,
   "deferred_by_unit": {
-    "blend.fillet_geom_p6": 37,
     "intersect.surface_intersector_p2": 7,
     "intersect.surface_intersector_p4": 1,
-    "topology.brep_p3": 10
+    "topology.brep_p3": 18
   },
   "max_rel_err": 0.0,
   "pass": true,

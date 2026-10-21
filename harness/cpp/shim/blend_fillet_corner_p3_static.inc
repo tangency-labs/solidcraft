@@ -372,9 +372,10 @@ double p3_check_tangent(int64_t kind, SmFilletCorner* c, Model& M)
     if (close_enough)
         return 0.0;
 
-    // The split loop, up to SmFilletSolver::SplitFilletGeomAtSideEdge (whose Rust port is
-    // a stub): a vertex's position drops onto each of its two geometries' rails; a drop
-    // inside the rail splits the geometry. Without a split nothing is removed from the
+    // The split loop, up to SmFilletSolver::SplitFilletGeomAtSideEdge: a vertex's position
+    // drops onto each of its two geometries' rails; a drop inside the rail splits the
+    // geometry through pOrigGeom->GetFilletSolver(), which the model's geometries do not
+    // have (upstream then dereferences NULL). Without a split nothing is removed from the
     // list, so every vertex is visited.
     for (ULONG ii = 0; ii < V.GetSize(); ++ii)
     {
@@ -409,6 +410,8 @@ double p3_check_tangent(int64_t kind, SmFilletCorner* c, Model& M)
                 continue;
             if (ivl.IsValueOnBoundary(param, tol))
                 continue;
+            if (gs[g]->GetFilletSolver() == NULL)
+                return P3C_REFUSE; // GetFilletSolver()->SplitFilletGeomAtSideEdge
             return P3C_NOT_RUN; // SmFilletSolver::SplitFilletGeomAtSideEdge
         }
     }

@@ -73,9 +73,9 @@
 //!   (SmFilletGeom.cpp:10580-10645); [`Curve::drop_point`] and the solve here each build
 //!   their own. The results are bit-identical in every difftest case; a future
 //!   cache-dependent disagreement should look here first.
-//! - **Unported callees.** `SmFilletGeom::FindEdgeTangentAtPoint` and
-//!   `SmFilletGeom::Copy` (`blend.fillet_geom_p6`); `SmFilletExecutive::GetPseudoBrep`
-//!   (`blend.fillet_executive_p1`); the corner members above. Each stub replaces only
+//! - **Unported callees.** `SmFilletExecutive::GetPseudoBrep`
+//!   (`blend.fillet_executive_p1`); the corner members above. `FindEdgeTangentAtPoint`
+//!   and `SmFilletGeom::Copy` are part 6's (`blend.fillet_geom_p6`). Each stub replaces only
 //!   its call.
 //! - **User pointers.** `MakeRailEdgeuse` stores the two faces' surface pointers in the
 //!   new vertex use's `SmTsectPnt::m_apUserPointer` (never read in SMLib; not modelled
@@ -84,6 +84,7 @@
 //! - **Arguments.** Out-params become return values; `iDebugLevel` and debug drawing
 //!   are dropped. No recursion.
 
+use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
@@ -418,37 +419,14 @@ fn corner_record_fillet_error(
 /// its status (SmFilletGeom.cpp:11865, 11877).
 fn fillet_edge_update_split_face(
     fb: &mut FilletBrep,
+    k: &Kernel,
     e: EdgeId,
     orig_face: Option<FaceId>,
     new_face: Option<FaceId>,
+    target: &mut Brep,
+    corners: &[FilletCorner],
 ) -> Result<()> {
-    ignore_non_unported(fb.update_edge_split_face(e, orig_face, new_face))
-}
-
-/// `SmFilletGeom::FindEdgeTangentAtPoint(lRailIndex, lEndIndex, rbFound, rTangent)`
-/// (unit `blend.fillet_geom_p6`): whether a tangent was found, and the tangent.
-fn find_edge_tangent_at_point(
-    fb: &FilletBrep,
-    g: FilletGeomId,
-    rail_index: usize,
-    end_index: usize,
-) -> Result<(bool, Vec3)> {
-    // UNPORTED(blend.fillet_geom_p6): SmFilletGeom::FindEdgeTangentAtPoint
-    unported_on(
-        (fb.edge_list().len(), g, rail_index, end_index),
-        "SmFilletGeom::FindEdgeTangentAtPoint",
-        "blend.fillet_geom_p6",
-    )
-}
-
-/// `SmFilletGeom::Copy(pFilletGeomToCopy)` (unit `blend.fillet_geom_p6`).
-fn fillet_geom_copy(fb: &mut FilletBrep, g: FilletGeomId, src: FilletGeomId) -> Result<()> {
-    // UNPORTED(blend.fillet_geom_p6): SmFilletGeom::Copy
-    unported_on(
-        (fb.edge_list().len(), g, src),
-        "SmFilletGeom::Copy",
-        "blend.fillet_geom_p6",
-    )
+    ignore_non_unported(fb.update_edge_split_face(k, e, orig_face, new_face, target, corners))
 }
 
 /// `pFilletSolver->m_pExecutive->GetPseudoBrep()` (unit `blend.fillet_executive_p1`):
@@ -1176,7 +1154,7 @@ impl FilletBrep {
     ///
     /// `SM_ERR_NULL_POINTER` for a source without solver or a solver without executive
     /// (upstream dereferences them); [`SolidError::Unported`] for the executive's
-    /// pseudo B-rep (`blend.fillet_executive_p1`) and `Copy` (`blend.fillet_geom_p6`).
+    /// pseudo B-rep (`blend.fillet_executive_p1`).
     pub fn copy_fillet_geom(
         &mut self,
         k: &Kernel,
@@ -1203,7 +1181,7 @@ impl FilletBrep {
         for i in 0..2 {
             ignore_non_unported(self.make_rail_edge(k, g, i))?;
         }
-        ignore_non_unported(fillet_geom_copy(self, g, src))?;
+        ignore_non_unported(self.copy_geom(k, g, src, solvers))?;
         let gtype = self.geom(src)?.fillet_geom_type();
         self.geom_mut(g)?.set_fillet_geom_type(gtype);
         Ok(g)
@@ -1286,6 +1264,26 @@ impl FilletBrep {
     ) -> Result<EdgeuseId> {
         // Check input
         let solver = self.geom_solver(g, solvers, OP_RAIL_EU)?;
+        self.make_rail_edgeuse_on(g, rail_index, fv, orient, belonging_rail, solver, target)
+    }
+
+    /// [`FilletBrep::make_rail_edgeuse`] with geometry `g`'s solver already resolved
+    /// (`GetFilletSolver()`, checked non-`NULL` by the caller).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletBrep::make_rail_edgeuse`] after its solver lookup.
+    #[allow(clippy::too_many_arguments)]
+    pub fn make_rail_edgeuse_on(
+        &mut self,
+        g: FilletGeomId,
+        rail_index: usize,
+        fv: Option<VertexId>,
+        orient: OrientType,
+        belonging_rail: Option<EdgeId>,
+        solver: &FilletSolver,
+        target: &Brep,
+    ) -> Result<EdgeuseId> {
         let fv = fv.ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))?;
         self.fillet_vertex(fv)?;
         if rail_index > 1 {
@@ -1382,8 +1380,9 @@ impl FilletBrep {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` without surface, rails, uses, solver; those of the
-    /// curve creations, the lift and [`FilletBrep::make_fillet_edge`];
-    /// [`SolidError::Unported`] for `FindEdgeTangentAtPoint` (`blend.fillet_geom_p6`).
+    /// curve creations, the lift, [`FilletBrep::make_fillet_edge`] and (for
+    /// `SM_BT_BLEND`) `FindEdgeTangentAtPoint`, which reads the rail end vertices'
+    /// classification edges in `target`.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn create_end_curve(
         &mut self,
@@ -1392,6 +1391,7 @@ impl FilletBrep {
         end_index: usize,
         trim_type: BoundaryTrimmingType,
         solvers: &[FilletSolver],
+        target: &Brep,
     ) -> Result<EdgeId> {
         // Create a line between the two UV points and lift the curve.
         let fillet_surface = self
@@ -1447,8 +1447,12 @@ impl FilletBrep {
                 .distance(self.vertex_point(fv_end)?);
 
             // Find Edge Tangents
-            let (found1, mut tangent1) = find_edge_tangent_at_point(self, g, 0, end_index)?;
-            let (found2, mut tangent2) = find_edge_tangent_at_point(self, g, 1, end_index)?;
+            // (rbFound, rTangent): a tangent not found leaves SmVector3d() undefined
+            let found = |t: Option<Vec3>| (t.is_some(), t.unwrap_or(Vec3::UNDEF));
+            let (found1, mut tangent1) =
+                found(self.find_edge_tangent_at_point(k, g, 0, end_index, target)?);
+            let (found2, mut tangent2) =
+                found(self.find_edge_tangent_at_point(k, g, 1, end_index, target)?);
 
             // when 1st tangent was found
             if found1 {
@@ -2065,12 +2069,16 @@ impl FilletBrep {
     ///
     /// `SM_ERR_NULL_POINTER` for a missing rail (upstream calls through `NULL`); those of
     /// `SmFilletEdge::UpdateSplitFace` (`blend.fillet_geom_p2`, wired; its status is
-    /// ignored upstream, so only [`SolidError::Unported`] propagates).
+    /// ignored upstream, so only [`SolidError::Unported`] propagates). `target` and
+    /// `corners` are those of [`FilletBrep::update_edge_split_face`].
     pub fn update_geom_split_face(
         &mut self,
+        k: &Kernel,
         g: FilletGeomId,
         orig_face: Option<FaceId>,
         new_face: Option<FaceId>,
+        target: &mut Brep,
+        corners: &[FilletCorner],
     ) -> Result<()> {
         // For both rails:
         for ii in 0..2 {
@@ -2085,7 +2093,7 @@ impl FilletBrep {
                 &geom.other_rails2
             });
             for rail in all_rails {
-                fillet_edge_update_split_face(self, rail, orig_face, new_face)?;
+                fillet_edge_update_split_face(self, k, rail, orig_face, new_face, target, corners)?;
             }
         }
 
@@ -2093,7 +2101,9 @@ impl FilletBrep {
         for feu in self.geom(g)?.side_eus.clone() {
             if let Some(fe) = self.brep().edgeuse(feu)?.edge {
                 if self.fillet_edge(fe).is_ok() {
-                    fillet_edge_update_split_face(self, fe, orig_face, new_face)?;
+                    fillet_edge_update_split_face(
+                        self, k, fe, orig_face, new_face, target, corners,
+                    )?;
                 }
             }
         }
@@ -2211,7 +2221,8 @@ mod tests {
         let mut fb = FilletBrep::new();
         let g = fb.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
         assert!(matches!(
-            fb.update_geom_split_face(g, None, None).unwrap_err(),
+            fb.update_geom_split_face(&k, g, None, None, &mut Brep::new(), &[])
+                .unwrap_err(),
             SolidError::Upstream { .. }
         ));
     }

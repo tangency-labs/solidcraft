@@ -42,7 +42,7 @@ use solidcore::blend::fillet_geom::p6::{
     join_two_fillet_verts_by_curves, move_tsp,
 };
 use solidcore::blend::fillet_solver::p1::{
-    FilletExecutiveRef, FilletGeomRef, FilletSolver, OffsetSurfaceSlot,
+    FilletExecutiveRef, FilletSolver, OffsetSurfaceSlot,
 };
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::extent1d::Extent1d;
@@ -600,7 +600,8 @@ impl Target {
             edge.interval
         };
         let t = ivl.min() + (ivl.max() - ivl.min()) * frac;
-        Ok(c.evaluate_point(t).ok().map(|p| (t, [p.x, p.y, p.z])))
+        // harness-side input resolution: both sides receive the resolved point
+        Ok(c.evaluate_point(&Kernel::default(), t).ok().map(|p| (t, [p.x, p.y, p.z])))
     }
 
     fn on_face(&self, f: FaceId, uv: [f64; 2]) -> Result<Option<[f64; 3]>, HarnessError> {
@@ -611,7 +612,10 @@ impl Target {
             return Ok(None);
         };
         let p = Point2::new(u0 + (u1 - u0) * uv[0], v0 + (v1 - v0) * uv[1]);
-        Ok(srf.evaluate_point(p).ok().map(|p| [p.x, p.y, p.z]))
+        Ok(srf
+            .evaluate_point(&Kernel::default(), p)
+            .ok()
+            .map(|p| [p.x, p.y, p.z]))
     }
 }
 
@@ -654,7 +658,7 @@ fn resolve_vertex(v: &VertexIn, tg: &Target) -> Result<Vertex, HarnessError> {
         Some(PointOn::Pc) => {
             if let Some(e) = pc_edge {
                 if let Some(c) = tg.brep.edge(e).map_err(h)?.curve.as_ref() {
-                    if let Ok(p) = c.evaluate_point(t) {
+                    if let Ok(p) = c.evaluate_point(&Kernel::default(), t) {
                         point = [p.x, p.y, p.z];
                     }
                 }
@@ -1519,6 +1523,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             let sides = m.fb.geom(g).map_err(h)?.side_eus.clone();
             join_two_fillet_verts_by_curves(
+                &k,
                 &m.fb,
                 g,
                 v(*vs),
@@ -1547,7 +1552,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::FindTangent { g, rail, end } => {
             let g = geom(&m, *g)?;
-            m.fb.find_edge_tangent_at_point(g, *rail, *end, &tg.brep)
+            m.fb.find_edge_tangent_at_point(&k, g, *rail, *end, &tg.brep)
                 .map(|t| {
                     results.push(b(t.is_some()));
                     let t = t.unwrap_or(Vec3::new(0.0, 0.0, 0.0));
@@ -1603,7 +1608,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 }
                 None => None,
             };
-            m.fb.set_up_rail_point(g, *rail, *end, *param, pc.as_ref())
+            m.fb.set_up_rail_point(&k, g, *rail, *end, *param, pc.as_ref())
         }
         OpIn::MoveTsp { pnts, from, to } => {
             let tsects: Vec<TsectPnt> = pnts
@@ -1639,13 +1644,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     .ok_or_else(|| harness("solver"))?,
                 None => FilletSolver::new(1e-6, 1e-3, 1e-6),
             };
-            let this_ref = FilletGeomRef {
-                index: 1000 + g.0 as usize,
-            };
             let r = m.fb.rail_edgeuse_intersect(
                 &k,
                 g,
-                this_ref,
                 &mut solver,
                 &tg.brep,
                 *rail,

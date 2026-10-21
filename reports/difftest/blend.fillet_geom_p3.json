@@ -2333,16 +2333,12 @@
       "values_compared": 143
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0087",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587892",
-      "values_compared": 0
+      "values_compared": 147
     },
     {
       "deferred": {
@@ -2357,16 +2353,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587894",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -2605,16 +2597,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0118",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587923",
-      "values_compared": 0
+      "values_compared": 129
     },
     {
       "max_rel_err": 0.0,
@@ -2889,16 +2877,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0151",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587956",
-      "values_compared": 0
+      "values_compared": 136
     },
     {
       "max_rel_err": 0.0,
@@ -2953,16 +2937,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715587963",
-      "values_compared": 0
+      "values_compared": 129
     },
     {
       "max_rel_err": 0.0,
@@ -3537,16 +3517,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0227",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588032",
-      "values_compared": 0
+      "values_compared": 138
     },
     {
       "max_rel_err": 0.0,
@@ -3857,16 +3833,12 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0263",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588068",
-      "values_compared": 0
+      "values_compared": 141
     },
     {
       "max_rel_err": 0.0,
@@ -4021,16 +3993,12 @@
       "values_compared": 98
     },
     {
-      "deferred": {
-        "symbol": "SmFilletVertex::CalcFilletIntFillet",
-        "unit": "blend.fillet_geom_p5"
-      },
       "max_rel_err": 0.0,
       "name": "gen0282",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207379614715588087",
-      "values_compared": 0
+      "values_compared": 140
     },
     {
       "max_rel_err": 0.0,
@@ -4170,15 +4138,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 43,
+  "cases_deferred": 35,
   "cases_failed": 0,
-  "cases_passed": 275,
+  "cases_passed": 283,
   "cases_rejected": 7,
   "cases_total": 325,
   "deferred_by_unit": {
     "blend.fillet_corner_p1": 2,
     "blend.fillet_corner_p2": 2,
-    "blend.fillet_geom_p5": 8,
     "intersect.surface_intersector_p4": 31
   },
   "max_rel_err": 4.610460808594103e-15,

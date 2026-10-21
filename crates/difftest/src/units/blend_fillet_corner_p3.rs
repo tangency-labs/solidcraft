@@ -695,6 +695,8 @@ fn corner_rust(k: &Kernel, op: CornerOp, model: &Model, ci: &CornerIn) -> Result
             pseudo: &mut rm.fb,
             corner: None,
             tsect_surfaces: &surfaces,
+            // the model's geometries have no solver (as the shim's)
+            solvers: &mut [],
         };
         match op {
             CornerOp::CalcGeom => c.calc_corner_geom(k, &mut env),

@@ -82,7 +82,7 @@
 
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::OffsetSurface;
-use crate::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver};
+use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
@@ -167,8 +167,8 @@ fn copy_as_b_spline(k: &Kernel, curve: &Curve) -> Result<Option<Curve>> {
 }
 
 /// `SmCurve::Evaluate(t, 1, TRUE, aPV)`: the position and first derivative.
-fn evaluate_tangent(curve: &Curve, t: f64, op: &'static str) -> Result<(Point3, Vec3)> {
-    let pv = curve.evaluate(t, 1, true, true)?;
+fn evaluate_tangent(k: &Kernel, curve: &Curve, t: f64, op: &'static str) -> Result<(Point3, Vec3)> {
+    let pv = curve.evaluate(k, t, 1, true, true)?;
     match pv.as_slice() {
         [p, d, ..] => Ok((*p, *d)),
         _ => Err(SolidError::sm_err(op)),
@@ -176,8 +176,14 @@ fn evaluate_tangent(curve: &Curve, t: f64, op: &'static str) -> Result<(Point3, 
 }
 
 /// `DropVectors(uv, TRUE, TRUE, 1, &v, &uvv)`.
-fn drop_vector(surface: &Surface, uv: Point2, v: Vec3, op: &'static str) -> Result<Vec2> {
-    drop_vectors_at(surface, uv, Side::Left, Side::Left, &[v])?
+fn drop_vector(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    v: Vec3,
+    op: &'static str,
+) -> Result<Vec2> {
+    drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[v])?
         .first()
         .copied()
         .ok_or_else(|| SolidError::sm_err(op))
@@ -302,6 +308,7 @@ impl core::fmt::Debug for TrimOriginalSurfacesEnv<'_> {
 /// of the curve and surface evaluations.
 #[allow(clippy::too_many_arguments)]
 pub fn join_two_fillet_verts_by_curves(
+    k: &Kernel,
     fb: &FilletBrep,
     g: FilletGeomId,
     start_fv: Option<VertexId>,
@@ -344,7 +351,7 @@ pub fn join_two_fillet_verts_by_curves(
     } else {
         ivl.min()
     };
-    let mut end_pnt = last_curve.evaluate_point(param)?;
+    let mut end_pnt = last_curve.evaluate_point(k, param)?;
 
     // Make a copy of side-EUs array
     let mut copy_side_eus = side_eus.to_vec();
@@ -391,7 +398,7 @@ pub fn join_two_fillet_verts_by_curves(
 
                 // when distance between last and current curve endPoints is out of
                 // tolerance
-                let start_pnt = side_uv.evaluate_point(start_param)?;
+                let start_pnt = side_uv.evaluate_point(k, start_param)?;
                 let uv_dist = start_pnt.distance(end_pnt);
 
                 if uv_dist > uv_tol {
@@ -406,8 +413,8 @@ pub fn join_two_fillet_verts_by_curves(
                     let surface = fillet_surface.ok_or_else(nul)?;
                     let uv_start = Point2::new(start_pnt.x, start_pnt.y);
                     let uv_end = Point2::new(end_pnt.x, end_pnt.y);
-                    let s3d_start_pnt = surface.evaluate_point(uv_start)?;
-                    let s3d_end_pnt = surface.evaluate_point(uv_end)?;
+                    let s3d_start_pnt = surface.evaluate_point(k, uv_start)?;
+                    let s3d_end_pnt = surface.evaluate_point(k, uv_end)?;
                     let gap = s3d_start_pnt.distance(s3d_end_pnt);
 
                     // reject gaps larger than 10*tolerance
@@ -418,7 +425,7 @@ pub fn join_two_fillet_verts_by_curves(
                 } // end 2D gap larger than tolerance check
 
                 // found a keeper edge -increment EndPoint
-                end_pnt = side_uv.evaluate_point(end_param)?;
+                end_pnt = side_uv.evaluate_point(k, end_param)?;
             } // end 2DTest check
 
             // Add Edge to Arrays - prepare for next iteration
@@ -517,7 +524,7 @@ impl FilletBrep {
         };
 
         let (tangent1, uv_tangent1) =
-            self.rail_end_tangents(rail1, start_fv, surf, uv1, drop_start_point)?;
+            self.rail_end_tangents(k, rail1, start_fv, surf, uv1, drop_start_point)?;
 
         // Calc tangent from the other rail
         let rail2 = self.first_rail_at(end_fv)?.ok_or_else(nul)?;
@@ -559,7 +566,7 @@ impl FilletBrep {
         };
 
         let (tangent2, uv_tangent2) =
-            self.rail_end_tangents(rail2, end_fv, surf, uv2, drop_end_point)?;
+            self.rail_end_tangents(k, rail2, end_fv, surf, uv2, drop_end_point)?;
 
         let len1 = tangent1.length();
         let len2 = tangent2.length();
@@ -692,6 +699,7 @@ impl FilletBrep {
     /// 3D tangent dropped into the surface at `uv`), both negated at the curve's start.
     fn rail_end_tangents(
         &self,
+        k: &Kernel,
         rail: EdgeId,
         fv: VertexId,
         surf: &Surface,
@@ -713,14 +721,14 @@ impl FilletBrep {
             get_start_tan = true;
             param = ivl.min();
         }
-        let (_, mut tangent) = evaluate_tangent(curve, param, OP_BLENDING)?;
+        let (_, mut tangent) = evaluate_tangent(k, curve, param, OP_BLENDING)?;
         let uv_curve = eu1::uv_trim_curve(self.brep(), eu)?.0;
         let mut uv_tangent = match uv_curve {
             Some(c) if !dropped => {
-                let (_, d) = evaluate_tangent(c, param, OP_BLENDING)?;
+                let (_, d) = evaluate_tangent(k, c, param, OP_BLENDING)?;
                 Vec2::new(d.x, d.y)
             }
-            _ => drop_vector(surf, uv, tangent, OP_BLENDING)?,
+            _ => drop_vector(k, surf, uv, tangent, OP_BLENDING)?,
         };
         if get_start_tan {
             tangent = -tangent;
@@ -887,12 +895,12 @@ impl FilletBrep {
         }
 
         // Start:
-        let tan1 = self.side_edge_tangent(start_fv, target, cp_vertex, true)?;
+        let tan1 = self.side_edge_tangent(k, start_fv, target, cp_vertex, true)?;
         // End:
-        let tan2 = self.side_edge_tangent(end_fv, target, cp_vertex, false)?;
+        let tan2 = self.side_edge_tangent(k, end_fv, target, cp_vertex, false)?;
 
-        let uv_tan1 = drop_vector(&fillet_surface, start_uv, tan1, OP_END)?;
-        let uv_tan2 = drop_vector(&fillet_surface, end_uv, tan2, OP_END)?;
+        let uv_tan1 = drop_vector(k, &fillet_surface, start_uv, tan1, OP_END)?;
+        let uv_tan2 = drop_vector(k, &fillet_surface, end_uv, tan2, OP_END)?;
 
         // Create a UV-space curve.
         let start_pnt = Point3::new(start_uv.x, start_uv.y, 0.0);
@@ -933,6 +941,7 @@ impl FilletBrep {
     /// start (`is_start`) or towards it at the end, for `CalcFilletEnd`.
     fn side_edge_tangent(
         &self,
+        k: &Kernel,
         fv: VertexId,
         target: &Brep,
         cp_vertex: Option<VertexId>,
@@ -949,7 +958,7 @@ impl FilletBrep {
         let e = eu1::edge(target, eu)?.ok_or_else(|| invalid(OP_END, "edge use without edge"))?;
         let curve = target.edge(e)?.curve.as_ref().ok_or_else(nul)?;
 
-        let (_, d) = evaluate_tangent(curve, t, OP_END)?;
+        let (_, d) = evaluate_tangent(k, curve, t, OP_END)?;
         if d.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::sm_err(OP_END));
         }
@@ -1057,15 +1066,15 @@ impl FilletBrep {
             let mut test_uv = Point2::new(param, iso_v);
 
             // evaluate a RailCurve point and a FilletSurface MinY point
-            let curve_pnt = new_rail_curve.evaluate_point(param)?;
-            let surf_pnt = surface.evaluate_point(test_uv)?;
+            let curve_pnt = new_rail_curve.evaluate_point(k, param)?;
+            let surf_pnt = surface.evaluate_point(k, test_uv)?;
 
             // Compare RailCurve point to FilletSurface MinY point
             if curve_pnt.distance(surf_pnt) > approx_tol {
                 // evaluate FilletSurface MaxY point
                 let iso_v = uv_domain.max().y;
                 test_uv.y = iso_v;
-                let surf_pnt = surface.evaluate_point(test_uv)?;
+                let surf_pnt = surface.evaluate_point(k, test_uv)?;
 
                 // Compare RailCurve point to FilletSurface MaxY point
                 if curve_pnt.distance(surf_pnt) > approx_tol {
@@ -1159,7 +1168,7 @@ impl FilletBrep {
                 .curve
                 .as_ref()
                 .ok_or_else(nul)?
-                .approximate_length(&trim_ivl, 5, false)?
+                .approximate_length(k, &trim_ivl, 5, false)?
                 .0;
             if len < corner.approx_tol_3d {
                 // The edge is too small, try to squeeze it (later)
@@ -1227,14 +1236,14 @@ impl FilletBrep {
             if !(interval.is_init() || interval.has_negative_length()) {
                 let param = pick(&interval, which_try);
                 let curve = self.brep().edge(e)?.curve.as_ref().ok_or_else(nul)?;
-                if let Some(p) = ignored(curve.evaluate_point(param))? {
+                if let Some(p) = ignored(curve.evaluate_point(k, param))? {
                     test_pt = p;
                 }
             } else if let Some(cc) = fe.curve_class() {
                 let edge_domain = cc.interval();
                 let param = pick(&edge_domain, which_try);
                 let curve = self.brep().edge(e)?.curve.as_ref().ok_or_else(nul)?;
-                if let Some(p) = ignored(curve.evaluate_point(param))? {
+                if let Some(p) = ignored(curve.evaluate_point(k, param))? {
                     test_pt = p;
                 }
             } else if let Some(corner) = fe.fillet_corner() {
@@ -1436,6 +1445,7 @@ impl FilletBrep {
     /// or an edge classification object that is not an edge; those of the evaluation.
     pub fn find_edge_tangent_at_point(
         &self,
+        k: &Kernel,
         g: FilletGeomId,
         rail_index: usize,
         end_index: usize,
@@ -1464,7 +1474,7 @@ impl FilletBrep {
                 Some(_) => return Err(invalid(OP_TANGENT, "classification object is not an edge")),
             };
             let curve = target.edge(e)?.curve.as_ref().ok_or_else(nul)?;
-            let (_, d) = evaluate_tangent(curve, t, OP_TANGENT)?;
+            let (_, d) = evaluate_tangent(k, curve, t, OP_TANGENT)?;
             if d.length_squared() > EFF_ZERO_SQ {
                 return Ok(Some(d.unitize_or_z()));
             }
@@ -1592,6 +1602,7 @@ impl FilletBrep {
     /// `NULL`); those of [`FilletBrep::rail_vertexuse`] and the evaluation.
     pub fn set_up_rail_point(
         &mut self,
+        k: &Kernel,
         g: FilletGeomId,
         rail_index: usize,
         end_index: usize,
@@ -1621,7 +1632,7 @@ impl FilletBrep {
             .curve
             .as_ref()
             .ok_or_else(|| invalid(OP_SETUP, "rail without curve"))?;
-        let s3d_pnt = rail_curve.evaluate_point(parameter)?;
+        let s3d_pnt = rail_curve.evaluate_point(k, parameter)?;
 
         let fv = self.fillet_vertex_mut(fillet_vert)?;
         fv.set_fillet_vertex_type(FilletVertexType::Unknown);
@@ -1657,8 +1668,8 @@ impl FilletBrep {
 
     /// `SmFilletGeom::RailEdgeuseIntersect(lRailIndex, pEdgeuse, dGuessEdgeParameter,
     /// ...)`: the solver's rail/edge-use intersection evaluated on this geometry's
-    /// surfaces: the solver's geometry for surfaces is `this_ref` (the solver's handle
-    /// of geometry `g`) during the call and restored after it. Returns
+    /// surfaces: the solver's geometry for surfaces is `g` during the call and restored
+    /// after it. Returns
     /// `(rbFoundIntersection, rTsectPnt, rdEdgeuseParameter)`.
     ///
     /// # Errors
@@ -1671,7 +1682,6 @@ impl FilletBrep {
         &self,
         k: &Kernel,
         g: FilletGeomId,
-        this_ref: FilletGeomRef,
         solver: &mut FilletSolver,
         target: &Brep,
         rail_index: usize,
@@ -1687,7 +1697,7 @@ impl FilletBrep {
         // If there's anything there already, restore it when we're done.
         let saved_fg = solver.fillet_geom_for_surfaces();
 
-        solver.set_fillet_geom_for_surfaces(Some(this_ref));
+        solver.set_fillet_geom_for_surfaces(Some(g));
 
         // UNPORTED(blend.fillet_solver_p2): SmFilletSolver::RailEdgeuseIntersect
         let stat = unported_on(
@@ -2265,7 +2275,7 @@ mod tests {
         let (g, _) = two_rail_geom(&mut fb, &k);
 
         // without a fillet surface: the point is set, then SM_ERR_NULL_POINTER
-        let err = fb.set_up_rail_point(g, 1, 1, 0.25, None).unwrap_err();
+        let err = fb.set_up_rail_point(&k, g, 1, 1, 0.25, None).unwrap_err();
         assert_eq!(code(&err), Some(SM_ERR_NULL_POINTER));
         let v = fb.rail_vertex(g, 1, 1).unwrap();
         assert_eq!(fb.vertex_point(v).unwrap(), Point3::new(0.25, 1.0, 0.0));
@@ -2278,7 +2288,7 @@ mod tests {
             PointClassType::Edge,
             Some(EntityRef::Edge(EdgeId::from_index(0))),
         );
-        fb.set_up_rail_point(g, 1, 1, 0.5, Some(&pc)).unwrap();
+        fb.set_up_rail_point(&k, g, 1, 1, 0.5, Some(&pc)).unwrap();
         let fv = fb.fillet_vertex(v).unwrap();
         assert!(fv.is_processed());
         assert_eq!(fv.fillet_vertex_type(), FilletVertexType::RailXEdgeuse);
@@ -2291,7 +2301,7 @@ mod tests {
         );
 
         // processed: nothing changes
-        fb.set_up_rail_point(g, 1, 1, 0.75, None).unwrap();
+        fb.set_up_rail_point(&k, g, 1, 1, 0.75, None).unwrap();
         assert_eq!(fb.vertex_point(v).unwrap(), Point3::new(0.5, 1.0, 0.0));
     }
 
@@ -2366,6 +2376,7 @@ mod tests {
         let mut orients = vec![OrientType::Same];
         let sides = fb.geom(g).unwrap().side_eus.clone();
         let made = join_two_fillet_verts_by_curves(
+            &k,
             &fb,
             g,
             Some(start),
@@ -2385,6 +2396,7 @@ mod tests {
 
         // empty lists: upstream reads GetLast() of an empty array
         let err = join_two_fillet_verts_by_curves(
+            &k,
             &fb,
             g,
             Some(start),
@@ -2406,13 +2418,12 @@ mod tests {
         let mut fb = FilletBrep::new();
         let (g, _) = two_rail_geom(&mut fb, &k);
         let mut s = solver(false);
-        let saved = Some(FilletGeomRef { index: 3 });
+        let saved = Some(FilletGeomId(3));
         s.set_fillet_geom_for_surfaces(saved);
         let err = fb
             .rail_edgeuse_intersect(
                 &k,
                 g,
-                FilletGeomRef { index: 9 },
                 &mut s,
                 &Brep::new(),
                 0,
@@ -2429,7 +2440,6 @@ mod tests {
             .rail_edgeuse_intersect(
                 &k,
                 g,
-                FilletGeomRef { index: 9 },
                 &mut s,
                 &Brep::new(),
                 0,
@@ -2512,7 +2522,7 @@ mod tests {
 
         // unclassified: not found
         assert_eq!(
-            fb.find_edge_tangent_at_point(g, 0, 1, &target).unwrap(),
+            fb.find_edge_tangent_at_point(&k, g, 0, 1, &target).unwrap(),
             None
         );
 
@@ -2521,13 +2531,15 @@ mod tests {
         fv.set_point_class(PointClassType::Edge, Some(EntityRef::Edge(te)));
         fv.set_original_t_param(0.5);
         let t = fb
-            .find_edge_tangent_at_point(g, 0, 1, &target)
+            .find_edge_tangent_at_point(&k, g, 0, 1, &target)
             .unwrap()
             .unwrap();
         assert!((t - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-12);
 
         // a rail index past the two rails
-        let err = fb.find_edge_tangent_at_point(g, 2, 0, &target).unwrap_err();
+        let err = fb
+            .find_edge_tangent_at_point(&k, g, 2, 0, &target)
+            .unwrap_err();
         assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
     }
 

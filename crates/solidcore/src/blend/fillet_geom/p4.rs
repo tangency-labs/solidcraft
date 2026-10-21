@@ -117,8 +117,9 @@ use crate::topology::vertex;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 use super::p1::{
-    cleanup_noise, join_verts_by_capping, FilStatus, FilletBrep, FilletCornerId, FilletCornerType,
-    FilletEdgeType, FilletErrorType, FilletGeomId, FilletGeomType, FilletSolverId,
+    cleanup_noise, join_verts_by_capping, CurveObjectHandle, FilStatus, FilletBrep, FilletCornerId,
+    FilletCornerType, FilletEdgeType, FilletErrorType, FilletGeomId, FilletGeomType,
+    FilletSolverId,
 };
 use super::p6::join_two_fillet_verts_by_curves;
 
@@ -1687,6 +1688,7 @@ impl FilletBrep {
 
         // Add a sequence of m_vSideEUs->Curves to traverse from pEndFV0 to pEndFV1
         let made_connection = join_two_fillet_verts_by_curves(
+            k,
             self,
             g,
             end_fv0,
@@ -1728,6 +1730,7 @@ impl FilletBrep {
 
         // Add in m_vSideEUs Edge sequence to traverse from pStartFV1 to pStartFV0
         let made_connection = join_two_fillet_verts_by_curves(
+            k,
             self,
             g,
             start_fv1,
