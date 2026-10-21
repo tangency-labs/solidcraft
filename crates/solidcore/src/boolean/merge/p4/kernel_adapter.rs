@@ -1222,8 +1222,8 @@ mod tests {
         let mut placement = Axis2Placement::default();
         placement.translate(Vec3::X);
         // SmBrep::Notify is topology.brep_p2's (#149) and now runs through the adapter's
-        // environment; the vertex walk is wired since #285, so the transform stops at
-        // its curve walk
+        // environment; the vertex walk (GetVertices) is wired, so the transform then
+        // stops at its curve walk
         let r = adapter.transform_brep(
             &mut kernels,
             &mut b,
