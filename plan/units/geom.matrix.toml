@@ -1,0 +1,12 @@
+id = "geom.matrix"
+upstream = ["source/SMLib/inc/SmMatrix.h", "source/SMLib/src/SmMatrix.cpp"]
+rust_module = "geom::matrix"
+depends_on = []
+soft_depends_on = ["geom.tol"]
+est_lines = 816
+layer = 2
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-geom.matrix-a1"
+claimed_at = "2026-10-12T19:48:03Z"
+notes = "20 fns; largest: SmMatrix::EigenSystemJacobiSolver, SmMatrix::LUDecompose, SmMatrix::SolveLinearSystem, SmMatrix::Compute3x3EigenVectors; cycle back-edges (call into later units; stub or co-port): geom.vector3d(2); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; GREEN: difftest 4044 cases (44 fixture + 4000 generated), 0 deferred, max_rel_err 0 (bit-identical); 100k-seed run clean; back-edges sm_sqrt/SmVector3d::Set (geom.vector3d) co-ported as private helpers"

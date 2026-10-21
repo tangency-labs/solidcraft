@@ -1,0 +1,12 @@
+id = "surface.sphere"
+upstream = ["source/SMLib/inc/SmSphere.h", "source/SMLib/src/SmSphere.cpp"]
+rust_module = "surface::sphere"
+depends_on = ["curve.curve_p2", "curve.ellipse_p1", "curve.ellipse_p2", "geom.axis2_placement", "geom.extent1d", "geom.extent2d", "geom.extent3d", "geom.geom_utility_p1", "geom.object", "geom.tol", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_curve_p1", "nurbs.b_spline_surface_n_lib_p1", "nurbs.b_spline_surface_p1", "nurbs.b_spline_surface_p2", "surface.cone_p1", "surface.surf_of_revolution_p1", "surface.surf_of_revolution_p2", "surface.surf_of_revolution_p3", "surface.surface_p2", "topology.database_io"]
+soft_depends_on = ["curve.curve_p4", "geom.geom_utility_p2", "nurbs.b_spline_curve_p2", "surface.plane_p1", "surface.plane_p2"]
+est_lines = 2861
+layer = 28
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN (PR #100): difftest 800 generated cases, 800 pass bit-identical, 0 deferred, --perturb 800/800 (every op: CreateCanonical and the constructor with MakeNurb incl. swap/inside-out/partial-domain/explicit-generator, operator==, Copy, CreateOffsetSurface (+rebuild), CreateIsoParametricCurve, ConvertUVFromSTEPToNURBS/NURBSToSTEP, EvaluateSTEP(Point), EvaluateNormal, RebuildSTEPFromNURBParameters, Transform, IsClosed/U/V, STEPInversion, CreateTrimmedCircleSegments, IntersectWithPlane/Sphere/Cone, GlobalSurfaceIntersect with a plane, IsNurbSurfaceSphere). DISPATCH GAP: the sphere is not a SurfaceKind variant (as the torus): SmSphere::GlobalSurfaceIntersect falls back to SmSurface::GlobalSurfaceIntersect with a sphere `this` as Unported (names surface.sphere), Surface::read_from_db reads the record with Sphere::read_from_db and then reports the gap, and the ssi engine defers SurfaceSpec::Sphere on surface.surface_p2. Sphere implements Revolved so SurfOfRevolution::intersect_with_sphere takes it. No UNPORTED(surface.sphere) stubs remain. Not ported (not in the unit's function list): GetCanonical, GlobalPointSolveSTEP, RotationAboutAxisX/Y/Z, AssertValid, WriteToDB, Dump. 34 fns; largest: SmSphere::CreateTrimmedCircleSegments, SmSphere::IntersectWithSphere, SmSphere::IsNurbSurfaceSphere, SmSphere::IntersectWithCone; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

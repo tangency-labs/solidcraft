@@ -1,0 +1,12 @@
+id = "curve.curve_cache"
+upstream = ["source/SMLib/inc/SmCurveCache.h", "source/SMLib/src/SmCurveCache.cpp"]
+rust_module = "curve::curve_cache"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.extent3d", "geom.object", "geom.tol", "geom.vector3d", "nlib.math", "nurbs.b_spline_curve_p1", "nurbs.nurbs_crv"]
+soft_depends_on = ["geom.geom_utility_p1", "geom.local_solve1d", "geom.pseudo_box", "geom.tree", "nlib.knots", "nurbs.b_spline_curve_p2"]
+est_lines = 1474
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.curve_cache-a1"
+claimed_at = "2026-10-13T01:00:33Z"
+notes = "GREEN (promoted by curve.curve_p5: 638 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 638 cases (38 fixture: lines, cubics, C0 quadratic, closed, degenerate, 2D, rational arc and Hermite curves through Tessellate with every option, sub/beyond/disjoint/reversed intervals, GetAnalyticCurve, type queries + 600 generated), 635 pass bit-identical (max_rel_err 0), 3 deferred (curve.curve_p5 2: SmCurve::IsArc, curve.line 1: SmLine in GetAnalyticCurve); co-ported SmFindCurveDistanceExtremaEFO::Evaluate (curve.curve_p4) and SmCurve::IsLine (curve.curve_p5, curve::curve::p5::is_line_base); wired curve_p2 span stubs, SmTree::GetOwnerObject and the IsLine stub of nurbs.b_spline_curve_p2; 24 fns; largest: SmCurveCache::Tessellate, sm_ComputeConstants, SmCurveCache::BuildTree, sm_ComputeParentData; cycle back-edges (call into later units; stub or co-port): curve.curve_p4(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; after curve.line: 638 cases, 636 pass, 2 deferred (curve.curve_p5 2)"

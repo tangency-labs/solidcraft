@@ -1,0 +1,12 @@
+id = "geom.vector2d"
+upstream = ["source/SMLib/inc/SmVector2d.h", "source/SMLib/src/SmVector2d.cpp"]
+rust_module = "geom::vector2d"
+depends_on = []
+soft_depends_on = []
+est_lines = 339
+layer = 0
+tests = ["prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle"]
+status = "green"
+claimed_by = "swarm-geom.vector2d-a1"
+claimed_at = "2026-10-12T19:22:41Z"
+notes = "35 fns; largest: SmVector2d::AngleBetween, SmVector2d::CCWAngleBetween, SmVector2d::Unitize, SmVector2d::CloserThan; cycle back-edges (call into later units; stub or co-port): geom.vector3d(5), geom.tol(2); unit-SCC #22 (220 units); 318 upstream test entry points reach this unit; GREEN: difftest 4060 cases (60 fixture + 4000 generated), 0 deferred, max_rel_err 0 (bit-identical); 200k-seed run clean; back-edges sm_sqrt/sm_acos/sm_asin (geom.vector3d) and SM_IS_ZERO_SQUARED (geom.tol) co-ported as private helpers"

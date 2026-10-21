@@ -1,0 +1,12 @@
+id = "geom.extent3d"
+upstream = ["source/SMLib/inc/SmExtent3d.h", "source/SMLib/src/SmExtent3d.cpp"]
+rust_module = "geom::extent3d"
+depends_on = []
+soft_depends_on = []
+est_lines = 1122
+layer = 0
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle"]
+status = "green"
+claimed_by = "swarm-geom.extent3d-a1"
+claimed_at = "2026-10-12T19:22:46Z"
+notes = "GREEN: difftest 3086 cases, all bit-identical, 0 deferred (Circumscribe wired by geom.pseudo_box); geom.extent1d intervals wired; co-ports sm_sqrt/sm_asin/GetMaxDimension (geom.vector3d). 67 fns; largest: SmExtent3d::IntersectLine, SmExtent3d::Circumscribe, SmExtent3d::ApproximateUnbounded, SmExtent3d::ComputeConeBoundTo; cycle back-edges (call into later units; stub or co-port): geom.vector3d(51), geom.extent1d(9), geom.pseudo_box(4); unit-SCC #22 (220 units); 318 upstream test entry points reach this unit"

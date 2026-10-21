@@ -1,0 +1,12 @@
+id = "nurbs.b_spline_curve_p3"
+upstream = ["source/SMLib/src/SmBSplineCurve.cpp"]
+rust_module = "nurbs::b_spline_curve::p3"
+depends_on = ["geom.assert_array", "geom.axis2_placement", "geom.extent1d", "geom.geom_utility_p1", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "nurbs.b_spline_curve_n_lib", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p2"]
+soft_depends_on = ["geom.context", "geom.extent3d", "geom.vector2d", "nlib.geom", "nlib.math"]
+est_lines = 1187
+layer = 13
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nurbs.b_spline_curve_p3-a1"
+claimed_at = "2026-10-13T00:13:51Z"
+notes = "GREEN: difftest 2195 cases, 2195 passed, 0 deferred: the 6 cases deferred on SmCurve::GetNaturalInterval (TrimGap's GlobalCurveIntersect named curves whose handles reported no natural interval) pass since the handles carry the curves' natural intervals; difftest partial: 2195 cases, 2036 passed, 159 deferred (curve.curve_p5 159) after curve.curve_p8 wired SmCurve::GlobalCurveIntersect (TrimGap); difftest partial: 2195 cases, 1995 passed, 200 deferred (curve.curve_p7 98, curve.curve_p8 56, curve.curve_p4 46) after curve.curve_cache co-ported SmCurve::IsLine; difftest partial: 2195 cases, 1836 passed, 359 deferred (curve.curve_p5 188, curve.curve_p7 69, curve.curve_p8 56, curve.curve_p4 46) after curve.curve_p2 wired its stubs (was 966 deferred, curve.curve_p2 734); 9 fns; largest: SmBSplineCurve::AssertValid, SmBSplineCurve::JoinWith, SmBSplineCurve::TrimGap, SmBSplineCurve::IsSegmentLine; cycle back-edges (call into later units; stub or co-port): curve.curve_p2(6), curve.line(3), curve.curve_p4(1), curve.curve_p7(1), curve.curve_p8(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; after curve.curve_p4 (SmCurve::AssertValid wired): 2195 cases, 2023 pass, 172 deferred (curve.curve_p7 116, curve.curve_p8 56); after curve.curve_p7 (GlobalPropertyAnalysis wired): 2195 cases, 2023 pass, 172 deferred (curve.curve_p5 116, curve.curve_p8 56)"

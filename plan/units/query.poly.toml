@@ -1,0 +1,12 @@
+id = "query.poly"
+upstream = ["source/SMLib/inc/SmGraphicsExtern.h", "source/SMLib/inc/SmPoly.h", "source/SMLib/inc/SmPolyMerge.h", "source/SMLib/src/SmPoly.cpp", "source/SMLib/src/SmPolyBrepData.cpp", "source/SM_API/src/SmApiGeneral.cpp"]
+rust_module = "query::poly"
+depends_on = ["geom.a_object", "geom.axis2_placement", "geom.extent3d", "geom.object", "geom.point_set", "geom.tol", "geom.vector2d", "geom.vector3d", "topology.proto_topology_p1", "topology.topology"]
+soft_depends_on = ["geom.extent2d", "geom.geom_utility_p1", "geom.geom_utility_p2", "geom.pseudo_box", "surface.surface_p2", "topology.face_p2", "topology.face_p3", "topology.vertex"]
+est_lines = 2119
+layer = 44
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL: difftest 671 cases (12 upstream-derived fixtures from TestSmGeneral.cpp transform tests + 59 adversarial fixtures + 600 generated: build/dump, bbox, GetNormal, ComputeSphereBound, ContainsPoint/PointInPolygon, IsDegenerate, Transform, setters/destructors, IsKindOf), 669 bit-identical, 0 failed, 2 deferred (topology.face_p2: SmFace::GetSurface in IsDegenerate with valid back pointers); perturbation 669/669 detected. Nested composite poly faces are rejected (InvalidInput) to bound composite recursion. SetOriginalFace with propagate_attribs stubs SmFace::Notify as UNPORTED(topology.face_p3), justified in plan/findings.md (topology.face_p3 section): needs a B-rep handle, since PolyBrep holds the original face as an opaque ObjectKey with no B-rep and no topology record for SmTopology::Notify to copy from. sm_IsUniformPositiveScale / sm_ReportInvalidTransformInput (anonymous namespace) unit-tested only. Wired solution_array poly_vertex_point (handle trait) and retagged trim_srf_cache poly-edge stub to topology.face_p2. 127 fns; largest: SmPolyLoop::ContainsPoint, SmPolyFace::GetNormal, SmPolyEdge::IsDegenerate, SmPolyBrep::Transform; unit-SCC #22 (220 units); hazards: ptr-hash; 319 upstream test entry points reach this unit"

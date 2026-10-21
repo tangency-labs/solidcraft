@@ -1,0 +1,12 @@
+id = "blend.fillet_corner_p1"
+upstream = ["source/SMLib/inc/SmFilletCorner.h", "source/SMLib/src/SmFilletCorner.cpp"]
+rust_module = "blend::fillet_corner::p1"
+depends_on = ["blend.fillet_executive_p1", "blend.fillet_geom_p1", "blend.fillet_solver_p1", "blend.fillet_standard_solver_p1", "curve.curve_p2", "geom.axis2_placement", "geom.extent1d", "geom.extent2d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_surface_p1", "surface.surface_p2", "topology.edge", "topology.edgeuse_p1", "topology.vertex", "topology.vertexuse"]
+soft_depends_on = ["boolean.merge_p1", "boolean.topology_intersector_p2", "boolean.topology_intersector_p3", "curve.curve_p1", "curve.curve_p5", "curve.line", "geom.a_object", "geom.attribute", "geom.geom_utility_p1", "intersect.surface_intersector_p1", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p2", "nurbs.b_spline_surface_p2", "surface.plane_p1", "surface.surface_p4", "surface.surface_p5", "surface.surface_p6", "surface.surface_p7", "topology.brep_p4", "topology.brep_p7", "topology.edgeuse_p3", "topology.face_p2", "topology.proto_topology_p1"]
+est_lines = 1971
+layer = 59
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "55 fns; largest: SmFilletCorner::MakeConstantRadiusFillet, SmFilletCorner::MakeFaceBrep, SmFilletCorner::InsertIntersectionTopology, sm_CreateSrfOfRevolution; cycle back-edges (call into later units; stub or co-port): blend.fillet_geom_p3(3), blend.fillet_geom_p5(1); unit-SCC #22 (220 units); hazards: ptr-hash; 319 upstream test entry points reach this unit; CO-PORTED in blend.fillet_corner_p3 (PR #256): SmFilletCorner members and constructor, GetCornerType/GetName -> blend::fillet_corner::p3::{FilletCorner, FilletCorner::new, FilletCornerKind}; its stubs there: sm_TestG1Continuity, SmFilletNx1Corner::CheckNx1Degeneracy, CreateEndPatch, MakeFaceBrep, CalcCornerVertGeom; CO-PORTED in blend.fillet_executive_p3 (PR #244): read-only CornerView (GetFilletedVertex, GetCornerType, GetName)"

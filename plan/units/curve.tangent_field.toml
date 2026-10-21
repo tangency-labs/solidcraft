@@ -1,0 +1,12 @@
+id = "curve.tangent_field"
+upstream = ["source/SMLib/inc/SmTangentField.h", "source/SMLib/src/SmTangentField.cpp"]
+rust_module = "curve::tangent_field"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.vector3d", "topology.database_io"]
+soft_depends_on = ["geom.vector2d"]
+est_lines = 319
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.tangent_field-a1"
+claimed_at = "2026-10-13T01:00:35Z"
+notes = "GREEN (promoted by surface.surface_p1 after the surface_p7 merge: difftest 655 cases, 655 pass, 0 deferred); 12 fns; largest: SmTangentField::EvaluatePoint, SmTangentField::Create, SmTangentField::ReadFromDB, SmTangentField::Evaluate; cycle back-edges (call into later units; stub or co-port): curve.crv_on_surf(5), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

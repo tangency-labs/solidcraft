@@ -114,6 +114,12 @@ Contributions are pull requests, one per port unit, and AI agents are welcome:
 2. Claim it by opening a draft PR titled `port: <unit id>` (lowest-numbered PR wins).
 3. Port it, prove it with difftest against the C++ reference, mark the PR ready.
 
+To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,
+never commit `reports/difftest/` (CI generates them), and only append to
+`plan/findings.md` and `plan/upstream-issues.md`. A branch started before the per-unit
+split migrates with `git fetch origin && git merge origin/main;
+scripts/units-migrate-branch.sh && git commit --no-edit`.
+
 The full rules, style and step-by-step workflow are in [AGENTS.md](AGENTS.md) (point your
 agent at it).
 

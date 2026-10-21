@@ -1,0 +1,12 @@
+id = "curve.composite_curve_p1"
+upstream = ["source/SMLib/inc/SmCompositeCurve.h", "source/SMLib/src/SmCompositeCurve.cpp"]
+rust_module = "curve::composite_curve::p1"
+depends_on = ["curve.curve_p1", "curve.curve_p2", "curve.curve_p3", "curve.curve_p6", "curve.curve_p8", "geom.a_object", "geom.attribute", "geom.axis2_placement", "geom.extent1d", "geom.extent3d", "geom.geom_utility_p1", "geom.object", "geom.polar_box", "geom.pseudo_box", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_curve_p1"]
+soft_depends_on = ["geom.extent2d", "nurbs.b_spline_curve_p2", "nurbs.b_spline_curve_p3"]
+est_lines = 1700
+layer = 21
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.composite_curve_p1-a1"
+claimed_at = "2026-10-13T06:02:42Z"
+notes = "GREEN (promoted by curve.curve_p5: 3093 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 3093 cases (93 fixture: my_test_cci_self composites/offset rebuild, the disabled BuildCompositesFromCurves square, edge cases + 3000 generated), 2781 pass bit-identical (max_rel_err 0), 312 deferred (curve.curve_p5 312: AssertValid of the joined ApproximateCurve result reaches LocalPropertyAnalysis; corner chamfer / classify solves); 30k-seed run clean; --perturb SENSITIVE; SmCompositeCurve joins Curve as CurveKind::Composite; sm_FlushCrv co-ported (call graph lists it unused); no UNPORTED(curve.composite_curve_p1) stubs to wire; upstream OOB reads (GetKnots, ApproximateCurve NULL join, chamfer sSolutions[0]) in findings.md. 46 fns; largest: SmCompositeCurve::ComputeProjectedLoopOrientation, sm_CreateCorner, SmCompositeCurve::BuildCompositesFromCurves, sm_CurveClassify; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(4); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

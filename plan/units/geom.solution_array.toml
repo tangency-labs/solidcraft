@@ -1,0 +1,12 @@
+id = "geom.solution_array"
+upstream = ["source/SMLib/inc/SmSolutionArray.h", "source/SMLib/src/SmSolutionArray.cpp"]
+rust_module = "geom::solution_array"
+depends_on = ["geom.extent3d", "geom.object"]
+soft_depends_on = ["geom.tol", "geom.vector2d"]
+est_lines = 1319
+layer = 4
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "partial"
+claimed_by = "swarm-geom.solution_array-a1"
+claimed_at = "2026-10-12T20:24:32Z"
+notes = "difftest: 810 cases, 754 pass, 56 deferred (curve.curve_p2 16, topology.face_p2 14, topology.edge 12, surface.surface_p2 9, topology.vertex 5); Dump not ported (print only). 42 fns; largest: SmSolution::ClassifySolutionEnd, SmSolutionArray::AddSortedSolution, SmSolution::GetPoint, SmSolution::Dump; cycle back-edges (call into later units; stub or co-port): geom.extent1d(4), geom.vector3d(4), curve.curve_p2(2), geom.extent2d(2), surface.surface_p2(2), topology.edge(2), topology.face_p2(2), query.poly(1), surface.volume_p1(1), topology.vertex(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

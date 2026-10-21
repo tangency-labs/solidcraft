@@ -1,0 +1,12 @@
+id = "intersect.surface_drop_lib_p3"
+upstream = ["source/SMLib/src/SmSurfaceDropLib.cpp"]
+rust_module = "intersect::surface_drop_lib::p3"
+depends_on = ["curve.curve_cache", "curve.curve_p2", "geom.a_object", "geom.extent1d", "geom.extent2d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "intersect.surface_drop_lib_p1", "intersect.surface_drop_lib_p2", "nurbs.b_spline_curve_p1", "surface.offset_surface", "surface.surface_p1", "surface.surface_p2", "surface.surface_p3", "surface.surface_p4", "surface.surface_p5", "surface.surface_p7"]
+soft_depends_on = ["curve.crv_on_surf", "curve.curve_p4", "geom.vector2d", "nurbs.b_spline_surface_p1"]
+est_lines = 2062
+layer = 33
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "1 fns; largest: SmSurface::DropCurve; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"

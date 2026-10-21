@@ -1,0 +1,12 @@
+id = "curve.composite_curve_p2"
+upstream = ["source/SMLib/inc/SmCompositeCurve.h", "source/SMLib/src/SmCompositeCurve.cpp"]
+rust_module = "curve::composite_curve::p2"
+depends_on = ["curve.composite_curve_p1", "curve.curve_p1", "curve.curve_p2", "curve.curve_p4", "curve.curve_p7", "curve.curve_p8", "curve.offset_curve", "geom.a_object", "geom.extent1d", "geom.object", "geom.solution_array", "geom.vector3d", "topology.database_io"]
+soft_depends_on = ["geom.geom_utility_p1", "geom.tol", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p2"]
+est_lines = 1345
+layer = 22
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-curve.composite_curve_p2-a1"
+claimed_at = "2026-10-13T06:41:55Z"
+notes = "GREEN (promoted by curve.curve_p5: 661 cases, 0 deferred after its stubs were wired); difftest 661 cases (361 pass, 300 deferred on curve.curve_p5); 10 fns; largest: SmCompositeCurve::CreateOffsetsOfManyCurves, SmCompositeCurve::IntersectAndTrimOffsets, sm_CheckBowTies, SmCompositeCurveSegment::ReadFromDB; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"

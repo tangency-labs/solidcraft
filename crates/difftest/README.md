@@ -3,7 +3,7 @@
 `difftest` runs every case of a unit through **upstream SMLib (C++, via
 `solidcore-ffi`)** and the **solidcore Rust port** on identical inputs and
 compares the results. A unit may be marked `status = "green"` in
-`plan/modules.toml` only when `difftest --status-of <id>` prints `green`, and
+`plan/units/<id>.toml` only when `difftest --status-of <id>` prints `green`, and
 `status = "partial"` only when it prints `partial` (AGENTS.md section 4a).
 
 ## Quick start
@@ -26,7 +26,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 |---|---|
 | `--unit <id>` | run one unit (repeatable; `*` and `?` match several registered runners, e.g. `--unit 'nlib.*'`) |
 | `--jobs N` / `-j N` | run N units at a time, each in its own child process (default `1`: one process, in order; `0`: every core). Output, reports and exit status are the same as with `1` (below) |
-| `--green` | all units with `status = "green"` or `"partial"` in `plan/modules.toml` (one without a runner FAILS; a `green` unit that comes out partial FAILS) |
+| `--green` | all units with `status = "green"` or `"partial"` in `plan/units/*.toml` (one without a runner FAILS; a `green` unit that comes out partial FAILS) |
 | `--status-of <id>` | run the unit (no report) and print only `green`, `partial` or `fail`; exit `1` on `fail` (also when no runner is registered) |
 | `--all` | every registered runner |
 | `--list` | registered runners, their plan status and case counts |
@@ -94,7 +94,8 @@ With `--jobs N` and more than one unit (`--green`, `--all`, several or a glob of
 <id>` with the other options; the C++ kernel keeps global state, so units never share a
 process or run on threads). At most N children run at once; the queue is ordered longest
 first by the `cases_total` of each unit's previous report (in `--report-dir`, else
-`reports/difftest/`), and the next unit starts as soon as a child exits. The parent
+`reports/difftest/`; a unit with no report is estimated from the size of its
+`fixtures/<id>/`, about 512 bytes a case), and the next unit starts as soon as a child exits. The parent
 prints each unit's lines in the serial order and the usual summary line, so stdout,
 `reports/difftest/*.json` and the exit status are identical to a serial run's. Timing
 goes to stderr only: `difftest --jobs N: wall … s, sum of unit times … s, longest unit
@@ -417,11 +418,12 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit foo
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit foo.bar --perturb   # must say SENSITIVE
 cargo clippy -p difftest -p solidcore-ffi --features difftest/cpp --all-targets -- -D warnings
 git add harness/cpp/shim/foo_bar.cpp crates/solidcore-ffi/src/units/foo_bar.rs \
-        crates/difftest/src/units/foo_bar.rs fixtures/foo.bar reports/difftest/foo.bar.json
+        crates/difftest/src/units/foo_bar.rs fixtures/foo.bar plan/units/foo.bar.toml
 ```
 
-Commit the report produced with the default `--seeds` (it is deterministic, so
-diffs in it are meaningful). Then set `status` to what
+Do not commit `reports/difftest/foo.bar.json` (gitignored; CI regenerates every
+green/partial unit's report and publishes main's set). Quote its summary line in the
+PR instead. Then set `status` in `plan/units/foo.bar.toml` to what
 `--status-of foo.bar` prints (`green` or `partial`; never on `fail`).
 
 ## `--ssi-corpus`: exact ground-truth SSI corpus
@@ -546,7 +548,9 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   `wasm32-unknown-unknown`; the difftest binary refuses to run without `cpp`, except for `--solidcraft-cases` (Rust only).
 * Debugging: the binary is `bin/debug/difftest`; set breakpoints with
   mcp-debugger (the C++ kernel is built with `-g`).
-* Reports: `reports/difftest/<unit>.json` — sorted keys, no timestamps,
+* Reports: `reports/difftest/<unit>.json` — not committed (gitignored): CI uploads
+  main's set as the `difftest-reports` artifact, `scripts/fetch-reports.sh`
+  downloads it. Sorted keys, no timestamps,
   shortest round-trip floats, non-finite floats as `"NaN"`/`"inf"`; failing
   cases include inputs and up to 20 mismatches.
 * Reference platform: x86-64 Linux (as CI). Upstream converts out-of-range

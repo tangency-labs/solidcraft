@@ -1,0 +1,12 @@
+id = "surface.curve_bounded_surface"
+upstream = ["source/SMLib/inc/SmCurveBoundedSurface.h", "source/SMLib/src/SmCurveBoundedSurface.cpp"]
+rust_module = "surface::curve_bounded_surface"
+depends_on = ["geom.object", "surface.surface_p2", "topology.database_io"]
+soft_depends_on = ["curve.composite_curve_p1", "curve.curve_p2"]
+est_lines = 324
+layer = 22
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-surface.curve_bounded_surface-a1"
+claimed_at = "2026-10-13T12:00:00Z"
+notes = "difftest 535 cases (135 fixture + 400 generated), 359 pass, 176 deferred (surface.surface_p1 85, surface.surface_p3 56, surface.surface_p7 25, surface.surface_p5 10); SurfaceKind::CurveBounded; Surface::read_from_db now takes &Kernel; 19 fns; largest: SmCurveBoundedSurface::ReadFromDB, SmCurveBoundedSurface::operator==, SmCurveBoundedSurface::Evaluate, SmCurveBoundedSurface::SmCurveBoundedSurface; cycle back-edges (call into later units; stub or co-port): surface.surface_p1(4), surface.surface_p3(2), surface.surface_p5(1), surface.surface_p7(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit Re-run with surface.surface_p5's back-edges wired (PR #50): cases=535 passed=469 failed=0 deferred=66 max_rel_err=0e0 blocked_by=surface.surface_p3(66). GREEN (PR #52, after merging surface_p4/#49 and surface_p5/#50): 535/535 pass, 0 deferred, --perturb SENSITIVE 535/535."

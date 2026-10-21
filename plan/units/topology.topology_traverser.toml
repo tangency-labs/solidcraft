@@ -1,0 +1,12 @@
+id = "topology.topology_traverser"
+upstream = ["source/SMLib/inc/SmTopologyTraverser.h", "source/SMLib/src/SmTopologyTraverser.cpp"]
+rust_module = "topology::topology_traverser"
+depends_on = ["geom.solution_array", "topology.edge", "topology.edgeuse_p1", "topology.face_p2", "topology.vertex", "topology.vertexuse"]
+soft_depends_on = ["geom.context", "geom.extent2d", "geom.tol", "geom.vector3d", "topology.face_p4", "topology.loopuse", "topology.proto_topology_p1", "topology.shell", "topology.topology"]
+est_lines = 784
+layer = 43
+tests = ["prog_test:my_test_tsurf_cyl_creation_2d", "prog_test:my_test_tsurf_cyl_creation_3d", "prog_test:my_test_tsurf_cyl_creation_fast", "prog_test:my_test_tsurf_creation", "SM_API_test:TestSmCreatePlanarCircle", "SM_API_test:TestIntersectionOutputStatus"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL (PR #113): difftest 909 cases, 889 passed, 0 failed, 20 deferred: topology.face_p3(5) (were topology.face_p1 before PR #148 wired FlipFaceOrientation), topology.face_p4(15) (re-run in PR #154: the 7 topology.shell deferrals pass, RemoveShell / FaceuseShellReplacement wired to topology::shell); exact traversal order and all face/edge/vertex/faceuse/vertexuse marks compared, 0 absolute floors; wire recursion replaced by an explicit continuation stack in the same order (6000-edge regression). No existing UNPORTED(topology.topology_traverser) back-edges. 14 fns; largest: sm_ShellConnectivity, SmTopologyTraverser::IsInnerShell, sm_CollectFaces, SmTopologyTraverser::FaceuseTraversal; cycle back-edges (call into later units; stub or co-port): topology.face_p3(1); unit-SCC #22 (220 units); 200 upstream test entry points reach this unit PR #163 exposes the existing co-ported face_edges helper for merge_p1 reuse; it keeps duplicates between loops and deduplicates within each loop (regression added). PR #169 exposes its existing co-ported has_lamina_edge for brep_p6 reuse; no duplicated face algorithm. Re-run: 909 cases, 889 pass, 20 deferred, 0 failures, max_rel_err 0. [topology.face_p3 wired (PR #139): 909 cases, 889 pass, 0 failed, 20 deferred (topology.face_p4 20; the 5 topology.face_p3 deferrals now defer inside it)] After topology.face_p4 (PR #239) merged with the batch: 909 cases, 895 pass, 0 failed, 14 deferred (was 889/20)."

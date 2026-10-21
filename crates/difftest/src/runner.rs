@@ -15,7 +15,7 @@ use crate::HarnessError;
 /// A side-by-side runner for one unit. Implement it on `pub struct Runner;`
 /// in `src/units/<unit_id_with_underscores>.rs`.
 pub trait UnitDiff {
-    /// Unit id as in `plan/modules.toml` (e.g. `nlib.knots`).
+    /// Unit id as in `plan/units/<id>.toml` (e.g. `nlib.knots`).
     fn id(&self) -> &'static str;
 
     /// Runs the upstream C++ (via `solidcore_ffi::units::*`).

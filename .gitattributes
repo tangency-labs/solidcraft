@@ -1,0 +1,4 @@
+# Append-only logs: a local `git merge` keeps both sides' new entries instead of
+# conflicting. GitHub's own mergeability check ignores this, so merge main locally.
+plan/findings.md merge=union
+plan/upstream-issues.md merge=union

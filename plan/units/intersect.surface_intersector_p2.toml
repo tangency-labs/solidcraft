@@ -1,0 +1,12 @@
+id = "intersect.surface_intersector_p2"
+upstream = ["source/SMLib/src/SmSurfaceIntersector.cpp"]
+rust_module = "intersect::surface_intersector::p2"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.extent2d", "geom.matrix", "geom.solution_array", "geom.vector2d", "geom.vector3d", "intersect.surface_intersector_p1", "nurbs.b_spline_curve_p1", "surface.surface_p2"]
+soft_depends_on = ["curve.curve_p8", "geom.extent3d", "geom.object", "geom.tol", "nurbs.b_spline_curve_n_lib", "surface.surface_cache_p1", "surface.surface_cache_p2", "surface.surface_p3", "surface.surface_p5", "surface.surface_p7"]
+est_lines = 1677
+layer = 33
+tests = ["prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection", "prog_test:my_test_surface_interface", "prog_test:my_test_ssi", "prog_test:my_test_tsurf_section", "prog_test:my_test_planar_section"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "6 fns; largest: SmSurfaceIntersector::ClassifyBoundaryStartPointIntersection, SmSurfaceIntersector::ComputePointValues, SmSurfaceIntersector::DoBoundaryPlaneTest, SmSurfaceIntersector::FlushCurve; unit-SCC #22 (220 units); 150 upstream test entry points reach this unit; difftest PR #42: 1660 cases (1508 pass, 152 deferred: blend.fillet_executive_p1(11), surface.surface_p3(36), surface.surface_p5(105)); EvaluateNormal wired to surface.surface_p7; shim covers SmPlane, SmBSplineSurface, SmCurveBoundedSurface; fixtures from my_test_planar_section (shovel.srf) plus 38 + 105 review adversarial cases; FlushCurve unguarded (decreasing knots compare the CreateCanonical SM_ERR path); gap walk capped at MAX_GAP_SAMPLES (see plan/findings.md) Re-run with surface.surface_p5's back-edges wired (PR #50): cases=1660 passed=1508 failed=0 deferred=152 max_rel_err=0e0 blocked_by=blend.fillet_executive_p1(11),intersect.surface_intersector_p3(10),surface.surface_p3(131). Re-run (PR #52, after merging surface_p4/#49 and surface_p5/#50): 1660 cases, 1636 pass, 24 deferred (blend.fillet_executive_p1 12, surface.surface_point_solve_p3 12). Re-run after merging PR #106 (surface.surface_point_solve_p3 wired, 2026-10-15): 1660 cases, 1648 pass, 12 deferred (blend.fillet_executive_p1 12), 0 failed, max_rel_err 0."

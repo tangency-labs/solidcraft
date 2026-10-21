@@ -1,0 +1,12 @@
+id = "nlib.srf_adv_p1"
+upstream = ["source/SMLib/src/NL_SrfAdv.cpp"]
+rust_module = "nurbs::srf_adv::p1"
+depends_on = ["nlib.crv_basic", "nlib.crv_fit_p1", "nlib.crv_nurb", "nlib.geom", "nlib.math", "nlib.srf_basic", "nlib.srf_nurb"]
+soft_depends_on = ["nlib.crv_fit_p2", "nlib.crv_tool_p2", "nlib.funcs_basic", "nlib.srf_adv_p2", "nlib.srf_adv_p3", "nlib.srf_adv_p4", "nlib.srf_fit", "nlib.srf_tool_p1"]
+est_lines = 1188
+layer = 15
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.srf_adv_p1-a1"
+claimed_at = "2026-10-12T23:52:37Z"
+notes = "5 fns; largest: N_CreateSkinSpine, N_SrfEvalPtDerivsUnbounded, N_CrossBoundaryDerivsVectorField, N_SrfOffsetGetMaxDeriv; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; green: 2886 difftest cases (386 fixtures + 2500 generated), 0 deferred, bit-identical"

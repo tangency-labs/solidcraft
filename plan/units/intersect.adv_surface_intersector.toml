@@ -1,0 +1,12 @@
+id = "intersect.adv_surface_intersector"
+upstream = ["source/SMLib/inc/SmAdvSurfaceIntersector.h", "source/SMLib/src/SmAdvSurfaceIntersector.cpp"]
+rust_module = "intersect::adv_surface_intersector"
+depends_on = ["curve.conic", "geom.extent2d", "geom.extent3d", "geom.global_solver", "geom.pseudo_box", "geom.solution_array", "geom.vector2d", "geom.vector3d", "intersect.surface_intersector_p1", "surface.surface_cache_p1", "surface.surface_p2"]
+soft_depends_on = ["geom.geom_utility_p1", "geom.object", "geom.polar_box", "geom.tree", "surface.surface_p11", "surface.surface_p7"]
+est_lines = 1646
+layer = 33
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "PARTIAL: difftest 1931 cases (398 review fixtures: adversarial singular-point programs; 27 inline edge cases from the ComputeSingularityPoint docs + 6 LocalSolve/SolveIt cases on leaves >4x apart in size (DropPointsToTangentPlane) + 1500 generated programs: singular points with shape-tensor geometry, Dupin indicatrices, SolveIt/LocalSolve/SolveBranch/FindBestSubdivisionNode/BranchIsGaussSeparate/FindInteriorCurves over hand-built surface cache trees), 1915 pass bit-identical, 16 deferred (surface.surface_p11 16: LocalSurfaceIntersect in FindInteriorCurves); wired the surface.surface_p7 stubs (DropPointsToTangentPlane, non-planar EvaluateNormal; CreateParallelProjectionCurves now stops at intersect.surface_intersector_p5 DoIntersection); wired UNPORTED(intersect.adv_surface_intersector) in surface.surface_p2 (GlobalSurfaceIntersect, PointBasedSurfaceIntersect now stop at intersect.surface_intersector_p5 / _p4); base SolveBranch exposed as geom::global_solver::solve_branch; 11 fns; largest: SmAdvSurfaceIntersector::ComputeSingularityPoint, SmAdvSurfaceIntersector::FindInteriorCurves, SmAdvSurfaceIntersector::LocalSolve, SmAdvSurfaceIntersector::MakeDupin; cycle back-edges (call into later units; stub or co-port): intersect.surface_intersector_p2(2), blend.fillet_intersector(1), intersect.surface_intersector_p4(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit surface.surface_p11 (PR #120, after merging main with surface.surface_p3): cases=1931 passed=1929 failed=0 deferred=2 (intersect.surface_intersector_p2 2); --perturb SENSITIVE."

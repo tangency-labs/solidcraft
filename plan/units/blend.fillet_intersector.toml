@@ -1,0 +1,12 @@
+id = "blend.fillet_intersector"
+upstream = ["source/SMLib/inc/SmFilletIntersector.h", "source/SMLib/src/SmFilletIntersector.cpp"]
+rust_module = "blend::fillet_intersector"
+depends_on = ["blend.fillet_geom_p1", "blend.fillet_solver_p1", "curve.crv_on_surf", "curve.hermite_curve", "geom.extent1d", "geom.extent2d", "geom.vector2d", "geom.vector3d", "intersect.adv_surface_intersector", "intersect.surface_intersector_p1", "surface.surface_p2", "topology.edge"]
+soft_depends_on = ["curve.curve_p2", "curve.curve_p3", "geom.geom_utility_p1", "geom.object", "geom.solution_array", "nurbs.b_spline_curve_p1", "surface.surface_p1", "topology.edgeuse_p1"]
+est_lines = 1708
+layer = 50
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "12 fns; largest: SmFilletIntersector::ComputeNextPoint, SmFilletIntersector::FlushCurve, SmFilletIntersector::TestSpanAccuracy, sm_FlushCrv; cycle back-edges (call into later units; stub or co-port): blend.fillet_solver_p2(2), blend.fillet_solver_p4(2), blend.fillet_solver_p3(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL (PR #179): difftest cases=1286 passed=908 deferred=378 (PR #192 after #168: the 33 ComputePointValuesDelta cases that deferred at SmConstantRadiusFS::SetupOffsetValues run and pass, with the runner writing the op's points back to the arena as the shim's references do; blend.fillet_solver_p2 37, _p3 120, _p4 59, curve.crv_on_surf 162: SmCrvOnSurf over an SmPlane is a dispatch gap); FlushCurve of 2+ points is not run in C++ (dereferences the unset m_pExecutive and NULL fillet geometry rails) and is covered by unit tests only Re-verified after merging main (surface.offset_surface green): FilletSolverOps::rail_surface_evaluate_1st_derivatives (GetSurface(rail)->Evaluate1stDerivatives) now evaluates the ported SmOffsetSurface of ConstantRadiusAssistedFs (no UNPORTED(surface.offset_surface) left); cases=1213 passed=803 failed=0 deferred=410, --perturb 803/803. Review fixes: FilletSolverOps::step_solve takes rdStep in/out and its flags as an out-param kept on failure; 73 review fixtures (fixtures/blend.fillet_intersector/review_cases.json); cases=1286 passed=875 failed=0 deferred=411 (_p3 120: rv_next_clipped_step pins the C++ rescaled step)."

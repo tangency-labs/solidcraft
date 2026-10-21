@@ -1,0 +1,12 @@
+id = "curve.curve_p1"
+upstream = ["source/SMLib/src/SmCurve.cpp"]
+rust_module = "curve::curve::p1"
+depends_on = ["curve.curve_cache", "curve.curve_p2", "curve.curve_p3", "curve.curve_p4", "geom.a_object", "geom.extent1d", "geom.global_solver", "geom.object", "geom.solution_array", "geom.tol", "geom.tree", "geom.vector3d", "nurbs.b_spline_curve_p1"]
+soft_depends_on = ["curve.hermite_curve", "geom.extent3d", "geom.geom_utility_p1", "geom.pseudo_box"]
+est_lines = 2097
+layer = 18
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "partial"
+claimed_by = "swarm-curve.curve_p1-a1"
+claimed_at = "2026-10-13T03:57:21Z"
+notes = "PARTIAL: difftest 3083 cases (83 fixture re-expressing the smCurveTest my_test_point_extrema / my_test_drop_point line and circle solves, the SmApiCreateRectangle / SmApiCreateRegularPolygon edges through Tessellate / TessellateByBisection / GlobalPointSolve / ApproximateCurve and edge cases + 3000 generated), 2493 pass bit-identical (max_rel_err 0), 590 deferred (curve.curve_p5 590: LocalPropertyAnalysis 310, SmFindCCNormalENFO::Evaluate 163, SmCCIntersectENFO::Evaluate 73, IsArc 44); --perturb SENSITIVE; 12,083-case run clean; co-ported SmCurve::IsLine dispatch and CacheMakeOrValidate cache build (curve.curve_p5); SolutionObject::natural_interval added for IdenticalSolutions; wired UNPORTED(curve.curve_p1) in nurbs.b_spline_curve_p1 (TessellateByBisection: unit now green), nurbs.b_spline_curve_p2 (ApproximateCurve), curve.hyperbola (GlobalPointSolveSTEP: 70 -> 0 curve_p1 deferred), curve.ellipse_p2 (line GlobalPointSolve; the ellipse one now waits on curve.ellipse_p1); curve.curve_p4 / curve.ellipse_p2 curve_p1 deferrals now pass or wait on curve.ellipse_p1 (findings.md). 8 fns; largest: SmCPGlobalSolver::LocalSolve, SmCurve::TessellateByBisection, SmCurve::ClassifyIntersectingRangeSolution, SmCurve::GlobalPointSolve; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(2); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit UPDATE after topology.brep_p1 (PR #145): re-run 3083 cases, 3057 pass, 0 fail, 26 deferred (geom.solution_array 26: its SmTol::GetZoneTol3d(SmObject*) stub, formerly tagged topology.brep_p1, now self-tagged: the tolerance arms are ported but need a &Brep the array does not hold)."

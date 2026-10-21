@@ -1,0 +1,12 @@
+id = "geom.context"
+upstream = ["source/SMLib/inc/SmContext.h", "source/SMLib/inc/SmTopoTypes.h", "source/SMLib/src/SmContext.cpp", "source/SM_API/src/SmApiGeneral.cpp"]
+rust_module = "geom::context"
+depends_on = []
+soft_depends_on = ["geom.tol"]
+est_lines = 355
+layer = 2
+tests = ["prog_test:my_test_crv_projected_max", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix"]
+status = "green"
+claimed_by = "swarm-geom.context-a1"
+claimed_at = "2026-10-12T19:48:04Z"
+notes = "green: 2013 difftest cases (13 fixtures + 2000 generated scripts), 0 deferred, all bit-identical; wired UNPORTED(geom.context) in geom.tol (Option<&Context> overloads; geom.tol stays green). 30 fns; largest: SmNewMarkAndLock::LockMark, SmNewMarkAndLock::UnlockMark, SmContext::NewMark, SmContext::SmContext; entry points: SmApiCreateContext, SmApiGetOrCreateContext; unit-SCC #22 (220 units); 320 upstream test entry points reach this unit"

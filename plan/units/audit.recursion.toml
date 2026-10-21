@@ -1,0 +1,12 @@
+id = "audit.recursion"
+upstream = []
+rust_module = "(crate-wide)"
+depends_on = ["blend.fillet_corner_p2", "blend.fillet_corner_p3", "blend.hcr", "boolean.api_brep", "heal.heal_data_p3", "intersect.curve_class_p8", "intersect.surface_drop_curve", "intersect.surface_intersector_p5", "intersect.surface_silhouette", "mass.integrator", "offset.offset_executive_p2", "primitive.api_curves", "primitive.api_primitives", "query.api_queries", "query.tess", "surface.b_spline_volume_n_lib", "surface.cone_p3", "surface.srf_in_volume", "surface.surf_of_extrusion_p2", "surface.surface_point_solve_p3", "sweep.api_brep", "sweep.api_surfaces"]
+soft_depends_on = []
+est_lines = 0
+layer = 65
+tests = []
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "Not a port: audit every recursive path in crates/solidcore (direct and mutual recursion, incl. via Curve/Surface dispatch) and give each a depth bound returning SolidError, or convert to an explicit-stack loop only where iteration order stays identical (difftest must not change). Motivation: wasm32 has no stack guard page, so overflow corrupts memory. See AGENTS.md (recursion) and plan/findings.md (nested reads). Depends on all sink units so it runs last."

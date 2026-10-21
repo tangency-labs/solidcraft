@@ -1,0 +1,12 @@
+id = "topology.topology"
+upstream = ["source/SMLib/inc/SmTopology.h", "source/SMLib/inc/SmTrackTopologyChanges.h", "source/SMLib/src/SmTopology.cpp", "source/SMLib/src/SmTrackTopologyChanges.cpp"]
+rust_module = "topology::topology"
+depends_on = ["geom.a_object", "geom.context", "geom.object"]
+soft_depends_on = ["geom.tol"]
+est_lines = 389
+layer = 7
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-topology.topology-a1"
+claimed_at = "2026-10-12T21:22:31Z"
+notes = "GREEN: difftest 657 cases (57 upstream-derived/edge-case fixtures + 600 generated scripts: marks under SmNewMarkAndLock, flags/user values, Notify propagation for every operation incl. the callback pass-through, tolerance, IsConnectedTo, destruction, SmTrackTopologyChanges start/stop/nesting/foreign callback), 0 deferred, bit-identical; wired SmSAGObject::Notify (geom.a_object 169 -> 168 deferred) and retargeted the SmTol::GetZoneTol3d(SmObject*) markers to the derived-kind units; CO-PORTED in topology.brep_p5 (PR #194): SmTopologyChangeCallback::Execute/AddUnique/Remove -> topology::topology::TopologyChangeCallback, supporting real healer notifications; 27 native callback scripts pass in topology.brep_p5, including active reset/foreign replacement/preexisting observers; topology.topology rerun PASS 657/657, max_rel_err=0 (findings.md); 30 fns; largest: SmTopology::Notify, SmTrackTopologyChanges::StartTracking, SmTrackTopologyChanges::StopTracking, SmTrackTopologyChanges::SmTrackTopologyChanges; cycle back-edges (call into later units; stub or co-port): topology.proto_topology_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in topology.shell (PR #80): SmTopology face-use sibling links -> topology::Faceuse::sibling_links and topology::shell::faceuse_sibling_links, retaining literal next/last links after self-transfer clears the shell head; WIRED in topology.shell (PR #80): notify_with_regions forwards an explicit RegionLookup after the unchanged topology mark propagation; 657/657 native cases exact and sensitive"

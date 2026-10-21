@@ -1,0 +1,12 @@
+id = "topology.brep_p3"
+upstream = ["source/SMLib/src/SmBrep.cpp", "source/SM_API/src/SmApiQueries.cpp"]
+rust_module = "topology::brep::p3"
+depends_on = ["curve.curve_p2", "geom.context", "geom.extent1d", "geom.extent3d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "nurbs.b_spline_curve_p1", "nurbs.b_spline_surface_p1", "surface.surface_p1", "surface.surface_p2", "topology.brep_p1", "topology.brep_p2", "topology.brep_p4", "topology.brep_p9", "topology.edge", "topology.edgeuse_p1", "topology.edgeuse_p2", "topology.face_p1", "topology.face_p2", "topology.loopuse", "topology.proto_topology_p1", "topology.shell", "topology.topology", "topology.topology_traverser", "topology.vertex", "topology.vertexuse"]
+soft_depends_on = ["curve.crv_on_surf", "curve.curve_p1", "curve.curve_p5", "geom.extent2d", "geom.vector2d", "intersect.topology_solver_p2", "nurbs.b_spline_surface_n_lib_p1", "surface.offset_surface", "surface.surface_p11", "surface.surface_p4", "surface.surface_p5", "surface.surface_p7", "topology.edgeuse_p3", "topology.face_p3", "topology.face_p4", "topology.trimming_tools"]
+est_lines = 2503
+layer = 48
+tests = ["prog_test:my_test_tsurf_cyl_creation_2d", "prog_test:my_test_tsurf_cyl_creation_3d", "prog_test:my_test_tsurf_cyl_creation_fast", "prog_test:my_test_tsurf_creation", "SM_API_test:TestSmCreatePlanarCircle", "SM_API_test:TestIntersectionOutputStatus"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "CO-PORTED in topology.brep_p10 (PR #130): SmBrep::SmBrep, the topology part (infinite void region heading the region list, m_pInfiniteRegion; m_bEditingEnabled is topology.brep_p1's field) -> topology::Brep::new_with_infinite_region; CO-PORTED in offset.offset_executive_p2 (PR #201): earlier SmBrep::SmBrep empty-topology subset (void infinite region), now delegates to topology::Brep::new_with_infinite_region from PR #130, then assigns executive tolerance/editing state and caller-reserved result key; 11 fns; largest: SmBrep::MergeBrep, SmBrep::OrientTrimmedSurfaces, SmBrep::DeleteFace, SmBrep::SqueezeEdge; entry points: SmApiBrepCopy; cycle back-edges (call into later units; stub or co-port): blend.fillet_geom_p1(2), query.brep(1); unit-SCC #22 (220 units); hazards: ptr-hash; 200 upstream test entry points reach this unit"

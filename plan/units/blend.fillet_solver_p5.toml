@@ -1,0 +1,12 @@
+id = "blend.fillet_solver_p5"
+upstream = ["source/SMLib/src/SmFilletSolver.cpp"]
+rust_module = "blend::fillet_solver::p5"
+depends_on = ["blend.fillet_geom_p1", "blend.fillet_solver_p1", "curve.curve_p2", "geom.object", "geom.solution_array", "intersect.curve_class_p1", "surface.offset_surface", "topology.edge"]
+soft_depends_on = ["curve.curve_p1", "geom.extent1d", "geom.tol", "geom.vector3d", "intersect.curve_class_p2", "intersect.curve_class_p4", "intersect.point_class", "query.face_p2", "surface.surf_of_revolution_p1", "surface.surf_of_revolution_p2", "surface.surface_p2", "topology.edgeuse_p1", "topology.edgeuse_p2", "topology.face_p2", "topology.vertex"]
+est_lines = 848
+layer = 50
+tests = ["SM_API_test:TestSmCircularFillet", "SM_API_test:TestSmChamferFillet", "SM_API_test:TestSmFilletEdges", "SM_API_test:TestSmFilletEdgesPerEdge", "SM_API_test:TestSmVariableRadiusFillet", "SM_API_test:TestSmSetBevelCorners"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "2 fns; largest: SmFilletSolver::ProcessRollOver, SmFilletSolver::TestRollOver; cycle back-edges (call into later units; stub or co-port): blend.fillet_solver_p3(3), blend.fillet_geom_p2(2), blend.fillet_geom_p3(2), blend.fillet_geom_p5(2), blend.fillet_solver_p2(2), blend.fillet_executive_p1(1); unit-SCC #22 (220 units); 25 upstream test entry points reach this unit"

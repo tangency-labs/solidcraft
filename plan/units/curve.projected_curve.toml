@@ -1,0 +1,12 @@
+id = "curve.projected_curve"
+upstream = ["source/SMLib/inc/SmProjectedCurve.h", "source/SMLib/src/SmProjectedCurve.cpp"]
+rust_module = "curve::projected_curve"
+depends_on = ["curve.curve_p2", "geom.axis2_placement", "geom.object", "geom.vector3d", "topology.database_io"]
+soft_depends_on = []
+est_lines = 569
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.projected_curve-a1"
+claimed_at = "2026-10-13T01:00:34Z"
+notes = "difftest: 2727 cases, 0 deferred (green); wired curve.curve_p2 SmProjectedCurve::ReadFromDB back-edge. 25 fns; largest: SmProjectedCurve::ReadFromDB, SmProjectedCurve::Evaluate, SmProjectedCurve::Transform, SmProjectedCurve::EvaluatePoint; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

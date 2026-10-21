@@ -1,0 +1,12 @@
+id = "curve.line"
+upstream = ["source/SMLib/inc/SmLine.h", "source/SMLib/src/SmLine.cpp"]
+rust_module = "curve::line"
+depends_on = ["curve.curve_p2", "geom.assert_array", "geom.extent1d", "geom.extent2d", "geom.extent3d", "geom.object", "geom.pseudo_box", "geom.solution_array", "geom.tol", "geom.vector3d", "nurbs.b_spline_curve_n_lib", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p2", "nurbs.b_spline_curve_p3", "topology.database_io"]
+soft_depends_on = ["geom.axis2_placement", "geom.geom_utility_p1", "geom.geom_utility_p2", "geom.polar_box", "nurbs.nurbs_crv"]
+est_lines = 1884
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN (promoted by curve.curve_p5: 2103 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 2103 cases (103 fixture: my_test_reversed_line_join x16, smTopoTest canonical lines + AdjustSTEPInterval, my_test_analytic_curves line, my_test_bsplinecurve_nlib line deform/copy, SM_API TestSmCurves/TestSmBrep lines, edge cases: degenerate/zero-vector/inside-out/infinite/2D lines, ReadFromDB ASCII+binary v30/v33/2D/rational, line/line intersections incl. overlap ranges, drop/GPS/STEP inversion, trims, joins, deform, offset, transform, AssertValid + 2000 generated programs of up to 6 ops), 2102 pass bit-identical (max_rel_err 0), 1 deferred (curve.curve_p4 1: SmCurve::AssertValid; IntersectWithEllipse wired by curve.ellipse_p2); 40k-seed run clean; --perturb SENSITIVE; co-ported SmCurve::EvaluateSTEPPoint for lines; wired UNPORTED(curve.line) in curve.curve_p2 (ReadFromDB), nurbs.b_spline_curve_p2 (CreateAnalyticCurve), nurbs.b_spline_curve_p3 (unreachable JoinWith branch dropped), curve.iso_curve (CreateUVIsoLine); fixed nurbs.b_spline_curve_n_lib DeformToEndPointTargets to ignore DegreeElevate status as upstream (see findings). 62 fns; largest: SmLine::IntersectWithLine, SmLine::GlobalPointSolveSTEP, SmLine::JoinWith, SmLine::Tessellate; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(6), curve.ellipse_p2(1), surface.surf_of_extrusion_p1(1), surface.surf_of_revolution_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; after curve.curve_p7: the 1 deferred case is now blocked by curve.curve_p5"

@@ -1,0 +1,12 @@
+id = "curve.crv_in_volume"
+upstream = ["source/SMLib/inc/SmCrvInVolume.h", "source/SMLib/src/SmCrvInVolume.cpp"]
+rust_module = "curve::crv_in_volume"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.object", "geom.tol", "geom.vector3d", "topology.database_io"]
+soft_depends_on = ["geom.axis2_placement", "geom.context", "geom.extent3d", "geom.vector2d"]
+est_lines = 949
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "partial"
+claimed_by = "swarm-curve.crv_in_volume-a1"
+claimed_at = "2026-10-13T01:00:34Z"
+notes = "difftest 2030 cases (1855 pass, 175 deferred: intersect.curve_class_p4 175; surface.volume_p1 and surface.volume_p2 wired); 27 fns; largest: SmCrvInVolume::GetKnots, SmCrvInVolume::Evaluate, SmCrvInVolume::ReadFromDB, SmCrvInVolume::GenerateMults; cycle back-edges (call into later units; stub or co-port): surface.volume_p1(14), curve.curve_p5(3), intersect.curve_class_p1(2), surface.volume_p2(2), intersect.curve_class_p4(1), intersect.curve_class_p8(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit Re-run (PR #137, constructor stub retagged UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet): 2030 cases, 1855 pass, 175 deferred (intersect.curve_class_p2 175), 0 failed, --perturb SENSITIVE 1855/1855."

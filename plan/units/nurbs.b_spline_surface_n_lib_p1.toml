@@ -1,0 +1,12 @@
+id = "nurbs.b_spline_surface_n_lib_p1"
+upstream = ["source/SMLib/src/SmBSplineSurfaceNLib.cpp"]
+rust_module = "nurbs::b_spline_surface_n_lib::p1"
+depends_on = ["geom.extent1d", "geom.extent2d", "geom.object", "geom.vector3d", "nlib.crv_basic", "nlib.geom", "nlib.math", "nlib.srf_adv_p3", "nlib.srf_basic", "nlib.srf_nurb", "nurbs.b_spline_curve_n_lib", "nurbs.b_spline_curve_p1", "nurbs.b_spline_surface_p1"]
+soft_depends_on = ["geom.tol", "geom.vector2d", "nlib.crv_adv_p2", "nlib.crv_nurb", "nlib.crv_tool_p2", "nlib.knots", "nlib.srf_adv_p1", "nlib.srf_adv_p4", "nlib.srf_adv_p6", "nlib.srf_common", "nlib.srf_offset", "nlib.srf_tool_p3", "nlib.srf_tool_p4"]
+est_lines = 2033
+layer = 17
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nurbs.b_spline_surface_n_lib_p1-a1"
+claimed_at = "2026-10-13T00:47:51Z"
+notes = "difftest: 665 cases (65 fixtures + 600 generated), 638 pass bit-identical, 27 deferred (surface.surface_p5: SmSurface::IsSingularity in CreateExtendedSurface; then surface.surface_p7 IsClosed); DropCurve path of sm_CreateNonRationalCurve not diffed (upstream crash, see findings). 23 fns; largest: sm_CreateCoonsSrf, SmBSplineSurface::CreateExtendedSurface, SmBSplineSurface::CreateCoonsPatch, SmBSplineSurface::CreateNSidedPatch; cycle back-edges (call into later units; stub or co-port): surface.surface_p2(4), curve.curve_p2(1), intersect.surface_drop_lib_p3(1), surface.surface_p5(1), surface.surface_p7(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit Re-run with surface.surface_p5's back-edges wired (PR #50): cases=665 passed=638 failed=0 deferred=27 max_rel_err=0e0 blocked_by=surface.surface_p3(27). GREEN (PR #52, after merging surface_p4/#49 and surface_p5/#50): GetSingularities wired, 665/665 pass, 0 deferred."

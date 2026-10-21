@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # download main's difftest-reports artifact
   pages: write
   id-token: write
 
@@ -48,6 +49,11 @@ jobs:
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Fetch main's difftest reports
+        if: steps.gate.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-reports.sh || echo "no reports; unit pages will say so"
       - name: Build site
         if: steps.gate.outputs.build == 'true'
         run: python3 site/build.py --out _site

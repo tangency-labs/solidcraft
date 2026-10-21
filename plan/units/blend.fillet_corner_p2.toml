@@ -1,0 +1,12 @@
+id = "blend.fillet_corner_p2"
+upstream = ["source/SMLib/inc/SmFilletCorner.h", "source/SMLib/src/SmFilletCorner.cpp"]
+rust_module = "blend::fillet_corner::p2"
+depends_on = ["blend.fillet_corner_p1", "blend.fillet_geom_p1", "blend.fillet_geom_p2", "blend.fillet_solver_p1", "curve.curve_p2", "geom.extent1d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "intersect.surface_intersector_p1", "nurbs.b_spline_curve_p1", "surface.surface_p2", "topology.edge", "topology.edgeuse_p1", "topology.vertex"]
+soft_depends_on = ["blend.fillet_executive_p1", "blend.fillet_executive_p2", "blend.fillet_geom_p3", "blend.fillet_geom_p4", "blend.fillet_geom_p5", "blend.fillet_geom_p6", "blend.fillet_standard_solver_p2", "curve.curve_p1", "geom.extent2d", "geom.geom_utility_p1", "nurbs.b_spline_curve_p2", "nurbs.b_spline_surface_p2", "surface.offset_surface", "surface.surface_p1", "surface.surface_p4", "surface.surface_p7", "topology.edgeuse_p3", "topology.face_p2", "topology.proto_topology_p1", "topology.vertexuse"]
+est_lines = 1892
+layer = 64
+tests = ["SM_API_test:TestSmFilletPreview", "SM_API_test:TestSmSurfaceSurfaceFillet", "SM_API_test:TestSmCircularFillet", "SM_API_test:TestSmChamferFillet", "SM_API_test:TestSmFilletEdges", "SM_API_test:TestSmFilletEdgesPerEdge"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "16 fns; largest: SmFilletCorner::MakeVariableRadiusFillet, SmFilletNx1ClosedCorner::AdjustTangentCorner, SmFilletCorner::MakeAnalyticCornerSurface, SmFilletConvexNxNCorner::AdjustTopology; unit-SCC #22 (220 units); 31 upstream test entry points reach this unit; CO-PORTED in blend.fillet_corner_p3 (PR #256): the constructors of SmFillet1x1Corner, SmFilletNx1ClosedCorner, SmFilletNx1Corner, SmFillet3x2MixedConvexityCorner, SmFilletNx2Corner, SmFilletNxNCorner -> blend::fillet_corner::p3::FilletCorner::new (FilletCornerKind); its stubs there: sm_FindConcaveEdgeuses, MakeAnalyticCornerSurface, AdjustConcaveCornerTopology, SmFilletConvexNxNCorner::AdjustTopology, SmFilletNx1ClosedCorner::AdjustTangentCorner"

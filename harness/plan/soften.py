@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split light dependencies out of `depends_on` into `soft_depends_on` (plan/modules.toml).
+"""Split light dependencies out of `depends_on` into `soft_depends_on` (plan/units/*.toml).
 
 A dependency U -> D is *soft* when U's functions call at most MAX_CALLS distinct functions
 of D and D owns no methods of a class U's own classes are or derive from (so U needs no
@@ -17,7 +17,6 @@ import collections
 import json
 import os
 import pathlib
-import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -64,20 +63,13 @@ def needs_type(u, d):
     return bool(mine & own_classes[d])
 
 
-path = ROOT / "plan/modules.toml"
-text = path.read_text()
-blocks = re.split(r"(?m)^(?=\[\[unit\]\])", text)
-out, moved, total = [], 0, 0
-for b in blocks:
-    m = re.search(r'(?m)^id = "([^"]+)"', b)
-    if not m:
-        out.append(b)
-        continue
-    uid = m.group(1)
-    deps = re.findall(r'"([^"]+)"', re.search(r"(?m)^depends_on = \[(.*)\]$", b).group(1))
-    sm = re.search(r"(?m)^soft_depends_on = \[(.*)\]\n", b)
-    deps += re.findall(r'"([^"]+)"', sm.group(1)) if sm else []
-    deps = sorted(set(deps))
+sys.path.insert(0, str(ROOT / "harness/plan"))
+import units as plan_units  # noqa: E402
+
+moved, total = 0, 0
+for u in plan_units.load_units(ROOT):
+    uid = u["id"]
+    deps = sorted(set(u.get("depends_on", [])) | set(u.get("soft_depends_on", [])))
     if uid not in units_json:
         # Not a port unit (e.g. audit.recursion): its ordering is deliberate, keep it hard.
         hard = deps
@@ -86,12 +78,13 @@ for b in blocks:
     soft = [d for d in deps if d not in hard]
     total += len(deps)
     moved += len(soft)
-    if sm:
-        b = b.replace(sm.group(0), "")
-    b = re.sub(r"(?m)^depends_on = \[.*\]$",
-               lambda _: "depends_on = " + json.dumps(hard) + "\nsoft_depends_on = " + json.dumps(soft),
-               b, count=1)
-    out.append(b)
-path.write_text("".join(out))
+    new = {}
+    for k, v in u.items():  # soft_depends_on goes right after depends_on
+        if k == "soft_depends_on":
+            continue
+        new[k] = v
+        if k == "depends_on":
+            new[k], new["soft_depends_on"] = hard, soft
+    plan_units.write_unit(new, ROOT)
 print(f"soft_depends_on: {moved} of {total} dependencies (max {MAX_CALLS} calls, no type dependency)",
       file=sys.stderr)

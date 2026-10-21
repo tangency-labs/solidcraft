@@ -3,12 +3,12 @@
 //!
 //! The C++ kernel keeps global state, so units never share a process (no threads). The
 //! parent hands out units dynamically from one queue, longest first (by the case count
-//! of each unit's previous report in the report directory), and spawns the next one as
-//! soon as a child exits. A child is the same binary run as `--unit <id>` with the
-//! caller's other options and [`WORKER_ENV`] set; it prints and writes its report
-//! exactly as a serial run does. The parent prints each child's output in the serial
-//! order (as soon as every earlier unit is done) and the usual final summary, so stdout
-//! and the reports are identical to a serial run's.
+//! of each unit's previous report in the report directory, else an estimate from its
+//! fixture size), and spawns the next one as soon as a child exits. A child is the same
+//! binary run as `--unit <id>` with the caller's other options and [`WORKER_ENV`] set;
+//! it prints and writes its report exactly as a serial run does. The parent prints each
+//! child's output in the serial order (as soon as every earlier unit is done) and the
+//! usual final summary, so stdout and the reports are identical to a serial run's.
 //!
 //! A child that crashes (signal, unexpected exit, no summary line) fails only its own
 //! unit, with the tail of its stderr. Children are killed when the parent returns;
@@ -93,20 +93,40 @@ pub fn forwarded_args(raw: &[String]) -> Vec<String> {
     out
 }
 
-/// Case count of the first `<dir>/<id>.json` found in `dirs` (0 when there is none):
-/// the scheduling weight.
-fn previous_cases(dirs: &[&Path], id: &str) -> u64 {
+/// Case count of the first `<dir>/<id>.json` found in `dirs`.
+fn previous_cases(dirs: &[&Path], id: &str) -> Option<u64> {
     dirs.iter()
         .find_map(|d| std::fs::read_to_string(d.join(format!("{id}.json"))).ok())
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|v| v.get("cases_total").and_then(serde_json::Value::as_u64))
-        .unwrap_or(0)
 }
 
-/// Queue order: heaviest previous report (looked up in `dirs`, in order) first, ties
-/// (and units without a report) in the serial order.
-pub fn schedule(units: &[String], dirs: &[&Path]) -> Vec<usize> {
-    let weights: Vec<u64> = units.iter().map(|u| previous_cases(dirs, u)).collect();
+/// Fixture bytes per case, roughly, for [`fixture_weight`].
+const FIXTURE_BYTES_PER_CASE: u64 = 512;
+
+/// Estimated case count of a unit with no previous report: total size of
+/// `<fixtures>/<id>/*.json` at about [`FIXTURE_BYTES_PER_CASE`] bytes a case (reports
+/// are CI artifacts, not committed, so a fresh checkout has none).
+fn fixture_weight(fixtures: &Path, id: &str) -> u64 {
+    let Ok(rd) = std::fs::read_dir(fixtures.join(id)) else {
+        return 0;
+    };
+    rd.filter_map(Result::ok)
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum::<u64>()
+        / FIXTURE_BYTES_PER_CASE
+}
+
+/// Queue order: heaviest first, ties in the serial order. The weight is the case count
+/// of the unit's previous report (looked up in `dirs`, in order), else its fixture
+/// estimate under `fixtures` (see [`fixture_weight`]).
+pub fn schedule(units: &[String], dirs: &[&Path], fixtures: &Path) -> Vec<usize> {
+    let weights: Vec<u64> = units
+        .iter()
+        .map(|u| previous_cases(dirs, u).unwrap_or_else(|| fixture_weight(fixtures, u)))
+        .collect();
     let mut order: Vec<usize> = (0..units.len()).collect();
     order.sort_by_key(|&i| (std::cmp::Reverse(weights.get(i).copied().unwrap_or(0)), i));
     order
@@ -250,8 +270,15 @@ fn spawn(exe: &Path, args: &[String], id: &str, unit: usize) -> std::io::Result<
 
 /// Runs `units` in up to `jobs` child processes and prints like the serial loop in
 /// `main.rs`: each unit's lines in `units` order, then the summary line. `weights` are
-/// the report directories whose previous reports order the queue (see [`schedule`]).
-pub fn run_parallel(units: &[String], args: &[String], jobs: usize, weights: &[&Path]) -> ExitCode {
+/// the report directories whose previous reports order the queue, `fixtures` the
+/// fixture root for units without one (see [`schedule`]).
+pub fn run_parallel(
+    units: &[String],
+    args: &[String],
+    jobs: usize,
+    weights: &[&Path],
+    fixtures: &Path,
+) -> ExitCode {
     let exe = match std::env::current_exe() {
         Ok(e) => e,
         Err(e) => {
@@ -260,7 +287,7 @@ pub fn run_parallel(units: &[String], args: &[String], jobs: usize, weights: &[&
         }
     };
     let wall = Instant::now();
-    let mut queue: VecDeque<usize> = schedule(units, weights).into();
+    let mut queue: VecDeque<usize> = schedule(units, weights, fixtures).into();
     let mut results: Vec<Option<UnitRun>> = vec![None; units.len()];
     let mut times: Vec<Duration> = vec![Duration::ZERO; units.len()];
     let mut printed = 0usize;
@@ -444,11 +471,25 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("b.json"), r#"{"cases_total": 5}"#).unwrap();
         std::fs::write(dir.join("c.json"), r#"{"cases_total": 50}"#).unwrap();
+        let fixtures = dir.join("fixtures");
+        let none = dir.join("none");
         let order = schedule(
             &s(&["a", "b", "c", "d"]),
-            &[dir.join("none").as_path(), &dir],
+            &[none.as_path(), &dir],
+            &fixtures,
+        );
+        assert_eq!(order, vec![2, 1, 0, 3]);
+        // Without a report, fixture size estimates the weight (b's report still wins).
+        std::fs::create_dir_all(fixtures.join("a")).unwrap();
+        std::fs::create_dir_all(fixtures.join("b")).unwrap();
+        std::fs::write(fixtures.join("a").join("x.json"), vec![b' '; 10 * 512]).unwrap();
+        std::fs::write(fixtures.join("b").join("x.json"), vec![b' '; 100 * 512]).unwrap();
+        let order = schedule(
+            &s(&["a", "b", "c", "d"]),
+            &[none.as_path(), &dir],
+            &fixtures,
         );
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(order, vec![2, 1, 0, 3]);
+        assert_eq!(order, vec![2, 0, 1, 3]);
     }
 }

@@ -1,0 +1,12 @@
+id = "curve.curve_p6"
+upstream = ["source/SMLib/src/SmCurve.cpp"]
+rust_module = "curve::curve::p6"
+depends_on = ["curve.curve_p2", "curve.curve_p3", "curve.curve_p4", "geom.extent1d", "geom.extent3d", "geom.global_solver", "geom.object", "geom.polar_box", "geom.pseudo_box", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_curve_p1"]
+soft_depends_on = ["curve.line", "geom.extent2d", "nurbs.b_spline_curve_n_lib"]
+est_lines = 2376
+layer = 18
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-curve.curve_p6-a1"
+claimed_at = "2026-10-13T03:57:16Z"
+notes = "GREEN (promoted by curve.curve_p5: 3136 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 3136 cases (136 fixture: SM_API_test rectangle/hexagon edges (boxes, planarity, simple/global coincidence, gaps, drops), my_test_reversed_line_join line pairs x16 (simple coincidence, gaps, drops, GlobalPointSolveSTEP), smCurveTest DeformToEndPointTargets B-spline and line steps, my_test_drop_point-style drops, circle boxes, edge cases + 3000 generated), 3048 pass bit-identical (max_rel_err 0), 88 deferred (curve.curve_p5 88: SmFindCCNormalENFO::Evaluate in precise gaps, sm_IsPointSolutionAcrossClosedSeamBoundary in split recombination, LocalPropertyAnalysis/IsArc inside global solves); 30k-seed run clean; --perturb SENSITIVE; wired curve.curve_p1 (GlobalPointSolve, Tessellate, ApproximateCurve) at merge; ellipse GlobalCoincidenceChecker stub retagged UNPORTED(curve.ellipse_p1) (SmEllipse not a CurveKind; curve.ellipse_p2 stays partial, 1 case moved to ellipse_p1); geom.tools stubs kept (opaque handles, findings.md); GlobalCoincidenceChecker recursion bounded at 200 splits. 8 fns; largest: SmCurve::GlobalCoincidenceChecker, SmCurve::SimpleCoincidenceChecker, SmCurve::CurveMaxDistanceBetween, SmCurve::CalculateBoundingBox; cycle back-edges (call into later units; stub or co-port): curve.curve_p1(5), curve.crv_on_surf(3), curve.curve_p5(2), surface.surface_p1(1), surface.surface_p2(1), surface.surface_p5(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; GAP (PR #155): DeformToEndPointTargets dropped the pOptSurfCrvOnSurf / pOptCrvOrientation branch (it needs SmSurface::DropPoint); callers defer a curve on surface with a gap target as UNPORTED(curve.curve_p6) (topology.brep_p7 MakeFaceWithCurves)"

@@ -1,0 +1,12 @@
+id = "topology.brep_p8"
+upstream = ["source/SMLib/src/SmBrep.cpp"]
+rust_module = "topology::brep::p8"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.extent2d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "surface.surface_p2", "topology.loopuse"]
+soft_depends_on = ["curve.curve_p4", "curve.curve_p8", "curve.line", "intersect.point_class", "nurbs.b_spline_curve_p1", "surface.surface_p5", "surface.surface_p6", "surface.surface_p7", "surface.surface_p8", "topology.face_p2", "topology.vertex"]
+est_lines = 1768
+layer = 40
+tests = ["SM_API_test:TestSmCreatePlanarCircle", "SM_API_test:TestIntersectionOutputStatus", "SM_API_test:TestSmCreatePlane", "SM_API_test:TestSmCreateSwungPrimitive", "SM_API_test:TestSmCreatePlanarFaces", "prog_test:my_test_tracks_nested_geometry_and_resets"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "7 fns; largest: SmBrep::MakeFacesWithCurves, SmBrep::CreateFaceInRegionFromSurface, SmBrep::CreateFacesWithCurves, SmBrep::CreateFacesFromSurface; cycle back-edges (call into later units; stub or co-port): topology.trimming_tools(13), topology.brep_p1(11), topology.brep_p7(3), topology.brep_p3(2), topology.brep_p4(2), topology.brep_p5(2), topology.brep_p9(2), query.face_p1(1), topology.brep_p6(1), topology.face_p3(1); unit-SCC #22 (220 units); 186 upstream test entry points reach this unit"

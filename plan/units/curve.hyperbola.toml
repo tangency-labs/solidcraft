@@ -1,0 +1,12 @@
+id = "curve.hyperbola"
+upstream = ["source/SMLib/inc/SmHyperbola.h", "source/SMLib/src/SmHyperbola.cpp"]
+rust_module = "curve::hyperbola"
+depends_on = ["curve.curve_p2", "geom.axis2_placement", "geom.extent1d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p2", "topology.database_io"]
+soft_depends_on = ["geom.geom_utility_p1"]
+est_lines = 468
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.hyperbola-a1"
+claimed_at = "2026-10-13T01:00:33Z"
+notes = "GREEN (promoted by curve.curve_p5: 2062 cases, 0 deferred after its stubs were wired); difftest: 2062 cases, 1960 pass, 102 deferred (curve.curve_p1 70: SmCurve::GlobalPointSolve; curve.curve_p5 32: SmCurve::EvaluateSTEPPoint); wired UNPORTED(curve.hyperbola) in curve.curve_p2 (SmCurve::ReadFromDB). 22 fns; largest: SmHyperbola::MakeNurb, SmHyperbola::ReadFromDB, SmHyperbola::STEPInversion, SmHyperbola::EvaluateSTEP; cycle back-edges (call into later units; stub or co-port): curve.curve_p1(1), curve.curve_p5(1), surface.surf_of_extrusion_p1(1), surface.surf_of_revolution_p1(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

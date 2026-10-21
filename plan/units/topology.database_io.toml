@@ -1,0 +1,12 @@
+id = "topology.database_io"
+upstream = ["source/SMLib/inc/SmDatabaseIO.h", "source/SMLib/src/SmDatabaseIO.cpp"]
+rust_module = "topology::database_io"
+depends_on = []
+soft_depends_on = []
+est_lines = 363
+layer = 0
+tests = ["prog_test:my_test_poly_solver_2", "prog_test:my_test_poly_solver_1", "prog_test:my_test_sp_nurb", "SM_API_test:TestSmTessellateMaxEdgeCap", "SM_API_test:TestSmPolyBrepMassPropertiesWinding", "prog_test:my_test_MakeFace", "pt_TestFiles/Tess/BoxFillet.stl", "pt_TestFiles/Tess/Extrusion.pbp", "pt_TestFiles/Surface.sms", "pt_TestFiles/MakeFace/ApproximateSphere.smp"]
+status = "green"
+claimed_by = "swarm-topology.database_io-a1"
+claimed_at = "2026-10-12T19:21:50Z"
+notes = "28 fns; largest: SmDatabaseIO::ReadLongs, SmDatabaseIOFile::OpenFileForRead, SmDatabaseIO::ReadLong, SmDatabaseIO::ReadType; 82 upstream test entry points reach this unit; difftest green: 2059 cases (59 fixtures + 2000 generated), 0 deferred; 200k-seed run green"

@@ -1,0 +1,12 @@
+id = "intersect.ray_tracer"
+upstream = ["source/SMLib/inc/SmRayTracer.h", "source/SMLib/src/SmRayTracer.cpp"]
+rust_module = "intersect::ray_tracer"
+depends_on = ["geom.context", "geom.extent1d", "geom.extent2d", "geom.extent3d", "geom.geom_utility_p1", "geom.grid", "geom.object", "geom.pseudo_box", "geom.vector2d", "geom.vector3d", "intersect.point_class", "surface.surface_p2"]
+soft_depends_on = ["curve.curve_p2", "curve.line", "geom.polar_box", "geom.solution_array", "geom.tol", "geom.tree", "surface.surface_cache_p3", "surface.surface_p1", "surface.surface_p3", "surface.surface_p7", "surface.surface_p8"]
+est_lines = 1246
+layer = 32
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "partial: 421 cases, 310 pass, 0 fail, 111 deferred (surface.surface_p8 SmSurface::LocalLineIntersect x108, surface.surface_p6 SmSurface::CalculateContinuities x3 via the surface cache); surface_leaf matches upstream SE on degenerate patches (2 fixtures); SmSurface::EvaluateNormalSection wired to surface.surface_p3 (no case reaches it yet past the deferrals); UNPORTED stubs also for SmFace::PointClassify (query.face_p2), poly types (query.poly); CO-PORTED in intersect.ray_tracer (PR #48): SmSurfaceGridElement data members -> geom::grid::SurfaceGridElement (+ Grid::add_surface_element), SmRayRenderer/SmLightSource -> intersect::ray_tracer; 13 fns; largest: SmLSI3LocalSolver::LocalSolve, SmRayTracer::FireRay, sm_FindAdditionalTangentGuess, sm_FindPolyHit; cycle back-edges (call into later units; stub or co-port): query.poly(7), topology.topology(2), query.face_p2(1); unit-SCC #22 (220 units); 317 upstream test entry points reach this unit Re-run (PR #118, LocalLineIntersect wired by surface.surface_p8): 421 cases, 415 pass, 6 deferred (surface.surface_p2). LocalSolve sets the solution node marker as upstream does."

@@ -9,7 +9,7 @@ crates/solidcore       the kernel (pure Rust, no unsafe, wasm-ok)        owner: 
 crates/solidcore-ffi   extern "C" bindings to the C++ kernel (feature cpp)
 crates/difftest        side-by-side Rust vs C++ runner
 harness/cpp            C++ reference build (build.sh -> bin/cpp) + shim/<unit>.cpp
-plan/                  modules.toml (units, claims), STATUS.md, findings.md, order.md
+plan/                  units/<id>.toml (one file per unit), STATUS.md, findings.md, order.md
 ```
 
 ## 1. Hard rules
@@ -139,15 +139,15 @@ Every ported file starts with:
 
 ## 4. Porting a unit (PR workflow)
 
-Unit list and states: `plan/modules.toml` (format: `plan/modules.schema.md`, order:
-`plan/order.md`). **`plan/PROGRESS.md` is the checklist** (regenerated on `main` by CI;
+Unit list and states: `plan/units/<unit id>.toml`, one file per unit (format:
+`plan/modules.schema.md`, order: `plan/order.md`). **`plan/PROGRESS.md` is the checklist** (regenerated on `main` by CI;
 never edit it in a PR). **Any `todo` unit can be claimed.** A unit is *ready* when its `depends_on` are all
 `green` or `partial` (`soft_depends_on` never blocks; see section 4a); ready units are
 the easiest, lowest `layer` first. Claiming a unit that is not ready is fine:
 - Calls into a missing dependency are stubbed (`UNPORTED(<unit>)`, cases deferred; 4a).
 - If you need a **type** (struct, enum variant, base class) from a missing dependency,
   port the minimum of it yourself and record it in that unit's `notes` in
-  `plan/modules.toml` as `CO-PORTED in <your unit> (PR #n): <C++ symbols> -> <Rust path>`
+  `plan/units/<that unit>.toml` as `CO-PORTED in <your unit> (PR #n): <C++ symbols> -> <Rust path>`
   so its eventual porter extends your code instead of duplicating it.
 - If that dependency has an open `port:` PR, do not port the same code twice: build on
   that PR's branch (merge it into yours) or agree on the split in that PR's comments.
@@ -161,7 +161,7 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    latest `main` (`git fetch origin && git switch -c unit/<unit id> origin/main`),
    `git commit --allow-empty -m "claim: <unit id>"`, push, and open a draft PR titled
    exactly **`port: <unit id>`**. **The lowest-numbered open PR for a unit wins**; if
-   yours lost, close it. Do not edit `plan/modules.toml` to claim. Push WIP at least
+   yours lost, close it. Do not edit `plan/units/` to claim. Push WIP at least
    daily; a draft PR with no pushes for 48 h may be taken over (comment on it first).
    If the unit's `notes` mention a WIP branch on `origin`, start from it.
 2. **Port** the upstream functions the unit owns (listed in
@@ -207,17 +207,38 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
       readers bound header counts; input-driven recursion is bounded (section 1).
    9. **`UNPORTED` stubs only for calls into units that are not `green`/`partial`**,
       tagged with the owning unit from `harness/callgraph/units.json`; co-ports are
-      recorded as `CO-PORTED` in `plan/modules.toml` notes.
+      recorded as `CO-PORTED` in that unit's `plan/units/<id>.toml` notes.
 6. **Finish the PR**: merge the latest `origin/main` into your branch (never rebase a
    pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in
-   `plan/modules.toml` with case/deferred counts in `notes` (plus any units you
-   promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
+   `plan/units/<unit id>.toml` with case/deferred counts in `notes` (plus the files of
+   any units you promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
    the PR description. CI runs fmt, clippy, tests, wasm, difftest on every green or
    partial unit, and the difftest runner tests. **CI is the merge gate.** Once CI is
    green, a maintainer adds the PR to the merge queue after a quick check (stub tags,
    no loosened tolerance, no case dropped), and the queue re-runs CI on the PR merged
    with the latest `main`. Deep adversarial review happens after merge; anything it
    finds comes back as a follow-up issue or PR, so keep the step-5 checklist honest.
+
+**Shared files (avoid merge conflicts).** Every open PR touches the same plan, so:
+- Edit only `plan/units/<id>.toml` of your unit (and of units you promote or co-port
+  into). There is no shared `plan/modules.toml` any more.
+- Never commit `reports/difftest/` (gitignored). difftest still writes your reports
+  there locally; CI regenerates them, uploads main's set as the `difftest-reports`
+  artifact, and the site and `plan/PROGRESS.md` read that
+  (`scripts/fetch-reports.sh` downloads it). Quote your summary lines in the PR instead.
+- `plan/findings.md` and `plan/upstream-issues.md` are append-only: add new entries,
+  do not rewrite old ones. `.gitattributes` gives them `merge=union`, so a local
+  `git merge origin/main` keeps both sides' entries. GitHub's own conflict check
+  ignores that attribute, so when GitHub says your PR conflicts, merge main locally
+  and push.
+- **Branches from before the per-unit split** (they edit `plan/modules.toml` or commit
+  reports): merge main, then run the migration, which moves your `modules.toml` edits
+  into `plan/units/*.toml` and untracks your reports:
+  ```sh
+  git fetch origin && git merge origin/main; scripts/units-migrate-branch.sh && git commit --no-edit
+  ```
+  It reports a `CONFLICT` for a field main also changed (it keeps yours; check it) and
+  lists any other conflicted files for you to resolve before committing.
 
 **Blocked** (gate cannot be met, upstream behaviour unclear): record details in
 `plan/findings.md`, set `status = "blocked"` with a reason in `notes`, and open the PR
@@ -251,10 +272,15 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 
 ## 5. Where things go
 
+- `plan/units/<id>.toml`: one unit's plan entry (status, claims, notes). Edit only
+  your unit's file. Every tool reads them through `harness/plan/units.py` (Rust:
+  `crates/difftest/src/plan.rs`).
 - `plan/findings.md`: Rust-vs-C++ disagreements, upstream bugs, nondeterminism (e.g.
-  upstream `srand(time(NULL))`), anything a later agent must know.
+  upstream `srand(time(NULL))`), anything a later agent must know. Append-only.
 - `plan/upstream-issues.md`: upstream C++ defects also get an entry here (problems only,
-  with location, trigger, how found and whether the C++ build confirmed it).
+  with location, trigger, how found and whether the C++ build confirmed it). Append-only.
+- `reports/difftest/<unit>.json`: difftest output. Not committed: CI uploads main's set
+  as an artifact; `scripts/fetch-reports.sh` downloads it.
 - `plan/PROGRESS.md`: the checklist (generated; never edit by hand).
 - `plan/STATUS.md`: overall progress summary and handoff notes.
 - `bin/`: all build output (cargo `target-dir`, `bin/cpp/` for C++). Gitignored. Never

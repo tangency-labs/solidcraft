@@ -1,0 +1,12 @@
+id = "primitive.api_curves"
+upstream = ["source/SM_API/src/SmApiCurves.cpp"]
+rust_module = "primitive::api_curves"
+depends_on = ["geom.vector3d", "nurbs.b_spline_curve_p1"]
+soft_depends_on = ["curve.ellipse_p1", "curve.line", "geom.axis2_placement", "geom.context", "geom.extent1d", "geom.tol", "nurbs.b_spline_curve_n_lib"]
+est_lines = 649
+layer = 20
+tests = ["SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon", "SM_API_test:TestSmCreateArc", "SM_API_test:TestSmCreateCanonicalCurve", "SM_API_test:TestSmCreateCurve", "SM_API_test:TestSmCreateCircle"]
+status = "green"
+claimed_by = "swarm-primitive.api_curves-a1"
+claimed_at = "2026-10-13T05:53:39Z"
+notes = "green: difftest 1629 cases (129 fixture + 1500 generated), 0 deferred, perturb SENSITIVE; 13 fns; largest: SmApiCreateHelix, SmApiCreateCurve, SmApiCreateRegularPolygon, SmApiCreateRectangle; entry points: SmApiCreateArc, SmApiCreateCanonicalCurve, SmApiCreateCircle, SmApiCreateCurve, SmApiCreateEllipse, SmApiCreateHelix, SmApiCreateLine, SmApiCreateLineSegment, SmApiCreateRectangle, SmApiCreateRegularPolygon; 63 upstream test entry points reach this unit"

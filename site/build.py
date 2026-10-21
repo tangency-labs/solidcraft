@@ -5,8 +5,9 @@
     python3 site/build.py --out DIR       # elsewhere
 
 Standard library only (Python 3.11+ for tomllib). Every number comes from the repo:
-plan/modules.toml, plan/PROGRESS.md (claims), harness/callgraph/units.json,
-reports/difftest/*.json, reports/ssi-corpus.json, plan/upstream-issues.md, the
+plan/units/*.toml, plan/PROGRESS.md (claims), harness/callgraph/units.json,
+reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
+reports/ssi-corpus.json, plan/upstream-issues.md, the
 module file headers under crates/solidcore/src and git history (timeline). Output is
 deterministic: sorted, and the only date is the commit date of HEAD.
 
@@ -30,6 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True  # keep harness/plan clean
 sys.path.insert(0, str(ROOT / "harness/plan"))
 import progress  # noqa: E402  (reuse the checklist's counting logic)
+import units as plan_units  # noqa: E402  (the shared plan loader)
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "tangency-labs/solidcore")
 REPO_URL = f"https://github.com/{REPO}"
@@ -58,46 +60,69 @@ def head_info():
     return sha, date
 
 
-def timeline():
-    """[(unix time, units)] for plan/modules.toml along main's first-parent history.
+def cat_blobs(oids):
+    """{oid: text} for git blobs, read in one `git cat-file --batch`."""
+    oids = list(dict.fromkeys(oids))
+    if not oids:
+        return {}
+    raw = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"], check=True,
+                         capture_output=True, input="".join(f"{o}\n" for o in oids).encode()).stdout
+    out, pos = {}, 0
+    for o in oids:
+        nl = raw.index(b"\n", pos)
+        size = int(raw[pos:nl].split()[2])
+        out[o] = raw[nl + 1:nl + 1 + size].decode()
+        pos = nl + 1 + size + 1
+    return out
 
-    Consecutive commits with the same modules.toml blob are dropped, then the history is
-    thinned to at most MAX_TIMELINE_POINTS states (the last state in each time bucket),
-    always keeping the first and last.
+
+def timeline():
+    """[(unix time, units)] for the plan along main's first-parent history.
+
+    The plan is the tree plan/units/ (one file per unit) or, before the split, the single
+    file plan/modules.toml. Consecutive commits with the same plan object are dropped,
+    then the history is thinned to at most MAX_TIMELINE_POINTS states (the last state in
+    each time bucket), always keeping the first and last.
     """
     log = git("log", "--first-parent", "--format=%H %ct", "HEAD").split("\n")
     commits = [tuple(line.split()) for line in reversed(log) if line.strip()]
     if not commits:
         return []
-    req = "".join(f"{h}:plan/modules.toml\n" for h, _ in commits)
+    req = "".join(f"{h}:plan/units\n{h}:plan/modules.toml\n" for h, _ in commits)
     checks = git("cat-file", "--batch-check", inp=req).split("\n")
-    states = []  # (time, blob)
+    states = []  # (time, oid, kind)
     last = None
-    for (h, t), chk in zip(commits, checks):
-        parts = chk.split()
-        if len(parts) < 2 or parts[1] != "blob":
-            continue
-        if parts[0] != last:
-            states.append((int(t), parts[0]))
-            last = parts[0]
+    for i, (h, t) in enumerate(commits):
+        for chk in checks[2 * i:2 * i + 2]:
+            parts = chk.split()
+            if len(parts) >= 2 and parts[1] in ("tree", "blob"):
+                if parts[0] != last:
+                    states.append((int(t), parts[0], parts[1]))
+                    last = parts[0]
+                break
     if len(states) > MAX_TIMELINE_POINTS:
         t0, t1 = states[0][0], states[-1][0]
         width = max(1, (t1 - t0) / (MAX_TIMELINE_POINTS - 1))
         buckets = {}
-        for t, b in states:
-            buckets[int((t - t0) / width)] = (t, b)
+        for s in states:
+            buckets[int((s[0] - t0) / width)] = s
         thinned = [states[0]] + [buckets[k] for k in sorted(buckets)]
         states = sorted(set(thinned), key=lambda s: s[0])
-    raw = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"], check=True,
-                         capture_output=True, input="".join(f"{b}\n" for _, b in states).encode()).stdout
-    out, pos = [], 0
-    for t, _ in states:
-        nl = raw.index(b"\n", pos)
-        size = int(raw[pos:nl].split()[2])
-        text = raw[nl + 1:nl + 1 + size].decode()
-        pos = nl + 1 + size + 1
+    trees = {}
+    for _, oid, kind in states:
+        if kind == "tree":
+            entries = [ln.split(None, 3) for ln in git("ls-tree", oid).splitlines()]
+            trees[oid] = {e[3][:-5]: e[2] for e in entries
+                          if len(e) == 4 and e[1] == "blob" and e[3].endswith(".toml")}
+    blobs = cat_blobs([oid for _, oid, kind in states if kind == "blob"] +
+                      [b for files in trees.values() for b in files.values()])
+    out = []
+    for t, oid, kind in states:
         try:
-            units = progress.load_units(text)
+            if kind == "blob":
+                units = plan_units.parse_modules_toml(blobs[oid])
+            else:
+                units = plan_units.units_from_texts({k: blobs[b] for k, b in trees[oid].items()})
         except Exception:  # an early revision may not parse; skip it
             continue
         out.append((t, units))
@@ -115,7 +140,7 @@ def unit_module(u):
 
 
 def aggregate(samples):
-    """One pass over the sampled states of plan/modules.toml.
+    """One pass over the sampled states of the plan.
 
     Returns (overall, by_area, by_unit): overall is [(t, summary)], by_area maps an area
     to [(t, summary)] for the states in which it has units, and by_unit maps a unit id to
@@ -153,11 +178,13 @@ def load_claims():
 
 
 def load_reports():
+    """unit -> (report without its cases, path) from reports/difftest/. The reports are
+    not committed; CI fetches main's latest set first (scripts/fetch-reports.sh)."""
     reports = {}
     for p in sorted((ROOT / "reports/difftest").glob("*.json")):
         d = json.loads(p.read_text())
         d.pop("cases", None)
-        reports[d.get("unit", p.stem)] = (d, p.relative_to(ROOT).as_posix())
+        reports[d.get("unit", p.stem)] = (d, p)
     return reports
 
 
@@ -544,7 +571,7 @@ def graph_body(g):
     return f"""
 <h1>Dependency graph</h1>
 <p class="muted">{len(nodes)} units and their {fmt_int(g['edges'])} <code>depends_on</code> edges from
-<code>plan/modules.toml</code> (soft dependencies are not drawn). Units cluster by module, and dependency
+<code>plan/units/</code> (soft dependencies are not drawn). Units cluster by module, and dependency
 edges pull related modules together. Data: <a href="assets/graph.json"><code>assets/graph.json</code></a>.</p>
 <section class="kpis">{tiles}</section>
 <div class="graphui" hidden>
@@ -678,7 +705,7 @@ fixtures and fixed-seed generated cases) and the topology is identical and every
 <section>
 <h2>Progress over time</h2>
 <p class="muted">Share of in-scope upstream lines in green and partial units, from
-<code>plan/modules.toml</code> along <code>main</code>'s history ({len(points)} sampled states).</p>
+<code>plan/units/</code> along <code>main</code>'s history ({len(points)} sampled states).</p>
 <div class="chartpick" hidden><label>Module <select data-charts="overview-charts">
 <option value="all">all units</option>{area_opts}</select></label></div>
 <div id="overview-charts">
@@ -743,7 +770,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 </dl>
 <h2>Progress over time</h2>
 <p class="muted">Share of this module's upstream lines in green and partial units, from
-<code>plan/modules.toml</code> along <code>main</code>'s history ({len(apts)} sampled states).</p>
+<code>plan/units/</code> along <code>main</code>'s history ({len(apts)} sampled states).</p>
 {chart_svg(apts, f"chart-{area_slug(m)}", f"Share of {m} upstream lines ported over time")}
 {chart_table(apts)}
 <h2>Units</h2>
@@ -782,7 +809,7 @@ for difftest counts and blockers.</p>
     mod_opts = "".join(f'<option value="{esc(m)}">{esc(m)}</option>' for m in modules)
     body = f"""
 <h1>Units</h1>
-<p class="muted">{len(units)} port units from <code>plan/modules.toml</code>. Cases come from
+<p class="muted">{len(units)} port units from <code>plan/units/</code>. Cases come from
 <code>reports/difftest/&lt;unit&gt;.json</code>; blockers are the units deferred cases wait on (with case
 counts). Click a column heading to sort.</p>
 <div class="filters" data-table="units">
@@ -814,6 +841,9 @@ counts). Click a column heading to sort.</p>
         hrows = header_table(src) if exists else []
         look = header_lookup(hrows)
         rep, rep_path = reports.get(uid, (None, None))
+        if rep_path is not None:
+            (out / "reports").mkdir(parents=True, exist_ok=True)
+            shutil.copy(rep_path, out / "reports" / f"{uid}.json")
         fns = sorted(cg.get("functions", []), key=lambda f: (f["file"], f["line"], f["name"]))
         frows = []
         for f in fns:
@@ -852,7 +882,7 @@ counts). Click a column heading to sort.</p>
 {('<p>Absolute floors: <code>' + esc(json.dumps(floors)) + '</code></p>') if floors else ''}
 <h3>Blocked by</h3>
 {('<div class="scroll narrow"><table><thead><tr><th>Unported unit</th><th>Deferred cases</th></tr></thead><tbody>' + dtable + '</tbody></table></div>') if dtable else '<p class="muted">Nothing: no deferred cases.</p>'}
-<p><a href="{REPO_URL}/blob/{head_sha}/{esc(rep_path)}">Report JSON</a> (per-case results)</p>"""
+<p><a href="../reports/{esc(uid)}.json">Report JSON</a> (per-case results, from CI's latest <code>main</code> run)</p>"""
         else:
             diff = '<p class="muted">No difftest report yet.</p>'
         claim = f'<p>Claimed: {inline(u["claim"])}</p>' if u.get("claim") else ""

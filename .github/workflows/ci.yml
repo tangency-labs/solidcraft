@@ -83,6 +83,9 @@ jobs:
   difftest:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     needs: [test]
+    permissions:
+      contents: read
+      actions: read  # scripts/fetch-reports.sh reads main's report artifact
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
     steps:
@@ -91,11 +94,11 @@ jobs:
       - name: Skip when no unit is green
         id: green
         run: |
-          if [ -f plan/modules.toml ] && grep -Eq '^\s*status\s*=\s*"green"' plan/modules.toml; then
+          if grep -Eqs '^\s*status\s*=\s*"(green|partial)"' plan/units/*.toml; then
             echo "any=true" >> "$GITHUB_OUTPUT"
           else
             echo "any=false" >> "$GITHUB_OUTPUT"
-            echo "No green units in plan/modules.toml; nothing to difftest."
+            echo "No green units in plan/units/; nothing to difftest."
           fi
 
       - name: Clone upstream at pinned commit
@@ -181,12 +184,44 @@ jobs:
         if: steps.green.outputs.any == 'true'
         run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
 
+      # Reports are not committed. main's latest set (uploaded below) only orders the
+      # --jobs queue, heaviest unit first; without it difftest estimates from fixtures.
+      - name: Fetch main's difftest reports (queue order)
+        if: steps.green.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-reports.sh || echo "no previous reports; queue ordered by fixture size"
+
       - name: Difftest green units
         if: steps.green.outputs.any == 'true'
         # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
         # faster than the debug build that used to take ~35 min here. --jobs 0: one child
         # process per unit, one per vCPU (same output and reports as a serial run).
         run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
+
+      # main's reports are published from here (site, PROGRESS.md case counts,
+      # scripts/fetch-reports.sh), never committed.
+      - name: Keep only reports of green/partial units
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, "harness/plan")
+          import units
+          keep = {u["id"] for u in units.load_units() if u.get("status") in ("green", "partial")}
+          for p in pathlib.Path("reports/difftest").glob("*.json"):
+              if p.stem not in keep:
+                  p.unlink()
+          PY
+
+      - name: Upload difftest reports
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: difftest-reports
+          path: reports/difftest/*.json
+          if-no-files-found: error
+          retention-days: 90
 
       # The runners' own unit tests (guards, decoders, probes) need the C++ reference, so
       # the test job cannot run them. Same profile as above: only the test harness of the

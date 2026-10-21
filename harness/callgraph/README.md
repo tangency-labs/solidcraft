@@ -14,13 +14,13 @@ python3 harness/callgraph/why.py SmPoly.cpp --group boolean           # restrict
 |---|---|---|
 | 1 | `extract.py` | `tu/*.json`: per-TU definitions, call edges, classes, globals (libclang over `bin/cpp/compile_commands.json`) |
 | 2 | `build_graph.py` | `graph.json`, `closure.json` (CHA + RTA closures from `entrypoints.py` roots), `files.json`, `resolve.json`, `overriders.json` |
-| 3 | `plan_units.py` | `plan/modules.toml`, `plan/order.md`, `harness/callgraph/units.json`, `plan_summary.json` |
+| 3 | `plan_units.py` | `plan/units/<id>.toml`, `plan/order.md`, `harness/callgraph/units.json`, `plan_summary.json` |
 | 4 | `write_closure.py` | `plan/closure.md`, `harness/callgraph/unused_functions.txt` |
 
 Other files: `entrypoints.py` (in-scope SM_API entry points and kernel roots), `pp.py` (`#if`
 evaluator for text scans), `scc_probe.py` (function-level SCC statistics), `why.py`.
 
-`units.json` maps every unit id in `plan/modules.toml` to the exact upstream functions (qualified
+`units.json` maps every unit id in `plan/units/` to the exact upstream functions (qualified
 name, file, line, line count, clang USR) it owns. A unit that names a file in `upstream` owns only
 the listed functions of that file; other functions of the same file belong to other units or are
 out of scope (`unused_functions.txt`).

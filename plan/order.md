@@ -9,7 +9,7 @@ the previous layers are green. Dependencies are static calls plus conservative v
 evaluation -> offset/blend surfaces -> curve-on-surface -> surface point solve -> surface
 evaluation). Unit-level strongly connected components were linearised with a weighted greedy
 feedback-arc-set; the dropped *back-edges* are listed in each unit's `notes` in
-`plan/modules.toml`. A unit with back-edges can be ported in its layer, but its difftest can only
+`plan/units/<id>.toml`. A unit with back-edges can be ported in its layer, but its difftest can only
 cover paths whose callees are already ported; full side-by-side validation of such a unit is
 re-run when the back-edge targets turn green (keep `status = "claimed"` until then or record
 the partial coverage in `plan/findings.md`).

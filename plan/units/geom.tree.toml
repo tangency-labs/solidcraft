@@ -1,0 +1,12 @@
+id = "geom.tree"
+upstream = ["source/SMLib/inc/SmTree.h", "source/SMLib/src/SmTree.cpp"]
+rust_module = "geom::tree"
+depends_on = ["geom.extent3d"]
+soft_depends_on = []
+est_lines = 1259
+layer = 1
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "partial"
+claimed_by = "swarm-geom.tree-a1"
+claimed_at = "2026-10-12T19:33:41Z"
+notes = "difftest: 618 cases, 611 bit-identical, 0 failed, 7 deferred (nurbs.b_spline_surface_p1 6, surface.surface_cache_p1 1); max_rel_err=0; no absolute floors; 34 fns; largest: SmTree::AddToSpatialTree, SmTree::RmFromSpatialTree, SmTreeNode::PropagateToParents, SmTreeNode::GetBotSide; cycle back-edges (call into later units; stub or co-port): geom.vector3d(5), geom.object(2), surface.surface_cache_p1(2), curve.curve_cache(1), nurbs.b_spline_surface_p1(1), surface.surface_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; CO-PORTED in intersect.topology_solver_p2 (PR #60): Tree::map_objects -> stable borrowed shape-tree handle conversion; preserves boxes, links, decomposition data and order; regression tests cover neighbors, classification, ownership and mapping errors"

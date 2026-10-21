@@ -1,0 +1,12 @@
+id = "boolean.topology_intersector_p3"
+upstream = ["source/SMLib/src/SmTopologyIntersector.cpp"]
+rust_module = "boolean::topology_intersector::p3"
+depends_on = ["boolean.topology_intersector_p1", "boolean.topology_intersector_p2", "curve.curve_p2", "geom.extent3d", "geom.tol", "intersect.curve_class_p1", "intersect.point_class", "topology.edge", "topology.edgeuse_p1", "topology.face_p2"]
+soft_depends_on = ["curve.curve_p4", "curve.curve_p6", "geom.extent1d", "geom.object", "geom.vector3d", "intersect.curve_class_p3", "intersect.curve_class_p4", "intersect.curve_class_p5", "intersect.curve_class_p6", "intersect.curve_class_p7", "intersect.surface_drop_lib_p1", "nurbs.b_spline_curve_p1", "query.face_p1", "query.face_p2", "surface.surface_p1", "surface.surface_p2", "topology.brep_p4", "topology.face_p4", "topology.loopuse"]
+est_lines = 1849
+layer = 52
+tests = ["prog_test:my_test_bbu", "SM_API_test:TestSmSurfaceSurfaceFillet", "SM_API_test:TestSmMaterialCensus", "SM_API_test:TestSmPiecewiseMerge", "SM_API_test:TestSmBooleanLists", "SM_API_test:TestKernelMergeBrepsInvalidInput"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "3 fns; largest: SmTopologyIntersector::MergeCurveClasses, SmTopologyIntersector::MergeCoincidentSurfaces, SmTopologyIntersector::MergeCurveOnSurfaces; unit-SCC #22 (220 units); 110 upstream test entry points reach this unit"

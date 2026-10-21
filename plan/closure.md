@@ -79,7 +79,7 @@ in-scope operation (mass properties integrate exactly over faces, `SmBrep::Compu
 The only reachable `SmTess.cpp`/`SmPoly*.cpp` code is CHA residue: `SmAttribute::Copy` dispatching
 to polygon/decimation attribute types, `SmBrepCache::BuildTrees` dispatching `CalculateBoundingBox`
 to `SmCPolyFace`, and `SmApiTransform` accepting a `SmPolyBrep`. Those units (`query.poly`,
-`query.tess`) are flagged low priority in `plan/modules.toml`.
+`query.tess`) are flagged low priority in `plan/units/<id>.toml`.
 
 ## Rust module totals
 

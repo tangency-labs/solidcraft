@@ -1,0 +1,12 @@
+id = "topology.brep_data"
+upstream = ["source/SMLib/inc/SmBrepData.h", "source/SMLib/src/SmBrepData.cpp"]
+rust_module = "topology::brep_data"
+depends_on = ["geom.attribute", "geom.object", "geom.tol", "topology.database_io"]
+soft_depends_on = ["curve.composite_curve_p1", "curve.curve_p2", "geom.a_object", "geom.extent1d", "geom.extent2d", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_curve_p2", "nurbs.b_spline_surface_p1", "surface.offset_surface", "surface.surface_p2"]
+est_lines = 1466
+layer = 32
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "#76 kernel-aware Surface dispatch (PR #313, 2026-10-21): 2379 cases, 2377 pass, 0 failed, 2 deferred (surface.surf_of_extrusion_p2 2), max_rel_err 0; before 2370 pass / 9 deferred. 17 fns; largest: SmBrepData::ReadFromDB, SmBrepData::ReadCurveFromDB, SmBrepData::ReadSurfaceFromDB, SmEUData::ReadFromDB; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL (PR #25): difftest 2379 cases (358 upstream .smb fixtures: 186 ReadFromFile, 170 ReadFromDB v30, 2 part-file B-reps at v32; 21 edge-case fixtures; 2000 generated ASCII/binary B-rep, curve, surface, file and constructor cases for versions 29-50), 2324 pass bit-identical, 55 deferred (surface.surface_p3 46: offset surface records, read through the ported SmOffsetSurface since PR #62, wait on SmSurface::GetSingularities; surface.cone_p1 7: SmCone/SmCylinder records are read in full but have no SurfaceKind variant yet (DISPATCH GAP), surface.surf_of_extrusion_p2 2; SmPlane::ReadFromDB wired by surface.plane_p2 PR #40); --perturb SENSITIVE PR #62 (2026-10-15): 2379 cases, 2370 pass, 0 failed, 9 deferred (surface.cone_p1 7, surface.surf_of_extrusion_p2 2); the 46 offset surface records (deferred on surface.offset_surface) now read and compare."

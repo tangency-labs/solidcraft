@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate the call graph and the plan (plan/closure.md, plan/modules.toml, plan/order.md).
+# Regenerate the call graph and the plan (plan/closure.md, plan/units/*.toml, plan/order.md).
 # Requires bin/cpp/compile_commands.json (harness/cpp/build.sh) and libclang (see README.md).
 set -euo pipefail
 cd "$(dirname "$0")/../.."

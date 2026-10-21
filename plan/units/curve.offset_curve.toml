@@ -1,0 +1,12 @@
+id = "curve.offset_curve"
+upstream = ["source/SMLib/inc/SmOffsetCurve.h", "source/SMLib/src/SmOffsetCurve.cpp"]
+rust_module = "curve::offset_curve"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.object", "geom.vector3d", "topology.database_io"]
+soft_depends_on = ["geom.tol"]
+est_lines = 492
+layer = 14
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-curve.offset_curve-a1"
+claimed_at = "2026-10-13T01:00:33Z"
+notes = "20 fns; largest: SmOffsetCurve::Evaluate, SmOffsetCurve::ReadFromDB, SmOffsetCurve::EvaluatePoint, SmOffsetCurve::Trim; cycle back-edges (call into later units; stub or co-port): curve.curve_p5(3); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; GREEN: difftest 2808 cases (808 fixture: TestSmOffsetCurve curve/line/vertical-line offsets, smTopoTest nested zero offsets, rational arc cusp, parabola evolute, degenerate ends, Hermite bases, reversed/trimmed/copied/compared curves, ReadFromDB ASCII+binary streams from upstream WriteToDB + 2000 generated), 0 deferred, bit-identical (max_rel_err 0); --perturb SENSITIVE. Wired: SmCurve::ReadFromDB(SmOffsetCurve_TYPE); CreateSimpleOffset now defers on SmCurve::ApproximateCurve (curve.curve_p1)"

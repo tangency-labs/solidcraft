@@ -1,0 +1,12 @@
+id = "sweep.api_brep"
+upstream = ["source/SM_API/src/SmApiBrep.cpp"]
+rust_module = "sweep::api_brep"
+depends_on = ["primitive.primitive_creation_p2", "primitive.primitive_creation_p3"]
+soft_depends_on = ["curve.curve_p2", "geom.context", "geom.object", "geom.vector3d", "primitive.primitive_creation_p1", "topology.brep_p1", "topology.brep_p3", "topology.brep_p4"]
+est_lines = 529
+layer = 59
+tests = ["SM_API_test:TestSmCurveSweep", "SM_API_test:TestSmPipeSweep", "SM_API_test:TestSmCurveSweepFromFaces", "SM_API_test:TestSmCurveSweepFailureCleanup", "SM_API_test:TestSmCreateDraftSweep", "SM_API_test:TestSmTaperExtrude"]
+status = "partial"
+claimed_by = ""
+claimed_at = ""
+notes = "partial (PR #110): difftest cases=573 passed=306 deferred=267 (blocked_by primitive.primitive_creation_p2(80), topology.brep_p3(187): every entry point validates and copies its inputs as upstream; p3 sweep calls await the earlier SmBrep constructor and a concrete PrimitiveAccess adapter (PR #233)); compared: NULL curves, curves without Copy (SM_ERR), empty inputs, missing path, non-positive pipe radius, cap selector range; FFI fences off UB-111, UB-112, UB-113, UB-114, HANG-13; 12 fns; largest: SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges; entry points: SmApiCreateCurveSweep, SmApiCreateCurveSweepFromEdges, SmApiCreateCurveSweepFromFaces, SmApiCreateDraftSweep, SmApiCreateLinearSweep, SmApiCreateLinearSweepWithRepetitions, SmApiCreatePipeSweep, SmApiCreateRotationalSweep, SmApiCreateRotationalSweepWithRepetitions, SmApiCreateSweepAlongPlanarPath, SmApiCreateTaperExtrude; 15 upstream test entry points reach this unit"

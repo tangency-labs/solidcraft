@@ -1,0 +1,12 @@
+id = "blend.fillet_standard_solver_p2"
+upstream = ["source/SMLib/src/SmFilletStandardSolver.cpp"]
+rust_module = "blend::fillet_standard_solver::p2"
+depends_on = ["blend.fillet_executive_p1", "blend.fillet_geom_p1", "blend.fillet_solver_p1", "blend.fillet_solver_p3", "blend.fillet_standard_solver_p1", "curve.curve_p2", "geom.extent1d", "geom.extent2d", "geom.local_solve_nd", "geom.matrix", "geom.object", "geom.solution_array", "geom.vector2d", "geom.vector3d", "intersect.surface_intersector_p1", "nurbs.b_spline_curve_p1", "surface.offset_surface", "surface.surface_p2", "topology.edge", "topology.edgeuse_p1"]
+soft_depends_on = ["blend.fillet_intersector", "curve.curve_p1", "curve.curve_p4", "curve.curve_p5", "curve.curve_p6", "geom.geom_utility_p1", "geom.tol", "intersect.curve_class_p4", "intersect.surface_intersector_p4", "nurbs.b_spline_surface_p1", "query.face_p2", "surface.surface_p1", "surface.surface_p4", "surface.surface_p5", "surface.surface_p7", "topology.edgeuse_p3", "topology.face_p2", "topology.loopuse", "topology.vertex", "topology.vertexuse"]
+est_lines = 1989
+layer = 60
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "todo"
+claimed_by = ""
+claimed_at = ""
+notes = "17 fns; largest: SmConstantRadiusFS::LoadInitialValues, SmVariableRadiusFS::LoadJacobian, SmVariableRadiusFS::ReCalcFilletGeom, SmSurfaceSurfaceFS::CalcFilletGeom; cycle back-edges (call into later units; stub or co-port): blend.fillet_geom_p5(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

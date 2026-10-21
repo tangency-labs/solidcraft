@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! cargo run -p difftest --features cpp -- --unit <id> [--unit <id>...]
-//! cargo run -p difftest --features cpp -- --green      # all status=green|partial units in plan/modules.toml
+//! cargo run -p difftest --features cpp -- --green      # all status=green|partial units in plan/units/*.toml
 //! cargo run -p difftest --features cpp -- --green --jobs 0   # same, one child process per unit, all cores
 //! cargo run -p difftest --features cpp -- --all        # every registered runner
 //! cargo run -p difftest --features cpp -- --list
@@ -272,10 +272,11 @@ fn main() -> ExitCode {
     let jobs = difftest::jobs::resolve(args.jobs.unwrap_or(1)).min(wanted.len());
     if jobs > 1 {
         let fwd = difftest::jobs::forwarded_args(&raw);
-        // Previous reports order the queue; a fresh --report-dir falls back to the default.
+        // Previous reports order the queue; a fresh --report-dir falls back to the default,
+        // and a unit with no report anywhere to its fixture size (reports are not committed).
         let default_dir = root.join("reports").join("difftest");
         let dirs = [report_dir.as_path(), default_dir.as_path()];
-        return difftest::jobs::run_parallel(&wanted, &fwd, jobs, &dirs);
+        return difftest::jobs::run_parallel(&wanted, &fwd, jobs, &dirs, &root.join("fixtures"));
     }
 
     let mut failed = 0usize;

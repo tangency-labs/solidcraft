@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Regenerate plan/PROGRESS.md from plan/modules.toml and committed difftest reports.
+"""Regenerate plan/PROGRESS.md from plan/units/*.toml and the difftest reports.
 
 CI (.github/workflows/progress.yml) runs this on main and commits the result; PRs never
 edit plan/PROGRESS.md. Locally:
-    python3 harness/plan/progress.py          # from the manifest and committed reports
+    python3 harness/plan/progress.py          # from plan/units and reports/difftest/
     python3 harness/plan/progress.py --prs    # also mark units with an open "port: <id>" PR
 Output is deterministic (no timestamps); statuses, claims and report counts drive changes.
+Reports are not committed: CI uploads them from main (artifact `difftest-reports`) and
+`scripts/fetch-reports.sh` downloads the latest set into reports/difftest/.
 
 The counting helpers (`summary`, `is_ready`, `module`, `DONE`) are also imported by the
 GitHub Pages site generator (site/build.py), so both report the same numbers.
@@ -16,7 +18,9 @@ import subprocess
 import sys
 import pathlib
 import re
-import tomllib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import units as plan_units  # noqa: E402  (the shared plan loader)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DONE = ("green", "partial")
@@ -25,15 +29,13 @@ ORDER = ["geom", "nurbs", "curve", "surface", "topology", "intersect", "primitiv
 ICON = {"green": "✅", "partial": "🟡", "claimed": "🔨", "blocked": "⛔", "todo": "⏳"}
 
 
-def load_units(text=None):
-    """Units from plan/modules.toml (or from `text`, e.g. an older revision of it)."""
-    if text is None:
-        text = (ROOT / "plan/modules.toml").read_text()
-    return tomllib.loads(text)["unit"]
+def load_units():
+    """Units from plan/units/*.toml (sorted by id)."""
+    return plan_units.load_units(ROOT)
 
 
 def load_case_counts(units):
-    """Default-run counts from committed reports; omit units without a report.
+    """Default-run counts from reports/difftest/; omit units without a report.
 
     Notes can describe stress runs or contain operation numbers (e.g. "op-0 cases"),
     so they are not a source for the published case count. Reject invalid reports
@@ -120,7 +122,7 @@ def main():
     out = [
         "# Port progress",
         "",
-        "Generated from `plan/modules.toml` and `reports/difftest/*.json` by "
+        "Generated from `plan/units/*.toml` and CI's `reports/difftest/*.json` by "
         "`harness/plan/progress.py`; do not edit by hand.",
         "",
         f"**{count['green'] + count['partial']} / {len(units)} units ported** "
