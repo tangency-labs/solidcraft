@@ -2343,11 +2343,7 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
     if crate::blend_smlib::selected()? {
-        // SMLib has no solver for unequal setbacks: equal ones are its equal-distance chamfer.
-        return match side {
-            ChamferSide::Distance(d2) if d2 == d1 => crate::blend_smlib::chamfer(body, edges, d1),
-            _ => Err(crate::blend_smlib::unsupported("a chamfer with two different setbacks (two distances, or a distance and an angle)")),
-        };
+        return crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip);
     }
     let size = crate::blend_fit::Size::Sides(d1, side, flip);
     let counts = record::counts(&[body]);

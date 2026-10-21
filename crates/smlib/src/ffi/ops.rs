@@ -1,5 +1,5 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_shell`, `smlib_offset_faces`,
+//! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
 //! `smlib_thicken`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
@@ -17,6 +17,7 @@ pub const ERR_PICK_NONE: i32 = -1101;
 pub const ERR_PICK_AMBIGUOUS: i32 = -1102;
 pub const ERR_NO_ROOM: i32 = -1103;
 pub const ERR_NO_CUT: i32 = -1104;
+pub const ERR_UNSUPPORTED: i32 = -1105;
 
 pub const BOOLEAN_UNION: i32 = 0;
 pub const BOOLEAN_SUBTRACT: i32 = 1;
@@ -87,6 +88,18 @@ unsafe extern "C" {
         radii: *const f64,
         n_radii: i64,
         out: *mut *mut RawBrep,
+    ) -> i32;
+    fn smlib_chamfer_sides(
+        brep: *const RawBrep,
+        points: *const f64,
+        n_points: i64,
+        tolerance: f64,
+        distance: f64,
+        second: f64,
+        second_is_angle: i32,
+        first: *const f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
     ) -> i32;
     fn smlib_shell(
         brep: *const RawBrep,
@@ -187,6 +200,32 @@ pub fn fillet_variable(
     new_brep(|out| unsafe {
         smlib_fillet_variable(b.raw(), point.as_ptr(), tolerance, start.as_ptr(), degree, knots.as_ptr(), nk, radii.as_ptr(), nr, out)
     })
+}
+
+/// `smlib_chamfer_sides`.
+#[cfg(feature = "native")]
+pub fn chamfer_sides(
+    b: &Handle,
+    points: &[[f64; 3]],
+    tolerance: f64,
+    distance: f64,
+    second: f64,
+    angle: bool,
+    first: &[f64; 3],
+) -> Result<Handle, PickError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
+    let flat = points.as_ptr().cast::<f64>();
+    let mut failed = -1i64;
+    new_brep(|out| unsafe { smlib_chamfer_sides(b.raw(), flat, n, tolerance, distance, second, i32::from(angle), first.as_ptr(), out, &mut failed) })
+        .map_err(|s| {
+            let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+            (s, at)
+        })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn chamfer_sides(_: &Handle, _: &[[f64; 3]], _: f64, _: f64, _: f64, _: bool, _: &[f64; 3]) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
 }
 
 #[cfg(not(feature = "native"))]
