@@ -932,6 +932,14 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 ))
             });
             let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+            let mut records = BTreeMap::new();
+            let mut attrs = AttributeStore::default();
+            let mut env = ed::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attrs,
+                context: None,
+                key_of: &key_of,
+            };
             let r = p7::make_face(
                 k,
                 &mut b,
@@ -944,6 +952,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 orient_of(*orient)?,
                 &p7::MakeFaceOptions::default(),
                 &this_face,
+                &mut env,
             );
             new_face_record(&b, &r)
         }

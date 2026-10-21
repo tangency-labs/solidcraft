@@ -247,7 +247,7 @@ fn brep_set_tolerance(k: &Kernel, b: &mut Brep, tol: f64) -> Result<()> {
 /// `topology.brep_p7`). The new face owns the surface under the face identity
 /// `(SmFace_TYPE, 1 + index)`.
 fn make_face_with_curves(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     region: RegionId,
     input: TrimInput,
@@ -467,7 +467,7 @@ pub struct TrimInput {
 /// callees; [`SolidError::Unported`] (`SmBrep::SetTolerance` and the face builders).
 #[allow(clippy::fn_params_excessive_bools)]
 pub fn trim_surface_with_model_space_curves(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     region: Option<RegionId>,
     tol_3d: f64,

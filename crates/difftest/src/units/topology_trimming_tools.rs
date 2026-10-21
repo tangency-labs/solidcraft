@@ -1118,7 +1118,7 @@ fn find_outer(
     Ok(())
 }
 
-fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
+fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     match op {
         OpIn::Order { curves, tol, outer } => {
@@ -1912,7 +1912,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
 }
 
 fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let r = match brep_of(i) {
         Some(brep) => {
             let ex = export_of(brep)?;
@@ -1925,7 +1925,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
             let (mut b, _) = shared::import(&ex)?;
             run_rust_brep(&k, &mut b, &op)
         }
-        None => run_rust_geom(&k, i),
+        None => run_rust_geom(&mut k, i),
     };
     match r {
         Ok(v) => Ok(Output::new().values("out", v)),

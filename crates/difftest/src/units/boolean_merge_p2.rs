@@ -524,7 +524,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
     let mut a = import_operand(&p.a)?;
     let mut b = p.b.as_ref().map(import_operand).transpose()?;
     let options = i.options.map(options_of);
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut ids = Vec::new();
     let mut values = Vec::new();
     match &i.op {
@@ -646,7 +646,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                 } => {
                     let mut made = Vec::new();
                     match make_faceuse(
-                        &k,
+                        &mut k,
                         &mut a,
                         b,
                         FaceuseId::from_index(u32::try_from(*faceuse).map_err(|e| err(&e))?),

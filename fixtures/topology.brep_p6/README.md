@@ -30,3 +30,35 @@ two calls advance it by eight. The 56 cases compare both seeds, seven caller-loc
 masks, one/two calls and both infinite-region flags, including all faceuse marks
 and lock state. The native FFI regression checks that these inputs still reach
 traversal rather than an earlier no-op return.
+
+# Face construction fixture (`make_face.json`, op 3)
+
+Each case builds a kind-5 fixture block: shell vertices at the listed points
+(`MakeShellVertex`), joined by `MakeEdgeTopology` edges carrying straight
+`CreateLineSegment` curves, exactly as the wire network of `my_test_topology`.
+It then runs `SmBrep::MakeFaceTopology` once per `faces` entry, each on the B-rep
+the previous call left. Loops are given as network point pairs. The runner turns
+each pair into the edge use running from the first point to the second in the
+imported pre-operation graph, so both sides pass the same objects.
+
+The 89 cases cover:
+
+- Single loops on planes and B-spline surfaces (flat and saddle bilinear
+  patches), in both orientations, with and without `bCalculateTrims`,
+  `bVerifyRadialSectors`, an explicit region and caller UV curves.
+- Holes, whose inner wire shell is merged into the keeper shell by
+  `RemoveShell`, region `Remove` and delete.
+- Loop vertices that are a shell vertex (its shell is deleted), on a wire of
+  another shell (`TransferChildrenTo`), or in the keeper shell.
+- Shared edges, an open box built from one to five faces and the closed cube.
+- A three-page non-manifold book and a slit face followed by a fin, with and
+  without radial-sector verification, and an edge used three times in one loop.
+- Degenerate inputs: no edges, a NULL surface (also after a successful face),
+  zero-length loops, misordered or open chains, and a one-edge loop.
+- Scale and tolerance limits: squares from 1e-6 to 1e3, a corner off the plane by
+  1e-7 to 1e-4, and squares away from or tilted against the plane.
+
+The comparison covers every call's status and outputs, the context mark counters
+and locks, and the whole post-operation graph. The graph walk is the
+`topology.brep_p10` one; its export carries no `SmTopology` flags and no edge
+marks, see `plan/findings.md`.

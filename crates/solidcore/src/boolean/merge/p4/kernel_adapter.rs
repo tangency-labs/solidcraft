@@ -729,7 +729,7 @@ impl ManifoldIntersector for KernelManifoldIntersector {
         // New topology is made with the primary context; copies notify through the
         // other operand's (or the shared) context.
         let ctx = match kernels.other.as_deref_mut() {
-            Some(o) => MergeContext::Split(kernels.primary, Some(&mut o.context)),
+            Some(o) => MergeContext::SplitMut(kernels.primary, Some(&mut o.context)),
             None => MergeContext::Shared(kernels.primary),
         };
         let mut faces = Vec::new();

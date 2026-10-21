@@ -1,11 +1,14 @@
 //! Checked native `SmBrep::{CopyEdges, MakeFaceTopology, TestClosureSplitRegion}`.
-//! Uses the topology.vertexuse fixture block and the traverser's raw input export.
+//! Uses the topology.vertexuse fixture block and the traverser's raw input export;
+//! [`make_faces`] appends its `MakeFaceTopology` calls to the block and returns the
+//! post-operation graph.
 
 use super::topology_topology_traverser::{self as graph, Fixture};
 use super::topology_vertexuse::counts;
 use crate::{call_with_buffer, FfiError};
 
-/// One request. `op`: closure=0, copy=1, edgeless face=2. Flag bits are
+/// One request. `op`: closure=0, copy=1, edgeless face=2 (face construction on real
+/// loops is [`make_faces`], the shim's op 3). Flag bits are
 /// infinite-region testing / calculate trims (1), optional copy list (2), null
 /// surface (4), opposite orientation (8), and radial verification (16).
 #[derive(Debug, Clone)]
@@ -104,6 +107,136 @@ pub fn eval(path: &str, input: &[f64], request: &Request) -> Result<Vec<f64>, Ff
     })
 }
 
+/// Most `MakeFaceTopology` calls of one op-3 request.
+pub const MAX_FACES: usize = 16;
+/// Most loops, edge uses, loop vertices or UV curves of one call.
+pub const MAX_FACE_ITEMS: usize = 256;
+
+/// One `MakeFaceTopology` call of op 3. Indices refer to the fixture export's
+/// traversal order (regions, edge uses, vertices); blocks use the shared fixture
+/// encodings of [`super::topology_vertexuse`].
+#[derive(Debug, Clone, Default)]
+pub struct FaceSpec {
+    /// The surface block, `None` for a NULL surface.
+    pub surface: Option<Vec<f64>>,
+    /// Region index, or `-1` for NULL (the infinite region).
+    pub region: i64,
+    /// Bit 0 `bCalculateTrims`, bit 1 `bVerifyRadialSectors`, bit 2 `SM_OT_OPPOSITE`.
+    pub flags: i32,
+    /// `crEdgeLoops`.
+    pub loops: Vec<i64>,
+    /// `crEdgeuses` (edge use indices).
+    pub edgeuses: Vec<i64>,
+    /// `crLoopVertices` (vertex indices).
+    pub vertices: Vec<i64>,
+    /// `cpOptUVCurves`: curve blocks (`None` entries are NULL); `None` for a NULL array.
+    pub uv_curves: Option<Vec<Option<Vec<f64>>>>,
+}
+
+/// Run `MakeFaceTopology` once per spec, in order, on the fixture of `block`, stopping
+/// after the first call that does not succeed. Output: `[-1, status]` for a failed
+/// fixture, `[-2]` when a call would dereference null in C++ (see the shim), else the
+/// number of calls made, per call `status face shell region` (post-operation graph
+/// indices), five `mark delta, locked` pairs, then the post-operation graph export as
+/// `tag value` pairs (`0` integer, `1` double).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed block or spec (indices past the
+/// fixture's counts, too many items, bad flags) before any native call.
+pub fn make_faces(path: &str, block: &[f64], faces: &[FaceSpec]) -> Result<Vec<f64>, FfiError> {
+    let invalid = |what: &str| FfiError::InvalidArgument(format!("brep_p6 make_faces: {what}"));
+    let end = super::topology_vertexuse::brep_block_at(block, path)?;
+    if end != block.len() {
+        return Err(invalid("trailing block data"));
+    }
+    let fixture = export(path, block)?;
+    let Some(c) = counts(&fixture.graph) else {
+        return Ok(fixture.graph);
+    };
+    if faces.len() > MAX_FACES {
+        return Err(invalid("too many faces"));
+    }
+    let item = |v: i64, count: usize| v >= 0 && (v as u64) < count as u64;
+    let mut input = block.to_vec();
+    input.push(faces.len() as f64);
+    for f in faces {
+        if !(0..=7).contains(&f.flags)
+            || (f.region != -1 && !item(f.region, c[0]))
+            || f.loops.len() > MAX_FACE_ITEMS
+            || f.edgeuses.len() > MAX_FACE_ITEMS
+            || f.vertices.len() > MAX_FACE_ITEMS
+            || f.loops.iter().any(|&n| !(0..=MAX_FACE_ITEMS as i64).contains(&n))
+            || f.edgeuses.iter().any(|&e| !item(e, c[6]))
+            || f.vertices.iter().any(|&v| !item(v, c[9]))
+        {
+            return Err(invalid("selector, count or flag out of range"));
+        }
+        match &f.surface {
+            None => input.push(0.0),
+            Some(surface) => {
+                let (_, used) = super::topology_vertexuse::surface_at(surface, 0)?;
+                if used != surface.len() {
+                    return Err(invalid("trailing surface data"));
+                }
+                input.push(1.0);
+                input.extend(surface);
+            }
+        }
+        input.push(f.region as f64);
+        input.push(f64::from(f.flags));
+        for list in [&f.loops, &f.edgeuses, &f.vertices] {
+            input.push(list.len() as f64);
+            input.extend(list.iter().map(|&x| x as f64));
+        }
+        match &f.uv_curves {
+            None => input.push(-1.0),
+            Some(curves) => {
+                if curves.len() > MAX_FACE_ITEMS {
+                    return Err(invalid("too many UV curves"));
+                }
+                input.push(curves.len() as f64);
+                for curve in curves {
+                    match curve {
+                        None => input.push(0.0),
+                        Some(curve) => {
+                            let (_, used) = super::topology_vertexuse::curve_at(curve, 0)?;
+                            if used != curve.len() {
+                                return Err(invalid("trailing curve data"));
+                            }
+                            input.push(1.0);
+                            input.extend(curve);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let path = std::ffi::CString::new(path).map_err(|_| invalid("path"))?;
+    call_with_buffer(1 << 16, |buffer, len| {
+        // SAFETY: the block and every spec were validated above against the fixture's
+        // counts; the shim reads exactly this layout. Buffers stay live for the call
+        // and native objects never cross FFI.
+        unsafe {
+            sys::sc_topology_brep_p6_eval(
+                3,
+                path.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                0,
+                std::ptr::null(),
+                0,
+                1,
+                0,
+                0,
+                buffer.as_mut_ptr(),
+                buffer.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +297,70 @@ mod tests {
                 "{request:?}"
             );
         }
+    }
+
+    #[test]
+    fn make_faces_rejects_bad_specs_and_builds_a_square() {
+        // a kind-5 square: four shell vertices and four line edges
+        let mut block = vec![5.0, 4.0];
+        for p in [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]] {
+            block.extend(p);
+        }
+        block.push(4.0);
+        for (a, b) in [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 0.0)] {
+            block.extend([a, b, 0.0]);
+        }
+        block.extend([0.0, 0.0]);
+        let plane = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let edgeless = FaceSpec {
+            surface: Some(plane.clone()),
+            region: -1,
+            ..FaceSpec::default()
+        };
+        for bad in [
+            FaceSpec {
+                region: 99,
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                flags: 8,
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                edgeuses: vec![-1],
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                vertices: vec![99],
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                loops: vec![-1],
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                surface: Some(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                ..edgeless.clone()
+            },
+            FaceSpec {
+                uv_curves: Some(vec![Some(vec![2.0])]),
+                ..edgeless.clone()
+            },
+        ] {
+            assert!(
+                matches!(
+                    make_faces("", &block, std::slice::from_ref(&bad)),
+                    Err(FfiError::InvalidArgument(_))
+                ),
+                "{bad:?}"
+            );
+        }
+        let out = make_faces("", &block, &[edgeless]).unwrap();
+        // one call, SM_SUCCESS, a face and its new shell, no region
+        assert_eq!(out.get(..2), Some(&[1.0, 0.0][..]));
+        assert!(out.get(2).is_some_and(|f| *f >= 0.0));
+        assert!(out.get(3).is_some_and(|s| *s >= 0.0));
+        assert_eq!(out.get(4), Some(&-1.0));
     }
 
     #[test]

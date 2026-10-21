@@ -1572,7 +1572,7 @@ impl FilletBrep {
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn make_face_brep(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         g: FilletGeomId,
         solvers: &[FilletSolver],
         brep: &mut Brep,
@@ -2404,7 +2404,7 @@ mod tests {
 
     #[test]
     fn make_face_without_surface_is_null() {
-        let k = kernel();
+        let mut k = kernel();
         let mut fb = FilletBrep::new();
         let g = fb.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
         let mut b = Brep::new();
@@ -2420,7 +2420,7 @@ mod tests {
             context: None,
             key_of: &key_of,
         };
-        assert!(fb.make_face_brep(&k, g, &[], &mut b, &mut env).is_err());
+        assert!(fb.make_face_brep(&mut k, g, &[], &mut b, &mut env).is_err());
     }
 
     #[test]

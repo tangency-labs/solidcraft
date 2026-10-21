@@ -1578,7 +1578,7 @@ fn entity_key(entity: EntityRef, base: u64) -> ObjectRef {
 /// The shim's `curve_face`: `MakeFaceWithCurves` of the unit square from 3D lines
 /// over `[0, 1]` and 2D B-spline UV lines on the plane `z = 0`.
 fn curve_face(
-    kernel: &Kernel,
+    kernel: &mut Kernel,
     brep: &mut Brep,
     env: &mut NotifyEnv<'_>,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
@@ -1642,7 +1642,7 @@ fn rust_face_tail(input: &FaceTailIn) -> RResult<Output> {
         context: None,
         key_of: &original_key,
     };
-    let face = curve_face(&kernel, &mut original, &mut env, &original_key)?;
+    let face = curve_face(&mut kernel, &mut original, &mut env, &original_key)?;
     let upward = original
         .face(face)
         .map_err(setup)?

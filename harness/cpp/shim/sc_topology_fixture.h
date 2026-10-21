@@ -18,6 +18,8 @@
 //   `1 curve t0 t1 validate_only init_gaps`     CreateWireEdgeFromCurve(curve, [t0, t1])
 //   `2 surface u0 v0 u1 v1 validate_only init_gaps` CreateFaceFromSurface(surface, dom)
 //   `3 validate_only init_gaps`                 the wire network of prog_test my_test_topology
+//   `5 np (x y z)*np ne (a b has_curve [curve])*ne validate_only init_gaps`
+//                                               shell vertices joined by MakeEdgeTopology edges
 // `init_gaps` computes the cached vertex/face, vertex/edge, edge/face and edge/CCW-edge
 // gaps (C++ only) before the op, so their reset is observable.
 //
@@ -716,6 +718,49 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
                 if (status == SM_SUCCESS)
                     status = brep->MakeVertexLoop(pFace, pt, pLoop, pVertex);
             }
+        }
+    }
+    else if (kind == 5)
+    {
+        // kind 5: shell vertices at the given points, then edges between them
+        // (MakeEdgeTopology with a straight line or the given curve, as the wire network)
+        int64_t np = rd.idx();
+        std::vector<SmVertex*> vs;
+        for (int64_t i = 0; i < np; i++)
+        {
+            SmPoint3d p = rd.vec();
+            SmShell* pShell = nullptr;
+            SmVertex* pVertex = nullptr;
+            if (status == SM_SUCCESS)
+                status = brep->MakeShellVertex(brep->GetInfiniteRegion(), p, pShell, pVertex);
+            vs.push_back(pVertex);
+        }
+        int64_t ne = rd.idx();
+        for (int64_t i = 0; i < ne; i++)
+        {
+            int64_t a = rd.idx(), b = rd.idx();
+            SmBSplineCurve* c = rd.flag() ? read_curve(rd, ctx) : nullptr;
+            if (status != SM_SUCCESS)
+            {
+                delete c;
+                continue;
+            }
+            if (c == nullptr)
+                status = SmBSplineCurve::CreateLineSegment(ctx, 3, vs[(size_t)a]->GetPoint(), vs[(size_t)b]->GetPoint(), c);
+            SmEdge* pEdge = nullptr;
+            if (status == SM_SUCCESS)
+                status = brep->MakeEdgeTopology(brep->GetInfiniteRegion(), vs[(size_t)a], vs[(size_t)b], pEdge);
+            if (status != SM_SUCCESS || pEdge == nullptr)
+            {
+                delete c;
+                if (status == SM_SUCCESS)
+                    status = SM_ERR;
+                continue;
+            }
+            pEdge->SetCurve(c, TRUE);
+            c->SetOwner(pEdge);
+            pEdge->SetInterval(c->GetNaturalInterval());
+            pEdge->SetOrientation(SM_OT_SAME);
         }
     }
     else

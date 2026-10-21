@@ -551,8 +551,8 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
 
 // ---- traversal-order registry (mirrors the shim's walk) ---------------------------------
 
-struct Reg<I> {
-    items: Vec<I>,
+pub(crate) struct Reg<I> {
+    pub(crate) items: Vec<I>,
     index: BTreeMap<u32, i64>,
 }
 
@@ -574,7 +574,7 @@ impl<I: Copy> Reg<I> {
         self.index.insert(r, self.items.len() as i64);
         self.items.push(id);
     }
-    fn find(&self, id: Option<I>, raw: impl Fn(I) -> u32) -> i64 {
+    pub(crate) fn find(&self, id: Option<I>, raw: impl Fn(I) -> u32) -> i64 {
         match id {
             None => -1,
             Some(id) => self.index.get(&raw(id)).copied().unwrap_or(-3),
@@ -582,17 +582,18 @@ impl<I: Copy> Reg<I> {
     }
 }
 
-struct Graph {
-    regions: Reg<RegionId>,
-    shells: Reg<ShellId>,
-    faceuses: Reg<FaceuseId>,
-    faces: Reg<FaceId>,
-    loopuses: Reg<LoopuseId>,
-    loops: Reg<LoopId>,
-    edgeuses: Reg<EdgeuseId>,
-    edges: Reg<EdgeId>,
-    vertexuses: Reg<VertexuseId>,
-    vertices: Reg<VertexId>,
+/// The B-rep's objects in the shim's traversal order (shared with `topology.brep_p6`).
+pub(crate) struct Graph {
+    pub(crate) regions: Reg<RegionId>,
+    pub(crate) shells: Reg<ShellId>,
+    pub(crate) faceuses: Reg<FaceuseId>,
+    pub(crate) faces: Reg<FaceId>,
+    pub(crate) loopuses: Reg<LoopuseId>,
+    pub(crate) loops: Reg<LoopId>,
+    pub(crate) edgeuses: Reg<EdgeuseId>,
+    pub(crate) edges: Reg<EdgeId>,
+    pub(crate) vertexuses: Reg<VertexuseId>,
+    pub(crate) vertices: Reg<VertexId>,
 }
 
 const LOOPUSE_TYPE: i64 = 16004;
@@ -601,7 +602,7 @@ const VERTEXUSE_TYPE: i64 = 16006;
 const SHELL_TYPE: i64 = 16013;
 const UNKNOWN_TYPE: i64 = 16999;
 
-fn orient_code(o: solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType) -> i64 {
+pub(crate) fn orient_code(o: solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType) -> i64 {
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     match o {
         OrientType::Unknown => 0,
@@ -612,7 +613,7 @@ fn orient_code(o: solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType) -> i
 
 impl Graph {
     #[allow(clippy::too_many_lines)]
-    fn walk(b: &Brep) -> Result<Self, SolidError> {
+    pub(crate) fn walk(b: &Brep) -> Result<Self, SolidError> {
         let mut g = Self {
             regions: Reg::new(),
             shells: Reg::new(),

@@ -351,7 +351,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             rm.fb.geom_mut(gid).map_err(h)?.solver = Some(FilletSolverId(si));
         }
     }
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut o = Vec::new();
     macro_rules! status_of {
         ($r:expr) => {
@@ -438,7 +438,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                 context: None,
                 key_of: &key_of,
             };
-            let r = rm.fb.make_face_brep(&k, gid, &solvers, &mut brep, &mut env);
+            let r = rm.fb.make_face_brep(&mut k, gid, &solvers, &mut brep, &mut env);
             o.push(status_of!(r));
         }
         Query::Blending { g } => {

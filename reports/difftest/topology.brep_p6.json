@@ -3,6 +3,874 @@
   "cases": [
     {
       "max_rel_err": 0.0,
+      "name": "square_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#0 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_opposite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#1 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_cw_on_same",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#2 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_verify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#3 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_region0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#4 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_offset_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#5 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "triangle_tilted",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#6 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 109
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_same_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#7 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_opposite_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#8 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_cw_on_same_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#9 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_verify_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#10 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_region0_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#11 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_offset_plane_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#12 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "triangle_tilted_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#13 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_trims_uv_curves",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#14 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_trims_uv_some_null",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#15 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_uv_curves_without_trims",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#16 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_flat",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#17 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_opposite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#18 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_saddle",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#19 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#20 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_opposite_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#21 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "bspline_saddle_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#22 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_saddle_trims_uv_curves",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#23 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 201
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_trims_uv_curves_verify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#24 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 201
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_with_hole",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#25 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 229
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_with_hole",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#26 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 229
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_with_hole_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#27 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "bspline_flat_with_hole_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#28 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_hole_opposite",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#29 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 229
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_two_holes_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#30 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_shell_loop_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#31 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 137
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_shell_loop_vertex_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#32 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edgeless_shell_loop_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#33 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 137
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_wire_loop_vertex",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#34 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 161
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_hole_and_loop_vertices",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#35 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 237
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "loop_vertex_in_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#36 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 157
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_squares_shared_edge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#37 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 237
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "two_squares_shared_edge_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#38 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_squares_shared_edge_verify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#39 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 237
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_1",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#40 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 309
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_2",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#41 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 345
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_3",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#42 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 381
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#43 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 417
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_5",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#44 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 453
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "cube_faces_6",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#45 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "cube_faces_5_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#46 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "cube_faces_5_verify",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#47 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 453
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "book_two_pages",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#48 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 305
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "book_three_pages",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#49 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 341
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "book_three_pages_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#50 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "book_three_pages_verify",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#51 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "book_three_pages_trims_verify",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#52 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "slit_face",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#53 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 225
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "slit_face_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#54 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "slit_then_fin",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#55 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 261
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "slit_then_fin_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#56 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "slit_then_fin_verify",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#57 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "slit_then_fin_trims_verify",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#58 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "edge_used_three_times",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#59 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "edge_used_three_times_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#60 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edgeless_plane",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#61 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edgeless_plane_opposite_trims",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#62 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edgeless_bspline",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#63 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "edgeless_twice",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#64 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 169
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null_surface",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#65 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 97
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "null_surface_after_face",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#66 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 201
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "zero_loop",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#67 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
+      },
+      "max_rel_err": 0.0,
+      "name": "zero_then_loop",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#68 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "empty_loop_list_with_edgeuses",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#69 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 37
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "misordered_loop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#70 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "open_chain_loop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#71 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "one_edge_loop",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#72 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "two_loops_same_shell",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#73 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 249
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_tiny",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#74 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_tiny_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#75 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_huge",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#76 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_huge_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#77 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_small",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#78 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_small_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#79 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_1e-7",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#80 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_1e-7_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#81 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_5e-6",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#82 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_5e-6_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#83 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_1e-4",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#84 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_off_plane_1e-4_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#85 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_far_from_plane_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#86 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "square_on_tilted_plane_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#87 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "bspline_patch_subdomain_trims",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/topology.brep_p6/make_face.json#88 (upstream source/SMLib/src/SmBrep.cpp:14141 (SmBrep::MakeFaceTopology))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "open_box_seed0_mask0_repeat1_infinite0",
       "outcome": "pass",
       "pass": true,
@@ -3694,50 +4562,34 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#394 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#395 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#396 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#397 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
@@ -3774,50 +4626,34 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_8",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#402 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#403 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#404 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#405 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
@@ -3854,50 +4690,34 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#410 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_17",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#411 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_18",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#412 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_19",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#413 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
@@ -3934,50 +4754,34 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_24",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#418 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_25",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#419 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_26",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#420 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "make_face_flags_27",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p6/operations.json#421 (upstream tests/prog_test/src/smTopoTest.cpp:1259)",
       "values_compared": 0
     },
@@ -4022,41 +4826,37 @@
       "values_compared": 0
     },
     {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "pass",
-      "pass": true,
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=16427437253558003699",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeWireEdgeVertex",
-        "unit": "topology.brep_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003700",
-      "values_compared": 0
+      "values_compared": 133
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeWireEdgeVertex",
-        "unit": "topology.brep_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003701",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeWireEdgeVertex",
-        "unit": "topology.brep_p3"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -4074,50 +4874,34 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003704",
-      "values_compared": 0
+      "values_compared": 237
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeWireEdgeVertex",
-        "unit": "topology.brep_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003705",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeWireEdgeVertex",
-        "unit": "topology.brep_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0008",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003706",
-      "values_compared": 0
+      "values_compared": 137
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003707",
       "values_compared": 0
     },
@@ -4130,42 +4914,42 @@
       "values_compared": 0
     },
     {
-      "max_rel_err": 0.0,
-      "name": "gen0011",
-      "outcome": "pass",
-      "pass": true,
-      "source": "generated:seed=16427437253558003709",
-      "values_compared": 0
-    },
-    {
       "deferred": {
         "symbol": "SmBrep::MakeWireEdgeVertex",
         "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
-      "name": "gen0012",
+      "name": "gen0011",
       "outcome": "deferred",
       "pass": false,
-      "source": "generated:seed=16427437253558003710",
+      "source": "generated:seed=16427437253558003709",
       "values_compared": 0
     },
     {
       "max_rel_err": 0.0,
-      "name": "gen0013",
+      "name": "gen0012",
       "outcome": "pass",
       "pass": true,
+      "source": "generated:seed=16427437253558003710",
+      "values_compared": 133
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "gen0013",
+      "outcome": "deferred",
+      "pass": false,
       "source": "generated:seed=16427437253558003711",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::SetTolerance",
-        "unit": "topology.face_p3"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427437253558003712",
       "values_compared": 0
     },
@@ -4179,14 +4963,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 48,
+  "cases_deferred": 66,
   "cases_failed": 0,
-  "cases_passed": 450,
-  "cases_total": 498,
+  "cases_passed": 521,
+  "cases_total": 587,
   "deferred_by_unit": {
-    "query.brep": 6,
-    "topology.brep_p3": 23,
-    "topology.face_p3": 19
+    "curve.crv_on_surf": 2,
+    "intersect.surface_drop_lib_p3": 37,
+    "query.brep": 9,
+    "topology.brep_p3": 18
   },
   "max_rel_err": 0.0,
   "pass": true,

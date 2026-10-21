@@ -319,6 +319,8 @@ pub fn merge_edge(
 pub enum MergeContext<'a> {
     /// A kernel and a separate notification context (or none).
     Split(&'a Kernel, Option<&'a mut Context>),
+    /// [`MergeContext::Split`] with a mutable kernel (`MakeFace` claims a mark).
+    SplitMut(&'a mut Kernel, Option<&'a mut Context>),
     /// One kernel whose own context is notified (both B-reps share it).
     Shared(&'a mut Kernel),
 }
@@ -327,13 +329,24 @@ impl MergeContext<'_> {
     fn kernel(&self) -> &Kernel {
         match self {
             Self::Split(k, _) => k,
-            Self::Shared(k) => k,
+            Self::SplitMut(k, _) | Self::Shared(k) => k,
+        }
+    }
+
+    /// The kernel `MakeFace` claims its mark from; a read-only kernel cannot.
+    fn kernel_mut(&mut self) -> Result<&mut Kernel> {
+        match self {
+            Self::Split(..) => Err(SolidError::invalid_input(
+                OP_FACEUSE,
+                "MakeFace needs a mutable kernel (MergeContext::SplitMut)",
+            )),
+            Self::SplitMut(k, _) | Self::Shared(k) => Ok(k),
         }
     }
 
     fn context(&mut self) -> Option<&mut Context> {
         match self {
-            Self::Split(_, context) => context.as_deref_mut(),
+            Self::Split(_, context) | Self::SplitMut(_, context) => context.as_deref_mut(),
             Self::Shared(k) => Some(&mut k.context),
         }
     }
@@ -341,6 +354,7 @@ impl MergeContext<'_> {
     fn reborrow(&mut self) -> MergeContext<'_> {
         match self {
             Self::Split(k, context) => MergeContext::Split(k, context.as_deref_mut()),
+            Self::SplitMut(k, context) => MergeContext::SplitMut(k, context.as_deref_mut()),
             Self::Shared(k) => MergeContext::Shared(k),
         }
     }
@@ -531,7 +545,7 @@ fn orientation_to_find(
 /// tangent (`Unitize`); those of the merges, evaluations, copies and `Relate`;
 /// [`SolidError::Unported`] (module docs).
 pub fn make_faceuse(
-    k: &Kernel,
+    k: &mut Kernel,
     brep: &mut Brep,
     other: &mut Brep,
     faceuse: FaceuseId,
@@ -542,7 +556,7 @@ pub fn make_faceuse(
     new_faces: Option<&mut Vec<FaceId>>,
 ) -> Result<MadeFaceuse> {
     make_faceuse_with(
-        MergeContext::Split(k, context),
+        MergeContext::SplitMut(k, context),
         brep,
         other,
         faceuse,
@@ -731,8 +745,27 @@ pub fn make_faceuse_with(
     // make the new Brep Face within the classified Brep region
     let orientation = other.faceuse(faceuse)?.orientation;
     // bVerifyRadialSectors = FALSE, bCalculateTrims = FALSE, cpOptUVCurves = NULL
+    // MakeFace's own topology records and notifications under the primary
+    // identities: the copy's face and edge keys, its entity keys for the rest (no
+    // context callbacks: the kernel is borrowed for the face's mark lock)
+    let (face_key, edge_key, entity_key) = (
+        copy.face_destination_key,
+        copy.edge_destination_key,
+        copy.vertices.destination_key,
+    );
+    let key_of = |e: crate::EntityRef| match e {
+        crate::EntityRef::Face(f) => face_key(f),
+        crate::EntityRef::Edge(x) => edge_key(x),
+        other => entity_key(other),
+    };
+    let mut env = edge::NotifyEnv {
+        records: &mut *copy.vertices.records,
+        attributes: &mut *copy.vertices.attributes,
+        context: None,
+        key_of: &key_of,
+    };
     let made = brep_p7::make_face(
-        ctx.kernel(),
+        ctx.kernel_mut()?,
         brep,
         Some(region),
         &edge_loops,
@@ -743,6 +776,7 @@ pub fn make_faceuse_with(
         orientation,
         &MakeFaceOptions::default(),
         copy.face_destination_key,
+        &mut env,
     );
     if saved_infinite_region.is_some() {
         brep.set_infinite_region_record(saved_infinite_region);
