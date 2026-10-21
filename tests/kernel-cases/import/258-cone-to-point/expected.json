@@ -1,0 +1,24 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#258"
+  ],
+  "what": "a STEP cone 20 mm across coming to a point 30 mm up (no vertex at the apex): the cone face was meshed flat at its base, so the measured shape was far off",
+  "source": "analytic",
+  "method": "cone V = pi*r^2*h/3 = pi*100*30/3 = 1000*pi; area = lateral pi*r*s (s=sqrt(100+900)) + base pi*r^2 = 993.459+314.159; bbox [-10,-10,0]..[10,10,30]; faces: cone + base disc",
+  "body_count": 1,
+  "volume_mm3": 3141.592653589793,
+  "area_mm2": 1307.6180919385895,
+  "faces": 2,
+  "bbox": {
+    "min": [
+      -10,
+      -10,
+      0
+    ],
+    "max": [
+      10,
+      10,
+      30
+    ]
+  }
+}
