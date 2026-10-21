@@ -17,6 +17,8 @@ use solidcore::SolidError;
 ///   fail, and nothing is compared (AGENTS.md section 4a).
 /// * `rejected`: set by the C++ side only when fixture construction failed before
 ///   the operation ran. No Rust call or parity comparison is made.
+/// * `diagnostics`: named counts the Rust side reports for the record (e.g. arena
+///   records no walk reaches); written to the report, never compared.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Output {
     /// Named float arrays.
@@ -31,6 +33,9 @@ pub struct Output {
     pub deferred: Option<Deferred>,
     /// The native fixture constructor rejected the input before the operation ran.
     pub rejected: Option<String>,
+    /// Rust-side diagnostics for the report (never compared); boxed, as most outputs
+    /// have none.
+    pub diagnostics: Option<Box<BTreeMap<String, i64>>>,
 }
 
 /// Why a case is deferred: the unported upstream callee and the unit that will port it.
@@ -43,6 +48,20 @@ pub struct Deferred {
 }
 
 impl Output {
+    /// Adds a Rust-side diagnostic count (written to the report, never compared).
+    #[must_use]
+    pub fn diagnostic(mut self, key: &str, v: i64) -> Self {
+        self.diagnostics
+            .get_or_insert_with(Box::default)
+            .insert(key.to_string(), v);
+        self
+    }
+
+    /// The diagnostic `key`, if the Rust side reported one.
+    pub fn diagnostic_value(&self, key: &str) -> Option<i64> {
+        self.diagnostics.as_ref().and_then(|d| d.get(key).copied())
+    }
+
     /// Empty output.
     pub fn new() -> Self {
         Self::default()

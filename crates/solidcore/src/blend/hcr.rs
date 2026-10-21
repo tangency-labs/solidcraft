@@ -25,8 +25,12 @@
 //! | [`HcrObject`], `Geometry` (private)          | the `SmObject*` of the classifications    |
 //!
 //! Deviations:
-//! - The scene B-rep copy and its transformation (`SmBrep` copy constructor,
-//!   `Transform`) and its bounding box
+//! - The scene B-rep copy (`SmBrep`'s copy constructor,
+//!   `topology::brep::p3::copy_brep`) notifies through the caller's notification
+//!   environment, naming the copy's objects by its `key_of` and `brep`'s by `source_key`
+//!   (upstream objects are known by address), so [`Hcr::new`] and [`Hcr::with_transform`]
+//!   take the kernel mutably with both. The scene's transformation (`Transform`) and
+//!   its bounding box
 //!   (`SmBrep::CalculateBoundingBox`) belong to unported units, so [`Hcr::with_transform`]
 //!   stops there; [`Hcr::from_scene`] is the rest of `ConstructorInit` for a caller that
 //!   already holds the transformed scene and its box.
@@ -187,17 +191,20 @@ impl SolutionObject for CurveHandle {
     }
 }
 
-// ---- unported callees ---------------------------------------------------------------------
+// ---- callees -------------------------------------------------------------------------------
 
-/// `SmBrep::SmBrep(const SmBrep&)` (unit `topology.brep_p3`).
-fn copy_brep(brep: &Brep) -> Result<Brep> {
-    let _ = brep;
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep(const SmBrep&)
-    Err(SolidError::unported(
-        "SmBrep::SmBrep(const SmBrep&)",
-        "topology.brep_p3",
-    ))
+/// `new SmBrep(*pBrep)`: the copy constructor with its defaults (no maps,
+/// `bCopyAttributes` and `bAddAnalytics` `TRUE`), [`crate::topology::brep::p3::copy_brep`].
+fn copy_brep(
+    k: &mut Kernel,
+    env: &mut edge::NotifyEnv<'_>,
+    brep: &Brep,
+    source_key: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<Brep> {
+    crate::topology::brep::p3::copy_brep(k, env, brep, source_key, None, None, true, true)
 }
+
+// ---- unported callees ---------------------------------------------------------------------
 
 /// `SmBrep::Transform` (unit `topology.brep_p5`).
 fn transform_brep(brep: &mut Brep, transform: &Axis2Placement) -> Result<()> {
@@ -481,28 +488,38 @@ impl Hcr {
     /// # Errors
     ///
     /// Those of [`view_transform_for_vector`] and [`Hcr::with_transform`].
-    pub fn new(k: &Kernel, brep: &Brep, view_vector: Vec3, opts: HcrOptions) -> Result<Self> {
+    pub fn new(
+        k: &mut Kernel,
+        env: &mut edge::NotifyEnv<'_>,
+        brep: &Brep,
+        source_key: &dyn Fn(EntityRef) -> ObjectRef,
+        view_vector: Vec3,
+        opts: HcrOptions,
+    ) -> Result<Self> {
         let transform = view_transform_for_vector(view_vector)?;
-        Self::with_transform(k, brep, &transform, opts)
+        Self::with_transform(k, env, brep, source_key, &transform, opts)
     }
 
     /// An HCR object whose scene is `brep` transformed by `view_transform`
     /// (translation ignored) so that the eye looks along +Z (`SmHCR(crContext, pBrep,
-    /// crViewTransformation, ..)`, `ConstructorInit`).
+    /// crViewTransformation, ..)`, `ConstructorInit`). `env` notifies the scene copy's
+    /// objects; `source_key` is the identity of `brep`'s (see the module docs).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the scene copy, transform and box (units
-    /// `topology.brep_p3`, `topology.brep_p5`, `query.brep`).
+    /// Those of the scene copy (`topology::brep::p3::copy_brep`); [`SolidError::Unported`]
+    /// from the transform and box (units `topology.brep_p5`, `query.brep`).
     pub fn with_transform(
-        k: &Kernel,
+        k: &mut Kernel,
+        env: &mut edge::NotifyEnv<'_>,
         brep: &Brep,
+        source_key: &dyn Fn(EntityRef) -> ObjectRef,
         view_transform: &Axis2Placement,
         opts: HcrOptions,
     ) -> Result<Self> {
         let (vt, _) = prepare_transform(view_transform);
         // copy the original Brep
-        let mut scene = copy_brep(brep)?;
+        let mut scene = copy_brep(k, env, brep, source_key)?;
         scene.set_editing_enabled(true);
         // transform the copied Brep to place the eye looking up the Z axis
         ignore_status(transform_brep(&mut scene, &vt))?;

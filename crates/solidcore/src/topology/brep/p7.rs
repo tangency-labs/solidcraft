@@ -59,9 +59,11 @@
 //!   a failed `GetEnds` keeps the previous end point. A failed `CopyAndAddAnalytics` is
 //!   [`SolidError::InvalidInput`] (upstream then dereferences the null copy), as is
 //!   `pbOptCrvOnSurf` without UV curves (upstream loops over a null array).
-//! - **Unported callees** return [`SolidError::Unported`]: `MakeWireEdge`,
-//!   `MakeWireEdgeVertex` (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`);
-//!   the curve constructor of
+//! - **Wire edges.** `MakeWireEdge` / `MakeWireEdgeVertex` (unit `topology.brep_p3`, wired
+//!   by its PR #204) notify through the caller's notification environment, as the
+//!   other edits here do.
+//! - **Unported callees** return [`SolidError::Unported`]: `DeleteEdge`
+//!   (`topology.brep_p4`); the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which
 //!   `MergeSelfIntersectionCurves` reaches first. `GlueVertices` calls
 //!   `topology.brep_p5` with the caller's notification environment. `CopyFaces` with the
@@ -207,38 +209,42 @@ fn rebuild_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
     p2::rebuild_uv_trim_curves(k, b)
 }
 
-/// `MakeWireEdge(region, start, end, curve, ivl, orient, rpNewEdge)`.
+/// `MakeWireEdge(region, start, end, curve, ivl, orient, rpNewEdge)`
+/// ([`crate::topology::brep::p3::make_wire_edge`], unit `topology.brep_p3`), notifying
+/// through `env`.
+#[allow(clippy::too_many_arguments)]
 fn make_wire_edge(
-    _b: &mut Brep,
-    _region: Option<RegionId>,
-    _start: VertexId,
-    _end: VertexId,
-    _curve: Curve,
-    _ivl: Extent1d,
-    _orient: OrientType,
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    start: VertexId,
+    end: VertexId,
+    curve: Curve,
+    ivl: Extent1d,
+    orient: OrientType,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<EdgeId> {
-    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdge
-    Err(SolidError::unported(
-        "SmBrep::MakeWireEdge",
-        "topology.brep_p3",
-    ))
+    crate::topology::brep::p3::make_wire_edge(k, b, env, region, start, end, curve, &ivl, orient)
 }
 
-/// `MakeWireEdgeVertex(region, start, curve, ivl, orient, endPt, rpNewEdge, rpEndVertex)`.
+/// `MakeWireEdgeVertex(region, start, curve, ivl, orient, endPt, rpNewEdge, rpEndVertex)`
+/// ([`crate::topology::brep::p3::make_wire_edge_vertex`], unit `topology.brep_p3`), as
+/// [`make_wire_edge`].
+#[allow(clippy::too_many_arguments)]
 fn make_wire_edge_vertex(
-    _b: &mut Brep,
-    _region: Option<RegionId>,
-    _start: VertexId,
-    _curve: Curve,
-    _ivl: Extent1d,
-    _orient: OrientType,
-    _end_pt: Point3,
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    start: VertexId,
+    curve: Curve,
+    ivl: Extent1d,
+    orient: OrientType,
+    end_pt: Point3,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<(EdgeId, VertexId)> {
-    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdgeVertex
-    Err(SolidError::unported(
-        "SmBrep::MakeWireEdgeVertex",
-        "topology.brep_p3",
-    ))
+    crate::topology::brep::p3::make_wire_edge_vertex(
+        k, b, env, region, start, curve, &ivl, orient, end_pt,
+    )
 }
 
 /// `DeleteEdge(edge)`.
@@ -1199,15 +1205,34 @@ fn make_face_with_curves_impl(
                         }
                     }
                 }
-                let e = make_wire_edge(b, region, start_vertex, end_vertex, curve, ivl, orient)?;
+                let e = make_wire_edge(
+                    k,
+                    b,
+                    region,
+                    start_vertex,
+                    end_vertex,
+                    curve,
+                    ivl,
+                    orient,
+                    env,
+                )?;
                 edges.push(e);
                 if let Some(owner) = curve_owners.get_mut(slot) {
                     *owner = Some(e);
                 }
                 edge_orients.push(l_orient);
             } else {
-                let (e, v) =
-                    make_wire_edge_vertex(b, region, start_vertex, curve, ivl, orient, end_pt)?;
+                let (e, v) = make_wire_edge_vertex(
+                    k,
+                    b,
+                    region,
+                    start_vertex,
+                    curve,
+                    ivl,
+                    orient,
+                    end_pt,
+                    env,
+                )?;
                 edges.push(e);
                 if let Some(owner) = curve_owners.get_mut(slot) {
                     *owner = Some(e);

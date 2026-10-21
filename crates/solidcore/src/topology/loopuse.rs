@@ -910,10 +910,12 @@ pub(crate) fn notify_ref(e: EntityRef) -> ObjectRef {
 }
 
 /// The entity [`notify_ref`] gives the key `key`, if any (its inverse on keys). A
-/// caller decoding notification keys (the heal path's topology tracker) relies on every
-/// event of the edit being keyed by [`notify_ref`], as
-/// [`ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState) does; a change of
-/// that scheme changes this decoder with it.
+/// caller decoding notification keys relies on every event of the edit being keyed by
+/// [`notify_ref`], as [`ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState)
+/// does; a change of that scheme changes this decoder with it. (The heal path's
+/// tracker now decodes kernel identities, `topology::brep::p3::topology_entity`, since
+/// part 5's plain edits run under them; this inverse stays for the arena scheme's tests.)
+#[cfg(test)]
 pub(crate) fn entity_of_notify_key(key: ObjectKey) -> Option<EntityRef> {
     let raw = key.0.checked_sub(1)?;
     let kind = raw >> 32;

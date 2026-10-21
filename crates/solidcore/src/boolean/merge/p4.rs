@@ -1146,14 +1146,19 @@ fn orient_sheet_surfaces(
     crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same)
 }
 
+/// `new SmBrep(dSize, dRatio, pOptContextForStack)` for a component: the B-rep and its
+/// infinite void region ([`Brep::new_with_infinite_region`], the topology part of
+/// `topology.brep_p3`'s constructor). The kernel is held shared here, so the rest of
+/// `SmBrep()` (the context's zone tolerance and the given sizes, and the
+/// `SM_NO_CONSTRUCTION` notification) is not applied, the same deviation as
+/// `blend::fillet_geom::p1::FilletBrep::new`'s and `primitive::api_primitives`'.
 fn new_component_brep(
     _kernel: &Kernel,
     _model_size_estimate: f64,
     _large_small_size_ratio: f64,
     _stack_context: Option<&crate::geom::context::Context>,
 ) -> Result<Brep> {
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    Brep::new_with_infinite_region()
 }
 
 /// `m_vTI.m_pBrep->DeleteStaleCaches()` (`topology.brep_p2`): the faces' trimmed-surface

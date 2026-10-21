@@ -30,6 +30,9 @@
 //! | [`Region::is_infinite_region`] | `IsInfiniteRegion` |
 //! | [`Shell::is_inner_shell`], [`order_region_shells`] | `IsInnerShell`, `OrderShells` |
 //! | [`region_remove_shell`] | `SmOwningTopology::Remove` of a shell from its region |
+//! | [`region_post_insert_shell`] | `SmOwningTopology::PostInsert` of a shell into a region (CO-PORTED, `topology.brep_p3`) |
+//! | [`shell_remove_faceuse`], [`shell_post_insert_faceuse`] | `SmOwningTopology::Remove` / `PostInsert` of one face use (CO-PORTED, `topology.brep_p3`) |
+//! | [`shell_list_size`] | `SmShell::GetSize` (`m_lListSize`; CO-PORTED, `topology.brep_p3`) |
 //!
 //! Deviations: circular lists are typed vectors in head-first order, as in the
 //! shared Brep arena model. `GetWireEdges`, `GetMatedShells` and `RayFire` claim and
@@ -52,6 +55,12 @@
 //! over `Shell::members`: code that edits `members` directly (e.g. a later unit that
 //! rebuilds face-use lists) must keep them in step or reset them to `None`.
 //! There is no recursion. Missing external callees return explicit `Unported` errors.
+//! The single-member `Remove` / `PostInsert` co-ports (`topology.brep_p3`, PR #204)
+//! return upstream's `SM_ERR` of `Remove` (a member not in this list) as
+//! [`SolidError::sm_err`], which callers that ignore it can tell apart. `PostInsert`
+//! does no checks upstream; here it returns `InvalidInput` for a member that some list
+//! still holds (upstream would splice it into a second list), or for a face use
+//! going into a shell whose head is a wire or vertex use.
 
 use crate::error::{Result, SolidError};
 use crate::geom::context::{with_mark_lock, ALL_MARKS};
@@ -510,6 +519,91 @@ pub fn region_remove_shell(brep: &mut Brep, region: RegionId, shell: ShellId) ->
     Ok(())
 }
 
+/// `pRegion->PostInsert(pShell)` (`SmOwningTopology::PostInsert`): appends the shell
+/// to the tail of the region's list and makes the region its owner.
+///
+/// # Errors
+/// `InvalidInput` when a region's list still holds the shell (this one's, or that of
+/// the region it names), and dangling ids.
+pub fn region_post_insert_shell(brep: &mut Brep, region: RegionId, shell: ShellId) -> Result<()> {
+    let owner = brep.shell(shell)?.region;
+    if brep.region(region)?.shells.contains(&shell) {
+        return Err(invalid_members());
+    }
+    if let Some(owner) = owner {
+        if brep.region(owner)?.shells.contains(&shell) {
+            return Err(invalid_members());
+        }
+    }
+    brep.region_mut(region)?.shells.push(shell);
+    brep.shell_mut(shell)?.region = Some(region);
+    Ok(())
+}
+
+/// `pShell->Remove(pFU)` (`SmOwningTopology::Remove`): takes the face use off the
+/// shell's face-use list, clears its owner and links, and closes the list over the
+/// gap (the head moves to the next member when it was the head; a list left
+/// without members gets a NULL head).
+///
+/// # Errors
+/// [`SolidError::sm_err`] (upstream's `SM_ERR` return) when the face use's owner is
+/// not this shell or it is missing from the list; `InvalidInput` for a shell whose
+/// head is not a face use; dangling ids.
+pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId) -> Result<()> {
+    const OP: &str = "topology::shell::shell_remove_faceuse";
+    if brep.faceuse(faceuse)?.shell != Some(shell) {
+        return Err(SolidError::sm_err(OP));
+    }
+    let members = &mut brep.shell_mut(shell)?.members;
+    match members {
+        ShellMembers::Faceuses(list) => {
+            let index = list
+                .iter()
+                .position(|id| *id == faceuse)
+                .ok_or_else(|| SolidError::sm_err(OP))?;
+            list.remove(index);
+            if list.is_empty() {
+                *members = ShellMembers::Empty;
+            }
+        }
+        ShellMembers::Empty => return Err(SolidError::sm_err(OP)),
+        _ => return Err(invalid_members()),
+    }
+    let record = brep.faceuse_mut(faceuse)?;
+    record.shell = None;
+    record.sibling_links = None;
+    refresh_faceuse_sibling_links(brep, shell)
+}
+
+/// `pShell->PostInsert(pFU)` (`SmOwningTopology::PostInsert`): appends the face use
+/// to the tail of the shell's face-use list and makes the shell its owner. The
+/// shell type is left as it is, as upstream.
+///
+/// # Errors
+/// `InvalidInput` when a shell's face-use list still holds the face use, or when the
+/// shell's head is a wire or vertex use; dangling ids.
+pub fn shell_post_insert_faceuse(
+    brep: &mut Brep,
+    shell: ShellId,
+    faceuse: FaceuseId,
+) -> Result<()> {
+    if let Some(owner) = brep.faceuse(faceuse)?.shell {
+        if let ShellMembers::Faceuses(list) = &brep.shell(owner)?.members {
+            if list.contains(&faceuse) {
+                return Err(invalid_members());
+            }
+        }
+    }
+    let target = &mut brep.shell_mut(shell)?.members;
+    match target {
+        ShellMembers::Empty => *target = ShellMembers::Faceuses(vec![faceuse]),
+        ShellMembers::Faceuses(list) => list.push(faceuse),
+        _ => return Err(invalid_members()),
+    }
+    brep.faceuse_mut(faceuse)?.shell = Some(shell);
+    refresh_faceuse_sibling_links(brep, shell)
+}
+
 /// Move a shell's vertex, wire edges and face uses to another shell.
 ///
 /// `wire_candidates` is the native optional list of B-rep wire edges. When it
@@ -698,7 +792,12 @@ fn clear_shell_members(brep: &mut Brep, id: ShellId) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn shell_list_size(brep: &Brep, id: ShellId) -> Result<usize> {
+/// `SmShell::GetSize`: the shell's `m_lListSize`, recomputed from its typed members
+/// (`UpdateListSize`; a wire shell counts its head edge's radial edge uses).
+///
+/// # Errors
+/// A wire head without an edge, and dangling ids.
+pub fn shell_list_size(brep: &Brep, id: ShellId) -> Result<usize> {
     match &brep.shell(id)?.members {
         ShellMembers::Empty => Ok(0),
         ShellMembers::Faceuses(members) => Ok(members.len()),
@@ -1279,5 +1378,74 @@ mod tests {
         // a face use missing from its shell's list is an inconsistent B-rep
         brep.faceuse_mut(c).unwrap().shell = Some(from);
         assert!(move_faceuse(&mut brep, c, to).is_err());
+    }
+
+    #[test]
+    fn single_member_remove_and_post_insert() {
+        let mut brep = Brep::new();
+        let s = brep.add_shell_record(Shell::default()).unwrap();
+        let t = brep.add_shell_record(Shell::default()).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            ids.push(
+                brep.add_faceuse_record(Faceuse {
+                    shell: Some(s),
+                    ..Faceuse::default()
+                })
+                .unwrap(),
+            );
+        }
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        {
+            let sh = brep.shell_mut(s).unwrap();
+            sh.shell_type = ShellType::Faceuse;
+            sh.members = ShellMembers::Faceuses(vec![a, b, c]);
+        }
+        assert_eq!(shell_list_size(&brep, s).unwrap(), 3);
+        // removing the head moves it to the next member and closes the ring
+        shell_remove_faceuse(&mut brep, s, a).unwrap();
+        assert_eq!(brep.shell(s).unwrap().get_faceuses().unwrap(), vec![b, c]);
+        assert_eq!(brep.faceuse(a).unwrap().shell, None);
+        assert_eq!(faceuse_sibling_links(&brep, a).unwrap(), (None, None));
+        assert_eq!(faceuse_sibling_links(&brep, b).unwrap(), (Some(c), Some(c)));
+        // Remove of a member that is not in the list is upstream's SM_ERR status
+        let e = shell_remove_faceuse(&mut brep, s, a).unwrap_err();
+        assert!(matches!(e, SolidError::Upstream { .. }));
+        // PostInsert into an empty shell makes its head; the type is not touched
+        shell_post_insert_faceuse(&mut brep, t, a).unwrap();
+        assert_eq!(
+            brep.shell(t).unwrap().members,
+            ShellMembers::Faceuses(vec![a])
+        );
+        assert_eq!(brep.shell(t).unwrap().shell_type, ShellType::Unknown);
+        assert_eq!(brep.faceuse(a).unwrap().shell, Some(t));
+        assert_eq!(faceuse_sibling_links(&brep, a).unwrap(), (Some(a), Some(a)));
+        // a member still listed elsewhere is refused
+        assert!(shell_post_insert_faceuse(&mut brep, t, b).is_err());
+        // the last member leaves a NULL head
+        shell_remove_faceuse(&mut brep, s, b).unwrap();
+        shell_remove_faceuse(&mut brep, s, c).unwrap();
+        assert_eq!(brep.shell(s).unwrap().members, ShellMembers::Empty);
+        assert_eq!(shell_list_size(&brep, s).unwrap(), 0);
+    }
+
+    #[test]
+    fn region_post_insert_appends_and_owns() {
+        let mut brep = Brep::new();
+        let r = brep.add_region_record(Region::default()).unwrap();
+        let q = brep.add_region_record(Region::default()).unwrap();
+        let s1 = brep.add_shell_record(Shell::default()).unwrap();
+        let s2 = brep.add_shell_record(Shell::default()).unwrap();
+        region_post_insert_shell(&mut brep, r, s1).unwrap();
+        region_post_insert_shell(&mut brep, r, s2).unwrap();
+        assert_eq!(brep.region(r).unwrap().shells, vec![s1, s2]);
+        assert_eq!(brep.shell(s2).unwrap().region, Some(r));
+        // listed twice, or still in another region's list: refused
+        assert!(region_post_insert_shell(&mut brep, r, s1).is_err());
+        assert!(region_post_insert_shell(&mut brep, q, s1).is_err());
+        region_remove_shell(&mut brep, r, s1).unwrap();
+        region_post_insert_shell(&mut brep, q, s1).unwrap();
+        assert_eq!(brep.region(r).unwrap().shells, vec![s2]);
+        assert_eq!(brep.region(q).unwrap().shells, vec![s1]);
     }
 }

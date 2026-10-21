@@ -92,6 +92,8 @@ pub struct CaseResult {
     /// In perturb mode: what was perturbed (`value`, `int`, `topology`, `error`),
     /// or `None` if the case had nothing to perturb or was deferred.
     pub perturbed: Option<&'static str>,
+    /// The Rust side's [`Output::diagnostics`] (reported, never compared).
+    pub diagnostics: BTreeMap<String, i64>,
 }
 
 /// Classification of one case.
@@ -455,6 +457,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             rejected: None,
             deferred: None,
             perturbed: None,
+            diagnostics: BTreeMap::new(),
         };
         if let Ok(c) = &cpp {
             if let Some(reason) = &c.rejected {
@@ -493,6 +496,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 cr.deferred = r.deferred;
             }
             (Ok(c), Ok(mut r)) => {
+                cr.diagnostics = r.diagnostics.as_deref().cloned().unwrap_or_default();
                 if opts.perturb {
                     cr.perturbed = perturb_output(&mut r);
                 }
@@ -565,6 +569,7 @@ mod tests {
             rejected: None,
             deferred,
             perturbed: None,
+            diagnostics: BTreeMap::new(),
         };
         let d = || {
             Some(Deferred {

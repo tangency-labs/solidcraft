@@ -24,12 +24,12 @@
 //! A Rust error maps to its `SmStatus` (`-1` for one upstream cannot return, e.g. a
 //! dereference the shim should have refused); an `Unported` error anywhere defers the case.
 //! The B-rep walks (`ProtoTopology`) of the bare stand-ins answer as upstream's do: no
-//! uses, no B-rep, vertices at the origin. The vertex, edge and face stand-ins are also
-//! records of one B-rep ([`TopoRecords`]), so point classifications on them reach the
-//! ported topology members (`SmVertex::GetPoint`, `SmEdge::GetCurve`,
-//! `SmFace::GetSurface`, the zone tolerances) through the [`ClassGeometry`] hooks.
-//! Deferred: `SmBrep::Transform`, the manager's fallback tolerance and what needs a real
-//! B-rep (`SmBrep::GetVertices`, `Point3DClassify`, UV domains from trim curves).
+//! uses, no B-rep, vertices at the origin. Deferred: point classifications on topology
+//! objects (their `SmVertex::GetPoint`, `SmEdge::GetCurve`, `SmFace::GetSurface`, ...
+//! in `intersect.point_class`), `SmBrep::Transform`, and the manager's fallback
+//! tolerance. `ProtoBrep::brep_squeeze_edge` (`SmBrep::SqueezeEdge`) defers under
+//! `harness:proto-pool-brep-edit`: the pool's stand-ins have no B-rep to edit, so that
+//! is a gap of this harness, not of a plan unit (no case reaches it).
 
 use std::collections::BTreeMap;
 
@@ -1468,6 +1468,19 @@ impl ProtoTopology<H> for Pool {
 /// The bare stand-ins' members (upstream `SmEdge::GetInterval`, `GetCurve`, `GetTolerance`
 /// of the stand-in objects the shim makes), and new curves appended to the pool.
 impl ProtoBrep<H> for Pool {
+    fn brep_squeeze_edge(
+        &mut self,
+        _k: &mut Kernel,
+        _brep: H,
+        _edge: H,
+        _survivor: H,
+    ) -> solidcore::Result<()> {
+        // the pool's bare stand-ins have no B-rep to edit
+        Err(SolidError::unported(
+            "SmBrep::SqueezeEdge (bare stand-ins without a B-rep)",
+            "harness:proto-pool-brep-edit",
+        ))
+    }
     fn edge_interval(&self, edge: H) -> Option<Extent1d> {
         match self.objs.get(edge.0) {
             Some(PObj::Edge { ivl, .. }) if self.live_h(edge) => Some(*ivl),

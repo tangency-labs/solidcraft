@@ -649,22 +649,23 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         keep_as_wires: Option<&[O]>,
     ) -> Result<()>;
 
-    /// `SmBrep::MergeBrep`; waiting for `topology.brep_p3`.
+    /// `target->MergeBrep(other, pOptCopyBrepMap, pOptReverseMap, bAddAnalytics)`: the
+    /// owner of the B-reps implements it with `topology::brep::p3::merge_brep` (a
+    /// stateless owner through `topology::brep::p3::with_kernel_callbacks`, `other`
+    /// enrolled in the same identity domain), as `IntersectorBrep::brep_delete_face`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the merge; an owner with no B-rep behind a handle returns its own error.
     fn merge_brep(
         &mut self,
-        _k: &mut Kernel,
-        _target: O,
-        _other: O,
-        _copy_map: Option<&mut CopyBrepMap<O>>,
-        _reverse_map: Option<&mut CopyBrepMap<O>>,
-        _add_analytics: bool,
-    ) -> Result<()> {
-        // UNPORTED(topology.brep_p3): SmBrep::MergeBrep
-        Err(SolidError::unported(
-            "SmBrep::MergeBrep",
-            "topology.brep_p3",
-        ))
-    }
+        k: &mut Kernel,
+        target: O,
+        other: O,
+        copy_map: Option<&mut CopyBrepMap<O>>,
+        reverse_map: Option<&mut CopyBrepMap<O>>,
+        add_analytics: bool,
+    ) -> Result<()>;
 
     /// `SmStitch::DoStitching` (`SmFilletExecutive.cpp:3559-3576`). Delegate to the
     /// already ported `heal::stitch::p2::Stitch::do_stitching` (heal stitch p2) on the
@@ -716,22 +717,24 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
 
-    /// `SmBrep::OrientTrimmedSurfaces`; waiting for `topology.brep_p3`.
+    /// `brep->OrientTrimmedSurfaces(bNormalsOutward, rbMaybeNotSolid, bJustUnifyNormals,
+    /// pOptFacesToSwapUV)`: the owner of the B-reps implements it with
+    /// `topology::brep::p3::orient_trimmed_surfaces`, writing its
+    /// `maybe_not_closed_solid` to `maybe_not_solid`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the orientation; an owner with no B-rep behind a handle returns its own
+    /// error.
     fn orient_trimmed_surfaces(
         &mut self,
-        _k: &mut Kernel,
-        _brep: O,
-        _outward: bool,
-        _maybe_not_solid: &mut bool,
-        _just_unify: bool,
-        _faces_to_swap_uv: Option<&mut Vec<O>>,
-    ) -> Result<()> {
-        // UNPORTED(topology.brep_p3): SmBrep::OrientTrimmedSurfaces
-        Err(SolidError::unported(
-            "SmBrep::OrientTrimmedSurfaces",
-            "topology.brep_p3",
-        ))
-    }
+        k: &mut Kernel,
+        brep: O,
+        outward: bool,
+        maybe_not_solid: &mut bool,
+        just_unify: bool,
+        faces_to_swap_uv: Option<&mut Vec<O>>,
+    ) -> Result<()>;
 
     // ---- added by blend.fillet_executive_p2 (PR #267) --------------------------------
 

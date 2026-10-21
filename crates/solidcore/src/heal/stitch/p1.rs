@@ -1033,7 +1033,7 @@ impl<'c> Stitch<'c> {
                     }
                     let (keep, other) = if c.keep_first { (v0, v1) } else { (v1, v0) };
                     if do_squeeze {
-                        squeeze_edge_to(b, squeeze_edge, keep)?;
+                        squeeze_edge_to(k, b, squeeze_edge, keep)?;
                     } else if do_glue {
                         glue_vertices(k, b, keep, other, Some(&wire_edges))?;
                     }
@@ -2003,9 +2003,8 @@ fn stitch_and_orient(
     faces_to_swap: Option<&[FaceId]>,
     just_unify: Option<bool>,
 ) -> Result<()> {
-    // The part 5 body reaches no kernel state before its stitching dependency.
-    let _ = k;
     crate::topology::brep::p5::stitch_and_orient(
+        k,
         b,
         &crate::topology::brep::p5::StitchAndOrientOptions {
             stitch_tolerance: stitch_tol_3d,
@@ -2051,14 +2050,25 @@ pub(crate) fn glue_edges_general(
     })
 }
 
-/// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`).
-pub(crate) fn squeeze_edge_to(b: &mut Brep, e: Option<EdgeId>, keep: VertexId) -> Result<()> {
-    let _ = (b, e, keep);
-    // UNPORTED(topology.brep_p3): SmBrep::SqueezeEdge
-    Err(SolidError::unported(
-        "SmBrep::SqueezeEdge",
-        "topology.brep_p3",
-    ))
+/// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`,
+/// [`crate::topology::brep::p3::squeeze_edge`]), notifying through the kernel
+/// context's callbacks under the kernel's identities
+/// ([`crate::topology::brep::p3::with_kernel_callbacks`]).
+///
+/// # Errors
+///
+/// Those of the squeeze; `SM_ERR_NULL_POINTER` for a null edge (upstream dereferences
+/// it).
+pub(crate) fn squeeze_edge_to(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: Option<EdgeId>,
+    keep: VertexId,
+) -> Result<()> {
+    let e = e.ok_or_else(|| SolidError::null_pointer("heal::stitch::p1::squeeze_edge_to"))?;
+    crate::topology::brep::p3::with_kernel_callbacks(k, b, |k, b, env| {
+        crate::topology::brep::p3::squeeze_edge(k, b, env, e, keep)
+    })
 }
 
 /// `SmBrep::MakeVertexSplitEdge(edge, t, rpE1, rpE2, rpNewV)` (unit `topology.brep_p9`),

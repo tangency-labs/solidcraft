@@ -33,6 +33,9 @@ fn case_json(c: &CaseResult) -> Value {
     }
     m.insert("max_rel_err".into(), num(c.diff.max_rel_err));
     m.insert("values_compared".into(), json!(c.diff.values_compared));
+    if !c.diagnostics.is_empty() {
+        m.insert("diagnostics".into(), json!(c.diagnostics));
+    }
     if c.both_errored {
         m.insert("both_errored".into(), json!(true));
     }

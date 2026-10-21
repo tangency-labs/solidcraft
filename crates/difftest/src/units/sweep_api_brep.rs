@@ -452,7 +452,7 @@ fn status(e: &SolidError) -> f64 {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let v = |p: &P3| Vec3::new(p[0], p[1], p[2]);
     let b = Brep::default();
     // `Ok(())` only on success, which the stubbed entry points cannot reach yet.
@@ -464,7 +464,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             cap,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_linear_sweep(&k, &refs(&cs), v(dir), *dist, *cap).map(drop)
+            api::create_linear_sweep(&mut k, &refs(&cs), v(dir), *dist, *cap).map(drop)
         }
         Inputs::Rotational {
             curves: cs,
@@ -474,7 +474,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             cap,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_rotational_sweep(&k, &refs(&cs), pt(base), v(axis), *angle_deg, *cap)
+            api::create_rotational_sweep(&mut k, &refs(&cs), pt(base), v(axis), *angle_deg, *cap)
                 .map(drop)
         }
         Inputs::Draft {
@@ -485,11 +485,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             caps,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_draft_sweep(&k, &refs(&cs), *height, *angle_deg, *corner, *caps).map(drop)
+            api::create_draft_sweep(&mut k, &refs(&cs), *height, *angle_deg, *corner, *caps)
+                .map(drop)
         }
         Inputs::Pipe { radius, path, cap } => {
             let p = curve(&k, path)?;
-            api::create_pipe_sweep(&k, *radius, p.as_ref(), *cap).map(drop)
+            api::create_pipe_sweep(&mut k, *radius, p.as_ref(), *cap).map(drop)
         }
         Inputs::PlanarPath {
             profile,
@@ -515,7 +516,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let scl = curve(&k, &sweep.scale_curve)?;
             let opts = options_of(sweep.options);
             api::create_curve_sweep(
-                &k,
+                &mut k,
                 &refs(&pc),
                 path.as_ref(),
                 sref.as_ref(),
@@ -535,7 +536,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             if matches!(i, Inputs::FromFaces { .. }) {
                 let faces: Vec<FaceId> = (0..n).map(FaceId::from_index).collect();
                 api::create_curve_sweep_from_faces(
-                    &k,
+                    &mut k,
                     &b,
                     &faces,
                     path.as_ref(),
@@ -547,7 +548,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             } else {
                 let edges: Vec<EdgeId> = (0..n).map(EdgeId::from_index).collect();
                 api::create_curve_sweep_from_edges(
-                    &k,
+                    &mut k,
                     &b,
                     &edges,
                     path.as_ref(),
@@ -566,7 +567,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             caps,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_taper_extrude(&k, &refs(&cs), *height, *angle_deg, *caps, *fillet).map(drop)
+            api::create_taper_extrude(&mut k, &refs(&cs), *height, *angle_deg, *caps, *fillet)
+                .map(drop)
         }
         Inputs::LinearReps {
             curves: cs,
@@ -576,8 +578,15 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             cap,
         } => {
             let cs = curves(&k, cs)?;
-            api::create_linear_sweep_with_repetitions(&k, &refs(&cs), v(dir), *dist, *reps, *cap)
-                .map(drop)
+            api::create_linear_sweep_with_repetitions(
+                &mut k,
+                &refs(&cs),
+                v(dir),
+                *dist,
+                *reps,
+                *cap,
+            )
+            .map(drop)
         }
         Inputs::RotationalReps {
             curves: cs,
@@ -589,7 +598,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let cs = curves(&k, cs)?;
             api::create_rotational_sweep_with_repetitions(
-                &k,
+                &mut k,
                 &refs(&cs),
                 pt(base),
                 v(axis),

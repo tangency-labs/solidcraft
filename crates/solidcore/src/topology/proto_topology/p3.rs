@@ -35,10 +35,14 @@
 //!   those of its supertrait [`ProtoTopology`](super::p1::proto::ProtoTopology)), which the owner of the B-reps implements. `SmTol::GetZoneTol3d` of a vertex is
 //!   [`ProtoBrep::topology_tolerance`]; `SmTol::GetXSectTol3d(v1, v2)` is the
 //!   sum of the two.
+//! - **B-rep edits**: `SmBrep::SqueezeEdge` of `GetWhichBrep(which)` is
+//!   [`ProtoBrep::brep_squeeze_edge`] (the owner of the B-reps calls
+//!   `topology::brep::p3::squeeze_edge`), so
+//!   [`ProtoTopologyManager::glue_coincident_brep_vertices`] takes `&mut Kernel` and
+//!   the B-reps mutably.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
-//!   each tagged `UNPORTED(<unit>)`: `SqueezeEdge` / `DeleteEdge` (`topology.brep_p3`
-//!   / `_p4`). `SmBrep::Point3DClassify` goes through
-//!   [`ProtoBrep::brep_point_3d_classify`], which the B-reps' owner implements. `SmBrep::GlueVertices`
+//!   each tagged `UNPORTED(<unit>)`: `SmBrep::Point3DClassify` (`query.brep`),
+//!   `DeleteEdge` (`topology.brep_p4`). `SmBrep::GlueVertices`
 //!   goes through [`BrepGlue`], which the B-reps' owner implements with
 //!   `topology::brep::p5` (so [`ProtoTopologyManager::glue_coincident_brep_vertices`]
 //!   takes the kernel and the B-reps mutably).
@@ -200,15 +204,6 @@ pub trait BrepGlue<O> {
         v2: O,
         opt_wire_edges_in_brep: Option<&[O]>,
     ) -> Result<()>;
-}
-
-/// `SmBrep::SqueezeEdge` of B-rep `which`.
-fn brep_squeeze_edge<O>(_which: i32, _edge: O, _vertex: O) -> Result<()> {
-    // UNPORTED(topology.brep_p3): SmBrep::SqueezeEdge
-    Err(SolidError::unported(
-        "SmBrep::SqueezeEdge",
-        "topology.brep_p3",
-    ))
 }
 
 /// `SmBrep::DeleteEdge` of B-rep `which`.
@@ -1149,7 +1144,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                     // Can't call SqueezeEdge() in this case.
                                     brep_delete_edge(which, edge)
                                 } else {
-                                    let r = brep_squeeze_edge(which, edge, v1); // deletes v2
+                                    let r =
+                                        brep.brep_squeeze_edge(k, self.which_brep(which), edge, v1); // deletes v2
                                     set_slot(deleted_v, jj, v2);
                                     r
                                 };

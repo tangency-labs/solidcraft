@@ -35,22 +35,25 @@
 //! - [`create_extrude`] makes a 2D curve's NURB 3D in place, as upstream (the curve
 //!   is the caller's, taken `&mut`).
 //! - The B-rep entry points ([`create_skin_primitive`], [`create_skin_from_faces`],
-//!   [`create_surface_revolution`]) validate and copy their inputs as upstream, then
+//!   [`create_surface_revolution`]) validate and copy their inputs as upstream, build
+//!   the new B-rep ([`crate::topology::brep::p3::new_brep`] in the caller's kernel,
+//!   upstream's API context; it stops at `SmRegion::SetIsVoid`, `topology.shell`) and
 //!   return [`SolidError::Unported`]: `SmPrimitiveCreation` (units
-//!   `primitive.primitive_creation_p1..p3`) and the `SmBrep` construction and queries
-//!   they use (`topology.brep_p1`, `topology.brep_p3`) are not ported yet.
+//!   `primitive.primitive_creation_p1..p3`) is not ported yet.
 //! - [`create_surface_revolution`] copies the curve with the infallible
 //!   [`BSplineCurve::copy`]; upstream `SmCurve::Copy` can fail (only on allocation
 //!   failure) and then returns `SM_ERR`, a path the port does not have.
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
+use crate::geom::tol;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use crate::surface::surface::Surface;
+use crate::topology::brep::p3 as brep_p3;
 use crate::topology::{Brep, FaceId};
 
 const OP_SKIN_PRIMITIVE: &str = "sweep::api_surfaces::create_skin_primitive";
@@ -157,7 +160,7 @@ fn copy_skin_primitive_curves(k: &Kernel, input_curves: &[Option<&Curve>]) -> Re
 /// the error of a failing curve copy; [`SolidError::Unported`] otherwise
 /// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_skin_primitive(
-    k: &Kernel,
+    k: &mut Kernel,
     curves_in_each_profile: &[usize],
     curves_3d: &[Option<&Curve>],
     degree: usize,
@@ -170,14 +173,15 @@ pub fn create_skin_primitive(
     // Arguments of the unported legacy call: the profile counts, the private curve
     // copies, an approximation tolerance of 0.0, the degree and the cap flag.
     let _ = (curve_copies, cap_ends);
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    // ported (topology.brep_p1): SmBrep::GetInfiniteRegion is Brep::infinite_region, called
-    // on the new B-rep once the constructor above lands
-    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
-    // instantiate with the new B-rep's infinite region when its constructor lands.
-    // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_skin_primitive;
-    // supply the new B-rep through PrimitiveCreationAccess after its constructor is ported.
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
+    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
+    let _ = new_brep.infinite_region();
+    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
+    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateSkinPrimitive
+    Err(SolidError::unported(
+        "SmPrimitiveCreation::CreateSkinPrimitive",
+        "primitive.primitive_creation_p2",
+    ))
 }
 
 /// A solid lofted between the matching loops of the face sequence `faces` of
@@ -187,22 +191,23 @@ pub fn create_skin_primitive(
 ///
 /// [`SolidError::Unported`] (`SmPrimitiveCreation::CreateSkinFromFaces`).
 pub fn create_skin_from_faces(
-    k: &Kernel,
+    k: &mut Kernel,
     brep: &Brep,
     faces: &[FaceId],
     degree: usize,
 ) -> Result<SkinFromFaces> {
     // Arguments of the unported legacy call: the faces, no guide curves, an
     // approximation tolerance of 0.0 and the degree.
-    let _ = (k, brep, faces, degree);
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    // ported (topology.brep_p1): SmBrep::GetInfiniteRegion is Brep::infinite_region, called
-    // on the new B-rep once the constructor above lands
-    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
-    // instantiate with the new B-rep's infinite region when its constructor lands.
-    // Ported: primitive::primitive_creation::p3::PrimitiveCreation::create_skin_from_faces;
-    // supply the new B-rep through PrimitiveAccess after its constructor is ported.
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    let _ = (brep, faces, degree);
+    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
+    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
+    let _ = new_brep.infinite_region();
+    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
+    // UNPORTED(primitive.primitive_creation_p3): SmPrimitiveCreation::CreateSkinFromFaces
+    Err(SolidError::unported(
+        "SmPrimitiveCreation::CreateSkinFromFaces",
+        "primitive.primitive_creation_p3",
+    ))
 }
 
 /// The surface extruded from `curve` along `sweep_vector` (`SmApiCreateExtrude`,
@@ -252,6 +257,7 @@ pub fn create_ruled_surface(
 /// `InvalidInput` for no curve; [`SolidError::Unported`] otherwise
 /// (`SmPrimitiveCreation::CreateRotationalSweep`).
 pub fn create_surface_revolution(
+    k: &mut Kernel,
     curve: Option<&BSplineCurve>,
     origin: Point3,
     axis_dir: Vec3,
@@ -269,13 +275,11 @@ pub fn create_surface_revolution(
     // Arguments of the unported call: the curves, the axis, the angle, one segment
     // and no capping.
     let _ = (curves_to_sweep, origin, axis_dir, angle_deg);
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    // ported (topology.brep_p1): SmBrep::GetInfiniteRegion is Brep::infinite_region, called
-    // on the new B-rep once the constructor above lands
-    // Ported: primitive::primitive_creation::p1::PrimitiveCreation::new;
-    // instantiate with the new B-rep's infinite region when its constructor lands.
-    // Ported: primitive::primitive_creation::p3::PrimitiveCreation::create_partial_rotational_sweep;
-    // supply the new B-rep through PrimitiveAccess after its constructor is ported.
+    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
+    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
+    let _ = new_brep.infinite_region();
+    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
+    // UNPORTED(primitive.primitive_creation_p3): SmPrimitiveCreation::CreateRotationalSweep
     // ported (topology.brep_p1): SmBrep::GetSurfaces is topology::brep::p1::surfaces, on the
     // sweep's B-rep after the call above
     Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
@@ -363,36 +367,38 @@ mod tests {
         let o = Point3::new(0.0, 0.0, 0.0);
         let x = Vec3::new(1.0, 0.0, 0.0);
         assert!(matches!(
-            create_surface_revolution(None, o, x, 180.0),
+            create_surface_revolution(&mut Kernel::default(), None, o, x, 180.0),
             Err(SolidError::InvalidInput { .. })
         ));
         let c = wave(0.0);
-        assert!(create_surface_revolution(Some(&c), o, x, 180.0)
-            .unwrap_err()
-            .is_unported());
+        assert!(
+            create_surface_revolution(&mut Kernel::default(), Some(&c), o, x, 180.0)
+                .unwrap_err()
+                .is_unported()
+        );
 
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let a = Curve::from(wave(0.0));
         let b = Curve::from(wave(5.0));
         let ok = [Some(&a), Some(&b)];
-        assert!(create_skin_primitive(&k, &[1, 1], &ok, 3, true)
+        assert!(create_skin_primitive(&mut k, &[1, 1], &ok, 3, true)
             .unwrap_err()
             .is_unported());
         for (counts, degree) in [(&[1usize, 1][..], 0), (&[1, 1], 4), (&[2], 1), (&[1, 0], 1)] {
             assert!(matches!(
-                create_skin_primitive(&k, counts, &ok, degree, true),
+                create_skin_primitive(&mut k, counts, &ok, degree, true),
                 Err(SolidError::InvalidInput { .. })
             ));
         }
         assert!(matches!(
-            create_skin_primitive(&k, &[1, 1], &[Some(&a), None], 1, false),
+            create_skin_primitive(&mut k, &[1, 1], &[Some(&a), None], 1, false),
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(matches!(
-            create_skin_primitive(&k, &[1, 2], &ok, 1, false),
+            create_skin_primitive(&mut k, &[1, 2], &ok, 1, false),
             Err(SolidError::InvalidInput { .. })
         ));
-        assert!(create_skin_from_faces(&k, &Brep::default(), &[], 3)
+        assert!(create_skin_from_faces(&mut k, &Brep::default(), &[], 3)
             .unwrap_err()
             .is_unported());
     }

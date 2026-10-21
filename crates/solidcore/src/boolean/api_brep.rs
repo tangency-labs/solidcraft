@@ -459,7 +459,9 @@ mod tests {
     fn lists_and_trees_reach_the_merge() {
         let mut k = Kernel::default();
         let e = boolean_lists(&mut k, &[Brep::new()], &[], &[Brep::new()], &[], 1).unwrap_err();
-        assert_eq!(unported_unit(&e), "topology.brep_p3");
+        // the list operands are copied (topology.brep_p3); the merge then reaches
+        // topology.brep_p4
+        assert_eq!(unported_unit(&e), "topology.brep_p4");
         let mut breps = vec![Some(Brep::new()), Some(Brep::new())];
         let tree = vec![0, 1, -1];
         // The merge is constructed and runs.

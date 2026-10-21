@@ -2192,13 +2192,20 @@ impl core::fmt::Debug for NotificationStores<'_> {
 /// The caller's state [`notify`] and [`set_curve`] pass notifications through.
 /// A missing context means no context callbacks, not the kernel's context.
 pub struct NotifyEnv<'a> {
-    /// The topology records (`SmTopology` members) of the notified objects.
+    /// The topology records (`SmTopology` members) of the notified objects, keyed by
+    /// their notification identities. The caller's own keys ([`NotifyEnv::key_of`]) are
+    /// the caller's to keep distinct; the kernel-issued ones (curves, objects of callers
+    /// without identities of their own) are unique only within one identity domain
+    /// (`geom::context`), so a store holding them belongs to one domain: not shared
+    /// across two contexts, nor across a `Context::take_notify_lease` that is not given
+    /// back.
     pub records: &'a mut BTreeMap<ObjectKey, Topology>,
-    /// The attribute store.
+    /// The attribute store (keyed like [`NotifyEnv::records`], and scoped the same way).
     pub attributes: &'a mut AttributeStore,
     /// The context of the objects (`GetContext`).
     pub context: Option<&'a mut Context>,
-    /// The identity each topology entity is notified under.
+    /// The identity each topology entity is notified under (the caller's; keys from
+    /// `geom::context::KERNEL_KEY_BASE` up are the kernel's).
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
 }
 

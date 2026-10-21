@@ -12,6 +12,7 @@
 //! | [`Context`]                               | `SmContext`                                     |
 //! | [`Context::new`], [`Context::default`]    | `SmContext::SmContext(double, double)` (no `SM_USE_GLOBAL_CACHE`) |
 //! | [`Context::doing_boolean`]                | `SmContext::GetDoingBoolean`                    |
+//! | [`IdentitySlot`], [`NotifyLease`], [`Context::take_notify_lease`], [`Context::restore_notify_lease`], [`KERNEL_KEY_BASE`], [`TOPOLOGY_KEY_BASE`], [`GEOMETRY_KEY_BASE`], [`MAX_BREP_SERIAL`], [`is_reserved_key`] | (none: kernel-issued notification identities; CO-PORTED by `topology.brep_p3`) |
 //! | [`Context::doing_boolean_mut`]            | `SmContext::GetDoingBooleanRef`                 |
 //! | [`Context::set_doing_boolean`]            | `SmContext::SetDoingBoolean`                    |
 //! | [`Context::user_notify_callback`]         | `SmContext::GetUserNotifyCallback`              |
@@ -71,7 +72,10 @@
 //! - The attribute-callback list, global user data (`void*`), `operator new/delete`,
 //!   `Dump`, `GetTypeString` and `IsLockedMark` are unused upstream and not ported.
 
+use std::sync::Arc;
+
 use crate::error::{Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::object;
 use crate::geom::tol;
 use crate::kernel::Kernel;
@@ -140,6 +144,9 @@ pub const ALL_MARKS: i32 = MarkType::AllMarks as i32;
 /// Index of `SM_MT_MARKIO` in the mark arrays (the `default:` mark upstream).
 const MARK_IO: usize = 3;
 
+/// An installed notify callback, or none (what a [`NotifyLease`] carries).
+pub type BoxedCallback = Option<Box<dyn NotifyCallback>>;
+
 /// Receiver of topology-change notifications (`SmNotifyCallback`).
 pub trait NotifyCallback: std::fmt::Debug + Send {
     /// `SmNotifyCallback::Execute`: called once for every [`object::notify`] of an
@@ -191,7 +198,125 @@ pub struct Context {
     user_notify_callback: Option<Box<dyn NotifyCallback>>,
     /// `m_pSysNotifyCallBack`.
     sys_notify_callback: Option<Box<dyn NotifyCallback>>,
+    /// This context's notification identity domain (`Context::geometry_key`,
+    /// `Context::brep_serial`), lent with the callbacks ([`NotifyLease`]).
+    identities: IdentityDomain,
 }
+
+/// The reserved range of notification keys: the top bit set. Only the kernel issues
+/// keys in it: topology keys ([`TOPOLOGY_KEY_BASE`], a B-rep serial, the object's
+/// kind and its arena index) and geometry keys ([`GEOMETRY_KEY_BASE`]). A caller's own
+/// labels stay below it ([`is_reserved_key`]).
+pub const KERNEL_KEY_BASE: u64 = 0b10 << 62;
+
+/// The kernel's topology keys: `0b10 << 62 | serial << 36 | kind << 32 | index`
+/// (`topology::brep::p3::topology_ref`).
+pub const TOPOLOGY_KEY_BASE: u64 = 0b10 << 62;
+
+/// The kernel's geometry keys: both top bits set, then a counter of the issuing
+/// domain.
+pub const GEOMETRY_KEY_BASE: u64 = 0b11 << 62;
+
+/// The largest B-rep serial a domain issues (26 bits, bits 36..62 of a topology key).
+pub const MAX_BREP_SERIAL: u64 = (1 << 26) - 1;
+
+/// Whether `key` is in the kernel's reserved range ([`KERNEL_KEY_BASE`]).
+#[must_use]
+pub const fn is_reserved_key(key: ObjectKey) -> bool {
+    key.0 >= KERNEL_KEY_BASE
+}
+
+/// The token of one identity domain. Each [`Context`] makes its own and tokens are
+/// told apart only by `Arc::ptr_eq` (never ordered or hashed), so no two domains are
+/// confused.
+#[derive(Debug)]
+struct DomainToken(());
+
+/// A context's notification identity domain: its token and how many geometry keys and
+/// B-rep serials it has issued.
+#[derive(Debug)]
+struct IdentityDomain {
+    token: Arc<DomainToken>,
+    geometry_issued: u64,
+    breps_issued: u64,
+    /// The stand-in a crate edit left while it lends the context's callbacks
+    /// ([`Context::lend_notify`]): the context issues nothing and lends nothing until
+    /// they are given back.
+    lent: bool,
+}
+
+impl IdentityDomain {
+    fn new() -> Self {
+        Self {
+            token: Arc::new(DomainToken(())),
+            geometry_issued: 0,
+            breps_issued: 0,
+            lent: false,
+        }
+    }
+}
+
+/// A kernel-issued identity: the issuing domain and the value it issued (a geometry
+/// key or a B-rep serial).
+#[derive(Debug)]
+struct Issued {
+    domain: Arc<DomainToken>,
+    value: u64,
+}
+
+/// Where an object keeps the notification identity the kernel issued it (upstream
+/// passes the object itself, known by address): empty until a context issues one.
+/// Only the crate fills a slot, from the context the object is notified through; an
+/// identity is valid only in the domain that issued it, and any other domain issues a
+/// fresh one. A clone is empty (a copy is another object), so no two live objects
+/// hold one identity.
+#[derive(Debug, Default)]
+pub struct IdentitySlot(Option<Issued>);
+
+impl Clone for IdentitySlot {
+    /// An empty slot: the copy is a new object.
+    fn clone(&self) -> Self {
+        Self::new()
+    }
+}
+
+impl IdentitySlot {
+    /// An empty slot.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(None)
+    }
+
+    /// The issued value (a geometry key or a B-rep serial), once there is one.
+    #[must_use]
+    pub fn value(&self) -> Option<u64> {
+        self.0.as_ref().map(|i| i.value)
+    }
+}
+
+/// A context's notify callbacks and identity domain, lent to another context for a
+/// while ([`Context::take_notify_lease`]), so that every identity the callbacks see
+/// still comes from the domain they live with.
+#[derive(Debug)]
+pub struct NotifyLease {
+    user: BoxedCallback,
+    sys: BoxedCallback,
+    identities: IdentityDomain,
+}
+
+/// The refusal of a context whose callbacks a crate edit has lent out
+/// ([`Context::lend_notify`]): a nested edit through it would notify no callback, in
+/// another domain.
+const NOTIFY_LENT: SolidError = SolidError::InvalidInput {
+    operation: "geom::context::lend_notify",
+    reason: "the context's notify callbacks are lent to an edit in progress (nested edit)",
+};
+
+/// The refusal of an exhausted identity domain.
+const IDENTITIES_EXHAUSTED: SolidError = SolidError::InvalidInput {
+    operation: "geom::context::identities",
+    reason: "the context has issued every notification identity of the kind",
+};
 
 impl Default for Context {
     /// `SmContext()`: both sizes [`tol::USE_DEFAULT`].
@@ -201,24 +326,95 @@ impl Default for Context {
 }
 
 impl Context {
+    /// The geometry key the object owning `slot` is notified under in this context:
+    /// the slot's key when this context's domain issued it, else a fresh key of the
+    /// domain, stored in the slot (the object enters the domain). Keys are in
+    /// [`GEOMETRY_KEY_BASE`]'s range and unique among those the domain has issued.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` once the domain has issued every geometry key, or while a crate
+    /// edit has lent the context's callbacks ([`Context::lend_notify`]).
+    pub(crate) fn geometry_key(&mut self, slot: &mut IdentitySlot) -> Result<ObjectKey> {
+        self.check_not_lent()?;
+        if let Some(i) = &slot.0 {
+            if Arc::ptr_eq(&i.domain, &self.identities.token) {
+                return Ok(ObjectKey(i.value));
+            }
+        }
+        let n = self.identities.geometry_issued + 1;
+        if n > !GEOMETRY_KEY_BASE {
+            return Err(IDENTITIES_EXHAUSTED);
+        }
+        self.identities.geometry_issued = n;
+        let key = GEOMETRY_KEY_BASE | n;
+        slot.0 = Some(Issued {
+            domain: Arc::clone(&self.identities.token),
+            value: key,
+        });
+        Ok(ObjectKey(key))
+    }
+
+    /// The serial the B-rep owning `slot` is notified under in this context (its
+    /// objects' topology keys hold it): the slot's when this context's domain issued
+    /// it, else a fresh serial of the domain, stored in the slot. Serials run from 1 to
+    /// [`MAX_BREP_SERIAL`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` once the domain has issued every serial, or while a crate edit
+    /// has lent the context's callbacks ([`Context::lend_notify`]).
+    pub(crate) fn brep_serial(&mut self, slot: &mut IdentitySlot) -> Result<u64> {
+        self.check_not_lent()?;
+        if let Some(serial) = self.issued_brep_serial(slot) {
+            return Ok(serial);
+        }
+        let serial = self.fresh_serial()?;
+        slot.0 = Some(Issued {
+            domain: Arc::clone(&self.identities.token),
+            value: serial,
+        });
+        Ok(serial)
+    }
+
+    /// The serial this context's domain issued the B-rep owning `slot`, if it did.
+    pub(crate) fn issued_brep_serial(&self, slot: &IdentitySlot) -> Option<u64> {
+        slot.0
+            .as_ref()
+            .filter(|i| Arc::ptr_eq(&i.domain, &self.identities.token))
+            .map(|i| i.value)
+    }
+
+    fn fresh_serial(&mut self) -> Result<u64> {
+        let n = self.identities.breps_issued + 1;
+        if n > MAX_BREP_SERIAL {
+            return Err(IDENTITIES_EXHAUSTED);
+        }
+        self.identities.breps_issued = n;
+        Ok(n)
+    }
+
     /// Borrow notification callbacks alongside the live kernel without moving
     /// the kernel's traversal marks or tolerances. Notification APIs use mutable
     /// Context while geometry APIs borrow Kernel; both refer to one upstream
-    /// context. Callback ownership is restored on every returned error as well.
+    /// context. The callbacks travel with their identity domain
+    /// ([`Context::lend_notify`]), and are restored on every returned error as well.
     /// The snapshot `Context` is read-only apart from its callbacks: mark, mark-lock
     /// and doing-Boolean changes the action makes to it are dropped on return.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput`, before anything moves, when they are already lent (a nested
+    /// lend would notify nobody, in another domain).
     pub(crate) fn with_notification_context<T>(
         k: &mut Kernel,
         action: impl FnOnce(&mut Kernel, &mut Context) -> T,
-    ) -> T {
-        let context = &mut k.context;
-        let mut notifications = context.metadata_copy();
-        notifications.user_notify_callback = context.user_notify_callback.take();
-        notifications.sys_notify_callback = context.sys_notify_callback.take();
+    ) -> Result<T> {
+        let mut notifications = k.context.metadata_copy();
+        notifications.install_lease(k.context.lend_notify()?);
         let result = action(k, &mut notifications);
-        k.context.user_notify_callback = notifications.user_notify_callback;
-        k.context.sys_notify_callback = notifications.sys_notify_callback;
-        result
+        k.context.install_lease(notifications.take_lease());
+        Ok(result)
     }
 
     /// An immutable metadata snapshot, without copying callback ownership.
@@ -232,6 +428,7 @@ impl Context {
             zone_tol_3d: self.zone_tol_3d,
             user_notify_callback: None,
             sys_notify_callback: None,
+            identities: IdentityDomain::new(),
         }
     }
 
@@ -250,6 +447,7 @@ impl Context {
             zone_tol_3d: tol::size_estimate_to_zone_tol_3d(model_size_estimate),
             user_notify_callback: None,
             sys_notify_callback: None,
+            identities: IdentityDomain::new(),
         }
     }
 
@@ -302,6 +500,88 @@ impl Context {
     /// in debug builds when one is already set).
     pub fn set_sys_notify_callback(&mut self, callback: Option<Box<dyn NotifyCallback>>) {
         self.sys_notify_callback = callback;
+    }
+
+    /// Takes the user and the system notify callbacks out with this context's identity
+    /// domain, leaving no callbacks and a fresh domain, so that a caller can lend them to
+    /// another context for a while ([`Context::restore_notify_lease`]; no upstream
+    /// counterpart: a context reached through `GetContext` cannot be borrowed twice).
+    /// The identities the callbacks see keep coming from their own domain.
+    ///
+    /// Until the lease is given back this context is a new identity domain, whose
+    /// identities may coincide with the lent domain's: every caller store keyed by
+    /// identities (notification records and attributes, a tracker, a callback's state)
+    /// must be scoped to one domain. A lease that is never given back leaves the context
+    /// a new domain for good.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput`, before anything moves, while a crate edit has lent this context's
+    /// callbacks ([`Context::lend_notify`]): swapping the lent context's placeholder would
+    /// let a nested edit through, notifying nobody.
+    pub fn take_notify_lease(&mut self) -> Result<NotifyLease> {
+        self.check_not_lent()?;
+        Ok(self.take_lease())
+    }
+
+    /// Installs a lease's callbacks and identity domain, dropping this context's own
+    /// callbacks and domain (returning a lease to the context it came from, or lending
+    /// it to a stand-in); take them out first to keep them.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput`, before anything moves, while a crate edit has lent this context's
+    /// callbacks: the edit's own return of them would drop what this installs. (Callbacks
+    /// set on a lent context with the `set_*` setters are dropped the same way when the
+    /// edit gives the lent ones back.)
+    pub fn restore_notify_lease(&mut self, lease: NotifyLease) -> Result<()> {
+        self.check_not_lent()?;
+        self.install_lease(lease);
+        Ok(())
+    }
+
+    /// [`Context::take_notify_lease`] without the lent check: a crate lending helper
+    /// taking its stand-in's callbacks back.
+    pub(crate) fn take_lease(&mut self) -> NotifyLease {
+        NotifyLease {
+            user: self.user_notify_callback.take(),
+            sys: self.sys_notify_callback.take(),
+            identities: core::mem::replace(&mut self.identities, IdentityDomain::new()),
+        }
+    }
+
+    /// [`Context::restore_notify_lease`] without the lent check: a crate lending helper
+    /// installing a lease on its stand-in, or giving a lease back to the context that
+    /// lent it (which ends the lend).
+    pub(crate) fn install_lease(&mut self, lease: NotifyLease) {
+        self.user_notify_callback = lease.user;
+        self.sys_notify_callback = lease.sys;
+        self.identities = lease.identities;
+    }
+
+    /// Lends the callbacks and the identity domain for a crate edit, as
+    /// [`Context::take_notify_lease`], and marks this context as lent until
+    /// [`Context::install_lease`] gives them back.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` when they are already lent (a nested edit), before anything
+    /// moves.
+    pub(crate) fn lend_notify(&mut self) -> Result<NotifyLease> {
+        self.check_not_lent()?;
+        let lease = self.take_lease();
+        self.identities.lent = true;
+        Ok(lease)
+    }
+
+    /// `InvalidInput` when a crate edit has lent this context's callbacks
+    /// ([`Context::lend_notify`]).
+    pub(crate) const fn check_not_lent(&self) -> Result<()> {
+        if self.identities.lent {
+            Err(NOTIFY_LENT)
+        } else {
+            Ok(())
+        }
     }
 
     /// The context's model size estimate, or the system one when it is

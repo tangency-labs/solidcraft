@@ -89,13 +89,13 @@
 //!   `SmBrep::MakeShellVertexTopology`, `SmRegion::GetShells`): `GetShells` is
 //!   `topology.shell`'s, with no attribute filter as upstream's default;
 //!   `GetInfiniteRegion` is `topology.brep_p1`'s accessor. `SmFilletBrep()` runs
-//!   `SmBrep()`, which creates that region; the constructor is `topology.brep_p3`'s and
-//!   not ported, so [`FilletBrep::new`] has none and the edge use constructor stops
-//!   there with `UNPORTED(topology.brep_p3)` (a missing region is that gap, never
-//!   upstream's NULL). `MakeShellVertexTopology` is `topology.brep_p2`'s; the rest of the
-//!   constructor (the shell-owned edge use with no fillet geometry) is ported behind
-//!   them, so [`FilletBrep::new_fillet_edgeuse`] returns [`SolidError::Unported`] today
-//!   and completes once the `SmBrep` constructor is wired. `SmFilletGeom(pFilletSolver, eType)` copies the
+//!   `SmBrep()`, which creates that region: [`FilletBrep::new`] makes it as
+//!   `topology.brep_p3`'s constructor does ([`Brep::new_with_infinite_region`]).
+//!   It has no kernel, so the rest of `SmBrep()` (the context's zone tolerance and size
+//!   settings, and the `SM_NO_CONSTRUCTION` notification) is not applied to the pseudo
+//!   B-rep; it keeps `Brep::new`'s tolerance. `MakeShellVertexTopology` is
+//!   `topology.brep_p2`'s; the rest of the edge use constructor (the shell-owned edge
+//!   use with no fillet geometry) is ported behind them. `SmFilletGeom(pFilletSolver, eType)` copies the
 //!   solver's offset surfaces with `SmOffsetSurface::Copy` (the kernel stands for the
 //!   solver's creation context; its status is ignored upstream, so a failed copy leaves
 //!   `NULL`, and only [`SolidError::Unported`] propagates). That constructor leaves `m_dOrientations` and `m_bCapped`
@@ -1265,11 +1265,15 @@ impl Default for FilletBrep {
 
 impl FilletBrep {
     /// `SmFilletBrep()` (CO-PORTED from `blend.fillet_geom_p6`): an empty B-rep with
-    /// editing enabled.
+    /// editing enabled and `SmBrep()`'s infinite void region
+    /// ([`Brep::new_with_infinite_region`]; see the module's Constructors).
     #[must_use]
     pub fn new() -> Self {
+        // (cannot fail on an empty B-rep; were it to, the region stays missing and
+        // `new_fillet_edgeuse` refuses it as the null upstream never has)
+        let brep = Brep::new_with_infinite_region().unwrap_or_else(|_| Brep::new());
         Self {
-            brep: Brep::new(),
+            brep,
             edge_list: Vec::new(),
             vertices: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -1384,19 +1388,16 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmBrep::SmBrep` (`topology.brep_p3`) while the pseudo
-    /// B-rep has no infinite region (see below); the errors of
-    /// `SmBrep::MakeShellVertexTopology` when the region has no shell; [`SolidError::Upstream`]
+    /// The errors of `SmBrep::MakeShellVertexTopology` when the region has no shell;
+    /// [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) without an infinite region
+    /// (upstream dereferences it; `SmBrep()` always makes one); [`SolidError::Upstream`]
     /// (`SM_ERR_NULL_POINTER`) when the region still has no shell (upstream reads
     /// `sShells[0]` of an empty array).
     pub fn new_fillet_edgeuse(&mut self) -> Result<EdgeuseId> {
         // upstream dereferences m_pInfiniteRegion unchecked: SmFilletBrep() runs SmBrep(),
-        // which always creates the infinite region, so it is never NULL there.
-        // [`FilletBrep::new`] cannot create it yet, so a missing region is that
-        // constructor's gap, not upstream's NULL.
+        // which always creates the infinite region, so it is never NULL there
         let Some(reg) = infinite_region(&self.brep) else {
-            // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-            return Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"));
+            return Err(SolidError::null_pointer(OP_EDGEUSE));
         };
         let mut shells = region_shells(&self.brep, reg)?;
         if shells.is_empty() {
@@ -4008,7 +4009,22 @@ mod tests {
         assert!(fb.edge_list().is_empty());
         assert!(fb.fillet_edge(e).is_err());
         assert!(fb.brep().vertex(v1).unwrap().vertexuses.is_empty());
-        assert!(fb.new_fillet_edgeuse().is_err());
+        // SmFilletBrep() made the infinite region: the edge use is owned by its first
+        // shell (an artifact shell vertex when the region had none)
+        let eu = fb.new_fillet_edgeuse().unwrap();
+        let reg = fb.brep().infinite_region().unwrap();
+        let shell = *fb
+            .brep()
+            .region(reg)
+            .unwrap()
+            .get_shells(None, |_, _| Ok(false))
+            .unwrap()
+            .first()
+            .unwrap();
+        assert_eq!(
+            fb.brep().edgeuse(eu).unwrap().owner,
+            EdgeuseOwner::Shell(Some(shell))
+        );
     }
 
     #[test]

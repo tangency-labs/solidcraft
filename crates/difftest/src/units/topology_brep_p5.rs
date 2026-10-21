@@ -227,6 +227,7 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
                 Vec::new()
             };
             vec![status(p5::make_manifold(
+                k,
                 b,
                 if i.mode == 0 { None } else { Some(&regions) },
                 i.flag,
@@ -274,6 +275,7 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
             out
         }
         10 => vec![status(p5::stitch_and_orient(
+            k,
             b,
             &p5::StitchAndOrientOptions {
                 stitch_tolerance: i.tolerance,

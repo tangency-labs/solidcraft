@@ -484,6 +484,23 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             true,
         )
     }
+
+    /// `SmBrep::SqueezeEdge(edge, survivor)` of `brep`'s B-rep
+    /// ([`crate::topology::brep::p3::squeeze_edge`]), notifying as the glue does.
+    fn brep_squeeze_edge(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        edge: H,
+        survivor: H,
+    ) -> crate::Result<()> {
+        if brep.kind != K_BREP || edge.b != brep.b || survivor.b != brep.b {
+            return Err(invalid("edge or vertex is not in the B-rep"));
+        }
+        self.with_edit_env(brep, |b, env| {
+            crate::topology::brep::p3::squeeze_edge(k, b, env, eid(edge), vid(survivor))
+        })
+    }
 }
 
 /// The B-rep walks over one operand's own entities (as `Brep`'s own impl, through the
@@ -989,6 +1006,59 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             inside,
             &mut notify,
         )
+    }
+
+    /// `SmBrep::DeleteFace(pFace)` with its defaults (`FALSE, TRUE, NULL, NULL`):
+    /// [`crate::topology::brep::p3::delete_face`], notifying as the glue does.
+    fn brep_delete_face(&mut self, k: &mut Kernel, brep: H, face: H) -> crate::Result<()> {
+        if brep.kind != K_BREP || face.kind != K_FACE || face.b != brep.b {
+            return Err(invalid("face is not in the B-rep"));
+        }
+        self.with_edit_env(brep, |b, env| {
+            let mut marks = crate::topology::topology_traverser::Marks::default();
+            crate::topology::brep::p3::delete_face(
+                k,
+                b,
+                env,
+                &mut marks,
+                fid(face),
+                crate::topology::brep::p3::DeleteFaceOptions::default(),
+            )
+            .map(drop)
+        })
+    }
+}
+
+impl ArenaPair<'_> {
+    /// Runs the edit `f` of `brep`'s B-rep with the adapter's records and attributes,
+    /// notifying through that B-rep's context under its notification keys (as
+    /// `brep_glue_edges_general`).
+    fn with_edit_env<R>(
+        &mut self,
+        brep: H,
+        f: impl FnOnce(&mut Brep, &mut ed::NotifyEnv<'_>) -> crate::Result<R>,
+    ) -> crate::Result<R> {
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        let namespace = self.namespace;
+        let b = self
+            .breps
+            .get_mut(slot)
+            .and_then(Option::as_deref_mut)
+            .ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        let key_of = |e| super::kernel_adapter::notification_key(namespace, brep.b == 1, e);
+        let mut env = ed::NotifyEnv {
+            records: self.records,
+            attributes: self.attributes,
+            context: Some(if brep.b == 1 {
+                self.other_context
+                    .as_deref_mut()
+                    .unwrap_or(self.primary_context)
+            } else {
+                self.primary_context
+            }),
+            key_of: &key_of,
+        };
+        f(b, &mut env)
     }
 }
 

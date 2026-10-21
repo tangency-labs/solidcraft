@@ -548,45 +548,78 @@ where
 }
 
 fn empty_brep(
-    _allocation_context: &mut Kernel,
-    _model_size_estimate: f64,
-    _large_small_size_ratio: f64,
-    _stack_context: Option<&Kernel>,
+    allocation_context: &mut Kernel,
+    model_size_estimate: f64,
+    large_small_size_ratio: f64,
+    stack_context: Option<&Kernel>,
 ) -> Result<Brep> {
-    // Brep::new is an arena container, not the native constructor: it does not
-    // create the void infinite region or initialize context-derived tolerances.
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    // `new SmBrep(...)` (topology::brep::p3::new_brep; pOptContextForStack is the
+    // allocating kernel, as there)
+    let _ = stack_context;
+    crate::topology::brep::p3::new_brep(
+        allocation_context,
+        model_size_estimate,
+        large_small_size_ratio,
+    )
 }
 
+/// The identity of a source B-rep's objects in the arena-only copy and merge: the
+/// destination's scheme (`loopuse::notify_ref`, as `ArenaNotifyState`) in a namespace of
+/// its own (bit 40), so a source object never shares a key with a destination object.
+fn source_ref(e: EntityRef) -> crate::geom::object::ObjectRef {
+    let r = crate::topology::loopuse::notify_ref(e);
+    crate::geom::object::ObjectRef {
+        type_code: r.type_code,
+        key: crate::geom::attribute::ObjectKey(r.key.0 | 1 << 40),
+    }
+}
+
+/// `new SmBrep(source, pOptCopyBrepMap, pOptReverseMap, bCopyAttributes, bAddAnalytics)`
+/// (`topology::brep::p3::copy_brep`): the list operands carry no notification state, so
+/// the copy notifies through an arena-only store (`ArenaNotifyState`: default records,
+/// no attributes, no context), as the arena entry's component copies do.
 fn copy_brep(
-    _k: &mut Kernel,
-    _source: &Brep,
-    _copy_map: Option<&mut CopyBrepMap<EntityRef>>,
-    _reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
-    _copy_attributes: bool,
-    _add_analytics: bool,
+    k: &mut Kernel,
+    source: &Brep,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    copy_attributes: bool,
+    add_analytics: bool,
 ) -> Result<Brep> {
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep(copy)
-    Err(SolidError::unported(
-        "SmBrep::SmBrep(copy)",
-        "topology.brep_p3",
-    ))
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
+    crate::topology::brep::p3::copy_brep(
+        k,
+        &mut state.env(None),
+        source,
+        &source_ref,
+        copy_map,
+        reverse_map,
+        copy_attributes,
+        add_analytics,
+    )
 }
 
+/// `SmBrep::MergeBrep(source, pOptCopyBrepMap, pOptReverseMap, bAddAnalytics)`
+/// (`topology::brep::p3::merge_brep`), notifying as [`copy_brep`].
 fn combine_brep(
-    _k: &mut Kernel,
-    _target: &mut Brep,
-    _source: &Brep,
-    _copy_map: Option<&mut CopyBrepMap<EntityRef>>,
-    _reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
-    _add_analytics: bool,
+    k: &mut Kernel,
+    target: &mut Brep,
+    source: &Brep,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p3): SmBrep::MergeBrep
-    Err(SolidError::unported(
-        "SmBrep::MergeBrep",
-        "topology.brep_p3",
-    ))
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
+    crate::topology::brep::p3::merge_brep(
+        k,
+        &mut state.env(None),
+        target,
+        source,
+        &source_ref,
+        copy_map,
+        reverse_map,
+        add_analytics,
+    )
 }
 
 fn create_face_from_surface(
@@ -615,7 +648,7 @@ fn copy_base_surface(_k: &mut Kernel, _source: &Surface) -> Result<Surface> {
 }
 
 fn stitch_and_orient(
-    _k: &mut Kernel,
+    k: &mut Kernel,
     brep: &mut Brep,
     tolerance: f64,
     allow_spine_edges: bool,
@@ -623,6 +656,7 @@ fn stitch_and_orient(
     just_unify: Option<&mut bool>,
 ) -> Result<()> {
     crate::topology::brep::p5::stitch_and_orient(
+        k,
         brep,
         &crate::topology::brep::p5::StitchAndOrientOptions {
             stitch_tolerance: tolerance,
@@ -1098,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn surface_list_requires_native_empty_brep_constructor_before_surface_copy() {
+    fn surface_list_makes_the_native_empty_brep_then_stops_at_the_surface_copy() {
         let mut k = Kernel::default();
         k.tolerances.zone_tol_3d = 0.002;
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
@@ -1108,8 +1142,8 @@ mod tests {
         assert!(matches!(
             list_operand(&mut k, &[], &[surface]),
             Err(SolidError::Unported {
-                upstream: "SmBrep::SmBrep",
-                unit: "topology.brep_p3",
+                upstream: "SmSurface::SmSurface(copy, sliced base)",
+                unit: "surface.surface_p1",
             })
         ));
     }

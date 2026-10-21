@@ -84,6 +84,7 @@ use solidcore::surface::surface::p2::TsectCurveType;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
 use solidcore::topology::brep::p1 as bp1;
+use solidcore::topology::brep::p3 as bp3;
 use solidcore::topology::brep::p5 as bp5;
 use solidcore::topology::brep::p7;
 use solidcore::topology::brep_cache::{arena_identity, BrepCache, CacheObject, CacheSource};
@@ -1032,6 +1033,21 @@ impl CurveOnClassifyObjects<H> for Objs<'_> {
 }
 
 impl ProtoBrep<H> for Two {
+    fn brep_squeeze_edge(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        edge: H,
+        survivor: H,
+    ) -> solidcore::Result<()> {
+        if brep.kind != K_BREP || edge.b != brep.b || survivor.b != brep.b {
+            return Err(invalid("edge or vertex is not in the B-rep"));
+        }
+        let b = self.brep_m(brep)?;
+        with_edit_env(b, |b, env| {
+            bp3::squeeze_edge(k, b, env, eid(edge), vid(survivor))
+        })
+    }
     fn edge_interval(&self, edge: H) -> Option<Extent1d> {
         ed::interval(self.brep(edge)?, eid(edge)).ok()
     }
@@ -1643,6 +1659,25 @@ impl IntersectorBrep<H> for Two {
     fn topology_objects(&self) -> &dyn TopologyObjects<H> {
         self
     }
+    fn brep_delete_face(&mut self, k: &mut Kernel, brep: H, face: H) -> solidcore::Result<()> {
+        if brep.kind != K_BREP || face.b != brep.b {
+            return Err(invalid("face is not in the B-rep"));
+        }
+        let b = self.brep_m(brep)?;
+        with_edit_env(b, |b, env| {
+            let mut marks = solidcore::topology::topology_traverser::Marks::default();
+            bp3::delete_face(
+                k,
+                b,
+                env,
+                &mut marks,
+                fid(face),
+                bp3::DeleteFaceOptions::default(),
+            )
+            .map(drop)
+        })
+    }
+
     fn brep_glue_edges_general(
         &mut self,
         k: &mut Kernel,
@@ -1696,6 +1731,44 @@ impl IntersectorBrep<H> for Two {
             &mut notify,
         )
     }
+}
+
+/// A notification environment for the B-rep edits of the hooks (no attributes or
+/// context: the intersector cases compare no attributes). Each entity is notified
+/// under its arena kind and index, which identify it within the edited B-rep (the
+/// edits give each object its default `SmTopology` record, as each C++ object has).
+fn with_edit_env<R>(
+    b: &mut Brep,
+    f: impl FnOnce(&mut Brep, &mut solidcore::topology::edge::NotifyEnv<'_>) -> R,
+) -> R {
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = |e: EntityRef| {
+        let (kind, i) = match e {
+            EntityRef::Brep(_) => (0u64, 0),
+            EntityRef::Region(x) => (1, x.index()),
+            EntityRef::Shell(x) => (2, x.index()),
+            EntityRef::Faceuse(x) => (3, x.index()),
+            EntityRef::Face(x) => (4, x.index()),
+            EntityRef::Loopuse(x) => (5, x.index()),
+            EntityRef::Loop(x) => (6, x.index()),
+            EntityRef::Edgeuse(x) => (7, x.index()),
+            EntityRef::Edge(x) => (8, x.index()),
+            EntityRef::Vertexuse(x) => (9, x.index()),
+            EntityRef::Vertex(x) => (10, x.index()),
+        };
+        ObjectRef {
+            type_code: 0,
+            key: ObjectKey((kind << 32) | u64::from(i)),
+        }
+    };
+    let mut env = solidcore::topology::edge::NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    f(b, &mut env)
 }
 
 /// The identity a glue notification runs under: vertex uses as the vertex
@@ -3400,7 +3473,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                     o.push(NULL_DEREF);
                     continue;
                 }
-                let r = ti.face_face_coincidence(&k, &mut two, &es, &fs, *ignore, *nesting);
+                let r = ti.face_face_coincidence(&mut k, &mut two, &es, &fs, *ignore, *nesting);
                 let Some(r) = status(r, &mut o)? else {
                     continue;
                 };
@@ -3592,7 +3665,7 @@ fn run_part2_op(
             let keep: Option<Vec<H>> = keep
                 .as_ref()
                 .map(|l| l.iter().filter_map(|&h| triple_to_h(h)).collect());
-            status(ti.delete_faces(two, &fs, keep.as_deref()), o)?;
+            status(ti.delete_faces(k, two, &fs, keep.as_deref()), o)?;
         }
         OpIn::FixGaps { verts } => {
             o.push(44.0);

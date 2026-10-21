@@ -150,8 +150,14 @@ impl<I: ArenaId + Copy> Order<I> {
 /// first-seen order, while Rust arenas append new records. Both sides are renumbered
 /// by the same walk (the shim's, from the B-rep's regions in arena order and the edge
 /// list; on an imported C++ export it is the identity), so records created by the op
-/// compare by position in the topology, not by allocation order. Records the walk
-/// does not reach follow in arena order.
+/// compare by position in the topology, not by allocation order. [`graph`] compares only
+/// the records the walk reaches ([`Canon::reachable`]), as the C++ export walk emits
+/// only those: a record upstream deletes stays in the Rust arena, unlinked (the arena
+/// model's documented deviation, e.g. `MakeEdgeVertexTopology`'s vertex-shell vertex
+/// use), and is not part of the B-rep. A record that is wrongly still linked is reached,
+/// so it is still compared. The unreached count is a report diagnostic ([`graph`]).
+/// [`Canon::of`] (numbering record slots) also numbers the unreached records, after the
+/// reached ones.
 pub(crate) struct Canon {
     pub(crate) regions: Order<RegionId>,
     pub(crate) shells: Order<ShellId>,
@@ -384,6 +390,21 @@ impl Canon {
         }
         g
     }
+    /// The arena records of `b` the walk did not reach (deleted records the arenas
+    /// keep, or a leak).
+    pub(crate) fn unreached(&self, b: &Brep) -> usize {
+        let all = b.regions().len()
+            + b.shells().len()
+            + b.faceuses().len()
+            + b.faces().len()
+            + b.loopuses().len()
+            + b.loops().len()
+            + b.edgeuses().len()
+            + b.edges().len()
+            + b.vertexuses().len()
+            + b.vertices().len();
+        all.saturating_sub(self.len())
+    }
     fn len(&self) -> usize {
         self.regions.items.len()
             + self.shells.items.len()
@@ -400,12 +421,11 @@ impl Canon {
 /// The B-rep's records and links in [`Canon`] numbering, after `record` (which the
 /// caller has already put in that numbering, see [`Canon::of`]).
 pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {
-    graph_counted(b, record, false)
+    graph_counted(b, record, true)
 }
 
-/// [`graph`] with the record counts of the reachable topology ([`Canon`]) instead of
-/// the arena lengths: for ops that delete records, which an arena only resets (the C++
-/// side exports a fresh walk, so its counts are the reachable ones).
+/// [`graph`] (kept for its callers): the reachable topology ([`Canon::reachable`]) and
+/// its record counts, as the C++ side's fresh export walk.
 pub(crate) fn graph_reachable(b: &Brep, record: Vec<f64>) -> Output {
     graph_counted(b, record, true)
 }
@@ -604,10 +624,14 @@ fn graph_counted(b: &Brep, record: Vec<f64>, reachable: bool) -> Output {
     for e in &edges {
         values.extend([e.interval.min(), e.interval.max(), e.tolerance]);
     }
-    Output::new()
+    let out = Output::new()
         .values("record", record)
         .values("geometry", values)
-        .ints("graph", ints)
+        .ints("graph", ints);
+    match c.unreached(b) {
+        0 => out,
+        n => out.diagnostic("unreached_records", n as i64),
+    }
 }
 #[derive(Debug, Default)]
 struct Recorder {
@@ -1081,22 +1105,44 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::case::CaseSource;
+    use solidcore::topology::{Vertexuse, VertexuseOwner};
 
-    /// Fuzz 30000 (fuzz03460): op 2 on a wire, which has no face to select. The FFI
-    /// rejects the fixture; the Rust side must refuse it too instead of taking the
-    /// selector modulo zero faces.
+    /// A B-rep with one shell vertex in its infinite region.
+    fn shell_vertex() -> (Brep, VertexId) {
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let inf = b.infinite_region();
+        let (_, v) =
+            solidcore::topology::brep::p2::make_shell_vertex_topology(&mut b, inf).unwrap();
+        (b, v)
+    }
+
+    /// `graph` compares what the C++ export walk emits: a record the walk does not reach
+    /// (one upstream deleted, which the arena keeps unlinked) leaves the compared output
+    /// unchanged and is only counted as a diagnostic; an extra vertex use that is still
+    /// linked is reached, so it changes the output.
     #[test]
-    fn op_without_selected_entity_is_refused_not_a_panic() {
-        let case = Case {
-            unit: "boolean.merge_p1".into(),
-            name: "fuzz03460".into(),
-            source: CaseSource::Inline,
-            inputs: json!({"args":[2,1,0],"brep":{"curve":{"cpts":[[0,0,0,1],[4,0,0,1]],
-                "dim":3,"p":1,"u":[0,0,1,1]},"kind":"wire","t0":0.125,"t1":0.875},
-                "op":2,"tolerances":[0.001,1.0]}),
-        };
-        let e = Runner.run_rust(&case).unwrap_err();
-        assert!(e.to_string().contains("lacks selected entity"), "{e}");
+    fn graph_compares_only_reachable_records() {
+        let (b, _) = shell_vertex();
+        let base = graph(&b, vec![]);
+        assert!(base.diagnostics.is_none());
+
+        let (mut unlinked, _) = shell_vertex();
+        unlinked.add_vertexuse_record(Vertexuse::default()).unwrap();
+        let g = graph(&unlinked, vec![]);
+        assert_eq!((&g.values, &g.ints), (&base.values, &base.ints));
+        assert_eq!(g.diagnostic_value("unreached_records"), Some(1));
+
+        let (mut linked, v) = shell_vertex();
+        let extra = linked
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(v),
+                owner: VertexuseOwner::Unknown,
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        linked.vertex_mut(v).unwrap().vertexuses.push(extra);
+        let g = graph(&linked, vec![]);
+        assert_ne!(g.ints, base.ints);
+        assert!(g.diagnostics.is_none());
     }
 }
