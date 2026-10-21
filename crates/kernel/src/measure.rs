@@ -20,6 +20,13 @@ pub struct BodyMeasure {
     /// Counts after merging split pieces of the same analytic surface/curve (comparable with
     /// systems that use periodic faces and edges).
     pub merged: TopoCounts,
+    /// What volume, area and centre come from: `smlib` (exact, integrated on the surfaces, with
+    /// the kernel setting SMLib) or `mesh` (a fine tessellation).
+    pub measured_by: &'static str,
+    /// Why a measurement is not what the kernel setting asks for (SMLib refused the body, or
+    /// disagreed with the mesh).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Per-face sums: area, 6 × signed volume and 24 × first moments (divergence theorem), taken
@@ -63,12 +70,17 @@ fn min_edge_radius(m: &Mesh) -> Option<f64> {
 
 /// Volume, area, centre and box of a body, as [`measure`] works them out, without the topology
 /// counts (and the tessellation they take).
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct MassMeasure {
     pub volume: f64,
     pub area: f64,
     pub centroid: Vec3,
     pub bbox: Aabb3,
+    /// As [`BodyMeasure::measured_by`].
+    pub measured_by: &'static str,
+    /// As [`BodyMeasure::notes`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size, finer for
@@ -92,9 +104,12 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
             vertices: pos.len(),
             shells: 1,
             merged,
+            measured_by: "mesh",
+            notes: Vec::new(),
         });
     }
-    let (m, topo) = mass(b, true)?;
+    let (mut m, topo) = mass(b, true)?;
+    let chosen = crate::measure_backend::choose(b, &mut m);
     let topo = match topo {
         Some(t) => t,
         None => b.tessellate((b.size() * 1e-3).max(1e-3))?,
@@ -109,6 +124,8 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         vertices: b.vertex_count(),
         shells: b.shell_count(),
         merged: merged_topology(b, &topo)?,
+        measured_by: chosen.by,
+        notes: chosen.notes,
     })
 }
 
@@ -117,9 +134,13 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
 pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
     if b.triangle_mesh().is_some() {
         let m = measure(b)?;
-        return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox });
+        return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
-    Ok(mass(b, false)?.0)
+    let mut m = mass(b, false)?.0;
+    let chosen = crate::measure_backend::choose(b, &mut m);
+    m.measured_by = chosen.by;
+    m.notes = chosen.notes;
+    Ok(m)
 }
 
 /// The mass properties of a B-rep body from three tessellations: a coarse one (which sets how
@@ -189,7 +210,7 @@ fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
     let mom = o * (4.0 * v6) + mom;
     let volume = v6 / 6.0;
     let centroid = if v6.abs() > 1e-12 { mom / (4.0 * v6) } else { fine.bounds().center() };
-    Ok((MassMeasure { volume, area, centroid, bbox: coarse.bounds().union(&fine.bounds()) }, topo))
+    Ok((MassMeasure { volume, area, centroid, bbox: coarse.bounds().union(&fine.bounds()), measured_by: "mesh", notes: Vec::new() }, topo))
 }
 
 #[cfg(test)]

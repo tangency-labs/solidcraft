@@ -91,6 +91,8 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
                 "vertices": m.merged.vertices,
                 "face_types": m.merged.face_types,
                 "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
+                "measured_by": m.measured_by,
+                "notes": m.notes,
             })
         }
         Err(e) => json!({"name": b.name, "error": e.to_string()}),
