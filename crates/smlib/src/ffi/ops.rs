@@ -1,6 +1,6 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_fillet`,
 //! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
-//! `smlib_thicken`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
+//! `smlib_thicken`, `smlib_draft`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
 
@@ -120,6 +120,18 @@ unsafe extern "C" {
         out_failed_point: *mut i64,
     ) -> i32;
     fn smlib_thicken(brep: *const RawBrep, thickness: f64, symmetric: i32, out: *mut *mut RawBrep) -> i32;
+    fn smlib_draft(
+        brep: *const RawBrep,
+        points: *const f64,
+        n_points: i64,
+        tolerance: f64,
+        neutral_origin: *const f64,
+        neutral_normal: *const f64,
+        pull: *const f64,
+        angle: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+    ) -> i32;
 }
 
 #[cfg(feature = "native")]
@@ -167,6 +179,33 @@ pub fn thicken(b: &Handle, thickness: f64, symmetric: bool) -> Result<Handle, i3
 #[cfg(not(feature = "native"))]
 pub fn thicken(_: &Handle, _: f64, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
+}
+
+/// `smlib_draft`: the faces under `points` tilted by `angle` radians about their lines on the
+/// neutral plane (`origin`, `normal`), leaning in along `pull`.
+#[cfg(feature = "native")]
+pub fn draft(
+    b: &Handle,
+    points: &[[f64; 3]],
+    tolerance: f64,
+    origin: &[f64; 3],
+    normal: &[f64; 3],
+    pull: &[f64; 3],
+    angle: f64,
+) -> Result<Handle, PickError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
+    let flat = points.as_ptr().cast::<f64>();
+    let mut failed = -1i64;
+    new_brep(|out| unsafe { smlib_draft(b.raw(), flat, n, tolerance, origin.as_ptr(), normal.as_ptr(), pull.as_ptr(), angle, out, &mut failed) })
+        .map_err(|s| {
+            let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+            (s, at)
+        })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn draft(_: &Handle, _: &[[f64; 3]], _: f64, _: &[f64; 3], _: &[f64; 3], _: &[f64; 3], _: f64) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
 }
 
 /// `smlib_blend`: `sizes` holds one size per point (the caller checks the lengths match).
