@@ -537,6 +537,21 @@ mod smlib {
         assert!(e.to_string().contains("no room"), "{e}");
     }
 
+    /// A hole's wall is stored as two halves; a pick on the line between them opens the whole
+    /// wall (kernel-cases shell/4010). The cavity is the plate inset by 2.5 less the hole's
+    /// cylinder, open to the hole.
+    #[test]
+    fn shell_open_at_a_hole_wall_opens_the_whole_wall() {
+        let hole = Loop2::circle(Vec2::new(20.0, 15.0), 5.0);
+        let plate = extrude(&Plane::XY, &[Region2 { outer: square(0.0, 0.0, 40.0, 30.0), holes: vec![hole] }], 0.0, 12.5).unwrap().pop().unwrap();
+        let r = offset_backend::shell(&plate, &[Vec3::new(25.0, 15.0, 6.25)], 2.5).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = (15000.0 - pi * 25.0 * 12.5) - (35.0 * 25.0 * 7.5 - pi * 25.0 * 7.5);
+        // The measure is a mesh volume (within 1e-5 of the true one on this round hole).
+        assert!((volume(&r) - want).abs() < want * 1e-5, "{} vs {want}", volume(&r));
+        verified(&r, &plate, reach(2.5 * 1.5));
+    }
+
     #[test]
     fn offset_moves_a_face() {
         let b = ell();

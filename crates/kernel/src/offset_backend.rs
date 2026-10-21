@@ -73,14 +73,19 @@ fn run(name: &str, b: &Body, op: impl FnOnce(&Brep) -> std::result::Result<Brep,
     Ok((body, history))
 }
 
-/// [`crate::shell`] through SMLib: walls of `thickness` inside, open at the faces nearest to
-/// `open`.
+/// [`crate::shell`] through SMLib: walls of `thickness` inside, open at the faces under the
+/// points `open` (the face of the nearest triangle, as truck's shell picks them) and the faces
+/// on the same surface joined to them: a round wall stored in pieces (a hole's two halves) opens
+/// whole. SMLib is given one point inside each, never the pick itself, which may lie on the
+/// line between two pieces.
 pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     if !(thickness.is_finite() && thickness > 1e-6) {
         return Err(KernelError::Invalid("shell thickness must be positive".into()));
     }
+    let picked = faces_under(b, open)?;
+    let opened = crate::offset::with_same_surface(b, &picked);
     let tol = pick_tolerance(b);
-    let pts = points(open);
+    let pts = points(&face_points(b, &opened)?);
     let (r, h) = run("shell", b, |s| s.shell(&pts, tol, -thickness))?;
     let h = h.and_then(|h| with_offsets(&r, b, h, thickness));
     Ok(r.with_checked_history(h, &record::counts(&[b])))
@@ -116,6 +121,30 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
     // The walls first, while the sheet's edges still carry their tags on both copies.
     let h = h.map(with_edge_walls).and_then(|h| with_offsets(&r, b, h, step));
     Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
+/// The face of `b` under each point: the face of the nearest triangle, within the picking reach.
+fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
+    let reach = pick_tolerance(b);
+    let mesh = b.tessellate((b.size() * 1e-3).max(1e-3))?;
+    let mut out: Vec<usize> = Vec::new();
+    for p in at {
+        let near = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (crate::boolean_guard::point_triangle_dist(*p, x, y, z), *f as usize)))
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        match near {
+            Some((d, f)) if d < reach => {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+        }
+    }
+    Ok(out)
 }
 
 /// One point inside each face `faces` of `b`: the centroid of its largest triangle.

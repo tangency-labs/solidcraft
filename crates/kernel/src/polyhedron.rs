@@ -879,11 +879,12 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     let run = |body: &Body| -> Result<Body> {
         let healed = crate::boolean_record::healed(body)?.with_split_lines(body.splits.clone());
         let chosen = faces_at(&healed, at)?;
-        #[cfg(feature = "smlib")]
-        if crate::backend()? == crate::Backend::Smlib {
-            return crate::offset_backend::offset_faces(&healed, &chosen, distance).map(|r| record::after(r, &healed, &record::counts(&[body])));
-        }
-        match offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }) {
+        let moved = match crate::backend()? {
+            #[cfg(feature = "smlib")]
+            crate::Backend::Smlib => crate::offset_backend::offset_faces(&healed, &chosen, distance),
+            _ => offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }),
+        };
+        match moved {
             Ok(r) => Ok(record::after(r, &healed, &record::counts(&[body]))),
             // A piece of a split face (its neighbour stays): the piece swept along its normal
             // joins on (outward) or cuts in, with walls along the split lines.
