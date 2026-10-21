@@ -184,6 +184,7 @@ pub mod flat;
 pub mod history;
 pub mod measure;
 pub mod ops;
+pub mod ssi;
 
 /// Where [`set_log`] sends SMLib's log lines.
 #[cfg(feature = "native")]
