@@ -112,7 +112,7 @@ fn id<I: ArenaId>(v: Option<I>) -> i64 {
 /// One kind's records in first-seen order of [`Canon::of`] and each arena index's
 /// position in it.
 pub(crate) struct Order<I> {
-    items: Vec<I>,
+    pub(crate) items: Vec<I>,
     index: BTreeMap<u32, i64>,
 }
 impl<I: ArenaId + Copy> Order<I> {
@@ -165,17 +165,23 @@ impl Canon {
     /// Every record: the walk from the B-rep's regions and edge list, then the
     /// unreachable records in arena order (and the walk from them).
     pub(crate) fn of(b: &Brep) -> Self {
-        Self::walk(b, true)
+        Self::walk(b, true, false)
     }
 
     /// Only the records reachable from the B-rep's regions and edge list, in the order
     /// of [`Canon::of`] (an arena keeps the records an op deleted, reset).
     pub(crate) fn reachable(b: &Brep) -> Self {
-        Self::walk(b, false)
+        Self::walk(b, false, false)
+    }
+
+    /// [`Canon::of`] after seeding the edge and vertex lists in list order, as
+    /// `sc_merge_fixture.h`'s `native_graph` (`GetEdges`, `GetVertices`, then `walk`).
+    pub(crate) fn of_native(b: &Brep) -> Self {
+        Self::walk(b, true, true)
     }
 
     #[allow(clippy::too_many_lines)]
-    fn walk(b: &Brep, unreachable: bool) -> Self {
+    fn walk(b: &Brep, unreachable: bool, native: bool) -> Self {
         let mut g = Self {
             regions: Order::new(),
             shells: Order::new(),
@@ -188,6 +194,14 @@ impl Canon {
             vertexuses: Order::new(),
             vertices: Order::new(),
         };
+        if native {
+            for &e in b.edge_list() {
+                g.edges.add(Some(e));
+            }
+            for &v in b.vertex_list() {
+                g.vertices.add(Some(v));
+            }
+        }
         for (id, r) in b.regions().iter() {
             if r.in_brep {
                 g.regions.add(Some(id));

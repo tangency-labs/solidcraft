@@ -59,10 +59,13 @@
 //!   `pbOptCrvOnSurf` without UV curves (upstream loops over a null array).
 //! - **Unported callees** return [`SolidError::Unported`]: `MakeWireEdge`,
 //!   `MakeWireEdgeVertex` (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`);
-//!   `SmMerge` (`boolean.merge_p2`); the curve constructor of
+//!   the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which
 //!   `MergeSelfIntersectionCurves` reaches first. `GlueVertices` calls
-//!   `topology.brep_p5` with the caller's notification environment. Its classification of a UV curve
+//!   `topology.brep_p5` with the caller's notification environment. `CopyFaces` with the
+//!   merge builds `boolean.merge_p2`'s merge and calls its `MakeFaceuse` (so it takes the
+//!   kernel mutably, for the context's `DoingBoolean`); its copies are notified in `env`'s
+//!   one identity space. Its classification of a UV curve
 //!   against the faces and the `SetCurve` + `MergeIntervals` that follows are two stubs
 //!   (`classify_on_faces`, `set_curve_and_merge`) over a stand-in interval type; the
 //!   upstream interval loop around them is ported (`GetSize() != 1` skips before the
@@ -86,6 +89,9 @@
 //!   it from `m_pEdgeListHead`).
 //! - **Bounds.** No recursion; every loop is over input arrays or B-rep lists.
 
+use crate::boolean::merge::p1::{MergeState, VertexCopy};
+use crate::boolean::merge::p2::{make_faceuse, MergeOperand, TopologyCopy};
+use crate::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
@@ -97,7 +103,7 @@ use crate::geom::tools::{
     find_coincident_edge, find_first_vertex_within_tol_to_pnt, CoincidentEdgeQuery,
 };
 use crate::kernel::Kernel;
-use crate::math::{Point3, EFF_ZERO, EFF_ZERO_DEG};
+use crate::math::{Point3, EFF_ZERO, EFF_ZERO_DEG, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::InValueType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -363,16 +369,73 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
     crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
-/// `SmMerge(ctx, dest, src, tol, 20 deg)`, then per face the `GetBrep() == this` check
-/// (`SM_ERR`) and its `MakeFaceuse`.
+/// `SmMerge sMerge(ctx, pDestinationBrep, this, pDestinationBrep->GetTolerance(), 20 deg)`,
+/// then per face the `GetBrep() == this` check (`SM_ERR`) and its
+/// `MakeFaceuse(pFace->GetUpwardFaceuse(), .., NULL, &sNewFaceList)` with the context's
+/// `DoingBoolean` set (`SmTemporaryChangeValue`); `MakeFaceuse`'s status is ignored (`SE`).
+/// The copy notifications name source and destination entities through the one identity
+/// space of `env` (`this_face` for the new faces): entities whose arena ids coincide share
+/// an identity.
 fn merge_copy_faces(
-    _k: &Kernel,
-    _src: &Brep,
-    _dest: &mut Brep,
-    _faces: &[FaceId],
+    k: &mut Kernel,
+    src: &mut Brep,
+    dest: &mut Brep,
+    faces: &[FaceId],
+    this_face: &dyn Fn(FaceId) -> ObjectRef,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<Vec<FaceId>> {
-    // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
-    Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
+    let _merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+        k,
+        (&*dest, MergeOperand::Primary),
+        Some((&*src, MergeOperand::Other)),
+        dest.tolerance(),
+        20.0 * PI / 180.0,
+        None,
+    )?;
+    // The new merge's mate maps start empty.
+    let mut relations = Relations::default();
+    let key_of = env.key_of;
+    let vertex_key = |v: VertexId| key_of(EntityRef::Vertex(v));
+    let edge_key = |e: EdgeId| key_of(EntityRef::Edge(e));
+    let face_key = |f: FaceId| key_of(EntityRef::Face(f));
+    let mut copy = TopologyCopy {
+        vertices: VertexCopy {
+            records: &mut *env.records,
+            attributes: &mut *env.attributes,
+            source_key: &vertex_key,
+            destination_key: key_of,
+        },
+        edge_source_key: &edge_key,
+        edge_destination_key: &edge_key,
+        face_source_key: &face_key,
+        face_destination_key: this_face,
+    };
+    let mut new_faces = Vec::new();
+    for &f in faces {
+        if !face_in_brep(src, f)? {
+            return Err(SolidError::sm_err(OP));
+        }
+        let faceuse = fp2::upward_faceuse(src, f)?
+            .ok_or(SolidError::invalid_input(OP, "face without face use"))?;
+        let doing_boolean = k.context.doing_boolean();
+        k.context.set_doing_boolean(true);
+        let mut list = Vec::new();
+        let made = make_faceuse(
+            k,
+            dest,
+            src,
+            faceuse,
+            None,
+            &mut relations,
+            &mut copy,
+            env.context.as_deref_mut(),
+            Some(&mut list),
+        );
+        k.context.set_doing_boolean(doing_boolean);
+        ignored(made)?;
+        new_faces.extend(list);
+    }
+    Ok(new_faces)
 }
 
 /// One interval of a self-intersection curve's classification: its parameter interval
@@ -1384,7 +1447,7 @@ pub fn glue_edges_general(
 ///
 /// `SM_ERR` for a face of another B-rep; [`SolidError::Unported`] (see the module docs).
 pub fn copy_faces(
-    k: &Kernel,
+    k: &mut Kernel,
     src: &mut Brep,
     faces: &[FaceId],
     dest: &mut Brep,
@@ -1403,7 +1466,7 @@ pub fn copy_faces(
     if use_merge {
         // (the merge object is made before the face loop; MakeFaceuse's status is
         // ignored)
-        if let Some(made) = ignored(merge_copy_faces(k, src, dest, faces))? {
+        if let Some(made) = ignored(merge_copy_faces(k, src, dest, faces, this_face, env))? {
             new_faces = made;
         }
         return Ok((new_faces, all_ok));
@@ -1901,7 +1964,7 @@ mod tests {
         };
         // no faces to copy: past SetTolerance (topology.brep_p2) and the infinite region
         // (topology.brep_p1, #246) nothing runs
-        let r = copy_faces(&k, &mut src, &[], &mut dest, false, &face_ref, &mut env);
+        let r = copy_faces(&mut k, &mut src, &[], &mut dest, false, &face_ref, &mut env);
         assert!(
             matches!(&r, Ok((faces, true)) if faces.is_empty()),
             "copy: {r:?}"

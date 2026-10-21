@@ -577,13 +577,13 @@ fn build_failure(export: &[f64]) -> Output {
 // ---- handles ------------------------------------------------------------------------------
 
 /// Handle kinds (the shim's `HKind`, plus the Rust-only kinds).
-pub(crate) const K_VERTEX: u8 = 0;
-pub(crate) const K_EDGE: u8 = 1;
-pub(crate) const K_FACE: u8 = 2;
-const K_EDGE_CURVE: u8 = 3;
-const K_FACE_SURFACE: u8 = 4;
-const K_CURVE: u8 = 5;
-const K_BREP: u8 = 6;
+pub(super) const K_VERTEX: u8 = 0;
+pub(super) const K_EDGE: u8 = 1;
+pub(super) const K_FACE: u8 = 2;
+pub(super) const K_EDGE_CURVE: u8 = 3;
+pub(super) const K_FACE_SURFACE: u8 = 4;
+pub(super) const K_CURVE: u8 = 5;
+pub(super) const K_BREP: u8 = 6;
 /// A curve copy made by the port (never named by an input; `-1 -3 -1` in outputs, as
 /// the shim's table copies).
 const K_EXTRA: u8 = 7;
@@ -793,6 +793,17 @@ impl Two {
             env,
             caches: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
         }
+    }
+
+    /// Deletes the cache of the B-rep behind `brep` (`SmBrep::Notify`'s `PRE_EDIT` /
+    /// `DESTRUCTION`); the next use rebuilds it.
+    pub(crate) fn delete_cache(&mut self, brep: H) -> solidcore::Result<()> {
+        let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.caches
+            .get_mut(slot)
+            .ok_or_else(|| invalid("bad B-rep"))?
+            .take();
+        Ok(())
     }
 
     fn brep(&self, h: H) -> Option<&Brep> {

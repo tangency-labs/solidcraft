@@ -5015,8 +5015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "UpdateFaceSurfaceDomain on a face surface imported as its B-spline part",
+        "unit": "harness:analytic-geometry-export"
       },
       "max_rel_err": 0.0,
       "name": "gen0533",
@@ -8159,10 +8159,10 @@
     "blend.fillet_standard_solver_p1": 11,
     "curve.crv_on_surf": 28,
     "geom.tol": 82,
-    "harness:analytic-geometry-export": 122,
+    "harness:analytic-geometry-export": 123,
     "intersect.surface_drop_curve": 18,
     "intersect.surface_drop_lib_p3": 13,
-    "surface.sphere": 2,
+    "surface.surface_p2": 1,
     "topology.face_p2": 13
   },
   "max_rel_err": 0.0,

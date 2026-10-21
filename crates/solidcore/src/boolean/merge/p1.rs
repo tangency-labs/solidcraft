@@ -112,6 +112,13 @@ pub struct MergeState<T> {
     pub options: MergeOptions,
     /// `m_lTagID`, initially zero.
     pub tag_id: i64,
+    /// `m_bManifoldBoolean` (try fixing non-manifold cases): `TRUE` from the B-rep
+    /// constructor; `None` from the context-only one, which leaves it uninitialised
+    /// (a reader must treat `None` as upstream's indeterminate value).
+    pub manifold_boolean: Option<bool>,
+    /// `m_bIntersectionLoopClosed` (output status: `FALSE` when the result has an
+    /// open intersection loop): as [`MergeState::manifold_boolean`].
+    pub intersection_loop_closed: Option<bool>,
     /// `m_vTI`; its construction is the intersector owner's responsibility.
     pub intersector: T,
 }
@@ -125,6 +132,9 @@ impl<T> MergeState<T> {
         Self {
             options: MergeOptions::default(),
             tag_id: 0,
+            // not in the context-only constructor's initialiser list
+            manifold_boolean: None,
+            intersection_loop_closed: None,
             intersector,
         }
     }

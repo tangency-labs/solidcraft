@@ -14,15 +14,20 @@ use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use port::{BooleanDriver, PiecewiseAccess};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use solidcore::boolean::merge::p1::{MergeState, VertexCopy};
+use solidcore::boolean::merge::p2::{MergeOperand, TopologyCopy};
 use solidcore::boolean::merge::p4::{KernelManifoldIntersector, ManifoldState};
+use solidcore::boolean::merge::p5::process_wires_and_shell_vertices;
 use solidcore::boolean::merge::{p1::MergeOptions, p3 as port};
-use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
+use solidcore::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::MarkLock;
 use solidcore::geom::solution_array::{ObjectKind, SolutionObject};
 use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
+use solidcore::topology::topology::Topology;
+use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{brep::p1 as bp, Brep};
 use solidcore::SolidError;
 use solidcore_ffi::units::boolean_merge_p3 as ffi;
@@ -85,6 +90,8 @@ fn encode(i: &Inputs) -> Vec<f64> {
     data.extend(i.tree.iter().map(|&v| v as f64));
     data
 }
+/// The deferral tag of `ManifoldBoolean` calls with no Rust-side engine (family 4).
+const HARNESS_ENGINE_STATE: &str = "harness:merge-engine-state";
 /// Family 6: `NonManifoldBoolean` on an adopted engine (see the module docs).
 const ENGINE_PROBE: u8 = 6;
 
@@ -379,6 +386,8 @@ struct Pool {
     primary: Option<usize>,
     other: Option<usize>,
     manifold: bool,
+    /// The engine the last `construct` built (`boolean.merge_p2`).
+    engine: Option<port::MergeEngine>,
 }
 impl Pool {
     fn load(i: &Inputs) -> Result<Self, HarnessError> {
@@ -434,7 +443,27 @@ impl Pool {
             primary: Some(0),
             other: Some(i.a.len()),
             manifold: true,
+            engine: None,
         })
+    }
+    /// Move a live B-rep out of its slot (an empty one stays behind).
+    fn take_brep(&mut self, id: usize) -> solidcore::Result<Brep> {
+        self.brep(id)?;
+        let slot = self
+            .breps
+            .get_mut(id)
+            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+        Ok(std::mem::replace(slot, Brep::new()))
+    }
+    /// Put a B-rep back in its slot, or retire the slot when it was consumed.
+    fn restore_brep(&mut self, id: Option<usize>, brep: Option<Brep>) {
+        let Some(id) = id else { return };
+        match (brep, self.breps.get_mut(id)) {
+            (Some(brep), Some(slot)) => *slot = brep,
+            _ => {
+                self.retired.insert(id);
+            }
+        }
     }
     fn brep(&self, id: usize) -> solidcore::Result<&Brep> {
         if self.retired.contains(&id) {
@@ -486,30 +515,89 @@ impl BooleanDriver for Pool {
     }
     fn construct(
         &mut self,
-        _k: &mut Kernel,
-        _primary: &mut Option<usize>,
-        _other: &mut Option<usize>,
-        _approx_tol: f64,
-        _angle_tol: f64,
-        _options: Option<&MergeOptions>,
+        k: &mut Kernel,
+        primary: &mut Option<usize>,
+        other: &mut Option<usize>,
+        approx_tol: f64,
+        angle_tol: f64,
+        options: Option<&MergeOptions>,
     ) -> solidcore::Result<()> {
-        // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
-        Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
+        // SmMerge(context, primary, other, tol, angle, options) (boolean.merge_p2): the
+        // pool's intersector takes the constructed tolerances, the manifold flag its
+        // m_bManifoldBoolean.
+        let primary = primary.ok_or(SolidError::invalid_input(
+            "harness::merge_p3",
+            "SmMerge without primary B-rep",
+        ))?;
+        let other = other.map(|o| self.brep(o)).transpose()?;
+        let merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+            k,
+            (self.brep(primary)?, MergeOperand::Primary),
+            other.map(|o| (o, MergeOperand::Other)),
+            approx_tol,
+            angle_tol,
+            options,
+        )?;
+        self.intersector
+            .set_this_approx_tol_3d(merge.intersector.this_approx_tol_3d());
+        self.intersector
+            .set_this_ang_tol_rad(merge.intersector.this_ang_tol_rad());
+        self.manifold = merge.manifold_boolean.unwrap_or(self.manifold);
+        self.engine = Some(port::MergeEngine::from_merge(&merge)?);
+        Ok(())
     }
     fn manifold_boolean(
         &mut self,
-        _k: &mut Kernel,
-        _primary: &mut Option<usize>,
-        _other: &mut Option<usize>,
-        _manifold: &mut bool,
-        _lamina: &mut u64,
-        _operation: BooleanOperation,
-        _lock: Option<&mut MarkLock>,
+        k: &mut Kernel,
+        primary: &mut Option<usize>,
+        other: &mut Option<usize>,
+        manifold: &mut bool,
+        lamina: &mut u64,
+        operation: BooleanOperation,
+        lock: Option<&mut MarkLock>,
     ) -> solidcore::Result<Option<usize>> {
-        // ManifoldBoolean (boolean.merge_p4) runs on the engine the merge
-        // constructor builds, as port::DependencyMerge does; the pool has none.
-        // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
-        Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
+        // ManifoldBoolean (boolean.merge_p4) on the engine `construct` built, run by
+        // port::DependencyMerge on the pool's B-reps, moved in and back.
+        let Some(engine) = self.engine.take() else {
+            // Family 4 runs PiecewiseMerge on the native SmMerge(c, a, b, ...) the shim
+            // built, but no Rust engine holds the pool's piecewise intersector state.
+            return Err(SolidError::unported(
+                "SmMerge::ManifoldBoolean (pool engine state)",
+                HARNESS_ENGINE_STATE,
+            ));
+        };
+        if primary.is_some() && primary == other {
+            self.engine = Some(engine);
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "ManifoldBoolean of one B-rep with itself",
+            ));
+        }
+        let ids = (*primary, *other);
+        let mut a = ids.0.map(|id| self.take_brep(id)).transpose()?;
+        let mut b = match ids.1.map(|id| self.take_brep(id)).transpose() {
+            Ok(b) => b,
+            Err(error) => {
+                self.restore_brep(ids.0, a);
+                return Err(error);
+            }
+        };
+        let mut driver = port::DependencyMerge::with_engine(engine);
+        let result = driver.manifold_boolean(k, &mut a, &mut b, manifold, lamina, operation, lock);
+        self.engine = driver.into_engine();
+        // An assigned rpResult is the primary B-rep, back in its own slot.
+        let result = result.map(|assigned| match assigned {
+            Some(brep) => {
+                a = Some(brep);
+                true
+            }
+            None => false,
+        });
+        self.restore_brep(ids.0, a);
+        self.restore_brep(ids.1, b);
+        *primary = ids.0.filter(|id| !self.retired.contains(id));
+        *other = ids.1.filter(|id| !self.retired.contains(id));
+        result.map(|assigned| if assigned { ids.0 } else { None })
     }
 }
 impl PiecewiseAccess for Pool {
@@ -613,15 +701,87 @@ impl PiecewiseAccess for Pool {
         self.intersector.intersect_wire_edges = wires;
         self.intersector.intersect_lamina_edges = lamina;
     }
-    fn process_wires(&mut self, _k: &mut Kernel, _lock: &MarkLock) -> solidcore::Result<()> {
-        // ProcessWiresAndShellVertices is already ported in merge_p5. Its canonical
-        // engine-owned Relations/VertexCopy environment must come from merge_p2;
-        // this fixture adapter must not invent a second mate map.
-        // UNPORTED(boolean.merge_p2): SmMerge::SmMerge (wire-processing environment)
-        Err(SolidError::unported(
-            "SmMerge::SmMerge (wire-processing environment)",
-            "boolean.merge_p2",
-        ))
+    fn process_wires(&mut self, k: &mut Kernel, lock: &MarkLock) -> solidcore::Result<()> {
+        // ProcessWiresAndShellVertices(SM_BO_MERGE, keep, mark1, mark2) (merge_p5) with
+        // merge_p2's copy environment. The pool's intersector names only B-reps and
+        // surfaces, so its topology mates are empty, and the pool marks no topology:
+        // empty Relations and Marks are its actual state, not a second mate map.
+        let (Some(p), Some(o)) = (self.primary, self.other) else {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "wire processing without both operands",
+            ));
+        };
+        self.brep(p)?;
+        self.brep(o)?;
+        if p == o {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "wire processing of one B-rep with itself",
+            ));
+        }
+        let (low, high) = (p.min(o), p.max(o));
+        let (head, tail) = self.breps.split_at_mut(high);
+        let (lower, upper) = (
+            head.get_mut(low)
+                .ok_or(SolidError::null_pointer("harness::merge_p3"))?,
+            tail.first_mut()
+                .ok_or(SolidError::null_pointer("harness::merge_p3"))?,
+        );
+        let (primary, other) = if p < o {
+            (lower, upper)
+        } else {
+            (upper, lower)
+        };
+        let mut records = std::collections::BTreeMap::new();
+        for (base, brep) in [(0u64, &*primary), (1_000_000, &*other)] {
+            for v in brep.vertices().ids() {
+                records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());
+            }
+            for e in brep.edges().ids() {
+                records.insert(
+                    ObjectKey(2_000_000 + base + u64::from(e.index())),
+                    Topology::new(),
+                );
+            }
+        }
+        let object = |key: u64, type_code: i64| solidcore::geom::object::ObjectRef {
+            key: ObjectKey(key),
+            type_code,
+        };
+        let mut copy = TopologyCopy {
+            vertices: VertexCopy {
+                records: &mut records,
+                attributes: &mut self.attributes,
+                source_key: &|v| object(1_000_000 + u64::from(v.index()), 16021),
+                destination_key: &|e| match e {
+                    solidcore::EntityRef::Vertex(v) => object(u64::from(v.index()), 16021),
+                    solidcore::EntityRef::Vertexuse(v) => {
+                        object(6_000_000 + u64::from(v.index()), 16006)
+                    }
+                    _ => object(9_000_000, 16001),
+                },
+            },
+            edge_source_key: &|e| object(3_000_000 + u64::from(e.index()), 16016),
+            edge_destination_key: &|e| object(2_000_000 + u64::from(e.index()), 16016),
+            face_source_key: &|f| object(5_000_000 + u64::from(f.index()), 16002),
+            face_destination_key: &|f| object(4_000_000 + u64::from(f.index()), 16002),
+        };
+        let mut keep = Vec::new(); // local and discarded, as upstream
+        process_wires_and_shell_vertices(
+            k,
+            primary,
+            other,
+            &mut Marks::default(),
+            &mut Marks::default(),
+            &mut Relations::default(),
+            &mut copy,
+            None,
+            BooleanOperation::Merge,
+            lock.mark_type1(),
+            lock.mark_type2(),
+            &mut keep,
+        )
     }
     fn release_marks(&mut self, k: &mut Kernel, lock: &mut MarkLock) -> solidcore::Result<()> {
         lock.release(std::slice::from_mut(&mut k.context))
@@ -819,16 +979,20 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut manifold = true;
             let mut lamina = 0;
             let operation = boolean_operation(i.operation)?;
-            port::non_manifold_boolean(
-                &mut k,
-                &mut pool,
-                &mut primary,
-                &mut other,
-                &mut manifold,
-                &mut lamina,
-                operation,
-            )
-            .and_then(|result| single_result(&pool, result, manifold, lamina, &mut values))
+            // MergeAccess merge(context, a, b, 0.0, 0.0, options), as the shim builds it.
+            pool.construct(&mut k, &mut primary, &mut other, 0.0, 0.0, opts.as_ref())
+                .and_then(|()| {
+                    port::non_manifold_boolean(
+                        &mut k,
+                        &mut pool,
+                        &mut primary,
+                        &mut other,
+                        &mut manifold,
+                        &mut lamina,
+                        operation,
+                    )
+                })
+                .and_then(|result| single_result(&pool, result, manifold, lamina, &mut values))
         }
         4 => port::piecewise_merge(
             &mut k,
@@ -1111,11 +1275,14 @@ mod tests {
                 ..
             })
         ));
+        // SmMerge's constructor and copy environment are boolean.merge_p2's (#229):
+        // ProcessWiresAndShellVertices now runs and stops at the other B-rep's
+        // SmBrep::Point3DClassify (query.brep), as the C++ path calls it next
         assert!(matches!(
             pool.process_wires(&mut k, &MarkLock::unbound()),
             Err(SolidError::Unported {
-                unit: "boolean.merge_p2",
-                ..
+                unit: "query.brep",
+                upstream: "SmBrep::Point3DClassify",
             })
         ));
         assert!(matches!(

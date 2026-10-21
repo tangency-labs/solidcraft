@@ -58,14 +58,20 @@
 //! - `SmBrep::GlueVertices`, `RemoveFaces` (with the B-rep's own editing flag) and
 //!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers.
 //! - The calls into `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
-//!   (`topology.brep_p3`), `CalculateBoundingBox` (`query.brep`) and `SmMerge::MergeAddedFace`
-//!   (`boolean.merge_p2`) return [`SolidError::Unported`]. The API entry points call
-//!   `DoStitching`, `StitchIntoSolid` and `StitchIntoShell` in [`super::p2`].
-//!   `SmBrep::Notify(SM_NO_PRE_EDIT)` is `topology::brep::p2::notify` on an empty notify
-//!   state (no B-rep cache, no attribute state on the heal path).
+//!   (`topology.brep_p3`) and `CalculateBoundingBox` (`query.brep`) return
+//!   [`SolidError::Unported`]. `SmApiStitch(pBrep, pFace)` builds its `SmMerge` with
+//!   `boolean.merge_p2`'s [`MergeState::with_breps`], whose computed tolerance fails on
+//!   the null other B-rep where upstream crashes (UB-167), so its `MergeAddedFace` is
+//!   never reached. The API entry points call `DoStitching`, `StitchIntoSolid` and
+//!   `StitchIntoShell` in [`super::p2`]. `SmBrep::Notify(SM_NO_PRE_EDIT)` is
+//!   `topology::brep::p2::notify` on an empty notify state (no B-rep cache, no attribute
+//!   state on the heal path).
 
 use std::collections::BTreeMap;
 
+use crate::boolean::merge::p1::MergeState;
+use crate::boolean::merge::p2::MergeOperand;
+use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, SM_ERR};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -2185,11 +2191,14 @@ pub fn api_stitch(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
 }
 
 /// `SmApiStitch(SmBrep*, SmFace*)`: merges the face into the B-rep
-/// (`SmMerge::MergeAddedFace` with the API context).
+/// (`SmMerge::MergeAddedFace` with the API context), through a merge with a null other
+/// B-rep and the default tolerance, which upstream dereferences (UB-167).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a null B-rep or face; those of the merge.
+/// [`SolidError::InvalidInput`] for a null B-rep or face, and from the merge
+/// constructor for the null other B-rep (after the primary's
+/// `SmBrep::GetMinEdgeBBoxSize`).
 pub fn api_stitch_face(k: &mut Kernel, b: Option<&mut Brep>, face: Option<FaceId>) -> Result<()> {
     let (Some(b), Some(face)) = (b, face) else {
         return Err(SolidError::invalid_input(
@@ -2197,14 +2206,22 @@ pub fn api_stitch_face(k: &mut Kernel, b: Option<&mut Brep>, face: Option<FaceId
             "SmApiStitch: null B-rep or face",
         ));
     };
-    let _ = (k, b, face);
-    // UNPORTED(boolean.merge_p2): SmMerge::SmMerge(ctx, pBrep, NULL), then MergeAddedFace.
-    // Upstream crashes already in the constructor (UB-167: with tolerance 0 it calls
-    // GetMinEdgeBBoxSize on the null other B-rep), so this entry point cannot become a
-    // compared pass once merge_p2 lands; its port must refuse the null other B-rep.
-    Err(SolidError::unported(
-        "SmMerge::SmMerge (then MergeAddedFace; UB-167)",
-        "boolean.merge_p2",
+    // SmMerge sMerge(*pContext, pBrep, NULL): the default tolerance 0 is computed from
+    // both B-reps, and upstream dereferences the null other B-rep there (UB-167). The
+    // constructor returns that error (after the primary's GetMinEdgeBBoxSize), so the
+    // MergeAddedFace that follows upstream is never reached.
+    let merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+        k,
+        (&*b, MergeOperand::Primary),
+        None,
+        0.0,
+        0.0,
+        None,
+    )?;
+    let _ = (k, merge, face);
+    Err(SolidError::invalid_input(
+        API_OP,
+        "SmApiStitch: SmMerge with a null other B-rep (UB-167)",
     ))
 }
 

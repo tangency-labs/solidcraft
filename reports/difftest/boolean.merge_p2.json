@@ -2,28 +2,20 @@
   "abs_floors": [],
   "cases": [
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ctor_merge_test_computed_tol",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#0 (upstream tests/prog_test/src/smMergeTest.cpp:222 (SmMerge(ctx, b1, b2, 0.0, 20 deg)))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ctor_default_arguments",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#1 (upstream tests/prog_test/src/smMergeTest.cpp:590 (SmMerge(ctx, b0, b1): tolerance and angle default to 0))",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -31,7 +23,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#2 (upstream tests/SM_API_test/src/TestSmBrep.cpp:2403 (SmMerge(ctx, prism, tool face, 1e-6, 20 deg)))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -39,7 +31,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#3 (upstream tests/prog_test/src/smSweepTest.cpp:418 (SmMerge(ctx, b, temp, b->GetTolerance(), 0.1)))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -47,7 +39,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#4 (upstream source/SM_API/src/SmApiBrep.cpp:1913 (SmApiBooleanWithOptions passes an SmMergeOptions))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -55,7 +47,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#5 (upstream source/SM_API/src/SmApiBrep.cpp:1913 (SmApiBooleanWithOptions passes an SmMergeOptions))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -63,7 +55,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#6 (upstream source/SMLib/src/SmMerge.cpp:96 (dApproxTol3d < SM_EFF_ZERO boundary: not computed))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -71,7 +63,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#7 (upstream source/SMLib/src/SmMerge.cpp:96 (dApproxTol3d < SM_EFF_ZERO boundary: computed))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -79,7 +71,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#8 (upstream source/SMLib/src/SmMerge.cpp:155 (dAngleTolRadians == 0.0 also holds for -0.0))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -87,7 +79,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#9 (upstream source/SMLib/src/SmMerge.cpp:96 (NaN compares false: kept, not computed))",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -95,7 +87,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#10 (upstream source/SMLib/src/SmMerge.cpp:96)",
-      "values_compared": 8
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -135,8 +127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
+        "symbol": "SmBrep::MakeWireEdge",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "merge_edge_unmated_vertices",
@@ -163,8 +155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeFace",
-        "unit": "topology.brep_p7"
+        "symbol": "SmFace::SetTolerance",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_faceuse_square_to_make_face",
@@ -175,8 +167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeFace",
-        "unit": "topology.brep_p7"
+        "symbol": "SmFace::SetTolerance",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "make_faceuse_circle_region_given",
@@ -194,21 +186,17 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::MakeShellVertex",
-        "unit": "topology.brep_p9"
-      },
       "max_rel_err": 0.0,
       "name": "make_faceuse_unmated_vertex",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#21 (upstream source/SMLib/src/SmMerge.cpp:6965 (MergeVertex makes a shell vertex))",
-      "values_compared": 0
+      "values_compared": 70
     },
     {
       "deferred": {
-        "symbol": "SmCone::IsNurbSurfaceCone",
-        "unit": "surface.cone_p2"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "make_faceuse_sphere",
@@ -226,13 +214,13 @@
       "name": "merge_added_face_stitch_api",
       "outcome": "deferred",
       "pass": false,
-      "source": "fixture:fixtures/boolean.merge_p2/cases.json#23 (upstream source/SM_API/src/SmApiBrep.cpp:1185 (SmApiStitch(pBrep, pFace), here with a positive tolerance; see UB-181))",
+      "source": "fixture:fixtures/boolean.merge_p2/cases.json#23 (upstream source/SM_API/src/SmApiBrep.cpp:1185 (SmApiStitch(pBrep, pFace), here with a positive tolerance; see UB-167))",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmFace::GetBrep",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "merge_added_topology_feature_executive",
@@ -243,8 +231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmFace::GetEdges",
+        "unit": "topology.face_p4"
       },
       "max_rel_err": 0.0,
       "name": "merge_added_topology_gathered_lists",
@@ -254,21 +242,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "merge_added_topology_nothing_added",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p2/cases.json#26 (upstream source/SMLib/src/SmMerge.cpp:5474 (nothing to add in))",
-      "values_compared": 0
+      "values_compared": 35
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::FindInfiniteRegion",
+        "unit": "topology.brep_p9"
       },
       "max_rel_err": 0.0,
       "name": "merge_added_topology_wire_subset",
@@ -279,8 +263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::m_pVertexListHead",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "merge_added_topology_vertices_glue",
@@ -306,16 +290,12 @@
       "values_compared": 66
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645102366108429878",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
@@ -338,21 +318,17 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645102366108429881",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeFace",
-        "unit": "topology.brep_p7"
+        "symbol": "SmFace::SetTolerance",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0006",
@@ -362,21 +338,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645102366108429883",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "deferred": {
-        "symbol": "SmBrep::MakeFace",
-        "unit": "topology.brep_p7"
+        "symbol": "SmFace::SetTolerance",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -387,8 +359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0009",
@@ -434,16 +406,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::GetMinEdgeBBoxSize",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645102366108429890",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -455,17 +423,18 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 23,
+  "cases_deferred": 15,
   "cases_failed": 0,
-  "cases_passed": 22,
+  "cases_passed": 30,
   "cases_total": 45,
   "deferred_by_unit": {
-    "surface.cone_p2": 1,
-    "topology.brep_p2": 12,
-    "topology.brep_p3": 2,
-    "topology.brep_p7": 4,
-    "topology.brep_p9": 2,
-    "topology.face_p4": 2
+    "surface.surface_p2": 1,
+    "topology.brep_p1": 1,
+    "topology.brep_p3": 3,
+    "topology.brep_p9": 1,
+    "topology.face_p2": 1,
+    "topology.face_p3": 4,
+    "topology.face_p4": 4
   },
   "max_rel_err": 0.0,
   "pass": true,

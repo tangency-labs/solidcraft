@@ -17,9 +17,11 @@
 
 use super::arena_pair::{self, ArenaPair, H};
 use super::{
-    manifold_boolean, BooleanKernels, FixedGaps, ManifoldIntersector, ManifoldState, MergeEntity,
+    manifold_boolean, BooleanKernels, FixedGaps, MadeFaceuse, ManifoldIntersector, ManifoldState,
+    MergeEntity,
 };
 use crate::boolean::merge::p1::{self, MergeState};
+use crate::boolean::merge::p2::{self, MergeContext, TopologyCopy};
 use crate::boolean::merge::p5;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::boolean::topology_intersector::p1::{set_subset_objects, Relations};
@@ -624,11 +626,21 @@ impl ManifoldIntersector for KernelManifoldIntersector {
             type_code: crate::topology::vertex::TYPE,
         };
         let destination_key = |e| notification_key(namespace, false, e);
-        let mut copy = p1::VertexCopy {
-            records: &mut self.records,
-            attributes,
-            source_key: &source_key,
-            destination_key: &destination_key,
+        let edge_source = |e| notification_key(namespace, true, EntityRef::Edge(e));
+        let edge_destination = |e| notification_key(namespace, false, EntityRef::Edge(e));
+        let face_source = |f| notification_key(namespace, true, EntityRef::Face(f));
+        let face_destination = |f| notification_key(namespace, false, EntityRef::Face(f));
+        let mut copy = TopologyCopy {
+            vertices: p1::VertexCopy {
+                records: &mut self.records,
+                attributes,
+                source_key: &source_key,
+                destination_key: &destination_key,
+            },
+            edge_source_key: &edge_source,
+            edge_destination_key: &edge_destination,
+            face_source_key: &face_source,
+            face_destination_key: &face_destination,
         };
         p5::process_wires_and_shell_vertices_with_kernels(
             kernels.primary,
@@ -644,6 +656,61 @@ impl ManifoldIntersector for KernelManifoldIntersector {
             other_mark,
             keep,
         )
+    }
+
+    fn make_faceuse(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        faceuse: FaceuseId,
+        original_region: Option<RegionId>,
+    ) -> Result<MadeFaceuse> {
+        let namespace = self.namespace;
+        let vertex_source = |id| ObjectRef {
+            key: entity_key(namespace, true, MergeEntity::Vertex(id)),
+            type_code: crate::topology::vertex::TYPE,
+        };
+        let destination = |e| notification_key(namespace, false, e);
+        let edge_source = |e| notification_key(namespace, true, EntityRef::Edge(e));
+        let edge_destination = |e| notification_key(namespace, false, EntityRef::Edge(e));
+        let face_source = |f| notification_key(namespace, true, EntityRef::Face(f));
+        let face_destination = |f| notification_key(namespace, false, EntityRef::Face(f));
+        let mut copy = TopologyCopy {
+            vertices: p1::VertexCopy {
+                records: &mut self.records,
+                attributes,
+                source_key: &vertex_source,
+                destination_key: &destination,
+            },
+            edge_source_key: &edge_source,
+            edge_destination_key: &edge_destination,
+            face_source_key: &face_source,
+            face_destination_key: &face_destination,
+        };
+        // New topology is made with the primary context; copies notify through the
+        // other operand's (or the shared) context.
+        let ctx = match kernels.other.as_deref_mut() {
+            Some(o) => MergeContext::Split(kernels.primary, Some(&mut o.context)),
+            None => MergeContext::Shared(kernels.primary),
+        };
+        let mut faces = Vec::new();
+        let made = p2::make_faceuse_with(
+            ctx,
+            primary,
+            other,
+            faceuse,
+            original_region,
+            &mut self.merge.intersector,
+            &mut copy,
+            Some(&mut faces),
+        )?;
+        Ok(MadeFaceuse {
+            old_region: made.old_region,
+            new_region: made.new_region,
+            faces,
+        })
     }
 
     fn find_region_of_other_face(

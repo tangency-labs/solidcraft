@@ -21,18 +21,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::boolean::merge::p1::{MergeOptions, MergeState, VertexCopy};
 use solidcore::boolean::merge::p2::{
-    make_faceuse, merge_edge, MergeAddedOptions, MergeBrep, TopologyCopy,
+    make_faceuse, merge_edge, MergeAddedOptions, MergeBrep, SplitEdges, StitchSettings,
+    StitchedEdges, StitchedVertices, TopologyCopy,
 };
 use solidcore::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::context::MarkLock;
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::extent3d::Extent3d;
+use solidcore::geom::object::{NotifyOperation, ObjectRef};
+use solidcore::heal::stitch::p1::{DefaultStitchCallback, Stitch};
 use solidcore::kernel::Kernel;
 use solidcore::topology;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{
-    edge, edgeuse, face, vertex, ArenaId, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId,
+    edge, edgeuse, face, vertex, ArenaId, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId,
+    VertexId,
 };
 use solidcore::SolidError;
 use solidcore_ffi::units::boolean_merge_p2::{self as ffi, Mates, Request};
@@ -240,8 +244,13 @@ fn output(raw: &[f64]) -> Result<Output, HarnessError> {
         .iter()
         .map(|&x| x as i64)
         .collect();
-    let values = raw.get(end..).ok_or_else(|| err("truncated values"))?.to_vec();
-    Ok(Output::new().ints("topology", ints).values("geometry", values))
+    let values = raw
+        .get(end..)
+        .ok_or_else(|| err("truncated values"))?
+        .to_vec();
+    Ok(Output::new()
+        .ints("topology", ints)
+        .values("geometry", values))
 }
 
 /// The upstream status of a Rust error (`SM_ERR_INVALID_INPUT` for
@@ -263,7 +272,11 @@ fn opt_id<I: ArenaId>(i: i64) -> Option<I> {
 }
 
 /// The snapshots of the operands with a fresh, unused mark (as the shim's lock).
-fn snapshots(breps: &[&Brep], ids: &mut Vec<i64>, values: &mut Vec<f64>) -> Result<(), HarnessError> {
+fn snapshots(
+    breps: &[&Brep],
+    ids: &mut Vec<i64>,
+    values: &mut Vec<f64>,
+) -> Result<(), HarnessError> {
     let mut k = Kernel::default();
     let lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, 1).map_err(|e| err(&e))?;
     let mt = lock.mark_type();
@@ -275,11 +288,7 @@ fn snapshots(breps: &[&Brep], ids: &mut Vec<i64>, values: &mut Vec<f64>) -> Resu
 }
 
 /// The fixture's `Relate` calls, in the shim's order (edges, vertices, faces).
-fn relate(
-    a: &mut Brep,
-    b: &mut Brep,
-    mates: &[Vec<i64>; 3],
-) -> Result<Relations, HarnessError> {
+fn relate(a: &mut Brep, b: &mut Brep, mates: &[Vec<i64>; 3]) -> Result<Relations, HarnessError> {
     let mut r = Relations::default();
     for (j, &m) in mates[0].iter().enumerate() {
         if let Some(e) = opt_id::<EdgeId>(m) {
@@ -332,12 +341,16 @@ impl MergeBrep<H> for Two {
         faceuse: H,
     ) -> solidcore::Result<(Option<H>, Option<H>)> {
         // The SmTopology marks live in a record per call (upstream's object marks);
-        // the region split takes and releases its own mark locks.
+        // the region split takes and releases its own mark locks. The fixtures carry no
+        // attribute records: its notifications run on an empty store over the regions,
+        // as topology.brep_p10's runner.
         let b = self.brep_m(brep)?;
+        let mut state = topology::brep::p2::RegionNotifyState::new(b);
         let (shell, region) = topology::brep::p6::test_closure_split_region(
             k,
             b,
             &mut Marks::default(),
+            &mut state.env(),
             test_closure,
             FaceuseId::from_index(faceuse.i),
         )?;
@@ -346,15 +359,165 @@ impl MergeBrep<H> for Two {
             region.map(|r| hd(brep.b, K_REGION, r.index())),
         ))
     }
+    fn notify_brep(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        operation: NotifyOperation,
+    ) -> solidcore::Result<()> {
+        let _ = k;
+        // PRE_EDIT and DESTRUCTION delete the B-rep's cache; it is rebuilt on demand.
+        if matches!(
+            operation,
+            NotifyOperation::PreEdit | NotifyOperation::Destruction
+        ) {
+            self.delete_cache(brep)?;
+        }
+        // The fixtures carry no attribute records: an empty store over the regions, as
+        // heal.stitch_p1's PRE_EDIT.
+        let b = self.brep_r(brep)?;
+        let mut state = topology::brep::p2::RegionNotifyState::new(b);
+        let this = topology::brep::p2::NotifyArg::Object(topology::brep::p2::brep_ref(b));
+        topology::brep::p2::notify(
+            b,
+            &mut state.env(),
+            None,
+            operation,
+            [Some(this), None, None],
+        )
+    }
+    fn is_manifold_solid(&self, brep: H) -> solidcore::Result<bool> {
+        topology::brep::p2::is_manifold_solid(self.brep_r(brep)?)
+    }
     fn faceuse_shell(&self, fu: H) -> solidcore::Result<Option<H>> {
         let b = self.brep_r(fu)?;
         Ok(edgeuse::p1::faceuse_shell(b, FaceuseId::from_index(fu.i))?
             .map(|s| hd(fu.b, K_SHELL, s.index())))
     }
+    fn face_bounding_box(&self, k: &Kernel, face: H) -> solidcore::Result<Extent3d> {
+        // bTight = FALSE, the header default
+        solidcore::query::face::p1::calculate_bounding_box(
+            k,
+            self.brep_r(face)?,
+            FaceId::from_index(face.i),
+            false,
+        )
+    }
+    fn stitch_vertex_pairs(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        settings: &StitchSettings,
+        list1: &mut [Option<H>],
+        list2: &mut [Option<H>],
+    ) -> solidcore::Result<StitchedVertices<H>> {
+        let mut l1 = ids_of::<VertexId>(list1);
+        let mut l2 = ids_of::<VertexId>(list2);
+        let mut callback = DefaultStitchCallback::new();
+        let mut stitch = stitch_of(&mut callback, settings);
+        let r = stitch.stitch_vertex_pairs(k, self.brep_m(brep)?, &mut l1, &mut l2);
+        // Glued entries become null on both sides, also when the stitch fails.
+        null_where(list1, &l1);
+        null_where(list2, &l2);
+        let r = r?;
+        Ok(StitchedVertices {
+            processed: handles(brep, K_VERTEX, &r.processed),
+            deleted: handles(brep, K_VERTEX, &r.deleted),
+            max_vertex_gap: r.max_vertex_gap,
+            min_unstitched_vert_gap: r.min_unstitched_vert_gap,
+        })
+    }
+    fn split_edges_with_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        settings: &StitchSettings,
+        verts: &mut [Option<H>],
+        edges: &mut Vec<Option<H>>,
+    ) -> solidcore::Result<SplitEdges<H>> {
+        let mut v = ids_of::<VertexId>(verts);
+        let mut e = ids_of::<EdgeId>(edges);
+        let mut callback = DefaultStitchCallback::new();
+        let mut stitch = stitch_of(&mut callback, settings);
+        let r = stitch.split_edges_with_vertices(k, self.brep_m(brep)?, &mut v, &mut e);
+        null_where(verts, &v);
+        // The routine nulls processed edges and appends the new ones.
+        *edges = e
+            .iter()
+            .map(|e| e.map(|e| hd(brep.b, K_EDGE, e.index())))
+            .collect();
+        let r = r?;
+        Ok(SplitEdges {
+            processed_verts: handles(brep, K_VERTEX, &r.processed),
+            split_edges: handles(brep, K_EDGE, &r.split),
+            new_edges: handles(brep, K_EDGE, &r.new_edges),
+            max_vertex_gap: r.max_vertex_gap,
+            min_unstitched_vert_gap: r.min_unstitched_vert_gap,
+        })
+    }
+    fn stitch_edges_of_vertices(
+        &mut self,
+        k: &mut Kernel,
+        brep: H,
+        settings: &StitchSettings,
+        verts: &[Option<H>],
+    ) -> solidcore::Result<StitchedEdges<H>> {
+        let v = ids_of::<VertexId>(verts);
+        let mut callback = DefaultStitchCallback::new();
+        let mut stitch = stitch_of(&mut callback, settings);
+        let r = stitch.stitch_edges_of_vertices(k, self.brep_m(brep)?, &v)?;
+        Ok(StitchedEdges {
+            glued: handles(brep, K_EDGE, &r.glued),
+            deleted: handles(brep, K_EDGE, &r.deleted),
+            max_edge_gap: r.max_edge_gap,
+            min_unstitched_edge_gap: r.min_unstitched_edge_gap,
+        })
+    }
+    fn find_and_set_infinite_region(&mut self, _k: &mut Kernel, brep: H) -> solidcore::Result<()> {
+        // pOptShellToTest = NULL, SM_VS_INFINITEREGION_SWAP (2), no bounding box
+        topology::brep::p5::find_and_set_infinite_region(self.brep_m(brep)?, None, 2, None)
+    }
+}
+
+/// The `SmStitch` of `MergeAddedTopology`: `SmStitch(sCB, tol)` with the members it sets.
+fn stitch_of<'c>(callback: &'c mut DefaultStitchCallback, s: &StitchSettings) -> Stitch<'c> {
+    let mut stitch = Stitch::new(
+        callback,
+        s.stitch_tol_3d,
+        s.do_region_nesting,
+        s.validate_result,
+    );
+    stitch.making_manifold_solid = s.making_manifold_solid;
+    stitch.ignore_problems = s.ignore_problems;
+    stitch.fast_edge_compare = s.fast_edge_compare;
+    stitch.squeeze_small_edges = s.squeeze_small_edges;
+    stitch.split_edges_with_vertices = s.split_edges_with_vertices;
+    stitch.remove_laminar_slivers = s.remove_laminar_slivers;
+    stitch
+}
+
+/// Arena ids of a handle list (null entries stay null).
+fn ids_of<I: ArenaId>(list: &[Option<H>]) -> Vec<Option<I>> {
+    list.iter().map(|h| h.map(|h| I::from_index(h.i))).collect()
+}
+
+/// Null the handles whose ids the routine nulled.
+fn null_where<I>(list: &mut [Option<H>], ids: &[Option<I>]) {
+    for (h, id) in list.iter_mut().zip(ids) {
+        if id.is_none() {
+            *h = None;
+        }
+    }
+}
+
+fn handles<I: ArenaId>(brep: H, kind: u8, ids: &[I]) -> Vec<H> {
+    ids.iter().map(|i| hd(brep.b, kind, i.index())).collect()
 }
 
 fn import_operand(p: &(String, Vec<f64>)) -> Result<Brep, HarnessError> {
-    p5::import(&solidcore_ffi::units::boolean_merge_p5::export(p5::operand(p)).map_err(|e| err(&e))?)
+    p5::import(
+        &solidcore_ffi::units::boolean_merge_p5::export(p5::operand(p)).map_err(|e| err(&e))?,
+    )
 }
 
 fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
@@ -367,6 +530,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
     match &i.op {
         Op::Construct => {
             let m = match MergeState::<TopologyIntersector<H>>::with_breps(
+                &k,
                 (&a, brep_h(0)),
                 b.as_ref().map(|b| (b, brep_h(1))),
                 p.tol,
@@ -377,7 +541,10 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                 Err(e) => return Output::unported(&e).ok_or_else(|| err(&e)),
             };
             ids.push(0);
-            values.extend([m.intersector.this_approx_tol_3d(), m.intersector.this_ang_tol_rad()]);
+            values.extend([
+                m.intersector.this_approx_tol_3d(),
+                m.intersector.this_ang_tol_rad(),
+            ]);
             let o = m.options;
             values.extend(
                 [
@@ -389,6 +556,13 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                 ]
                 .map(|f| f64::from(u8::from(f))),
             );
+            // m_bManifoldBoolean, m_bIntersectionLoopClosed (the B-rep constructor sets
+            // both; an indeterminate value would be a harness error)
+            for flag in [m.manifold_boolean, m.intersection_loop_closed] {
+                values.push(f64::from(u8::from(
+                    flag.ok_or_else(|| err("indeterminate merge flag"))?,
+                )));
+            }
             values.push(m.tag_id as f64);
         }
         Op::MergeEdge { .. } | Op::MakeFaceuse { .. } => {
@@ -402,15 +576,34 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
                     records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());
                 }
                 for e in brep.edges().ids() {
-                    records.insert(ObjectKey(2_000_000 + base + u64::from(e.index())), Topology::new());
+                    records.insert(
+                        ObjectKey(2_000_000 + base + u64::from(e.index())),
+                        Topology::new(),
+                    );
                 }
                 for f in brep.faces().ids() {
-                    records.insert(ObjectKey(4_000_000 + base + u64::from(f.index())), Topology::new());
+                    records.insert(
+                        ObjectKey(4_000_000 + base + u64::from(f.index())),
+                        Topology::new(),
+                    );
                 }
+            }
+            for vu in a.vertexuses().ids() {
+                records.insert(
+                    ObjectKey(6_000_000 + u64::from(vu.index())),
+                    Topology::new(),
+                );
             }
             let mut attributes = AttributeStore::new();
             let vertex_source = |v: VertexId| key(1_000_000, vertex::TYPE, v.index());
-            let vertex_dest = |v: VertexId| key(0, vertex::TYPE, v.index());
+            // The primary's vertices and vertex uses (the ones a new shell vertex makes).
+            let vertex_dest = |e: solidcore::EntityRef| match e {
+                solidcore::EntityRef::Vertex(v) => key(0, vertex::TYPE, v.index()),
+                solidcore::EntityRef::Vertexuse(vu) => {
+                    key(6_000_000, topology::vertexuse::TYPE, vu.index())
+                }
+                _ => key(9_000_000, topology::topology::TYPE, 0),
+            };
             let edge_source = |e: EdgeId| key(3_000_000, edge::TYPE, e.index());
             let edge_dest = |e: EdgeId| key(2_000_000, edge::TYPE, e.index());
             let face_source = |f: FaceId| key(5_000_000, face::p2::TYPE, f.index());
@@ -479,6 +672,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
         }
         Op::MergeAddedTopology { .. } | Op::MergeAddedFace { .. } => {
             let mut state = match MergeState::<TopologyIntersector<H>>::with_breps(
+                &k,
                 (&a, brep_h(0)),
                 None,
                 p.tol,
@@ -542,7 +736,9 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
             snapshots(&[brep], &mut ids, &mut values)?;
         }
     }
-    Ok(Output::new().ints("topology", ids).values("geometry", values))
+    Ok(Output::new()
+        .ints("topology", ids)
+        .values("geometry", values))
 }
 
 impl UnitDiff for Runner {
@@ -589,7 +785,12 @@ fn face_operand(rng: &mut Rng) -> Option<Value> {
                 "dom":[-scale,-scale,scale,scale]}})
         }
         _ => {
-            let file = *rng.choose(&["plane_square.smb", "plane_circ.smb", "sphere.smb", "surf_extrude.smb"])?;
+            let file = *rng.choose(&[
+                "plane_square.smb",
+                "plane_circ.smb",
+                "sphere.smb",
+                "surf_extrude.smb",
+            ])?;
             json!({"kind":"graph","brep":{"kind":"file","file":file}})
         }
     })
@@ -649,7 +850,9 @@ fn generate_one(rng: &mut Rng, which: u64) -> Option<Value> {
         0 | 1 => {
             let (primary, _) = p5::generated_operand(rng, 1.0);
             let random = rng.uniform(1e-9, 10.0);
-            let tol = *rng.choose(&[0.0, -0.0, -1.0, 0.5e-12, 1.0e-12, 1.0e-3, 1.0, 1.0e6, random])?;
+            let tol = *rng.choose(&[
+                0.0, -0.0, -1.0, 0.5e-12, 1.0e-12, 1.0e-3, 1.0, 1.0e6, random,
+            ])?;
             let other = if tol < 1.0e-12 || rng.below(2) == 0 {
                 Some(p5::generated_operand(rng, 1.0).0)
             } else {
@@ -657,7 +860,9 @@ fn generate_one(rng: &mut Rng, which: u64) -> Option<Value> {
             };
             let ang = *rng.choose(&[0.0, -0.0, 0.1, -1.0, std::f64::consts::PI])?;
             let options = (rng.below(3) != 0).then(|| rng.below(32));
-            Some(json!({"op":"construct","primary":primary,"other":other,"tol":tol,"ang":ang,"options":options}))
+            Some(
+                json!({"op":"construct","primary":primary,"other":other,"tol":tol,"ang":ang,"options":options}),
+            )
         }
         2..=4 => {
             // The same construction for both operands, so mates match geometry.
@@ -665,9 +870,9 @@ fn generate_one(rng: &mut Rng, which: u64) -> Option<Value> {
                 face_operand(rng)?
             } else {
                 {
-                let scale = *rng.choose(&[1.0e-6, 1.0, 1.0e6])?;
-                p5::generated_operand(rng, scale).0
-            }
+                    let scale = *rng.choose(&[1.0e-6, 1.0, 1.0e6])?;
+                    p5::generated_operand(rng, scale).0
+                }
             };
             let other = if rng.below(4) == 0 {
                 p5::generated_operand(rng, 1.0).0
@@ -713,9 +918,11 @@ fn generate_one(rng: &mut Rng, which: u64) -> Option<Value> {
                     "face":rng.below(a[3] as u64)}));
             }
             let flags: Vec<bool> = (0..5).map(|_| rng.below(2) == 0).collect();
-            Some(json!({"op":"merge_added_topology","primary":primary,"tol":tol,
+            Some(
+                json!({"op":"merge_added_topology","primary":primary,"tol":tol,
                 "faces":subset(rng, a[3]),"edges":subset(rng, a[7]),"vertices":subset(rng, a[9]),
-                "flags":flags,"options":(rng.below(2)==0).then(|| rng.below(32))}))
+                "flags":flags,"options":(rng.below(2)==0).then(|| rng.below(32))}),
+            )
         }
     }
 }

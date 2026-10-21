@@ -708,7 +708,7 @@
   },
   {
    "name": "merge_added_face_stitch_api",
-   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1185 (SmApiStitch(pBrep, pFace), here with a positive tolerance; see UB-181)",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1185 (SmApiStitch(pBrep, pFace), here with a positive tolerance; see UB-167)",
    "inputs": {
     "op": "merge_added_face",
     "primary": {

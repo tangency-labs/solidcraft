@@ -4061,11 +4061,28 @@ impl<I: Ord + Copy> MateMap<I> {
         self.to_primary.get(&other).copied()
     }
 
-    /// The other-to-primary direction as a map (the `GetBrepMate` lookups of
-    /// [`find_brep_region_of_other_face`](crate::boolean::merge::p1::find_brep_region_of_other_face)).
+    /// Primary-to-other projection, borrowed by the shared merge helpers.
     #[must_use]
-    pub const fn primary_map(&self) -> &BTreeMap<I, I> {
+    pub fn primary_to_other(&self) -> &BTreeMap<I, I> {
+        &self.to_other
+    }
+
+    /// Other-to-primary projection, borrowed by the shared merge helpers.
+    #[must_use]
+    pub fn other_to_primary(&self) -> &BTreeMap<I, I> {
         &self.to_primary
+    }
+
+    /// `GetMappedBrepObjects` for this typed class, in other-handle order.
+    #[must_use]
+    pub fn mapped_primary(&self) -> Vec<I> {
+        self.to_primary.values().copied().collect()
+    }
+
+    /// `GetCommonEdges` / `GetCommonVertices`, preserving the supplied B-rep list order.
+    #[must_use]
+    pub fn common(&self, order: impl IntoIterator<Item = I>) -> (Vec<I>, Vec<I>) {
+        common_mates(order, |id| self.other(id))
     }
 
     /// Record an established pair. Conflicting pairs fail before either map changes.
@@ -4089,9 +4106,9 @@ impl<I: Ord + Copy> MateMap<I> {
     }
 }
 
-/// Edge, vertex and face mates shared by the merge stages; every id is
-/// operand-local. Curves and surfaces are owned by their edge and face in the arena
-/// model, so they have no mates of their own (see `boolean.merge_p2`).
+/// Face, edge and vertex mates shared by the merge stages; every id is operand-local.
+/// Curves and surfaces are owned by their edge and face in the arena model, so they
+/// have no mates of their own (see `boolean.merge_p2`).
 #[derive(Debug, Default, Clone)]
 pub struct Relations {
     /// Face mates in both directions; face Relate has no tolerance update.
@@ -4100,8 +4117,6 @@ pub struct Relations {
     pub edges: MateMap<EdgeId>,
     /// Vertex mates in both directions.
     pub vertices: MateMap<VertexId>,
-    /// Face mates in both directions (CO-PORTED by `boolean.merge_p2`).
-    pub faces: MateMap<FaceId>,
 }
 
 impl Relations {
@@ -4164,6 +4179,93 @@ impl Relations {
         brep.face(brep_face)?;
         other.face(other_face)?;
         self.faces.record(brep_face, other_face)
+    }
+
+    /// Move the typed mate store through a generic intersector operation, then
+    /// restore it even when that operation fails. Geometry and proto state stay
+    /// in the same intersector; no second live relationship store is retained.
+    pub(crate) fn with_intersector<O, T>(
+        &mut self,
+        intersector: &mut TopologyIntersector<O>,
+        encode: impl Fn(crate::EntityRef, bool) -> O,
+        decode: impl Fn(O) -> crate::EntityRef,
+        action: impl FnOnce(&mut TopologyIntersector<O>) -> Result<T>,
+    ) -> Result<T>
+    where
+        O: ClassObject + SolutionObject + Ord,
+    {
+        let mut forward = BTreeMap::new();
+        let mut reverse = BTreeMap::new();
+        macro_rules! transfer {
+            ($field:ident, $variant:ident) => {
+                for (b, o) in std::mem::take(&mut self.$field.to_other) {
+                    let b = encode(crate::EntityRef::$variant(b), false);
+                    let o = encode(crate::EntityRef::$variant(o), true);
+                    forward.insert(b, Some(o));
+                }
+                for (o, b) in std::mem::take(&mut self.$field.to_primary) {
+                    let b = encode(crate::EntityRef::$variant(b), false);
+                    let o = encode(crate::EntityRef::$variant(o), true);
+                    reverse.insert(Some(o), b);
+                }
+            };
+        }
+        transfer!(faces, Face);
+        transfer!(edges, Edge);
+        transfer!(vertices, Vertex);
+        intersector.b_to_o = Some(forward);
+        intersector.o_to_b = Some(reverse);
+        let result = action(intersector);
+        // Preserve both actual projections, including changes made before an
+        // error. All handles admitted here represent the same typed entities.
+        let mut restore_error = None;
+        if let Some(forward) = intersector.b_to_o.take() {
+            for (b, o) in forward {
+                if let Some(o) = o {
+                    match (decode(b), decode(o)) {
+                        (crate::EntityRef::Face(b), crate::EntityRef::Face(o)) => {
+                            self.faces.to_other.insert(b, o);
+                        }
+                        (crate::EntityRef::Edge(b), crate::EntityRef::Edge(o)) => {
+                            self.edges.to_other.insert(b, o);
+                        }
+                        (crate::EntityRef::Vertex(b), crate::EntityRef::Vertex(o)) => {
+                            self.vertices.to_other.insert(b, o);
+                        }
+                        _ => {
+                            restore_error = Some(SolidError::invalid_input(
+                                OP_RELATE,
+                                "mixed typed mate handles",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(reverse) = intersector.o_to_b.take() {
+            for (o, b) in reverse {
+                if let Some(o) = o {
+                    match (decode(o), decode(b)) {
+                        (crate::EntityRef::Face(o), crate::EntityRef::Face(b)) => {
+                            self.faces.to_primary.insert(o, b);
+                        }
+                        (crate::EntityRef::Edge(o), crate::EntityRef::Edge(b)) => {
+                            self.edges.to_primary.insert(o, b);
+                        }
+                        (crate::EntityRef::Vertex(o), crate::EntityRef::Vertex(b)) => {
+                            self.vertices.to_primary.insert(o, b);
+                        }
+                        _ => {
+                            restore_error = Some(SolidError::invalid_input(
+                                OP_RELATE,
+                                "mixed typed mate handles",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        restore_error.map_or(result, Err)
     }
 
     /// `Relate(pBrepTopo, pOtherTopo)` for two vertices of the concrete [`Brep`]

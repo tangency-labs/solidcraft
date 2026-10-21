@@ -70,8 +70,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_0",
@@ -82,8 +82,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_1",
@@ -94,8 +94,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_2",
@@ -106,8 +106,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "upstream_merge_breps_operation_3",
@@ -163,8 +163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_1",
@@ -175,8 +175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_2",
@@ -187,8 +187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_3",
@@ -199,8 +199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_4",
@@ -211,8 +211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_5",
@@ -223,8 +223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "binary_operator_6",
@@ -234,14 +234,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "binary_operator_7",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p3/cases.json#23",
       "values_compared": 0
     },
@@ -268,8 +265,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_0",
@@ -280,8 +277,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_1",
@@ -292,8 +289,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_2",
@@ -304,8 +301,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_3",
@@ -316,8 +313,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_4",
@@ -328,8 +325,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_5",
@@ -340,8 +337,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_6",
@@ -352,8 +349,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_7",
@@ -364,8 +361,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_8",
@@ -376,8 +373,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_9",
@@ -388,8 +385,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "nonmanifold_10",
@@ -866,8 +863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_0",
@@ -878,8 +875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_1",
@@ -890,8 +887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_2",
@@ -902,8 +899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_3",
@@ -914,8 +911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_4",
@@ -926,8 +923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_5",
@@ -938,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_6",
@@ -950,8 +947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_7",
@@ -962,8 +959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_8",
@@ -974,8 +971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family1_9",
@@ -1106,8 +1103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_0",
@@ -1118,8 +1115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_1",
@@ -1130,8 +1127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_2",
@@ -1142,8 +1139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_3",
@@ -1154,8 +1151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_4",
@@ -1166,8 +1163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_5",
@@ -1178,8 +1175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_6",
@@ -1190,8 +1187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_7",
@@ -1202,8 +1199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_8",
@@ -1214,8 +1211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "vg_family3_9",
@@ -1379,8 +1376,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -1624,8 +1621,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0028",
@@ -1664,8 +1661,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -1715,14 +1712,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0037",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058124",
       "values_compared": 0
     },
@@ -1772,8 +1766,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -1807,14 +1801,11 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0047",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058134",
       "values_compared": 0
     },
@@ -1871,8 +1862,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -1947,8 +1938,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0062",
@@ -1968,8 +1959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -2029,8 +2020,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -2061,8 +2052,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0073",
@@ -2073,8 +2064,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -2085,8 +2076,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0075",
@@ -2097,8 +2088,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -2129,8 +2120,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0079",
@@ -2306,14 +2297,11 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0098",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058185",
       "values_compared": 0
     },
@@ -2367,8 +2355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0105",
@@ -2391,8 +2379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0107",
@@ -2435,8 +2423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0111",
@@ -2447,8 +2435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0112",
@@ -2459,8 +2447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0113",
@@ -2603,8 +2591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -2615,8 +2603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0129",
@@ -2647,8 +2635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0132",
@@ -2692,8 +2680,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0137",
@@ -2785,8 +2773,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -2817,8 +2805,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0150",
@@ -2838,8 +2826,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0152",
@@ -2874,8 +2862,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0156",
@@ -2931,14 +2919,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0162",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058249",
       "values_compared": 0
     },
@@ -3024,8 +3009,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0172",
@@ -3036,8 +3021,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0173",
@@ -3057,8 +3042,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0175",
@@ -3227,8 +3212,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0192",
@@ -3382,8 +3367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0209",
@@ -3402,8 +3387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -3414,8 +3399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0212",
@@ -3426,8 +3411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0213",
@@ -3437,14 +3422,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058301",
       "values_compared": 0
     },
@@ -3548,8 +3530,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0226",
@@ -3601,8 +3583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0232",
@@ -3612,14 +3594,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "gen0233",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645103465620058320",
       "values_compared": 0
     },
@@ -3662,8 +3641,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0238",
@@ -3674,8 +3653,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0239",
@@ -3752,8 +3731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmMerge::SmMerge",
-        "unit": "boolean.merge_p2"
+        "symbol": "SmBrep::CalculateBoundingBox",
+        "unit": "query.brep"
       },
       "max_rel_err": 0.0,
       "name": "gen0247",
@@ -3842,14 +3821,14 @@
       "values_compared": 0
     }
   ],
-  "cases_both_errored": 56,
-  "cases_deferred": 172,
+  "cases_both_errored": 63,
+  "cases_deferred": 165,
   "cases_failed": 0,
-  "cases_passed": 215,
+  "cases_passed": 222,
   "cases_total": 387,
   "deferred_by_unit": {
-    "boolean.merge_p2": 87,
     "boolean.topology_intersector_p2": 48,
+    "query.brep": 80,
     "topology.brep_p3": 37
   },
   "max_rel_err": 0.0,

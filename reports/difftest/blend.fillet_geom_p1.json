@@ -650,16 +650,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "classify_face_point_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#80 (upstream source/SMLib/src/SmFilletGeom.cpp)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -986,16 +982,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "fb_split_face_classified",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#121 (upstream source/SMLib/src/SmFilletGeom.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -1669,16 +1661,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "classify_face_point_hang29_large_1e50_accepted",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/blend.fillet_geom_p1/cases.json#142 (upstream source/SMLib/src/SmFilletGeom.cpp)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "inputs": {
@@ -3153,16 +3141,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0000",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331383",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3837,16 +3821,12 @@
       "values_compared": 134
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0085",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331468",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3865,16 +3845,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331471",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3901,16 +3877,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0092",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331475",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -3981,28 +3953,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0101",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331484",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0102",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331485",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -4149,16 +4113,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0121",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331504",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4449,16 +4409,12 @@
       "values_compared": 129
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0158",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331541",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4733,16 +4689,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0193",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331576",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5353,16 +5305,12 @@
       "values_compared": 269
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0270",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331653",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5397,16 +5345,12 @@
       "values_compared": 550
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0275",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9207377415692331658",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5602,15 +5546,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 21,
+  "cases_deferred": 7,
   "cases_failed": 0,
-  "cases_passed": 446,
+  "cases_passed": 460,
   "cases_rejected": 13,
   "cases_total": 480,
   "deferred_by_unit": {
     "intersect.surface_drop_curve": 2,
-    "intersect.surface_intersector_p4": 5,
-    "topology.face_p4": 14
+    "intersect.surface_intersector_p4": 5
   },
   "max_rel_err": 0.0,
   "pass": true,

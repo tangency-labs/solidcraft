@@ -603,8 +603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "single_vertex_sphere_rebuild_swap_False",
@@ -615,8 +615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
+        "symbol": "SmSphere as SmSurface",
+        "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
       "name": "single_vertex_sphere_rebuild_swap_True",
@@ -4381,8 +4381,8 @@
   "cases_total": 474,
   "deferred_by_unit": {
     "intersect.curve_class_p2": 20,
-    "topology.face_p2": 123,
-    "topology.face_p4": 2
+    "surface.surface_p2": 2,
+    "topology.face_p2": 123
   },
   "max_rel_err": 0.0,
   "pass": true,

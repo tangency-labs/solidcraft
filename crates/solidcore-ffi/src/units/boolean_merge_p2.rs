@@ -9,22 +9,28 @@
 //!
 //! | request | integers | values |
 //! |---|---|---|
-//! | [`Request::Construct`] | `0` | tolerance, angle tolerance, the five option flags, tag id |
+//! | [`Request::Construct`] | `0` | tolerance, angle tolerance, the five option flags, `m_bManifoldBoolean`, `m_bIntersectionLoopClosed`, tag id |
 //! | [`Request::MergeEdge`] | status, made edge (`-1`), both snapshots | both snapshots |
 //! | [`Request::MakeFaceuse`] | status, old region, new region, new-face count, faces, both snapshots | both snapshots |
 //! | [`Request::MergeAddedTopology`], [`Request::MergeAddedFace`] | status, edges stitched, primary snapshot | the four gaps, primary snapshot |
 //!
-//! Guards (each input upstream would dereference null or use after free):
+//! Guards. These inputs crash or are undefined upstream:
 //! - a computed tolerance (`dApproxTol3d < SM_EFF_ZERO`) without other B-rep
-//!   (`pOtherBrep->GetMinEdgeBBoxSize`; UB-181, segfaults the reference build);
+//!   (`pOtherBrep->GetMinEdgeBBoxSize`; UB-167, segfaults the reference build);
 //! - `MakeFaceuse` of a null face use (`pFaceuseToMakeInBrep->GetMate()`);
-//! - mates that are not one-to-one per kind (`Relate` conflicts; the fixture only);
-//! - `MergeAddedTopology` / `MergeAddedFace` with another B-rep (they merge within
-//!   the primary one) or a computed tolerance (with no other B-rep, as above);
-//! - an entity listed twice in a `MergeAddedTopology` list: once `StitchVertexPairs`
-//!   glues one copy of a duplicated vertex and deletes it, the other entry is a
-//!   dangling pointer (UB-180 in `plan/upstream-issues.md`; segfaults the reference
-//!   build). Non-finite tolerances and angles run (probed on every fixture kind).
+//! - a vertex listed twice in a `MergeAddedTopology` list, once `StitchVertexPairs`
+//!   glues one copy and deletes it: the other entry dangles (UB-176; segfaults the
+//!   reference build).
+//!
+//! Deliberate over-refusals (harness choices, not upstream crashes):
+//! - any face, edge or vertex listed twice in a `MergeAddedTopology` list, glued or
+//!   not (UB-176 needs a repeated vertex that is actually glued);
+//! - `MergeAddedTopology` / `MergeAddedFace` with an other B-rep: the shim builds the
+//!   merge they run in with a null other B-rep, as `SmApiStitch` does;
+//! - mates that are not one-to-one per kind (they would make the fixture's `Relate`
+//!   fail, not the operation under test).
+//!
+//! Non-finite tolerances and angles run (probed on every fixture kind).
 
 use super::boolean_merge_p5::{export, Operand};
 use super::topology_vertexuse as shared;
@@ -167,7 +173,10 @@ fn push_list(ints: &mut Vec<i64>, list: Option<&[i64]>, n: usize) -> Result<(), 
         return Ok(());
     };
     let mut seen = BTreeSet::new();
-    if list.iter().any(|&i| !index_ok(i, n, false) || !seen.insert(i)) {
+    if list
+        .iter()
+        .any(|&i| !index_ok(i, n, false) || !seen.insert(i))
+    {
         return Err(invalid());
     }
     ints.extend([1, list.len() as i64]);
@@ -261,7 +270,9 @@ pub fn eval(
     };
     let path_a = CString::new(a.path).map_err(|_| invalid())?;
     let path_b = CString::new(b.map_or("", |b| b.path)).map_err(|_| invalid())?;
-    let (pb, nb) = b.map_or((std::ptr::null(), 0), |b| (b.block.as_ptr(), b.block.len() as i64));
+    let (pb, nb) = b.map_or((std::ptr::null(), 0), |b| {
+        (b.block.as_ptr(), b.block.len() as i64)
+    });
     let params = [approx_tol_3d, ang_tol_rad];
     call_with_buffer(1024, |buf, len| {
         // SAFETY: both construction programs were validated by `counts` (the p5
@@ -374,7 +385,15 @@ mod tests {
             flags: [false; 5],
         };
         assert!(eval(NETWORK, None, 1e-3, 0.0, None, twice).is_err());
-        assert!(eval(NETWORK, None, 1e-3, 0.0, None, Request::MergeAddedFace { face: 0 }).is_err());
+        assert!(eval(
+            NETWORK,
+            None,
+            1e-3,
+            0.0,
+            None,
+            Request::MergeAddedFace { face: 0 }
+        )
+        .is_err());
     }
 
     #[test]

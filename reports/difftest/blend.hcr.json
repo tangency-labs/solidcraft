@@ -404,8 +404,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -691,8 +691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0049",
@@ -731,8 +731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0053",
@@ -887,8 +887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0071",
@@ -1642,8 +1642,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0160",
@@ -2241,8 +2241,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0231",
@@ -2812,8 +2812,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0297",
@@ -3682,10 +3682,9 @@
   "cases_passed": 396,
   "cases_total": 434,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 1,
+    "intersect.surface_drop_lib_p3": 8,
     "surface.surface_p2": 3,
-    "topology.edge": 27,
-    "topology.face_p4": 7
+    "topology.edge": 27
   },
   "max_rel_err": 0.0,
   "pass": true,

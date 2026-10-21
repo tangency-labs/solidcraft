@@ -114,14 +114,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face00_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#14 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -394,14 +390,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face02_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#46 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -818,14 +810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face06_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#94 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -954,14 +942,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face08_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#110 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1090,14 +1074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face10_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#126 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1226,14 +1206,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face12_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#142 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1362,14 +1338,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face14_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#158 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1498,14 +1470,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face16_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#174 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1634,14 +1602,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face18_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#190 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1770,14 +1734,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face20_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#206 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -1906,14 +1866,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face22_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#222 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2042,14 +1998,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face24_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#238 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2178,14 +2130,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face26_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#254 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2314,14 +2262,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face28_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#270 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2450,14 +2394,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face30_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#286 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2586,14 +2526,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face32_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#302 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2722,14 +2658,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face34_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#318 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2858,14 +2790,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face36_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#334 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -2994,14 +2922,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face38_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#350 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3130,14 +3054,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face40_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#366 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3266,14 +3186,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face42_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#382 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3402,14 +3318,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face44_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#398 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3538,14 +3450,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face46_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#414 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3674,14 +3582,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "face48_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/constructed.json#430 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -3766,14 +3670,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#8 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4058,14 +3958,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#44 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4158,14 +4054,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#56 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4334,14 +4226,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#77 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4438,14 +4326,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#89 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4610,14 +4494,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#110 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4710,14 +4590,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#122 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -4886,14 +4762,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#143 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5106,14 +4978,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#170 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5250,14 +5118,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#187 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5426,14 +5290,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#208 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5526,14 +5386,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#220 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5698,14 +5554,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#241 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5802,14 +5654,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#253 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -5978,14 +5826,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#274 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6078,14 +5922,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Mouse_rb_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#286 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6330,14 +6170,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#317 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6514,14 +6350,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#339 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6690,14 +6522,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#360 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6794,14 +6622,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#372 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -6970,14 +6794,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#393 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7074,14 +6894,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#405 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7250,14 +7066,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#426 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7354,14 +7166,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#438 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7570,14 +7378,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#464 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7794,14 +7598,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#491 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -7970,14 +7770,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#512 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8074,14 +7870,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#524 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8250,14 +8042,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#545 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8354,14 +8142,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#557 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8530,14 +8314,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#578 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8634,14 +8414,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_Endcap_rb_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#590 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -8930,14 +8706,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#626 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9142,14 +8914,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#652 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9242,14 +9010,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#664 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9414,14 +9178,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#685 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9514,14 +9274,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#697 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9686,14 +9442,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#718 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9790,14 +9542,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#730 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -9962,14 +9710,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#751 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10142,14 +9886,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#773 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10394,14 +10134,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#804 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10494,14 +10230,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#816 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10666,14 +10398,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#837 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10770,14 +10498,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#849 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -10942,14 +10666,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#870 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11042,14 +10762,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#882 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11214,14 +10930,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_box_with_large_fillet_rb_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#903 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11358,14 +11070,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#920 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11654,14 +11362,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#956 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11758,14 +11462,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#968 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -11934,14 +11634,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#989 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12038,14 +11734,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1001 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12214,14 +11906,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1022 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12318,14 +12006,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1034 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12494,14 +12178,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1055 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12718,14 +12398,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1082 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -12862,14 +12538,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1099 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13038,14 +12710,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1120 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13142,14 +12810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1132 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13318,14 +12982,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1153 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13422,14 +13082,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1165 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13598,14 +13254,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1186 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13702,14 +13354,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_cone_rb_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1198 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -13954,14 +13602,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1229 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14134,14 +13778,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1251 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14306,14 +13946,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1272 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14406,14 +14042,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1284 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14578,14 +14210,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1305 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14678,14 +14306,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1317 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14850,14 +14474,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1338 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -14950,14 +14570,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1350 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15162,14 +14778,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1376 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15382,14 +14994,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1403 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15554,14 +15162,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1424 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15654,14 +15258,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1436 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15826,14 +15426,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1457 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -15926,14 +15522,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1469 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16098,14 +15690,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1490 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16198,14 +15786,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_disk_rb_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1502 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16490,14 +16074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1538 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16702,14 +16282,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1564 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16802,14 +16378,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1576 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -16974,14 +16546,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1597 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17074,14 +16642,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1609 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17246,14 +16810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1630 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17346,14 +16906,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1642 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17518,14 +17074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1663 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17698,14 +17250,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1685 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -17950,14 +17498,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1716 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18050,14 +17594,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1728 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18222,14 +17762,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1749 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18322,14 +17858,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1761 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18494,14 +18026,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1782 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18594,14 +18122,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1794 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18766,14 +18290,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_ellips_ts2_rb_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1815 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -18906,14 +18426,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1832 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19198,14 +18714,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1868 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19298,14 +18810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1880 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19470,14 +18978,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1901 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19570,14 +19074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1913 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19742,14 +19242,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1934 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -19842,14 +19338,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1946 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20014,14 +19506,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1967 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20234,14 +19722,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#1994 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20374,14 +19858,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2011 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20546,14 +20026,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2032 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20646,14 +20122,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2044 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20818,14 +20290,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2065 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -20918,14 +20386,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2077 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21090,14 +20554,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2098 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21190,14 +20650,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_circ_rb_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2110 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21442,14 +20898,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2141 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21622,14 +21074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2163 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21794,14 +21242,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2184 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -21894,14 +21338,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2196 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22066,14 +21506,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2217 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22166,14 +21602,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2229 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22338,14 +21770,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2250 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22438,14 +21866,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2262 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22650,14 +22074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2288 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -22870,14 +22290,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2315 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23042,14 +22458,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2336 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23142,14 +22554,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2348 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23314,14 +22722,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2369 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23414,14 +22818,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2381 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23586,14 +22986,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2402 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23686,14 +23082,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_plane_square_rb_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2414 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -23982,14 +23374,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2450 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24198,14 +23586,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2476 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24302,14 +23686,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2488 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24478,14 +23858,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2509 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24582,14 +23958,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2521 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24758,14 +24130,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2542 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -24862,14 +24230,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2554 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25038,14 +24402,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2575 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25222,14 +24582,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2597 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25478,14 +24834,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2628 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25582,14 +24934,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2640 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25758,14 +25106,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2661 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -25862,14 +25206,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2673 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26038,14 +25378,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2694 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26142,14 +25478,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2706 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26318,14 +25650,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_sphere_rb_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2727 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26462,14 +25790,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2744 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26758,14 +26082,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2780 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -26862,14 +26182,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2792 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27038,14 +26354,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2813 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27142,14 +26454,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2825 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27318,14 +26626,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2846 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27422,14 +26726,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2858 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27598,14 +26898,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2879 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27822,14 +27118,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2906 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -27966,14 +27258,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2923 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28142,14 +27430,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2944 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28246,14 +27530,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2956 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28422,14 +27702,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2977 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28526,14 +27802,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#2989 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28702,14 +27974,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3010 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -28806,14 +28074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_extrude_rb_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3022 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29062,14 +28326,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3053 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29246,14 +28506,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3075 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29422,14 +28678,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3096 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29526,14 +28778,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3108 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29702,14 +28950,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3129 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29806,14 +29050,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3141 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -29982,14 +29222,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3162 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30086,14 +29322,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3174 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30302,14 +29534,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3200 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30526,14 +29754,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3227 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30702,14 +29926,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3248 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30806,14 +30026,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3260 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -30982,14 +30198,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3281 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31086,14 +30298,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3293 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31262,14 +30470,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3314 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31366,14 +30570,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_rev_rb_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3326 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31662,14 +30862,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3362 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31878,14 +31074,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3388 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -31982,14 +31174,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3400 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32158,14 +31346,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3421 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32262,14 +31446,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3433 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32438,14 +31618,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3454 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32542,14 +31718,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3466 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32718,14 +31890,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3487 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -32902,14 +32070,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3509 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33158,14 +32322,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3540 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33262,14 +32422,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3552 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33438,14 +32594,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3573 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33542,14 +32694,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3585 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33718,14 +32866,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3606 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33822,14 +32966,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3618 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -33998,14 +33138,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_surf_sphere150_rb_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3639 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34142,14 +33278,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3656 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34438,14 +33570,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3692 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34542,14 +33670,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3704 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34718,14 +33842,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3725 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34822,14 +33942,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3737 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -34998,14 +34114,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3758 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35102,14 +34214,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3770 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35278,14 +34386,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3791 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35502,14 +34606,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3818 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35646,14 +34746,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3835 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35822,14 +34918,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3856 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -35926,14 +35018,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3868 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36102,14 +35190,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3889 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36206,14 +35290,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3901 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36382,14 +35462,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3922 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36486,14 +35562,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_torus_rb_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3934 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36742,14 +35814,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3965 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -36926,14 +35994,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#3987 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37102,14 +36166,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4008 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37206,14 +36266,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4020 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37382,14 +36438,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4041 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37486,14 +36538,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4053 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37662,14 +36710,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4074 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37766,14 +36810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4086 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -37982,14 +37022,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_0_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4112 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38206,14 +37242,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_3_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4139 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38382,14 +37414,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_6_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4160 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38486,14 +37514,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_9_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4172 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38662,14 +37686,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_12_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4193 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38766,14 +37786,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_15_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4205 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -38942,14 +37958,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_18_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4226 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39046,14 +38058,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_toruswvy_rb_21_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4238 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39342,14 +38350,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_2_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4274 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39558,14 +38562,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_5_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4300 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39662,14 +38662,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_8_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4312 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39838,14 +38834,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_11_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4333 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -39942,14 +38934,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_14_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4345 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40118,14 +39106,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_17_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4366 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40222,14 +39206,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_20_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4378 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40398,14 +39378,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_23_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4399 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40582,14 +39558,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_1_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4421 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40838,14 +39810,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_4_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4452 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -40942,14 +39910,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_7_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4464 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -41118,14 +40082,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_10_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4485 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -41222,14 +40182,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_13_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4497 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -41398,14 +40354,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_16_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4518 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -41502,14 +40454,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_19_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4530 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -41678,14 +40626,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "rv_vase_rev_rb_22_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/review_adversarial.json#4551 (upstream review adversarial sweep (PR #102): every op on loop index 0..23 of each B-rep)",
       "values_compared": 0
     },
@@ -59418,14 +58362,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#44 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -59470,14 +58410,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#50 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -59522,14 +58458,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#56 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -59658,14 +58590,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#72 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60030,14 +58958,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#118 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60086,14 +59010,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#124 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60142,14 +59062,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#130 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60278,14 +59194,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#146 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60654,14 +59566,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#192 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60706,14 +59614,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#198 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60758,14 +59662,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#204 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -60890,14 +59790,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#220 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -61278,14 +60174,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#266 (upstream tests/prog_test/src/smAdvancedTest.cpp:235)",
       "values_compared": 0
     },
@@ -61330,14 +60222,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#272 (upstream tests/prog_test/src/smAdvancedTest.cpp:235)",
       "values_compared": 0
     },
@@ -61382,14 +60270,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#278 (upstream tests/prog_test/src/smAdvancedTest.cpp:235)",
       "values_compared": 0
     },
@@ -61518,14 +60402,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#294 (upstream tests/prog_test/src/smAdvancedTest.cpp:235)",
       "values_compared": 0
     },
@@ -61890,14 +60770,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#340 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -61942,14 +60818,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#346 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -61994,14 +60866,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#352 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -62126,14 +60994,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#368 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
@@ -62498,14 +61362,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#414 (upstream tests/prog_test/src/smTessTest.cpp:3923)",
       "values_compared": 0
     },
@@ -62550,14 +61410,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#420 (upstream tests/prog_test/src/smTessTest.cpp:3923)",
       "values_compared": 0
     },
@@ -62602,14 +61458,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#426 (upstream tests/prog_test/src/smTessTest.cpp:3923)",
       "values_compared": 0
     },
@@ -62734,14 +61586,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#442 (upstream tests/prog_test/src/smTessTest.cpp:3923)",
       "values_compared": 0
     },
@@ -63106,14 +61954,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#488 (upstream tests/prog_test/src/smAdvancedTest.cpp:339)",
       "values_compared": 0
     },
@@ -63158,14 +62002,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#494 (upstream tests/prog_test/src/smAdvancedTest.cpp:339)",
       "values_compared": 0
     },
@@ -63210,14 +62050,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#500 (upstream tests/prog_test/src/smAdvancedTest.cpp:339)",
       "values_compared": 0
     },
@@ -63342,14 +62178,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#516 (upstream tests/prog_test/src/smAdvancedTest.cpp:339)",
       "values_compared": 0
     },
@@ -63714,14 +62546,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#562 (upstream tests/prog_test/src/smAdvancedTest.cpp:443)",
       "values_compared": 0
     },
@@ -63766,14 +62594,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#568 (upstream tests/prog_test/src/smAdvancedTest.cpp:443)",
       "values_compared": 0
     },
@@ -63818,14 +62642,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#574 (upstream tests/prog_test/src/smAdvancedTest.cpp:443)",
       "values_compared": 0
     },
@@ -63950,14 +62770,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#590 (upstream tests/prog_test/src/smAdvancedTest.cpp:443)",
       "values_compared": 0
     },
@@ -64338,14 +63154,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#636 (upstream tests/prog_test/src/smTessTest.cpp:3883)",
       "values_compared": 0
     },
@@ -64390,14 +63202,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#642 (upstream tests/prog_test/src/smTessTest.cpp:3883)",
       "values_compared": 0
     },
@@ -64442,14 +63250,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#648 (upstream tests/prog_test/src/smTessTest.cpp:3883)",
       "values_compared": 0
     },
@@ -64578,14 +63382,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "sphere_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#664 (upstream tests/prog_test/src/smTessTest.cpp:3883)",
       "values_compared": 0
     },
@@ -64966,14 +63766,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#710 (upstream tests/prog_test/src/smAdvancedTest.cpp:2406)",
       "values_compared": 0
     },
@@ -65018,14 +63814,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#716 (upstream tests/prog_test/src/smAdvancedTest.cpp:2406)",
       "values_compared": 0
     },
@@ -65070,14 +63862,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#722 (upstream tests/prog_test/src/smAdvancedTest.cpp:2406)",
       "values_compared": 0
     },
@@ -65206,14 +63994,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#738 (upstream tests/prog_test/src/smAdvancedTest.cpp:2406)",
       "values_compared": 0
     },
@@ -65594,14 +64378,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#784 (upstream tests/prog_test/src/smAdvancedTest.cpp:2543)",
       "values_compared": 0
     },
@@ -65646,14 +64426,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#790 (upstream tests/prog_test/src/smAdvancedTest.cpp:2543)",
       "values_compared": 0
     },
@@ -65698,14 +64474,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#796 (upstream tests/prog_test/src/smAdvancedTest.cpp:2543)",
       "values_compared": 0
     },
@@ -65834,14 +64606,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#812 (upstream tests/prog_test/src/smAdvancedTest.cpp:2543)",
       "values_compared": 0
     },
@@ -66222,14 +64990,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#858 (upstream tests/prog_test/src/smAdvancedTest.cpp:2188)",
       "values_compared": 0
     },
@@ -66274,14 +65038,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#864 (upstream tests/prog_test/src/smAdvancedTest.cpp:2188)",
       "values_compared": 0
     },
@@ -66326,14 +65086,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#870 (upstream tests/prog_test/src/smAdvancedTest.cpp:2188)",
       "values_compared": 0
     },
@@ -66462,14 +65218,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#886 (upstream tests/prog_test/src/smAdvancedTest.cpp:2188)",
       "values_compared": 0
     },
@@ -66850,14 +65602,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "torus_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#932 (upstream tests/prog_test/src/smAdvancedTest.cpp:41)",
       "values_compared": 0
     },
@@ -66902,14 +65650,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "torus_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#938 (upstream tests/prog_test/src/smAdvancedTest.cpp:41)",
       "values_compared": 0
     },
@@ -66954,14 +65698,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "torus_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#944 (upstream tests/prog_test/src/smAdvancedTest.cpp:41)",
       "values_compared": 0
     },
@@ -67090,14 +65830,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "torus_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#960 (upstream tests/prog_test/src/smAdvancedTest.cpp:41)",
       "values_compared": 0
     },
@@ -67478,14 +66214,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1006 (upstream tests/prog_test/src/smAdvancedTest.cpp:547)",
       "values_compared": 0
     },
@@ -67530,14 +66262,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1012 (upstream tests/prog_test/src/smAdvancedTest.cpp:547)",
       "values_compared": 0
     },
@@ -67582,14 +66310,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1018 (upstream tests/prog_test/src/smAdvancedTest.cpp:547)",
       "values_compared": 0
     },
@@ -67718,14 +66442,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1034 (upstream tests/prog_test/src/smAdvancedTest.cpp:547)",
       "values_compared": 0
     },
@@ -68106,14 +66826,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev_044_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1080 (upstream tests/prog_test/src/smAdvancedTest.cpp:703)",
       "values_compared": 0
     },
@@ -68158,14 +66874,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev_050_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1086 (upstream tests/prog_test/src/smAdvancedTest.cpp:703)",
       "values_compared": 0
     },
@@ -68210,14 +66922,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev_056_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1092 (upstream tests/prog_test/src/smAdvancedTest.cpp:703)",
       "values_compared": 0
     },
@@ -68346,14 +67054,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev_rebuilt_014_flip",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.loopuse/upstream_files.json#1108 (upstream tests/prog_test/src/smAdvancedTest.cpp:703)",
       "values_compared": 0
     },
@@ -68383,14 +67087,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=2530586264791566161",
       "values_compared": 0
     },
@@ -68525,14 +67225,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68554,14 +67250,10 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68647,14 +67339,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00017",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68716,14 +67404,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68840,38 +67524,26 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00040",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00041",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00042",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -68981,14 +67653,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00056",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69251,14 +67919,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00089",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69403,14 +68067,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00107",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69779,26 +68439,18 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00151",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00152",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69819,14 +68471,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00155",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69921,14 +68569,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00167",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -69997,14 +68641,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00176",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70083,14 +68723,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70217,14 +68853,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00202",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70393,14 +69025,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00222",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70421,14 +69049,10 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00225",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70632,14 +69256,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00250",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70855,14 +69475,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00277",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70883,14 +69499,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00280",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -70919,14 +69531,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00284",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71355,26 +69963,18 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00337",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00338",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71436,14 +70036,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00346",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71505,14 +70101,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00354",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71541,14 +70133,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00358",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71606,14 +70194,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00365",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71788,14 +70372,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00387",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71816,14 +70396,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00390",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -71853,14 +70429,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00394",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72153,14 +70725,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00430",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72213,14 +70781,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00437",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72306,14 +70870,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00448",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72363,14 +70923,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00454",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72383,14 +70939,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00456",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72561,26 +71113,18 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00478",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72723,14 +71267,10 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00496",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -72898,14 +71438,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "extra00517",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=269157856",
       "values_compared": 0
     },
@@ -73584,16 +72120,15 @@
     }
   ],
   "cases_both_errored": 333,
-  "cases_deferred": 604,
+  "cases_deferred": 238,
   "cases_failed": 0,
-  "cases_passed": 8250,
+  "cases_passed": 8616,
   "cases_total": 8854,
   "deferred_by_unit": {
     "intersect.surface_drop_lib_p3": 48,
     "surface.surf_of_extrusion_p2": 33,
     "surface.surface_p2": 70,
-    "topology.brep_p10": 87,
-    "topology.face_p4": 366
+    "topology.brep_p10": 87
   },
   "max_rel_err": 0.0,
   "pass": true,

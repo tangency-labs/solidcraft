@@ -9458,16 +9458,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_plane10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#38 (upstream tests/prog_test/src/smTopoTest.cpp:1640)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9574,16 +9570,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_Mouse",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#51 (upstream upstream/TestFiles/pt_TestFiles/Mouse.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9686,16 +9678,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_Endcap",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#64 (upstream upstream/TestFiles/pt_TestFiles/Endcap.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9802,16 +9790,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_box_with_large_fillet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#77 (upstream upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9918,16 +9902,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_cone",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#90 (upstream upstream/TestFiles/pt_TestFiles/cone.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10034,16 +10014,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_disk",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#103 (upstream upstream/TestFiles/pt_TestFiles/disk.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10150,16 +10126,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_ellips_ts2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#116 (upstream upstream/TestFiles/pt_TestFiles/ellips_ts2.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10266,16 +10238,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_plane_circ",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#129 (upstream upstream/TestFiles/pt_TestFiles/plane_circ.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10382,16 +10350,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_plane_square",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#142 (upstream upstream/TestFiles/pt_TestFiles/plane_square.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10498,16 +10462,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_sphere",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#155 (upstream upstream/TestFiles/pt_TestFiles/sphere.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10614,16 +10574,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_surf_extrude",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#168 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10730,16 +10686,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_surf_rev",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#181 (upstream upstream/TestFiles/pt_TestFiles/surf_rev.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10846,16 +10798,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_surf_sphere150",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#194 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10962,16 +10910,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_torus",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#207 (upstream upstream/TestFiles/pt_TestFiles/torus.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11078,16 +11022,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_toruswvy",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#220 (upstream upstream/TestFiles/pt_TestFiles/toruswvy.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11194,16 +11134,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "swap_vase_rev",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/tolerance.json#233 (upstream upstream/TestFiles/pt_TestFiles/vase_rev.smb)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11258,16 +11194,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490860",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11334,16 +11266,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490869",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11370,16 +11298,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0019",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490873",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11718,16 +11642,12 @@
       "values_compared": 36
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0058",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490912",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -11862,16 +11782,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490928",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11918,16 +11834,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0080",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490934",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12042,16 +11954,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0094",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490948",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12242,16 +12150,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0115",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490969",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12330,16 +12234,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0125",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490979",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -12370,16 +12270,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0129",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511490983",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12730,16 +12626,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0171",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491025",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13098,16 +12990,12 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0214",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491068",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13118,16 +13006,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0216",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491070",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13294,16 +13178,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0236",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491090",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14126,16 +14006,12 @@
       "values_compared": 31
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0332",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491186",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -14246,16 +14122,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0344",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491198",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14318,28 +14190,20 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0352",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491206",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0353",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491207",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14426,16 +14290,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0364",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491218",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -14570,16 +14430,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0379",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491233",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14650,16 +14506,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0388",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491242",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14734,16 +14586,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0397",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=16427432855511491251",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14763,9 +14611,9 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 272,
+  "cases_deferred": 234,
   "cases_failed": 0,
-  "cases_passed": 1437,
+  "cases_passed": 1475,
   "cases_total": 1709,
   "deferred_by_unit": {
     "intersect.curve_class_p2": 1,
@@ -14773,8 +14621,7 @@
     "query.brep": 93,
     "surface.surface_cache_p1": 20,
     "topology.face_p2": 19,
-    "topology.face_p3": 16,
-    "topology.face_p4": 38
+    "topology.face_p3": 16
   },
   "max_rel_err": 0.0,
   "pass": true,

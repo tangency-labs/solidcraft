@@ -274,20 +274,24 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     match i {
         Inputs::Boolean { operation, .. } => {
-            two(api::boolean(&k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()))
+            two(api::boolean(&mut k, Brep::new(), Brep::new(), op(*operation)?).map(|_| ()))
         }
-        Inputs::Union { .. } => two(api::boolean_union(&k, Brep::new(), Brep::new()).map(|_| ())),
+        Inputs::Union { .. } => {
+            two(api::boolean_union(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+        }
         Inputs::Difference { .. } => {
-            two(api::boolean_difference(&k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_difference(&mut k, Brep::new(), Brep::new()).map(|_| ()))
         }
         Inputs::Intersection { .. } => {
-            two(api::boolean_intersection(&k, Brep::new(), Brep::new()).map(|_| ()))
+            two(api::boolean_intersection(&mut k, Brep::new(), Brep::new()).map(|_| ()))
         }
-        Inputs::Merge { .. } => two(api::boolean_merge(&k, Brep::new(), Brep::new()).map(|_| ())),
+        Inputs::Merge { .. } => {
+            two(api::boolean_merge(&mut k, Brep::new(), Brep::new()).map(|_| ()))
+        }
         Inputs::WithOptions {
             operation, flags, ..
         } => two(api::boolean_with_options(
-            &k,
+            &mut k,
             Brep::new(),
             Brep::new(),
             op(*operation)?,

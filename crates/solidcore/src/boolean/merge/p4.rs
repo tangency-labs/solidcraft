@@ -305,24 +305,19 @@ pub trait ManifoldIntersector {
         attributes: &mut AttributeStore,
         single_vertices: &[VertexId],
     ) -> Result<FixedGaps>;
-    /// `MakeFaceuse(pFU1,pOldRegion,pNewRegion,pOrigRegion,&NewFs)`.
+    /// `MakeFaceuse(pFU1,pOldRegion,pNewRegion,pOrigRegion,&NewFs)`
+    /// (`boolean::merge::p2::make_faceuse` with the same mates).
     /// Its copy notifications use this same caller store, including when a face
     /// already has a mate. Build `TopologyCopy` with these attributes.
     fn make_faceuse(
         &mut self,
-        _kernels: &mut BooleanKernels<'_>,
-        _primary: &mut Brep,
-        _other: &mut Brep,
-        _attributes: &mut AttributeStore,
-        _faceuse: FaceuseId,
-        _original_region: Option<RegionId>,
-    ) -> Result<MadeFaceuse> {
-        // UNPORTED(boolean.merge_p2): SmMerge::MakeFaceuse
-        Err(SolidError::unported(
-            "SmMerge::MakeFaceuse",
-            "boolean.merge_p2",
-        ))
-    }
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        attributes: &mut AttributeStore,
+        faceuse: FaceuseId,
+        original_region: Option<RegionId>,
+    ) -> Result<MadeFaceuse>;
     /// `DeleteFaces(sDelFaces,&sKeepAsWires)`; the wire list is non-null even empty.
     fn delete_faces(
         &mut self,

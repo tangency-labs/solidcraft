@@ -21,7 +21,8 @@ struct P2Access : SmMerge {
         v.push_back(m_vTI.GetThisApproxTol3d());
         v.push_back(m_vTI.GetThisAngTolRad());
         for (SmBoolean f : {m_bCookieCutter, m_bImprinting, m_bBooleanPostProcess,
-                            m_bImprintAndClassifyFaces, m_bKeepOtherBrep})
+                            m_bImprintAndClassifyFaces, m_bKeepOtherBrep, m_bManifoldBoolean,
+                            m_bIntersectionLoopClosed})
             v.push_back(f ? 1.0 : 0.0);
         v.push_back((double)m_lTagID);
     }
