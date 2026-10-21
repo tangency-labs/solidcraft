@@ -20,6 +20,7 @@ pub struct RawBrep {
     _private: [u8; 0],
 }
 
+#[cfg(feature = "native")]
 pub type LogFn = extern "C" fn(user: *mut c_void, level: i32, line: *const c_char);
 
 #[cfg(feature = "native")]
@@ -88,7 +89,16 @@ mod calls {
     pub fn init() -> i32 {
         unsafe { smlib_init() }
     }
-    pub fn set_log(log: Option<LogFn>) {
+    /// Routes SMLib's log lines to `sink` (`None`: stops them).
+    pub fn set_log(sink: Option<fn(i32, String)>) {
+        let log: Option<LogFn> = match sink {
+            Some(sink) => {
+                // The first sink stays: init sets it once, and lines keep a single destination.
+                let _ = SINK.set(sink);
+                Some(trampoline)
+            }
+            None => None,
+        };
         unsafe { smlib_set_log(log, std::ptr::null_mut()) }
     }
     pub fn set_dump_dir(dir: Option<&CStr>) -> i32 {
@@ -139,7 +149,7 @@ mod calls {
     pub fn init() -> i32 {
         NOT_BUILT
     }
-    pub fn set_log(_: Option<LogFn>) {}
+    pub fn set_log(_: Option<fn(i32, String)>) {}
     pub fn set_dump_dir(_: Option<&CStr>) -> i32 {
         NOT_BUILT
     }
@@ -168,10 +178,16 @@ mod calls {
 
 pub use calls::*;
 
-/// A log line from the C API: NUL-terminated and valid for the callback's duration.
-pub fn line(p: *const c_char) -> String {
-    if p.is_null() {
-        return String::new();
+/// Where [`set_log`] sends SMLib's log lines.
+#[cfg(feature = "native")]
+static SINK: std::sync::OnceLock<fn(i32, String)> = std::sync::OnceLock::new();
+
+/// The log callback the C API calls: `line` is NUL-terminated and valid for the call's duration
+/// (smlib.h), so it is read here, inside the one module that touches raw pointers.
+#[cfg(feature = "native")]
+extern "C" fn trampoline(_: *mut c_void, level: i32, line: *const c_char) {
+    let text = if line.is_null() { String::new() } else { unsafe { std::ffi::CStr::from_ptr(line) }.to_string_lossy().into_owned() };
+    if let Some(sink) = SINK.get() {
+        sink(level, text);
     }
-    unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
