@@ -20,17 +20,17 @@ const DEFAULT_TIMEOUT_S: u64 = 180;
 /// Per kernel, how many cases ended in each status.
 type StatusCounts = BTreeMap<String, BTreeMap<String, usize>>;
 
-struct Options {
-    kernels: Vec<String>,
+pub(crate) struct Options {
+    pub(crate) kernels: Vec<String>,
     cli: Option<String>,
     area: Option<String>,
     timeout: Duration,
-    jobs: usize,
+    pub(crate) jobs: usize,
     /// Where to keep every case's full result as JSON.
     results: Option<String>,
 }
 
-fn options(rest: &[&str]) -> Result<Options, String> {
+pub(crate) fn options(rest: &[&str]) -> Result<Options, String> {
     let arg = |name: &str| rest.iter().position(|a| *a == name).and_then(|i| rest.get(i + 1)).map(|s| s.to_string());
     let kernels = match arg("--kernel").as_deref() {
         None | Some("default") => vec!["default".to_string()],
@@ -43,7 +43,7 @@ fn options(rest: &[&str]) -> Result<Options, String> {
     Ok(Options { kernels, cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, results: arg("--results") })
 }
 
-fn read(path: &Path) -> Value {
+pub(crate) fn read(path: &Path) -> Value {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
 }
 
@@ -66,8 +66,16 @@ fn cases(dir: &Path, only: Option<&str>) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
-/// One case on one kernel, in its own process, killed after the timeout.
+/// One case on one kernel, in its own process, killed after the timeout; `path` is the case's
+/// directory under `tests/kernel-cases/`.
 fn run_one(o: &Options, kernel: &str, case: &Path) -> Value {
+    let mut r = run_case(o, kernel, case);
+    let base = root().join("tests/kernel-cases");
+    r["path"] = json!(case.strip_prefix(&base).unwrap_or(case).to_string_lossy().replace('\\', "/"));
+    r
+}
+
+fn run_case(o: &Options, kernel: &str, case: &Path) -> Value {
     let rel = case.strip_prefix(root()).unwrap_or(case).to_path_buf();
     let mut cmd = match &o.cli {
         Some(bin) => Command::new(bin),
@@ -111,7 +119,8 @@ fn run_one(o: &Options, kernel: &str, case: &Path) -> Value {
     };
     match serde_json::from_slice::<Value>(&out.stdout).ok().and_then(|v| v.as_array().and_then(|a| a.first().cloned())) {
         Some(mut r) => {
-            r["seconds"] = json!(start.elapsed().as_secs_f64());
+            // `seconds` is the commands' own time, measured inside the case's process.
+            r["process_seconds"] = json!(start.elapsed().as_secs_f64());
             r
         }
         // No JSON: the process died (a native crash, an abort).
@@ -123,7 +132,7 @@ fn run_one(o: &Options, kernel: &str, case: &Path) -> Value {
     }
 }
 
-fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
+pub(crate) fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
     let jobs: Vec<(String, PathBuf)> = o.kernels.iter().flat_map(|k| list.iter().map(move |c| (k.clone(), c.clone()))).collect();
     let next = Arc::new(Mutex::new(0usize));
     let results = Arc::new(Mutex::new(vec![Value::Null; jobs.len()]));
@@ -157,7 +166,7 @@ fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
     Arc::try_unwrap(results).ok().and_then(|m| m.into_inner().ok()).unwrap_or_default()
 }
 
-fn cell(r: Option<&Value>) -> String {
+pub(crate) fn cell(r: Option<&Value>) -> String {
     let Some(r) = r else { return String::new() };
     let status = r["status"].as_str().unwrap_or("?");
     let mut notes: Vec<String> = r["checks"]
@@ -318,6 +327,9 @@ fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) ->
 }
 
 pub fn run(rest: &[&str]) -> Result<(), String> {
+    if rest.contains(&"--ladder") {
+        return crate::kernel_ladder::run(rest);
+    }
     let o = options(rest)?;
     let dir = root().join("tests/kernel-cases");
     let list = cases(&dir, o.area.as_deref())?;

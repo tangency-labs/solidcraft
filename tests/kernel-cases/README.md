@@ -47,6 +47,9 @@ Each case has:
   files the case writes (an export).
 - `expected.json`: the right answer, graded by `solidcraft-cli kernel-cases`.
 
+A script may start with `"base": "<case directory>"` (relative to its own directory): that case's
+commands, and its own base's, run first. The ladder's cases build on each other this way.
+
 Each area also has `skipped.json` (or several, `skipped-<part>.json`, where an area is triaged in
 parts): every issue and PR looked at that did not become a case, with one line each saying why.
 
@@ -81,11 +84,38 @@ parts): every issue and PR looked at that did not become a case, with one line e
 | `body_count`, `faces`, `edges`, `vertices` | Exact counts, where the geometry fixes them. Faces and edges count whole analytic surfaces and curves once (a full cylinder side is one face). |
 | `volume_mm3`, `area_mm2`, `center_of_mass`, `bbox` | As in `tests/oracle`: totals over every body, relative tolerance 1e-3 for volume and area, 1e-3 of the box diagonal for positions. |
 | `tolerance` | Optional overrides: `rel`, `abs_mm`. |
+| `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
+
+## The complexity ladder
+
+`ladder/` orders kernel operations by complexity instead of by where they went wrong: tiers from
+primitives through degenerate booleans, analytic and spline profiles, holes and taps, threads,
+fillets, chamfers, shells, patterns, to whole parts. Later tiers build on earlier tiers' shapes (a
+running part grows one tier at a time through `base`), so the last case carries everything.
+
+- `ladder/<NN-tier>/<NNN-name>/`: cases in the format above, each a test with its own answer.
+- `ladder/ladder.json`: the tiers in order and, per tier, its cases in order (paths under
+  `tests/kernel-cases/`, so a tier may also list a rig case from another area).
+- `ladder/golden.json`: per case and kernel the status, the commands' time and what the kernel
+  made (counts, volume, area). Runs compare with it and flag slowdowns (over twice the time and
+  0.25 s more) and changed counts or statuses. It is re-recorded only with a reason.
+- `tools/kernel-ladder/cases.py` writes the recipes and answers (standard-library Python; each
+  `method` gives the derivation).
+
+```sh
+cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-cli
+cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-cli --record "why"
+```
+
+`--record` measures one case at a time, rewrites the golden and sorts each tier by the first
+kernel's time, fastest first; commit both files. The report, `docs/kernel-ladder.md`, gives per
+tier and kernel the counts per status and the **frontier**: the first case in ladder order the
+kernel fails.
 
 ## Results
 
 Per case and kernel: **pass**; **fail** with the numbers; **not supported yet** (the kernel says
-so); **crash** (a panic caught by the guards, or the process died); **hang** (no result before
+so, or the case names a `missing` capability); **crash** (a panic caught by the guards, or the process died); **hang** (no result before
 the timeout).
 
 ## Exporting to solidcore
