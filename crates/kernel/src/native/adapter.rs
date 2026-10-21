@@ -330,6 +330,20 @@ pub(super) fn decode(body: b::Brep) -> Result<mt::Solid> {
 }
 
 pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid> {
+    decode_numbered(body, producer).map(|(solid, _)| solid)
+}
+
+/// The identities of a decoded record's faces and edges, by record index.
+#[cfg_attr(not(feature = "smlib"), allow(dead_code))]
+pub(super) struct Numbering {
+    pub faces: Vec<mt::FaceID>,
+    pub edges: Vec<mt::EdgeID>,
+}
+
+/// [`decode_from`], with each record face's and edge's identity in the solid: a caller holding
+/// indices into the record (an SMLib history) checks with them that the solid's face and edge
+/// order is the record's.
+pub(super) fn decode_numbered(body: b::Brep, producer: Producer) -> Result<(mt::Solid, Numbering)> {
     body.validate().map_err(invalid)?;
     body.check_geometry().map_err(invalid)?;
     compatible(&body, producer)?;
@@ -340,6 +354,7 @@ pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid
         .into_iter()
         .map(|e| Ok(mt::Edge::new_unchecked(vertex(e.vertices[0])?, vertex(e.vertices[1])?, load_edge_curve(e.curve, e.interval)?)))
         .collect::<Result<Vec<_>>>()?;
+    let mut face_ids: Vec<Option<mt::FaceID>> = vec![None; faces.len()];
     let mut faces: Vec<Option<b::Face>> = faces.into_iter().map(Some).collect();
     let shells = shells
         .into_iter()
@@ -349,7 +364,11 @@ pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid
                 .map(|u| {
                     // A face in two shells (both its sides used) is refused here: truck has one.
                     let f = faces.get_mut(u.face as usize).and_then(Option::take).ok_or_else(|| unsupported("a face in two shells"))?;
-                    face(f, u.forward, &edges)
+                    let made = face(f, u.forward, &edges)?;
+                    if let Some(slot) = face_ids.get_mut(u.face as usize) {
+                        *slot = Some(made.id());
+                    }
+                    Ok(made)
                 })
                 .collect::<Result<mt::Shell>>(),
             b::Shell::Faces { .. } => Err(unsupported("wire edges embedded in a shell")),
@@ -359,7 +378,9 @@ pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid
     if shells.iter().any(|s| s.shell_condition() == mt::ShellCondition::Irregular) {
         return Err(invalid("non-manifold shell"));
     }
-    Ok(mt::Solid::new_unchecked(shells))
+    let faces = face_ids.into_iter().collect::<Option<Vec<_>>>().ok_or_else(|| invalid("a face no shell uses"))?;
+    let numbering = Numbering { faces, edges: edges.iter().map(mt::Edge::id).collect() };
+    Ok((mt::Solid::new_unchecked(shells), numbering))
 }
 /// A face's topology as recorded, references already checked: built as the kernel built it,
 /// without truck's checks for wires that touch themselves (a seam edge used twice, a closed edge

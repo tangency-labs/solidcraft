@@ -157,8 +157,65 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
 /// says (`Body::oriented`), never by meshing it.
 #[cfg(feature = "smlib")]
 pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
-    let record = brep.to_native().map_err(|e| KernelError::Failed(e.to_string()))?;
-    guard("decode SMLib B-rep", || Body::oriented(adapter::decode_from(record, adapter::Producer::Foreign)?))
+    body_from_smlib_ordered(brep).map(|(body, _)| body)
+}
+
+/// [`body_from_smlib`], with where each of SMLib's faces and edges is in the body's face and
+/// edge order ([`crate::history`]): `None` where the body did not keep the record's order (a
+/// rebuild that walked a face's edges the other way).
+#[cfg(feature = "smlib")]
+pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(Body, Option<solidcraft_smlib::history::Order>)> {
+    let (record, order) = brep.to_native_ordered().map_err(|e| KernelError::Failed(e.to_string()))?;
+    guard("decode SMLib B-rep", || {
+        let (solid, numbering) = adapter::decode_numbered(record, adapter::Producer::Foreign)?;
+        let body = Body::oriented(solid)?;
+        let faces_kept = body.solid.face_iter().map(|f| f.id()).eq(numbering.faces.iter().copied());
+        let edges_kept = crate::body::edge_order(body.solid.face_iter()).0.iter().map(|e| e.id()).eq(numbering.edges.iter().copied());
+        Ok((body, (faces_kept && edges_kept).then_some(order)))
+    })
+}
+
+/// `body` in SMLib ([`smlib_body`]), with where each of SMLib's faces and edges is in the body's
+/// face and edge order: SMLib's export of the imported body, checked to number every face,
+/// edge and vertex as the body's record does. `None` where it does not.
+#[cfg(feature = "smlib")]
+pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    let record = brep_record(body)?;
+    let brep = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    let order = match brep.to_native_ordered() {
+        Ok((back, order)) => same_numbering(&record, &back).then_some(order),
+        Err(e) => {
+            log::debug!(target: "smlib", "no order for an operand: {e}");
+            None
+        }
+    };
+    Ok((brep, order))
+}
+
+/// Whether two records of one body number its faces, edges and vertices alike: the same loops of
+/// the same edges, the same edge ends, and each vertex where the other's is.
+#[cfg(feature = "smlib")]
+fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Brep) -> bool {
+    use solidcraft_geom::brep::Loop;
+    if a.faces.len() != b.faces.len() || a.edges.len() != b.edges.len() || a.vertices.len() != b.vertices.len() {
+        return false;
+    }
+    let loops_alike = a.faces.iter().zip(&b.faces).all(|(fa, fb)| {
+        fa.loops.len() == fb.loops.len()
+            && fa.loops.iter().zip(&fb.loops).all(|pair| match pair {
+                (Loop::Edges { edges: x }, Loop::Edges { edges: y }) => {
+                    x.len() == y.len() && x.iter().zip(y).all(|(u, w)| u.edge == w.edge && u.forward == w.forward)
+                }
+                (Loop::Vertex { vertex: x }, Loop::Vertex { vertex: y }) => x == y,
+                _ => false,
+            })
+    });
+    let ends_alike = a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices == y.vertices);
+    let at_same_place = a.vertices.iter().zip(&b.vertices).all(|(x, y)| {
+        let d = (0..3).map(|k| (x.point[k] - y.point[k]).powi(2)).sum::<f64>().sqrt();
+        d <= x.tolerance + y.tolerance + a.tolerance + b.tolerance
+    });
+    loops_alike && ends_alike && at_same_place
 }
 
 fn validate_topology(saved: &SavedBody) -> Result<()> {

@@ -525,3 +525,50 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         }
     }
 }
+
+/// The same booleans through SMLib: its tags, renumbered into the operands' and the result's
+/// face and edge order, give a history that holds against the geometry.
+#[cfg(feature = "smlib")]
+mod smlib {
+    use super::*;
+    use crate::boolean_backend::smlib_boolean;
+
+    fn through_smlib(a: &Body, b: &Body, op: BoolOp) -> Body {
+        smlib_boolean(a, b, op).unwrap().expect("a result")
+    }
+
+    #[test]
+    fn operands_number_as_their_records() {
+        let bodies = [boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0), crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap()];
+        for (i, b) in bodies.iter().enumerate() {
+            let (_, order) = crate::native::smlib_body_ordered(b).unwrap();
+            assert!(order.is_some(), "body {i}");
+        }
+    }
+
+    #[test]
+    fn box_minus_cylinder() {
+        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap();
+        let r = through_smlib(&a, &b, BoolOp::Cut);
+        let h = verified(&r, &[&a, &b], 0.01);
+        assert!(from(h, face(0, 0)).len() + from(h, face(0, 1)).len() >= 1, "{}", show(h));
+    }
+
+    #[test]
+    fn box_union_box() {
+        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = boxed(5.0, 2.0, 2.0, 15.0, 8.0, 8.0);
+        let r = through_smlib(&a, &b, BoolOp::Union);
+        let h = verified(&r, &[&a, &b], 0.02);
+        assert_eq!(h.faces.len(), 11, "{}", show(h));
+        assert_eq!(meets(h).len(), 4, "{}", show(h));
+    }
+
+    #[test]
+    fn disjoint_intersection_is_empty() {
+        let a = boxed(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+        let b = boxed(5.0, 5.0, 5.0, 6.0, 6.0, 6.0);
+        assert!(smlib_boolean(&a, &b, BoolOp::Intersect).unwrap().is_none());
+    }
+}
