@@ -57,6 +57,12 @@ pub(crate) fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body
     imp::blend(body, "chamfer", Kind::Chamfer, edges, &vec![distance; edges.len()])
 }
 
+/// A chamfer `d1` back along the face facing up most (down most with `flip`), the other side by
+/// `side` ([`crate::chamfer_sides`]).
+pub(crate) fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+    imp::sides(body, edges, d1, side, flip)
+}
+
 /// One edge rounded with the radius `spline` (checked by the caller) along it from the end
 /// nearest `start` ([`crate::fillet_variable_spline`]).
 pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -76,7 +82,7 @@ mod imp {
     use std::collections::BTreeSet;
 
     use solidcraft_geom::Vec3;
-    use solidcraft_smlib::{Blend, Brep, CheckLevel};
+    use solidcraft_smlib::{Blend, Brep, ChamferSecond, CheckLevel, Error as SmError};
 
     use super::Kind;
     use crate::blend_variable::RadiusSpline;
@@ -166,6 +172,19 @@ mod imp {
         run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
     }
 
+    pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {
+        body.require_brep("chamfer")?;
+        sizes_ok("chamfer", &vec![d1; edges.len()])?;
+        let picked = resolve(body, edges)?;
+        let second = match side {
+            crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
+            crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
+        };
+        let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
+        let tol = pick_tolerance(body);
+        run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+    }
+
     pub(super) fn variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
         body.require_brep("fillet")?;
         if !start.is_finite() {
@@ -184,7 +203,10 @@ mod imp {
         guard(what, || {
             let (sb, order) = smlib_body_ordered(body)?;
             let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
-            let r = op(&tagged).map_err(|e| failed(what, "operation", e))?;
+            let r = op(&tagged).map_err(|e| match e {
+                SmError::Unsupported => super::unsupported(&format!("this {what}, which SMLib cannot build exactly")),
+                e => failed(what, "operation", e),
+            })?;
             let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
             if !check.is_valid() {
                 let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
@@ -248,6 +270,10 @@ mod imp {
     }
 
     pub(super) fn variable(_: &Body, _: Vec3, _: Vec3, _: &RadiusSpline) -> Result<Body> {
+        Err(not_built())
+    }
+
+    pub(super) fn sides(_: &Body, _: &[Vec3], _: f64, _: crate::ChamferSide, _: bool) -> Result<Body> {
         Err(not_built())
     }
 }
@@ -342,6 +368,28 @@ mod tests {
         assert!((volume(&back) - volume(&r)).abs() < 1e-6 * 8000.0);
     }
 
+    /// A chamfer 5 back along the top and 2 down the side of the cube's edge y = 20, z = 20 (or
+    /// 2 along the top and 5 down with `flip`): a 5 × 2 / 2 triangle along the 20 mm edge, its
+    /// face coming from the edge.
+    #[test]
+    fn a_chamfer_takes_its_two_setbacks() {
+        let b = cube();
+        let at = Vec3::new(10.0, 20.0, 20.0);
+        for flip in [false, true] {
+            let r = imp::sides(&b, &[at], 5.0, crate::ChamferSide::Distance(2.0), flip).unwrap();
+            assert!(near(volume(&r), 8000.0 - 100.0), "{}", volume(&r));
+            let top = if flip { 18.0 } else { 15.0 };
+            assert!(
+                r.edges(0.01).unwrap().iter().any(|e| e.points.iter().all(|p| (p.y - top).abs() < 1e-6 && (p.z - 20.0).abs() < 1e-6)),
+                "flip {flip}"
+            );
+            let h = r.history().unwrap();
+            assert!(h.faces.iter().any(|f| f.origins == [crate::history::FaceOrigin::Edge { operand: 0, edge: edge_at(&b, at) }]));
+        }
+        let r = imp::sides(&b, &[at], 5.0, crate::ChamferSide::Angle(45f64.to_radians()), false).unwrap();
+        assert!(near(volume(&r), 8000.0 - 12.5 * 20.0), "{}", volume(&r));
+    }
+
     /// The ladder's 08/006: a 2 mm chamfer of a cylinder's top rim. SMLib's cone and rail lie some
     /// 2e-5 mm off the faces they bound, more than the kernel's working tolerance; the body keeps
     /// the tolerances SMLib's record gave them, so its own record (and the saved body's) is valid
@@ -366,6 +414,10 @@ mod tests {
     fn options_smlib_cannot_build_are_refused() {
         assert!(unsupported("x").to_string().contains("not supported yet"));
         let b = cube();
+        // A radius law with a corner (4 → 2 → 4, straight on both halves).
+        let corner = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 0.5, 1.0, 1.0], radii: vec![4.0, 2.0, 4.0] };
+        let e = imp::variable(&b, Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 20.0, 20.0), &corner).unwrap_err();
+        assert!(e.to_string().contains("not supported yet"), "{e}");
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
