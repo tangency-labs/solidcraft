@@ -93,3 +93,35 @@ fn a_cavity_comes_back_from_smlib() {
     let got = super::smlib_body(&back).unwrap().volume(1e-7).unwrap();
     assert!((got - (64_000.0 - 125.0)).abs() < 1e-6, "{got}");
 }
+
+/// A square revolved off the axis through three quarters of a turn: its flat ends are planes
+/// square to the axis (annular sectors), its walls cylinders.
+#[test]
+fn a_revolved_annulus_goes_with_its_flat_faces() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let square =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(4., 12.), Vec2::new(12., 12.), Vec2::new(12., 20.), Vec2::new(4., 20.)]), holes: vec![] };
+    let plane = Plane { y: v(0., 0., 1.), ..Plane::XZ };
+    let body = crate::revolve(&plane, &[square], Vec2::ZERO, Vec2::Y, 1.5 * PI).unwrap().pop().unwrap();
+    let s = super::smlib_body(&body).unwrap();
+    let check = s.check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    let exact = 0.75 * PI * (144.0 - 16.0) * 8.0;
+    let got = s.volume(1e-7).unwrap();
+    assert!((got - exact).abs() <= 1e-6 * exact, "SMLib volume {got}, exact {exact}");
+}
+/// A drill point (a cone ending in its apex) through SMLib and back measures as it went in.
+#[test]
+fn a_cone_apex_comes_back_measuring_as_it_went() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let r = 3.4;
+    let h = r / (59f64.to_radians()).tan();
+    let profile =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 3.0 - h), Vec2::new(r, 3.0), Vec2::new(r, 16.0), Vec2::new(0.0, 16.0)]), holes: vec![] };
+    let plane = Plane { origin: v(20.0, 15.0, 0.0), x: v(1., 0., 0.), y: v(0., 0., 1.) };
+    let tool = crate::revolve(&plane, &[profile], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
+    let back = super::body_from_smlib(&super::smlib_body(&tool).unwrap()).unwrap();
+    let (m0, m1) = (crate::measure(&tool).unwrap(), crate::measure(&back).unwrap());
+    assert!((m1.area - m0.area).abs() < 1e-5 * m0.area, "area {} -> {}", m0.area, m1.area);
+    assert!((m1.volume - m0.volume).abs() < 1e-5 * m0.volume, "volume {} -> {}", m0.volume, m1.volume);
+}

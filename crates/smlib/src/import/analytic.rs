@@ -1,8 +1,8 @@
 //! Revolutions and extruded circles as SMLib's analytic surfaces.
 //!
 //! A `placed_revolution` record holds a surface the way truck does (a profile turned about an
-//! axis, then placed); SMLib has no such surface, but every one truck makes for a cylinder, cone,
-//! sphere or torus is one of those exactly: a line along the axis, a line in a plane through it, a
+//! axis, then placed); SMLib has no such surface, but every one truck makes for a plane, cylinder, cone,
+//! sphere or torus is one of those exactly: a line square to the axis, a line along it, a line in a plane through it, a
 //! circle centred on it, a circle in a plane through it. A rational spline that is a circular arc
 //! swept straight along its axis (truck's extruded circles) is a cylinder. Each such face becomes
 //! that analytic surface with the face's range on it, checked point by point over the face's
@@ -21,7 +21,7 @@ use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 
 use super::{R, Unsupported};
 
-const NOT_ANALYTIC: Unsupported = Unsupported::NotYet("revolved surfaces other than cylinders, cones, spheres and tori");
+const NOT_ANALYTIC: Unsupported = Unsupported::NotYet("revolved surfaces other than planes, cylinders, cones, spheres and tori");
 
 /// `brep` with every revolution and extruded circle replaced by its analytic surface (borrowed
 /// when it has none).
@@ -44,8 +44,10 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
         // The angle about the axis starts at 0: the frame turns to the face's first angle (SMLib
         // refuses an analytic range past 360°). A torus's tube angle can't turn so: it starts
         // within the first turn, where SMLib's degree domains are at home.
-        turn_frame(&mut surface, range[0][0]);
-        range[0] = [0.0, range[0][1] - range[0][0]];
+        if !matches!(surface, b::Surface::Plane { .. }) {
+            turn_frame(&mut surface, range[0][0]);
+            range[0] = [0.0, range[0][1] - range[0][0]];
+        }
         if matches!(surface, b::Surface::Torus { .. }) {
             range[1] = first_turn(range[1]);
         }
@@ -255,7 +257,21 @@ impl Revolution {
             let (h0, h1) = (height(at(t[0])?), height(at(t[1])?));
             let (dh, dr) = (d.dot(self.z), d.dot(x));
             if dh.abs() <= 1e-12 * len {
-                return Err(NOT_ANALYTIC); // a disc: a plane, which a revolution face never is in the kernel
+                // A disc or an annulus: the plane square to the axis, its range the box round the
+                // sector the line sweeps (each end's radius at both end angles and every quarter
+                // turn between: in the plane a point is linear in the radius).
+                let (ra, rb) = (radial(at(t[0])?), radial(at(t[1])?));
+                let mut angles = vec![angle[0], angle[1]];
+                let mut q = (angle[0] / FRAC_PI_2).ceil() * FRAC_PI_2;
+                while q < angle[1] && angles.len() < 16 {
+                    angles.push(q);
+                    q += FRAC_PI_2;
+                }
+                let corners: Vec<[f64; 2]> = angles.iter().flat_map(|a| [ra, rb].map(|r| [r * a.cos(), r * a.sin()])).collect();
+                let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
+                let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+                let plane = b::Surface::Plane { origin: arr(foot), u_axis: arr(x), v_axis: arr(y) };
+                return Ok((plane, [[lo(0), hi(0)], [lo(1), hi(1)]]));
             }
             let r0 = radial(s) - dr / dh * height(s);
             let v = sorted(h0, h1);
@@ -329,6 +345,10 @@ fn analytic_uv(s: &b::Surface, p: Vec3, near: [f64; 2]) -> Option<[f64; 2]> {
         }
         a
     };
+    if let b::Surface::Plane { origin, u_axis, v_axis } = s {
+        let q = p - v3(*origin);
+        return Some([q.dot(v3(*u_axis)), q.dot(v3(*v_axis))]);
+    }
     let (frame, round) = match s {
         b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. } | b::Surface::Sphere { frame, .. } => (frame, 0.0),
         b::Surface::Torus { frame, major_radius, .. } => (frame, *major_radius),
