@@ -52,8 +52,11 @@ shells with opposite `forward`. `forward` means the face's normal in that shell 
 its surface's natural normal, ∂S/∂u × ∂S/∂v. In a closed shell, normals point out
 of the material.
 
-**Loops.** A face's first loop is its outer loop and is an edge loop. A vertex
-loop (a pole, a collapsed boundary) is only ever an inner loop. Loops are stored
+**Loops.** A face has one outer loop and any number of inner ones, in the
+producer's order: truck lists some holes before the outer loop, and an SMLib
+import puts the outer loop first, as SMLib requires. The first loop is an edge
+loop. A vertex loop (a pole, a collapsed boundary) is only ever an inner loop.
+Orientation tells outer from inner. Loops are stored
 relative to the surface's natural normal, whichever side a shell uses: seen from
 that normal, the outer loop runs counter-clockwise and inner loops clockwise.
 This lets one face sit in two shells without contradicting itself. An edge loop
@@ -82,7 +85,7 @@ paint and persistent names. The same holds for edges and vertices.
 1. Regions: the infinite region, then bounded regions in the producer's order.
 2. Shells and faces in order of first appearance, walking regions → shells →
    oriented faces.
-3. Edges in order of first appearance, walking faces → loops (outer first) →
+3. Edges in order of first appearance, walking faces → loops (in stored order) →
    oriented edges, then wire edges walking shells. A face whose first oriented
    face is reversed is walked backwards: each of its loops from its last
    oriented edge to its first. That is how a reversed face is traversed.
@@ -158,7 +161,12 @@ max, whatever the oriented edge's direction. Its interval must equal the edge's
 within 10⁻⁹ of the interval's magnitude (at least 1), room for a linear remap's
 rounding. A seam edge has two uses on one face, each with its own pcurve, a
 period apart. On a periodic surface a loop's pcurves are unwrapped, so each one
-starts where the one before it ends.
+starts where the one before it ends. A spline surface that closes on itself in a
+direction (knots clamped there, first and last control rows the same points with
+the same weights, within 10⁻⁹ of the control net's extent) is periodic in it for
+pcurves and tessellation, one active knot interval per period: a seam on it has
+its two uses an interval apart. The record is unchanged; a parameter outside the
+interval is evaluated a whole number of periods back inside it.
 
 Pcurves are SolidCraft's own, never a kernel's internal parameter space:
 `brep::pcurve::pcurves` computes them from a face's surface record and each
@@ -196,8 +204,11 @@ ends (within the edge's and the vertex's tolerances together); every oriented
 edge's pcurve, lifted through its face's surface, lies on the edge's curve at the
 interval's ends and middle (within the edge's) and starts on the same period as
 the use before it ends, except along a direction that collapses at a pole; every
-vertex loop's vertex lies on its face's surface (within the vertex's). It makes a
-fixed number of evaluations per record, so its work is linear in the item
+edge loop's pcurves enclose (u, v) area (more than 10⁻⁹ of the square of the
+loop's extent), and exactly one loop of each face, the outer, runs
+counter-clockwise about the natural normal, the rest clockwise (told apart by
+their areas, not their order); every vertex loop's vertex lies on its face's
+surface (within the vertex's). It makes a fixed number of evaluations per record, so its work is linear in the item
 budget, and a point it cannot evaluate is an error naming the record. It is not
 a certificate either: between the points it checks, an edge may still leave its
 surface. The truck adapter runs it before building topology, which truck does

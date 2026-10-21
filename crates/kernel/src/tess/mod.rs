@@ -737,6 +737,10 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
+    // Both evaluators take a closed spline's parameters inside its active interval.
+    for q in &mut all {
+        *q = s.wrap(*q);
+    }
     Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), surface: None, uv: all, fixed, normals: Vec::new(), flip: false, triangles })
 }
 

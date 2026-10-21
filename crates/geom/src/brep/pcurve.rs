@@ -13,9 +13,10 @@
 //!
 //! Periodic parameters are unwrapped along each curve, and each loop's uses are moved by whole
 //! periods so every use starts where the one before it ends: a seam edge used twice gets two
-//! pcurves a period apart. At a pole the parameter along the collapsed direction is undefined;
-//! there it is taken from the nearest sample where it is defined, so a pcurve runs straight into
-//! the pole, and where two uses meet at a pole the loop runs along the pole's line.
+//! pcurves a period apart. A spline closed on itself in a direction is periodic there, one knot
+//! interval per period ([`uv`]). At a pole the parameter along the collapsed direction is
+//! undefined; there it is taken from the nearest sample where it is defined, so a pcurve runs
+//! straight into the pole, and where two uses meet at a pole the loop runs along the pole's line.
 use super::eval::{CurveEval, SurfaceEval};
 use super::{Budget, Curve, Curve2, Surface, curve, curve_natural, interval, surface};
 use crate::Vec3;
@@ -646,4 +647,4 @@ fn move_by(c: &mut Curve2, d: usize, by: f64) {
 
 #[cfg(test)]
 #[path = "pcurve_tests.rs"]
-mod tests;
+pub(super) mod tests;

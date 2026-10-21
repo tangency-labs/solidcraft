@@ -85,9 +85,11 @@ pub struct Face {
     /// The modelled rectangle in surface parameters, `[[u0, u1], [v0, v1]]`, inside the
     /// surface's natural domain and around every loop.
     pub domain: [[f64; 2]; 2],
-    /// `loops[0]` is the outer loop, the rest inner. Loops are stored relative to the surface's
-    /// natural normal, whatever side a shell uses: seen from that normal, the outer loop runs
-    /// counter-clockwise and inner loops clockwise.
+    /// One outer loop and any inner ones, in the producer's order (truck lists some holes
+    /// first; SMLib's import puts the outer loop first, as SMLib requires). Loops are stored
+    /// relative to the surface's natural normal, whatever side a shell uses: seen from that
+    /// normal, the outer loop runs counter-clockwise and inner loops clockwise, which is what
+    /// tells them apart. The first loop is an edge loop.
     pub loops: Vec<Loop>,
 }
 

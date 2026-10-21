@@ -1,6 +1,12 @@
 //! Parameters of points on an [`EvalSurface`], on the evaluator's own surface form: a
 //! surface's parameter box and periods, the parameters of a point on it (closed form on a plane,
 //! damped Gauss–Newton elsewhere), unwrapping across a period, and its poles.
+//!
+//! A spline that closes on itself along a direction (its first and last control rows coincide,
+//! weights included, and its knots are clamped there: a NURBS cylinder, a fillet ring round a
+//! hole's rim) is periodic along it, one active knot interval per period: the record stays as it
+//! is, and parameters outside the interval are evaluated a whole number of periods back inside
+//! it ([`EvalSurface::derivs`]).
 
 use super::EvalSurface;
 use crate::Vec3;
@@ -18,9 +24,12 @@ pub fn domain(s: &EvalSurface) -> Domain {
     let tau = std::f64::consts::TAU;
     match s {
         EvalSurface::Plane { .. } => Domain { range: [None, None], period: [None, None] },
-        EvalSurface::Nurbs { degree, knots, count, .. } => {
+        EvalSurface::Nurbs { degree, knots, count, ctrl } => {
             let r = |d: usize| Some((*knots[d].get(degree[d])?, *knots[d].get(count[d])?));
-            Domain { range: [r(0), r(1)], period: [None, None] }
+            let range = [r(0), r(1)];
+            let shut = closed(*degree, knots, *count, ctrl);
+            let period = [0, 1].map(|d| range[d].filter(|_| shut[d]).map(|(a, b)| b - a).filter(|p| *p > 0.0));
+            Domain { range, period }
         }
         EvalSurface::Revolved { profile, swap, .. } => {
             let r = (|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?)))();
@@ -29,6 +38,59 @@ pub fn domain(s: &EvalSurface) -> Domain {
             Domain { range: [u.0, v.0], period: [u.1, v.1] }
         }
     }
+}
+
+/// Relative closeness of a spline's first and last control rows that makes it closed: control
+/// points within this fraction of the control net's extent, weights within this fraction of
+/// their size. Rows written as one (a producer's exact copy) pass; a surface whose ends merely
+/// come near each other does not.
+const CLOSED: f64 = 1e-9;
+
+/// Whether the tensor spline closes on itself along each direction: its knots clamped at both
+/// ends of that direction (so its boundary rows are its edges) and its first and last control
+/// rows the same points with the same weights. Control point `(i, j)` is `ctrl[j·count[0] + i]`.
+pub fn closed(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ctrl: &[[f64; 4]]) -> [bool; 2] {
+    let [nu, nv] = count;
+    if nu.checked_mul(nv) != Some(ctrl.len()) || nu < 2 || nv < 2 {
+        return [false; 2];
+    }
+    let cart = |c: &[f64; 4]| (c[3] != 0.0).then(|| Vec3::new(c[0] / c[3], c[1] / c[3], c[2] / c[3]));
+    let (mut lo, mut hi) =
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for c in ctrl {
+        let Some(p) = cart(c) else { return [false; 2] };
+        lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+        hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+    }
+    let extent = hi.dist(lo);
+    if !(extent.is_finite() && extent > 0.0) {
+        return [false; 2];
+    }
+    let same = |a: Option<&[f64; 4]>, b: Option<&[f64; 4]>| match (a, b) {
+        (Some(a), Some(b)) => {
+            matches!((cart(a), cart(b)), (Some(p), Some(q)) if p.dist(q) <= CLOSED * extent)
+                && (a[3] - b[3]).abs() <= CLOSED * a[3].abs().max(b[3].abs())
+        }
+        _ => false,
+    };
+    let clamped = |d: usize| {
+        let (p, n, k) = (degree[d], count[d], &knots[d]);
+        let ends = |r: std::ops::RangeInclusive<usize>| k.get(r).is_some_and(|s| s.windows(2).all(|w| w.first() == w.get(1)));
+        k.len() == n + p + 1 && ends(0..=p) && ends(n..=n + p)
+    };
+    let u = clamped(0) && (0..nv).all(|j| same(ctrl.get(j * nu), ctrl.get(j * nu + nu - 1)));
+    let v = clamped(1) && (0..nu).all(|i| same(ctrl.get(i), ctrl.get((nv - 1) * nu + i)));
+    [u, v]
+}
+
+/// `x` moved by whole periods `b − a` into `[a, b]` when it lies outside.
+pub(crate) fn wrap_into(x: f64, (a, b): (f64, f64)) -> f64 {
+    let period = b - a;
+    if (a..=b).contains(&x) || !(period > 0.0) {
+        return x;
+    }
+    let w = x - ((x - a) / period).floor() * period;
+    w.clamp(a, b)
 }
 
 impl Domain {
@@ -173,6 +235,52 @@ mod tests {
         }
         // Off the surface by more than `accept`: no parameters.
         assert!(project(&s, &dom, Vec3::new(5.0, 0.0, 1.0), None, 1e-3).is_none());
+    }
+
+    /// A quadratic spline round a square in u (first and last columns the same), straight
+    /// up in v, `last` moving its last u column.
+    fn ring(last: [f64; 4], u_knots: Vec<f64>) -> EvalSurface {
+        let around =
+            [[2.0, 0.0, 0.0, 1.0], [2.0, 2.0, 0.0, 1.0], [-2.0, 2.0, 0.0, 1.0], [-2.0, -2.0, 0.0, 1.0], [2.0, -2.0, 0.0, 1.0], [2.0, 0.0, 0.0, 1.0]];
+        let mut ctrl = Vec::new();
+        for z in [0.0, 3.0] {
+            for (i, c) in around.iter().enumerate() {
+                let c = if i == around.len() - 1 { [c[0] + last[0], c[1] + last[1], c[2] + last[2], c[3] + last[3]] } else { *c };
+                ctrl.push([c[0] * c[3], c[1] * c[3], (c[2] + z) * c[3], c[3]]);
+            }
+        }
+        EvalSurface::Nurbs { degree: [2, 1], knots: [u_knots, vec![0.0, 0.0, 1.0, 1.0]], count: [6, 2], ctrl }
+    }
+
+    #[test]
+    fn a_spline_closed_on_itself_is_periodic_over_its_knot_interval() {
+        let clamped = || vec![0.0, 0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0];
+        let s = ring([0.0; 4], clamped());
+        let EvalSurface::Nurbs { degree, knots, count, ctrl } = &s else { panic!("a spline") };
+        assert_eq!(closed(*degree, knots, *count, ctrl), [true, false]);
+        assert_eq!(domain(&s).period, [Some(1.0), None]);
+        // A period away is the same point; inside the interval nothing moves.
+        for (u, inside) in [(1.25, 0.25), (-0.25, 0.75), (3.6, 0.6)] {
+            let (Some(a), Some(b)) = (s.derivs(u, 0.4), s.derivs(inside, 0.4)) else { panic!("evaluates") };
+            assert!(a.0.dist(b.0) < 1e-12 && a.1.dist(b.1) < 1e-12, "{u}: {a:?} {b:?}");
+        }
+        assert_eq!(s.wrap([1.0, 0.5]), [1.0, 0.5]);
+        assert_eq!(s.wrap([1.25, 2.0]), [0.25, 2.0]);
+        // Projection finds a point near the seam from either side.
+        let p = s.derivs(0.02, 0.5).map(|d| d.0).unwrap_or(Vec3::ZERO);
+        let dom = domain(&s);
+        let Some(q) = project(&s, &dom, p, Some([0.98, 0.5]), 1e-9) else { panic!("projects") };
+        assert!((unwrap(q[0], 0.98, dom.period[0]) - 1.02).abs() < 1e-9, "{q:?}");
+        // Ends that only come near each other, a weight that differs, or unclamped knots: open,
+        // and evaluated past the interval as before (the end span continued).
+        for (what, open) in [
+            ("ends apart", ring([0.0, 1e-6, 0.0, 0.0], clamped())),
+            ("weights differ", ring([0.0, 0.0, 0.0, 1e-6], clamped())),
+            ("unclamped", ring([0.0; 4], vec![-0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5])),
+        ] {
+            assert_eq!(domain(&open).period, [None, None], "{what}");
+            assert_eq!(open.wrap([1.25, 0.5]), [1.25, 0.5], "{what}");
+        }
     }
 
     #[test]
