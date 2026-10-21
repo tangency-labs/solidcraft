@@ -523,6 +523,9 @@ pub fn sweep_path(plane: &Plane, region: &Region2, path: &[Vec3]) -> Result<Body
 /// [`sweep_path`] with sweep options: orientation, twist and end scale.
 pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
     ctl.check()?;
+    if crate::backend()? == crate::Backend::Smlib {
+        return Err(crate::smlib_sweeps::refuse("sweep along a path of points (a 3D sketch curve)"));
+    }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
     }

@@ -124,6 +124,9 @@ mod seam_faces;
 mod sew;
 #[cfg(feature = "smlib")]
 mod smlib_boolean;
+mod smlib_sweeps;
+#[cfg(test)]
+mod smlib_sweeps_tests;
 mod smooth_edges;
 mod sphere_lens;
 mod spline_conv;
