@@ -148,12 +148,12 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
         validate_value(&value, 0)?;
         let saved: SavedBody = serde_json::from_value(value).map_err(invalid)?;
         validate_topology(&saved)?;
-        let solid = adapter::decode(saved.solid)?;
+        let (solid, numbering) = adapter::decode_numbered(saved.solid, adapter::Producer::Own)?;
         let Runtime { size, coarse_missing } = saved.runtime;
         if !(size.is_finite() && size >= 0.0) || coarse_missing.is_some_and(|(tol, n)| !tol.is_finite() || n > MAX_ITEMS as u64) {
             return Err(invalid("runtime values"));
         }
-        let mut body = Body {
+        let body = Body {
             solid: Arc::new(solid),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
@@ -167,8 +167,12 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
             display_of: None,
             meshes: None,
             phased: false,
+            tolerances: None,
             regularization_protected: false,
         };
+        // A body made by another kernel keeps the tolerances its record saved for it.
+        let tolerances = adapter::decoded_tolerances(&numbering, &body);
+        let mut body = body.with_tolerances(tolerances);
         metadata::apply(&mut body, saved.metadata)?;
         Ok(body)
     })
@@ -193,7 +197,10 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
         let (solid, numbering) = adapter::decode_numbered(record, adapter::Producer::Foreign)?;
         let body = Body::oriented(solid)?;
         let kept = numbering.kept_by(&body.solid);
-        Ok((body, kept.then_some(order)))
+        // SMLib's approximated edges lie farther from their faces than the kernel's working
+        // tolerance: the body keeps the tolerances the record gave them, so its own record does.
+        let tolerances = adapter::decoded_tolerances(&numbering, &body);
+        Ok((body.with_tolerances(tolerances), kept.then_some(order)))
     })
 }
 

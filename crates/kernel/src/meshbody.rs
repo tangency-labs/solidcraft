@@ -127,6 +127,7 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
         display_of: None,
         meshes: None,
         phased: false,
+        tolerances: None,
         regularization_protected: false,
     })
 }
@@ -227,6 +228,7 @@ impl Body {
             display_of: None,
             meshes: None,
             phased: false,
+            tolerances: None,
             regularization_protected: self.regularization_protected,
         })
     }

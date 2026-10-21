@@ -68,6 +68,19 @@ pub struct Body {
     /// placed copy, which keeps them where they are, need not turn them again: searching every
     /// revolved face of every placed occurrence was most of the time moving an assembly took.
     pub(crate) phased: bool,
+    /// The tolerances the record this solid was decoded from held for its edges and vertices
+    /// (another kernel's approximations, which lie farther from their faces than this kernel's
+    /// working tolerance), so that its own record of the solid holds them again. `None`: the
+    /// working tolerance everywhere. Dropped by anything that makes a new solid.
+    pub(crate) tolerances: Option<std::sync::Arc<Tolerances>>,
+}
+
+/// Per edge and per vertex, in [`Body::unique_edges`] and [`Body::unique_vertices`] order, the
+/// tolerance a decoded record gave it (see `Body::tolerances`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Tolerances {
+    pub(crate) edges: Vec<f64>,
+    pub(crate) vertices: Vec<f64>,
 }
 
 /// The meshes made of one solid (see [`Body::keeping_meshes`]), by tolerance, angle and
@@ -684,6 +697,7 @@ impl Body {
             display_of: None,
             meshes: None,
             phased: true,
+            tolerances: None,
         })
     }
 
@@ -736,6 +750,7 @@ impl Body {
             display_of: None,
             meshes: None,
             phased: true,
+            tolerances: None,
         })
     }
 
@@ -753,12 +768,16 @@ impl Body {
             return Err(KernelError::Invalid("degenerate placement".into()));
         }
         let rigid = crate::ops::rigid_placement(&a);
-        let out = Body::placed_as_is(mt::builder::transformed(&*self.solid, *m), det < 0.0, rigid.then_some(self.coarse_missing).flatten())?;
-        // A placement that does not change distances leaves the boundaries exactly as far off
-        // their surfaces as they were, so the file's own figure still describes them (see
-        // [`Body::boundary_tol`]); one that scales the part does not, and the copy declares
-        // nothing. The same rule as the mesh count above.
-        Ok(if rigid { out.with_boundary_tol(self.boundary_tol) } else { out })
+        let mut placed = Body::placed_as_is(mt::builder::transformed(&*self.solid, *m), det < 0.0, rigid.then_some(self.coarse_missing).flatten())?;
+        // A rigid placement moves every edge and vertex as it is, in the same order, and leaves
+        // the boundaries exactly as far off their surfaces as they were, so the file's own figure
+        // still describes them (see [`Body::boundary_tol`]); one that scales the part does not,
+        // and the copy declares nothing. The same rule as the mesh count above.
+        if rigid {
+            placed.tolerances = self.tolerances.clone();
+            placed = placed.with_boundary_tol(self.boundary_tol);
+        }
+        Ok(placed)
     }
 
     pub(crate) fn inherit_regularization_protection(mut self, input: &Body) -> Self {
@@ -1238,6 +1257,24 @@ impl Body {
     pub(crate) fn unique_edges(solid: &Solid) -> Vec<mt::Edge> {
         let mut seen = std::collections::HashSet::new();
         solid.edge_iter().filter(|e| seen.insert(e.id())).collect()
+    }
+
+    /// The solid's vertices, each once, in the order [`Solid::vertex_iter`] first meets them.
+    pub(crate) fn unique_vertices(solid: &Solid) -> Vec<mt::Vertex> {
+        let mut seen = std::collections::HashSet::new();
+        solid.vertex_iter().filter(|v| seen.insert(v.id())).collect()
+    }
+
+    /// The record tolerances this body keeps for its own solid (`Body::tolerances`), when they
+    /// still number its edges and vertices.
+    pub(crate) fn kept_tolerances(&self) -> Option<&Tolerances> {
+        self.tolerances.as_deref().filter(|t| t.edges.len() == self.edge_count() && t.vertices.len() == Body::unique_vertices(&self.solid).len())
+    }
+
+    /// This body keeping `t` as its record tolerances (see `Body::tolerances`).
+    pub(crate) fn with_tolerances(mut self, t: Option<Tolerances>) -> Self {
+        self.tolerances = t.map(std::sync::Arc::new);
+        self
     }
 
     /// Triangulate with chord tolerance `tol` (mm). Triangles carry their face index.

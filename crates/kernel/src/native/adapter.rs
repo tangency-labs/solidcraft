@@ -100,19 +100,23 @@ pub(super) fn encode(body: &Body) -> Result<b::Brep> {
     encode_within(body, working_tolerance(body))?
 }
 
-/// The record of `body`'s solid with `tolerance` for the body, its edges and vertices.
-/// `Ok(Err(_))`: some edge lies farther than that from a face it bounds, so no pcurve fits it
-/// within the tolerance.
+/// The record of `body`'s solid with `tolerance` for the body, its edges and vertices, or for
+/// an edge or vertex the larger tolerance the body keeps for it from the record it was decoded
+/// from (`Body::tolerances`). `Ok(Err(_))`: some edge lies farther than its tolerance from a face
+/// it bounds, so no pcurve fits it.
 pub(super) fn encode_within(body: &Body, tolerance: f64) -> Result<Result<b::Brep>> {
     let solid = &body.solid;
     let shells = solid.boundaries();
     let regions = regions(body)?;
+    let (edge_tol, vertex_tol) = kept_tolerances(body);
+    let edge_tolerance = |e: &mt::Edge| edge_tol.get(&e.id()).map_or(tolerance, |t| t.max(tolerance));
+    let vertex_tolerance = |v: &mt::Vertex| vertex_tol.get(&v.id()).map_or(tolerance, |t| t.max(tolerance));
 
     // Faces in truck's order; edges and vertices in first appearance, each edge's curve record
     // and interval written when it first appears.
     let mut face_index = HashMap::new();
     let mut edge_index = HashMap::new();
-    let mut edges: Vec<(mt::Edge, b::Curve, [f64; 2])> = Vec::new();
+    let mut edges: Vec<(mt::Edge, b::Curve, [f64; 2], f64)> = Vec::new();
     let mut uses: Vec<Vec<b::EdgeUseRef>> = Vec::new();
     let mut faces = Vec::new();
     let mut shell_records = Vec::new();
@@ -136,7 +140,7 @@ pub(super) fn encode_within(body: &Body, tolerance: f64) -> Result<Result<b::Bre
                         None => {
                             let curve = e.curve();
                             let (t0, t1) = curve.try_range_tuple().ok_or_else(|| invalid("unbounded edge curve"))?;
-                            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1]));
+                            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1], edge_tolerance(e)));
                             uses.push(Vec::new());
                             edge_index.insert(e.id(), edges.len() - 1);
                             edges.len() - 1
@@ -156,18 +160,18 @@ pub(super) fn encode_within(body: &Body, tolerance: f64) -> Result<Result<b::Bre
     let mut vertex_index = HashMap::new();
     let mut vertices = Vec::new();
     let mut edge_records = Vec::with_capacity(edges.len());
-    for ((e, curve, interval), uses) in edges.into_iter().zip(uses) {
+    for ((e, curve, interval, edge_tolerance), uses) in edges.into_iter().zip(uses) {
         if uses.len() > 2 {
             return Err(unsupported("the radial order of an edge with more than two uses"));
         }
         let mut vertex = |x: &mt::Vertex| {
             *vertex_index.entry(x.id()).or_insert_with(|| {
-                vertices.push(b::Vertex { point: point(x.point()), tolerance });
+                vertices.push(b::Vertex { point: point(x.point()), tolerance: vertex_tolerance(x) });
                 vertices.len() - 1
             })
         };
         let ends = [vertex(e.absolute_front()), vertex(e.absolute_back())];
-        edge_records.push(b::Edge { curve, interval, vertices: [index(ends[0])?, index(ends[1])?], tolerance, uses });
+        edge_records.push(b::Edge { curve, interval, vertices: [index(ends[0])?, index(ends[1])?], tolerance: edge_tolerance, uses });
     }
     let result = b::Brep { version: b::VERSION, tolerance, regions, shells: shell_records, faces, edges: edge_records, vertices };
     result.validate().map_err(invalid)?;
@@ -181,7 +185,7 @@ fn face_record(
     face: &mt::Face,
     wires: &[mt::Wire],
     edge_index: &HashMap<mt::EdgeID, usize>,
-    edges: &[(mt::Edge, b::Curve, [f64; 2])],
+    edges: &[(mt::Edge, b::Curve, [f64; 2], f64)],
     tolerance: f64,
 ) -> Result<Result<b::Face>> {
     let surface = save_surface(&face.surface(), 0)?;
@@ -191,8 +195,8 @@ fn face_record(
             .edge_iter()
             .map(|e| {
                 let i = *edge_index.get(&e.id()).ok_or_else(|| invalid("edge index"))?;
-                let (_, curve, interval) = edges.get(i).ok_or_else(|| invalid("edge index"))?;
-                Ok(b::pcurve::EdgeUse { edge: index(i)?, curve, interval: *interval, forward: e.orientation() })
+                let (_, curve, interval, tolerance) = edges.get(i).ok_or_else(|| invalid("edge index"))?;
+                Ok(b::pcurve::EdgeUse { edge: index(i)?, curve, interval: *interval, forward: e.orientation(), tolerance: *tolerance })
             })
             .collect::<Result<Vec<_>>>()?;
         uses.push(l);
@@ -222,7 +226,7 @@ pub(super) fn face_alone(face: &mt::Face, tolerance: f64) -> Result<b::Face> {
         if let std::collections::hash_map::Entry::Vacant(slot) = edge_index.entry(e.id()) {
             let curve = e.curve();
             let (t0, t1) = curve.try_range_tuple().ok_or_else(|| invalid("unbounded edge curve"))?;
-            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1]));
+            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1], tolerance));
             slot.insert(edges.len() - 1);
         }
     }
@@ -337,10 +341,12 @@ pub(super) enum Producer {
 
 /// The solid of a record: validated, its geometry checked against its topology (truck builds
 /// edges and faces from it unchecked), then built as the kernel built it.
+#[cfg(test)]
 pub(super) fn decode(body: b::Brep) -> Result<mt::Solid> {
     decode_from(body, Producer::Own)
 }
 
+#[cfg(test)]
 pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid> {
     decode_numbered(body, producer).map(|(solid, _)| solid)
 }
@@ -352,6 +358,9 @@ pub(super) fn decode_from(body: b::Brep, producer: Producer) -> Result<mt::Solid
 pub(super) struct Numbering {
     pub faces: Vec<(mt::FaceID, std::collections::HashSet<mt::EdgeID>)>,
     pub edges: Vec<mt::EdgeID>,
+    /// Each record edge's and vertex's tolerance, by its identity in the solid.
+    pub edge_tolerances: Vec<(mt::EdgeID, f64)>,
+    pub vertex_tolerances: Vec<(mt::VertexID, f64)>,
 }
 
 #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
@@ -367,6 +376,32 @@ impl Numbering {
     }
 }
 
+/// The tolerances a decoded record gave `body`'s edges and vertices, in the body's order, where
+/// any is larger than the body's working tolerance (another kernel's approximated geometry);
+/// `None` otherwise. An edge or vertex the record does not name (a face rebuilt on decode) takes
+/// the largest the record gave.
+pub(super) fn decoded_tolerances(numbering: &Numbering, body: &Body) -> Option<crate::body::Tolerances> {
+    let floor = working_tolerance(body);
+    let most = numbering.edge_tolerances.iter().map(|(_, t)| *t).chain(numbering.vertex_tolerances.iter().map(|(_, t)| *t)).fold(0.0, f64::max);
+    if !(most.is_finite() && most > floor) {
+        return None;
+    }
+    let edges: HashMap<mt::EdgeID, f64> = numbering.edge_tolerances.iter().copied().collect();
+    let vertices: HashMap<mt::VertexID, f64> = numbering.vertex_tolerances.iter().copied().collect();
+    Some(crate::body::Tolerances {
+        edges: Body::unique_edges(&body.solid).iter().map(|e| edges.get(&e.id()).copied().unwrap_or(most)).collect(),
+        vertices: Body::unique_vertices(&body.solid).iter().map(|v| vertices.get(&v.id()).copied().unwrap_or(most)).collect(),
+    })
+}
+
+/// The tolerances `body` keeps for its edges and vertices (`Body::tolerances`), by identity.
+fn kept_tolerances(body: &Body) -> (HashMap<mt::EdgeID, f64>, HashMap<mt::VertexID, f64>) {
+    let Some(t) = body.kept_tolerances() else { return (HashMap::new(), HashMap::new()) };
+    let edges = Body::unique_edges(&body.solid).iter().map(mt::Edge::id).zip(t.edges.iter().copied()).collect();
+    let vertices = Body::unique_vertices(&body.solid).iter().map(mt::Vertex::id).zip(t.vertices.iter().copied()).collect();
+    (edges, vertices)
+}
+
 /// [`decode_from`], with each record face's and edge's identity in the solid: a caller holding
 /// indices into the record (an SMLib history) checks with them that the solid's face and edge
 /// order is the record's.
@@ -375,8 +410,10 @@ pub(super) fn decode_numbered(body: b::Brep, producer: Producer) -> Result<(mt::
     body.check_geometry().map_err(invalid)?;
     compatible(&body, producer)?;
     let b::Brep { shells, faces, edges, vertices, .. } = body;
+    let vertex_tolerances_in: Vec<f64> = vertices.iter().map(|v| v.tolerance).collect();
     let vertices: Vec<mt::Vertex> = vertices.into_iter().map(|v| mt::Vertex::new(p(v.point))).collect();
     let vertex = |i: u32| vertices.get(i as usize).ok_or_else(|| invalid("edge vertices"));
+    let edge_tolerances_in: Vec<f64> = edges.iter().map(|e| e.tolerance).collect();
     let edges = edges
         .into_iter()
         .map(|e| Ok(mt::Edge::new_unchecked(vertex(e.vertices[0])?, vertex(e.vertices[1])?, load_edge_curve(e.curve, e.interval)?)))
@@ -406,7 +443,12 @@ pub(super) fn decode_numbered(body: b::Brep, producer: Producer) -> Result<(mt::
         return Err(invalid("non-manifold shell"));
     }
     let faces = face_ids.into_iter().collect::<Option<Vec<_>>>().ok_or_else(|| invalid("a face no shell uses"))?;
-    let numbering = Numbering { faces, edges: edges.iter().map(mt::Edge::id).collect() };
+    let numbering = Numbering {
+        faces,
+        edges: edges.iter().map(mt::Edge::id).collect(),
+        edge_tolerances: edges.iter().map(mt::Edge::id).zip(edge_tolerances_in).collect(),
+        vertex_tolerances: vertices.iter().map(mt::Vertex::id).zip(vertex_tolerances_in).collect(),
+    };
     Ok((mt::Solid::new_unchecked(shells), numbering))
 }
 /// A face's topology as recorded, references already checked: built as the kernel built it,

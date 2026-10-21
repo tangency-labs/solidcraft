@@ -342,6 +342,26 @@ mod tests {
         assert!((volume(&back) - volume(&r)).abs() < 1e-6 * 8000.0);
     }
 
+    /// The ladder's 08/006: a 2 mm chamfer of a cylinder's top rim. SMLib's cone and rail lie some
+    /// 2e-5 mm off the faces they bound, more than the kernel's working tolerance; the body keeps
+    /// the tolerances SMLib's record gave them, so its own record (and the saved body's) is valid
+    /// and SMLib's check takes it back.
+    #[test]
+    fn an_smlib_blend_keeps_its_record_valid() {
+        let c = crate::cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 20.0).unwrap();
+        let r = imp::blend(&c, "chamfer", Kind::Chamfer, &[Vec3::new(10.0, 0.0, 20.0)], &[2.0]).unwrap();
+        let v = crate::validity(&r);
+        assert!(v.record.is_ok(), "{:?}", v.record);
+        assert!(matches!(v.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", v.smlib);
+        let saved = crate::decode_native_body(&crate::encode_native_body(&r).unwrap()).unwrap();
+        assert!(crate::validity(&saved).record.is_ok());
+        assert!(
+            crate::validity(&saved.placed(&truck_modeling::Matrix4::from_translation(truck_modeling::Vector3::new(5.0, 0.0, 0.0))).unwrap())
+                .record
+                .is_ok()
+        );
+    }
+
     #[test]
     fn options_smlib_cannot_build_are_refused() {
         assert!(unsupported("x").to_string().contains("not supported yet"));

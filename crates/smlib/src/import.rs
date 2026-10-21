@@ -203,12 +203,15 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
         curve(&mut a, &e.curve)?;
         a.i(flat::EDGE_VERTICES).extend([i64::from(e.vertices[0]), i64::from(e.vertices[1])]);
         a.r(flat::EDGE_RANGE).extend(e.interval);
+        // Each edge's own tolerance, never below the body's.
+        a.r(flat::EDGE_TOLERANCE).push(e.tolerance.max(brep.tolerance));
     }
 
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for v in &brep.vertices {
         a.i(flat::VERTEX_POINT_TYPE).push(1);
         a.r3(flat::VERTEX_POSITION, v.point);
+        a.r(flat::VERTEX_TOLERANCE).push(v.tolerance.max(brep.tolerance));
         for k in 0..3 {
             lo[k] = lo[k].min(v.point[k]);
             hi[k] = hi[k].max(v.point[k]);

@@ -100,6 +100,8 @@ pub const FACE_TORUS_AXIS: i32 = 160;
 pub const FACE_TORUS_REF_DIRECTION: i32 = 161;
 pub const FACE_TORUS_MAJOR_RADIUS: i32 = 162;
 pub const FACE_TORUS_MINOR_RADIUS: i32 = 163;
+pub const EDGE_TOLERANCE: i32 = 164;
+pub const VERTEX_TOLERANCE: i32 = 165;
 /// `SMLIB_FLAT_MAX_LEN`: no array is longer.
 pub const MAX_LEN: usize = 1 << 27;
 pub const SURFACE_NURBS: u8 = 0;

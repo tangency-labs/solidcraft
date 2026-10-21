@@ -11,7 +11,7 @@ fn about_z(origin: [f64; 3], down: bool) -> Frame {
     frame(origin, [1., 0., 0.], if down { [0., -1., 0.] } else { [0., 1., 0.] })
 }
 fn one(curve: &Curve, interval: [f64; 2]) -> Vec<Vec<EdgeUse<'_>>> {
-    vec![vec![EdgeUse { edge: 0, curve, interval, forward: true }]]
+    vec![vec![EdgeUse { edge: 0, curve, interval, forward: true, tolerance: 0.0 }]]
 }
 /// The largest distance between the lifted pcurve and the curve, at 65 points and each span's
 /// middle.
@@ -185,10 +185,10 @@ fn a_seam_used_twice_gets_pcurves_a_period_apart() {
     let high = Curve::Circle { frame: about_z([0., 0., 4.], false), radius: 3. };
     let full = [0., TAU];
     let l = vec![
-        EdgeUse { edge: 0, curve: &low, interval: full, forward: true },
-        EdgeUse { edge: 1, curve: &seam, interval: [0., 1.], forward: true },
-        EdgeUse { edge: 2, curve: &high, interval: full, forward: false },
-        EdgeUse { edge: 1, curve: &seam, interval: [0., 1.], forward: false },
+        EdgeUse { edge: 0, curve: &low, interval: full, forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &seam, interval: [0., 1.], forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 2, curve: &high, interval: full, forward: false, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &seam, interval: [0., 1.], forward: false, tolerance: 0.0 },
     ];
     let pcs = &pcurves(&cylinder, std::slice::from_ref(&l), 1e-9).unwrap()[0];
     let (ends, area) = walk(&l, pcs);
@@ -214,8 +214,8 @@ fn meridians_run_straight_into_the_poles() {
     let meridian = Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., 0., 1.]), radius: 6. };
     let half = [-FRAC_PI_2, FRAC_PI_2];
     let l = vec![
-        EdgeUse { edge: 0, curve: &meridian, interval: half, forward: false },
-        EdgeUse { edge: 0, curve: &meridian, interval: half, forward: true },
+        EdgeUse { edge: 0, curve: &meridian, interval: half, forward: false, tolerance: 0.0 },
+        EdgeUse { edge: 0, curve: &meridian, interval: half, forward: true, tolerance: 0.0 },
     ];
     for tol in [1e-3, 1e-6] {
         let pcs = &pcurves(&sphere, std::slice::from_ref(&l), tol).unwrap()[0];
@@ -268,7 +268,8 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
                 };
                 for (seam, iv) in [(&circle, [-FRAC_PI_2, FRAC_PI_2]), (&nurbs, [0., 1.])] {
                     for order in [[true, false], [false, true]] {
-                        let l: Vec<EdgeUse> = order.iter().map(|&forward| EdgeUse { edge: 0, curve: seam, interval: iv, forward }).collect();
+                        let l: Vec<EdgeUse> =
+                            order.iter().map(|&forward| EdgeUse { edge: 0, curve: seam, interval: iv, forward, tolerance: 0.0 }).collect();
                         let pcs = &pcurves(&sphere, std::slice::from_ref(&l), tol).unwrap()[0];
                         let what = format!("{sf:?} {turn} {off} {seam:?} {order:?}");
                         for pc in pcs {
@@ -306,10 +307,10 @@ fn a_torus_bounded_by_its_seams_spans_both_periods() {
         let tube = Curve::Circle { frame: Frame { origin: p(ax.o + ax.x * 10.), x_axis: p(ax.x), y_axis: p(ax.z) }, radius: 2. };
         let full = [0., TAU];
         let l = vec![
-            EdgeUse { edge: 0, curve: &around, interval: full, forward: true },
-            EdgeUse { edge: 1, curve: &tube, interval: full, forward: true },
-            EdgeUse { edge: 0, curve: &around, interval: full, forward: false },
-            EdgeUse { edge: 1, curve: &tube, interval: full, forward: false },
+            EdgeUse { edge: 0, curve: &around, interval: full, forward: true, tolerance: 0.0 },
+            EdgeUse { edge: 1, curve: &tube, interval: full, forward: true, tolerance: 0.0 },
+            EdgeUse { edge: 0, curve: &around, interval: full, forward: false, tolerance: 0.0 },
+            EdgeUse { edge: 1, curve: &tube, interval: full, forward: false, tolerance: 0.0 },
         ];
         let pcs = &pcurves(&torus, std::slice::from_ref(&l), 1e-9).unwrap()[0];
         let (ends, area) = walk(&l, pcs);
@@ -392,10 +393,10 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     let top = Curve::Circle { frame: about_z([0., 0., small], false), radius: big };
     let quarter = Curve::Circle { frame: frame([big, 0., 0.], [1., 0., 0.], [0., 0., 1.]), radius: small };
     let l = vec![
-        EdgeUse { edge: 0, curve: &outer, interval: full, forward: true },
-        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: true },
-        EdgeUse { edge: 2, curve: &top, interval: full, forward: false },
-        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: false },
+        EdgeUse { edge: 0, curve: &outer, interval: full, forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 2, curve: &top, interval: full, forward: false, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: false, tolerance: 0.0 },
     ];
     for tol in [1e-4, 1e-7] {
         closes_around_the_box(&band, &l, [1, 3], None, tol, &format!("torus band, tol {tol}"));
@@ -406,10 +407,10 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
         (Curve::Circle { frame: about_z([0.; 3], false), radius: 3. }, Curve::Circle { frame: about_z([0., 0., 4.], false), radius: 3. });
     let line = Curve::Line { start: [3., 0., 0.], end: [3., 0., 4.] };
     let l = vec![
-        EdgeUse { edge: 0, curve: &low, interval: full, forward: true },
-        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: true },
-        EdgeUse { edge: 2, curve: &high, interval: full, forward: false },
-        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: false },
+        EdgeUse { edge: 0, curve: &low, interval: full, forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 2, curve: &high, interval: full, forward: false, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: false, tolerance: 0.0 },
     ];
     closes_around_the_box(&cylinder, &l, [1, 3], None, 1e-7, "cylinder");
     // The dome: radius 6 from its equator (v = 0) to its pole (v = 1), the seam a meridian.
@@ -417,9 +418,9 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     let equator = Curve::Circle { frame: about_z([0.; 3], false), radius: 6. };
     let meridian = Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., 0., 1.]), radius: 6. };
     let l = vec![
-        EdgeUse { edge: 0, curve: &equator, interval: full, forward: true },
-        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: true },
-        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: false },
+        EdgeUse { edge: 0, curve: &equator, interval: full, forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: true, tolerance: 0.0 },
+        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: false, tolerance: 0.0 },
     ];
     closes_around_the_box(&dome, &l, [1, 2], Some(2), 1e-7, "dome");
     // A spline whose ends merely come near each other stays open: no period, so the seam's
@@ -483,7 +484,7 @@ fn hostile_records_give_errors() {
     let collapsed = Curve::Circle { frame: about_z([0.; 3], false), radius: 0. };
     assert!(matches!(pcurves(&plane, &one(&collapsed, [0., 1.]), 1e-6), Err(Error::Invalid(_))));
     // Too many uses, refused before any work.
-    let many = vec![vec![EdgeUse { edge: 0, curve: &line, interval: [0., 1.], forward: true }; MAX_USES + 1]];
+    let many = vec![vec![EdgeUse { edge: 0, curve: &line, interval: [0., 1.], forward: true, tolerance: 0.0 }; MAX_USES + 1]];
     assert!(matches!(pcurves(&plane, &many, 1e-6), Err(Error::TooLarge(_))));
     // A polyline of many points on a curved surface: too many spans for one pcurve.
     let cylinder = Surface::Cylinder { frame: about_z([0.; 3], false), radius: 1. };
@@ -505,4 +506,18 @@ fn hostile_records_give_errors() {
     let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: 1e12, minor_radius: 1e-12 };
     let far = Curve::Circle { frame: about_z([0.; 3], false), radius: 1e12 };
     let _ = pcurves(&torus, &one(&far, [0., 1.]), 1e-6);
+}
+
+/// An edge that lies up to 7.5e-5 mm off its plane (another kernel's approximation) gets no
+/// pcurve at the face's 1e-5 mm, and one within its own record tolerance of 2e-4 mm when the
+/// use carries it.
+#[test]
+fn an_edge_is_fitted_to_its_own_tolerance() {
+    let plane = Surface::PlaneThrough { origin: [1., 2., 3.], u_point: [3., 2., 3.], v_point: [1., 2., 7.] };
+    let off =
+        Curve::Spline { knots: vec![0., 0., 0., 0., 1., 1., 1., 1.], points: vec![[1., 2., 3.], [2., 2.0001, 4.], [3., 2.0001, 5.], [4., 2., 6.]] };
+    assert!(pcurves(&plane, &one(&off, [0., 1.]), 1e-5).is_err());
+    let own = vec![vec![EdgeUse { edge: 0, curve: &off, interval: [0., 1.], forward: true, tolerance: 2e-4 }]];
+    let pc = &pcurves(&plane, &own, 1e-5).unwrap()[0][0];
+    assert!(lift_error(&plane, &off, [0., 1.], pc) <= 2e-4);
 }

@@ -38,13 +38,15 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
-/// twice, is fitted once), its curve record and interval, and whether the loop runs along it.
+/// twice, is fitted once), its curve record and interval, whether the loop runs along it, and the
+/// edge record's own tolerance (its pcurve is fitted to that, never closer than the face's).
 #[derive(Clone, Copy, Debug)]
 pub struct EdgeUse<'a> {
     pub edge: u32,
     pub curve: &'a Curve,
     pub interval: [f64; 2],
     pub forward: bool,
+    pub tolerance: f64,
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
@@ -61,8 +63,8 @@ const MAX_USES: usize = 100_000;
 const CHECKS: usize = 16;
 
 /// For each loop of a face on `surface`, the pcurve of each of its edge uses, in order, within
-/// `tolerance` mm of the edge when lifted onto the surface. Loops are as the record keeps them
-/// (relative to the surface's natural normal: outer counter-clockwise, inner clockwise); each
+/// `tolerance` mm (or the use's own edge tolerance where larger) of the edge when lifted onto
+/// the surface. Loops are as the record keeps them (relative to the surface's natural normal: outer counter-clockwise, inner clockwise); each
 /// pcurve runs on its use's interval in its curve's direction, whatever `forward` says.
 pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<Vec<Vec<Curve2>>> {
     if !(tolerance.is_finite() && tolerance > 0.0 && tolerance <= 1e3) {
@@ -87,7 +89,10 @@ pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: 
                     curve(u.curve, 0, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
                     interval(&u.interval, curve_natural(u.curve)).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
                     let c = CurveEval::new(u.curve)?;
-                    let pc = on.pcurve(u.curve, &c, u.interval, tolerance).map_err(|e| {
+                    // An edge record that holds a looser tolerance than the face's (another
+                    // kernel's approximated edge) is fitted to its own, up to the same cap.
+                    let own = if u.tolerance.is_finite() && u.tolerance <= 1e3 { tolerance.max(u.tolerance) } else { tolerance };
+                    let pc = on.pcurve(u.curve, &c, u.interval, own).map_err(|e| {
                         let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
                         let message = format!("pcurve of loop {w} use {i} ({:?} to {:?}): {e}", at(u.interval[0]), at(u.interval[1]));
                         match e {
