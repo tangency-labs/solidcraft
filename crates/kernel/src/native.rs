@@ -352,4 +352,105 @@ mod tests {
         let restored = decode_native_body(&encode_native_body(&body).unwrap()).unwrap();
         equal(&body, &restored);
     }
+
+    /// Every pcurve of every face of `body` validates as the schema validator does, spans its
+    /// curve's range, lifts onto the surface within `tol` (64 samples and every span midpoint),
+    /// and each wire closes in (u, v): consecutive uses meet, or meet across a pole (the gap
+    /// lifts to one point). Returns the wires whose closure is a whole number of periods (a loop
+    /// round a pole or the surface), as (face, wire).
+    fn check_pcurves(body: &Body, tol: f64) -> Vec<(usize, usize)> {
+        use truck_modeling::{BoundedCurve, MetricSpace, ParametricCurve, ParametricSurface};
+        let mut winding = Vec::new();
+        for (f, face) in body.solid.face_iter().enumerate() {
+            let surface = face.surface();
+            let all = pcurve::pcurves(face, tol).unwrap_or_else(|e| panic!("face {f}: {e}"));
+            let wires = face.boundaries();
+            assert_eq!(all.len(), wires.len());
+            let lift = |uv: [f64; 2]| surface.subs(uv[0], uv[1]);
+            for (w, (pcs, wire)) in all.iter().zip(&wires).enumerate() {
+                assert_eq!(pcs.len(), wire.len());
+                let mut ends = Vec::new();
+                for (i, (pc, edge)) in pcs.iter().zip(wire.edge_iter()).enumerate() {
+                    let at = format!("face {f} wire {w} edge {i}");
+                    let (knots, count, values): (&Vec<f64>, usize, Vec<f64>) = match pc {
+                        solidcraft_geom::brep::Curve2::Spline { knots, points } => (knots, points.len(), points.iter().flatten().copied().collect()),
+                        solidcraft_geom::brep::Curve2::RationalSpline { knots, homogeneous } => {
+                            assert!(homogeneous.iter().all(|h| h[2] >= 1e-12), "{at}: weight");
+                            (knots, homogeneous.len(), homogeneous.iter().flatten().copied().collect())
+                        }
+                    };
+                    let degree = knots.len() - count - 1;
+                    assert!((2..=4096).contains(&count) && (1..=16).contains(&degree) && degree < count, "{at}: size");
+                    assert!(knots.windows(2).all(|k| k[0] <= k[1]) && knots[degree] < knots[count], "{at}: knots");
+                    assert!(values.iter().chain(knots).all(|x| x.is_finite() && x.abs() <= 1e12), "{at}: numbers");
+                    let curve = edge.curve();
+                    let (t0, t1) = curve.range_tuple();
+                    assert_eq!(pc.interval(), Some([t0, t1]), "{at}: interval");
+                    let mut ts: Vec<f64> = (0..=64).map(|k| t0 + (t1 - t0) * k as f64 / 64.).collect();
+                    ts.extend(knots.windows(2).filter(|k| k[0] < k[1]).map(|k| 0.5 * (k[0] + k[1])));
+                    for t in ts {
+                        let uv = pcurve::eval(pc, t).unwrap_or_else(|| panic!("{at}: eval at {t}"));
+                        let d = lift(uv).distance(curve.subs(t));
+                        assert!(d <= tol, "{at}: lift error {d} at {t}");
+                    }
+                    let (a, b) = (pcurve::eval(pc, t0).unwrap(), pcurve::eval(pc, t1).unwrap());
+                    ends.push(if edge.orientation() { (a, b) } else { (b, a) });
+                }
+                let mut wraps = false;
+                for k in 0..ends.len() {
+                    let (end, start) = (ends[k].1, ends[(k + 1) % ends.len()].0);
+                    let gap = (end[0] - start[0]).abs().max((end[1] - start[1]).abs());
+                    if gap <= 1e-9 {
+                        continue;
+                    }
+                    // A pole: the gap's ends and middle are one point in space.
+                    let mid = [0.5 * (end[0] + start[0]), 0.5 * (end[1] + start[1])];
+                    let one = lift(end).distance(lift(start)).max(lift(end).distance(lift(mid)));
+                    if one <= tol {
+                        continue;
+                    }
+                    let periods = [surface.u_period(), surface.v_period()];
+                    let whole = (0..2).all(|d| {
+                        let g = start[d] - end[d];
+                        g.abs() <= 1e-9 || periods[d].is_some_and(|p| (g / p - (g / p).round()).abs() <= 1e-9)
+                    });
+                    assert!(
+                        whole && lift(end).distance(lift(start)) <= tol,
+                        "face {f} wire {w}: open between uses {k} and {}: {end:?} {start:?}",
+                        (k + 1) % ends.len()
+                    );
+                    wraps = true;
+                }
+                if wraps {
+                    winding.push((f, w));
+                }
+            }
+        }
+        winding
+    }
+
+    #[test]
+    fn pcurves_on_planes_are_the_curves_mapped_exactly() {
+        use truck_modeling::{BoundedCurve, ParametricCurve, ParametricSurface};
+        let cube = crate::box_solid(Vec3::new(-3., 1., 2.), Vec3::new(40., 30., 10.)).unwrap();
+        assert!(check_pcurves(&cube, 1e-9).is_empty());
+        // Bit for bit: each line's pcurve ends lift to the line's own ends.
+        for face in cube.solid.face_iter() {
+            let surface = face.surface();
+            for (pcs, wire) in pcurve::pcurves(face, 1e-9).unwrap().iter().zip(face.boundaries()) {
+                for (pc, edge) in pcs.iter().zip(wire.edge_iter()) {
+                    let solidcraft_geom::brep::Curve2::Spline { points, .. } = pc else { panic!("a line is a degree-1 spline") };
+                    let curve = edge.curve();
+                    let (t0, t1) = curve.range_tuple();
+                    assert_eq!(surface.subs(points[0][0], points[0][1]), curve.subs(t0));
+                    assert_eq!(surface.subs(points[1][0], points[1][1]), curve.subs(t1));
+                }
+            }
+        }
+        // Arcs (rational) on the cylinder's caps.
+        let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 5., 40.).unwrap();
+        for face in cyl.solid.face_iter().filter(|f| matches!(f.surface(), truck_modeling::Surface::Plane(_))) {
+            assert!(pcurve::pcurves(face, 1e-9).unwrap().iter().flatten().all(|c| matches!(c, solidcraft_geom::brep::Curve2::RationalSpline { .. })));
+        }
+    }
 }
