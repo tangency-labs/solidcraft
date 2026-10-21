@@ -22,7 +22,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.references", "Sketch References", references).icon("list").noundo().params(
         "sketch?: id|name (default: the active sketch, else every sketch with links). Each link: its source, the occurrence placement it \
          reads (path and name) and the placement of the sketch's component it was made in, its curves and points, hidden, frozen and \
-         status: current; stale (the model shows it moved since it was stored: Update References stores it); pending (a placement it \
+         status: current; stale (shown where the source is now, but stored where it was: editing the sketch or Update References stores it); pending (a placement it \
          reads has an uncaptured move, which it follows once captured); frozen; lost (with the reason; it keeps its last geometry)",
     ),
     CommandSpec::new("sketch.update_references", "Update References", update_references).icon("update").params(
@@ -337,6 +337,10 @@ fn references(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                 }
                 entry["reason"] = json!(parts.join("; "));
+            } else if status == "stale" {
+                // What the model shows already follows the source; only the saved copy is behind.
+                entry["reason"] =
+                    json!("the model shows where the source is now; the sketch stores it when it is next edited or Update References runs");
             }
             out.push(entry);
         }
@@ -501,13 +505,13 @@ fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
         l.omit_edges.clear();
     }
     sk.set_link_wires(&link, &wires)?;
-    let rebuilt = sk.update_link(&link, &geom)?;
+    let update = sk.update_link_detail(&link, &geom)?;
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
     let sk = s.doc.sketch(id)?;
     let curves: Vec<&str> = sk.link_curves(&link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.as_str()).collect();
     let points: Vec<&str> = sk.link_points(&link).iter().filter_map(|q| sk.points.get(*q)).map(|q| q.id.as_str()).collect();
-    Ok(json!({"link": link, "rebuilt": rebuilt, "curves": curves, "points": points}))
+    Ok(json!({"link": link, "rebuilt": update.rebuilt, "dropped_constraints": update.dropped, "curves": curves, "points": points}))
 }
 
 fn remove_link(s: &mut Session, p: &Value) -> Result<Value> {

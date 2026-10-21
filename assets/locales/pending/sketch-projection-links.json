@@ -9,7 +9,8 @@
     "cmd.sketch_remove_link": "Remove Projection",
     "cmd.sketch_repair_link": "Repair Link",
     "cmd.sketch_resume_link": "Resume Link",
-    "cmd.sketch_update_references": "Update References"
+    "cmd.sketch_update_references": "Update References",
+    "sketch.hint.constraint.fix": "Fix: pick the sketch entities to fix in place"
   },
   "ja": {
     "browser.link_frozen": "凍結",
