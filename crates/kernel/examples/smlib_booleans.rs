@@ -174,9 +174,12 @@ mod run {
         o
     }
 
-    /// The SMLib side, through `solidcraft-smlib`. Primitives and booleans arrive with the
-    /// operation shims (smlib_primitives.cpp, smlib_ops.cpp); until a call exists it answers
-    /// "not supported yet" and the report counts the case as not run on SMLib.
+    /// The SMLib side, through `solidcraft-smlib`. Boxes and cylinders are the very B-reps truck
+    /// starts from, through their schema 4 records imported into SMLib (`smlib_body`), so both
+    /// kernels get the same input whatever the axis. Spheres and tori are SMLib's own primitives
+    /// (about +Z, like truck's): the import doesn't take truck's revolved surfaces yet. The
+    /// boolean arrives with the operation shims (smlib_ops.cpp); until then it answers "not
+    /// supported yet" and the report counts the case as not run on SMLib.
     mod side {
         use solidcraft_kernel::BoolOp;
         use solidcraft_kernel::fuzz::Shape;
@@ -188,11 +191,12 @@ mod run {
 
         pub fn shape(s: &Shape) -> Result<Brep, String> {
             match s {
-                Shape::Box { a, b } => Brep::make_box(*a, [b[0] - a[0], b[1] - a[1], b[2] - a[2]]).map_err(|e| e.to_string()),
-                Shape::Cylinder { .. } => Err(not_yet("cylinder")),
-                Shape::Sphere { .. } => Err(not_yet("sphere")),
-                Shape::Torus { .. } => Err(not_yet("torus")),
+                Shape::Sphere { center, radius } => return Brep::make_sphere(*center, *radius).map_err(|e| e.to_string()),
+                Shape::Torus { center, major, minor } => return Brep::make_torus(*center, *major, *minor).map_err(|e| e.to_string()),
+                Shape::Box { .. } | Shape::Cylinder { .. } => {}
             }
+            let body = s.body().map_err(|e| format!("truck primitive: {e}"))?;
+            solidcraft_kernel::smlib_body(&body).map_err(|e| format!("import: {e}"))
         }
 
         /// `a op b`; `None` when the result is empty.

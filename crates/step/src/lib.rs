@@ -10,6 +10,7 @@ mod eval;
 pub mod geom;
 pub mod p21;
 pub mod read;
+pub mod units;
 pub mod write;
 
 #[cfg(test)]

@@ -70,6 +70,24 @@ mod tests {
     }
 
     #[test]
+    fn every_primitive_is_valid_at_every_level() {
+        let o = [1.0, 2.0, 3.0];
+        let bodies = [
+            ("cylinder", Brep::make_cylinder(o, 15.0, 50.0).unwrap()),
+            ("sphere", Brep::make_sphere(o, 12.0).unwrap()),
+            ("frustum", Brep::make_cone(o, 10.0, 4.0, 20.0).unwrap()),
+            ("cone", Brep::make_cone(o, 10.0, 0.0, 20.0).unwrap()),
+            ("torus", Brep::make_torus(o, 22.0, 4.0).unwrap()),
+        ];
+        for (name, b) in &bodies {
+            for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
+                let r = b.check(level).unwrap();
+                assert!(r.is_valid(), "{name}, {level:?}: {r}");
+            }
+        }
+    }
+
+    #[test]
     fn a_copy_and_a_native_file_round_trip_stay_valid() {
         let b = Brep::make_box([0.0; 3], [2.0, 3.0, 4.0]).unwrap();
         assert!(b.try_clone().unwrap().check(CheckLevel::All).unwrap().is_valid());
