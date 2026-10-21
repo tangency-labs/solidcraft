@@ -35,6 +35,8 @@ fn build() -> Result<(), String> {
         ));
     }
     println!("cargo:rerun-if-changed={}", root.join("capi").display());
+    // SMLib's own sources too: a fix to the kernel must rebuild it.
+    println!("cargo:rerun-if-changed={}", root.join("source").display());
     let src = root.join("source");
     let core = sources(&src.join("SMLib/src"), &["StdAfx.cpp", "SmDllMain.cpp"])?;
     let api = sources(&src.join("SM_API/src"), &["StdAfx.cpp"])?;
