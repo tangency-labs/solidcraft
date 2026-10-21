@@ -84,6 +84,21 @@ impl SolutionObject for Handle {
     }
 }
 
+/// The handle of the curve `sm_IntersectAndSplit` intersects: upstream its solutions
+/// name the curve, whose natural interval `IdenticalSolutions` reads.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CurveHandle(Extent1d);
+
+impl SolutionObject for CurveHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.0)
+    }
+}
+
 // ---- inputs -----------------------------------------------------------------------
 
 /// An inline surface: control net as stored (`[x, y, z, w]`, rows in u), degrees,
@@ -2018,12 +2033,13 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
             let c = SmCurve::from(curve_of(c)?);
             record(|o| {
                 let mut s = s.clone();
-                intersect_and_split::<Handle>(
+                intersect_and_split(
                     &k,
                     &c,
                     &Extent1d::from_min_max(ivl[0], ivl[1]),
                     v3(*pp),
                     v3(*pn),
+                    Some(CurveHandle(c.natural_interval())),
                     &mut s,
                 )?;
                 o.push(s.len() as f64);

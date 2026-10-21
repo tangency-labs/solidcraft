@@ -51,6 +51,306 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "sil_adv_01_sphere_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#0 (upstream tests/prog_test/src/smAdvancedTest.cpp:150 my_test_sil_adv block 1: sphere.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 2 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 1323
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_02_sphere_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#1 (upstream tests/prog_test/src/smAdvancedTest.cpp:176 my_test_sil_adv block 2: sphere.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 2 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_03_sphere_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#2 (upstream tests/prog_test/src/smAdvancedTest.cpp:202 my_test_sil_adv block 3: sphere.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 1 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 1143
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_04_sphere_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#3 (upstream tests/prog_test/src/smAdvancedTest.cpp:228 my_test_sil_adv block 4: sphere.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 1 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 1263
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_05_cone_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#4 (upstream tests/prog_test/src/smAdvancedTest.cpp:254 my_test_sil_adv block 5: cone.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_06_cone_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#5 (upstream tests/prog_test/src/smAdvancedTest.cpp:280 my_test_sil_adv block 6: cone.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 2 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_07_cone_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#6 (upstream tests/prog_test/src/smAdvancedTest.cpp:306 my_test_sil_adv block 7: cone.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 2 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 123
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_08_cone_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#7 (upstream tests/prog_test/src/smAdvancedTest.cpp:332 my_test_sil_adv block 8: cone.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 2 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 123
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_09_plane_circ_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#8 (upstream tests/prog_test/src/smAdvancedTest.cpp:358 my_test_sil_adv block 9: plane_circ.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_10_plane_circ_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#9 (upstream tests/prog_test/src/smAdvancedTest.cpp:384 my_test_sil_adv block 10: plane_circ.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 || lNumFound == 1 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_11_plane_circ_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#10 (upstream tests/prog_test/src/smAdvancedTest.cpp:410 my_test_sil_adv block 11: plane_circ.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_12_plane_circ_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#11 (upstream tests/prog_test/src/smAdvancedTest.cpp:436 my_test_sil_adv block 12: plane_circ.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_13_plane_square_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#12 (upstream tests/prog_test/src/smAdvancedTest.cpp:462 my_test_sil_adv block 13: plane_square.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 6 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_14_plane_square_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#13 (upstream tests/prog_test/src/smAdvancedTest.cpp:488 my_test_sil_adv block 14: plane_square.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 6 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_15_plane_square_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#14 (upstream tests/prog_test/src/smAdvancedTest.cpp:514 my_test_sil_adv block 15: plane_square.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_16_plane_square_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#15 (upstream tests/prog_test/src/smAdvancedTest.cpp:540 my_test_sil_adv block 16: plane_square.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 0 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_17_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#16 (upstream tests/prog_test/src/smAdvancedTest.cpp:566 my_test_sil_adv block 17: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 19 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 11763
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_18_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#17 (upstream tests/prog_test/src/smAdvancedTest.cpp:592 my_test_sil_adv block 18: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 4 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5313
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_19_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#18 (upstream tests/prog_test/src/smAdvancedTest.cpp:618 my_test_sil_adv block 19: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 48 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 14163
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil_adv_20_torus_f0",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#19 (upstream tests/prog_test/src/smAdvancedTest.cpp:645 my_test_sil_adv block 20: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 28 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_21_torus_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#20 (upstream tests/prog_test/src/smAdvancedTest.cpp:671 my_test_sil_adv block 21: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 16 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5463
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_22_torus_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#21 (upstream tests/prog_test/src/smAdvancedTest.cpp:696 my_test_sil_adv block 22: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 14 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5463
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_23_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#22 (upstream tests/prog_test/src/smAdvancedTest.cpp:722 my_test_sil_adv block 23: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 13 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 7173
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_24_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#23 (upstream tests/prog_test/src/smAdvancedTest.cpp:748 my_test_sil_adv block 24: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 5 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5403
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_25_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#24 (upstream tests/prog_test/src/smAdvancedTest.cpp:774 my_test_sil_adv block 25: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 5 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5433
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_26_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#25 (upstream tests/prog_test/src/smAdvancedTest.cpp:801 my_test_sil_adv block 26: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 6 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 9903
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_27_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#26 (upstream tests/prog_test/src/smAdvancedTest.cpp:827 my_test_sil_adv block 27: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 4 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5613
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_28_toruswvy_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#27 (upstream tests/prog_test/src/smAdvancedTest.cpp:853 my_test_sil_adv block 28: toruswvy.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 10 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 14433
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_29_torus_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#28 (upstream tests/prog_test/src/smAdvancedTest.cpp:880 my_test_sil_adv block 29: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 4 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5103
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_30_torus_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#29 (upstream tests/prog_test/src/smAdvancedTest.cpp:906 my_test_sil_adv block 30: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 5 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5073
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_31_torus_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#30 (upstream tests/prog_test/src/smAdvancedTest.cpp:931 my_test_sil_adv block 31: torus.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 4 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5373
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_32_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#31 (upstream tests/prog_test/src/smAdvancedTest.cpp:957 my_test_sil_adv block 32: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 8 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 7203
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_33_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#32 (upstream tests/prog_test/src/smAdvancedTest.cpp:983 my_test_sil_adv block 33: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 5 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5463
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil_adv_34_vase_rev_f0",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p1/upstream_sil_adv.json#33 (upstream tests/prog_test/src/smAdvancedTest.cpp:1009 my_test_sil_adv block 34: vase_rev.smb face 0 of 1 (smTopoTest.cpp my_test_tsurf_silhouette, tol 1e-3, 20 deg); upstream asserts lNumFound == 5 after SmFace::CreateCurvesByTrimming (topology.face_p2, not run by this op))",
+      "values_compared": 5433
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
       "pass": true,
@@ -6500,15 +6800,649 @@
       "pass": true,
       "source": "generated:seed=9548447535074838816",
       "values_compared": 2
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0000",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614835",
+      "values_compared": 2463
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0001",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614836",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0002",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614837",
+      "values_compared": 123
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0003",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614838",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0004",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614839",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0005",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614840",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0006",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614841",
+      "values_compared": 213
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0007",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614842",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0008",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614843",
+      "values_compared": 8403
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0009",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614844",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0010",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614845",
+      "values_compared": 363
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0011",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614846",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0012",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614847",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0013",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614848",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0014",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614849",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0015",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614850",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0016",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614851",
+      "values_compared": 3513
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0017",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614852",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0018",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614853",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0019",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614854",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0020",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614855",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0021",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614856",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0022",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614857",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0023",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614858",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0024",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614859",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0025",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614860",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0026",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614861",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0027",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614862",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0028",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614863",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0029",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614864",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0030",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614865",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0031",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614866",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0032",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614867",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0033",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614868",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0034",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614869",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0035",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614870",
+      "values_compared": 3603
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0036",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614871",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0037",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614872",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0038",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614873",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0039",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614874",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0040",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614875",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0041",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614876",
+      "values_compared": 663
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0042",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614877",
+      "values_compared": 1503
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0043",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614878",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0044",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614879",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0045",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614880",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0046",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614881",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0047",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614882",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0048",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614883",
+      "values_compared": 33063
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0049",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614884",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0050",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614885",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0051",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614886",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0052",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614887",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0053",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614888",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0054",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614889",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0055",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614890",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0056",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614891",
+      "values_compared": 1773
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0057",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614892",
+      "values_compared": 3
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0058",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614893",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0059",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614894",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0060",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614895",
+      "values_compared": 0
+    },
+    {
+      "deferred": {
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0061",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614896",
+      "values_compared": 0
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "sil0062",
+      "outcome": "pass",
+      "pass": true,
+      "source": "generated:seed=11036475482651614897",
+      "values_compared": 123
+    },
+    {
+      "deferred": {
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
+      },
+      "max_rel_err": 0.0,
+      "name": "sil0063",
+      "outcome": "deferred",
+      "pass": false,
+      "source": "generated:seed=11036475482651614898",
+      "values_compared": 0
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 13,
+  "cases_deferred": 50,
   "cases_failed": 0,
-  "cases_passed": 793,
-  "cases_total": 806,
+  "cases_passed": 854,
+  "cases_total": 904,
   "deferred_by_unit": {
-    "curve.iso_curve": 13
+    "curve.iso_curve": 13,
+    "intersect.surface_drop_lib_p3": 11,
+    "surface.surface_cache_p1": 26
   },
   "max_rel_err": 0.0,
   "pass": true,

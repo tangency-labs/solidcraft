@@ -2926,20 +2926,36 @@ pub fn split_rail(
     Ok((new_vert, new_rail))
 }
 
-/// The curve and surface handles of `sm_ComputeSupportEdge`'s `GlobalCurveIntersect`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The curve and surface handles of `sm_ComputeSupportEdge`'s `GlobalCurveIntersect`,
+/// with the curve's natural interval and the surface's natural UV domain (which
+/// `IdenticalSolutions` reads of upstream's objects).
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum SupportHandle {
     /// `*p3DCurve`.
-    Curve,
+    Curve(Extent1d),
     /// `pFilletSurface`.
-    Surface,
+    Surface(Extent2d),
 }
 
 impl SolutionObject for SupportHandle {
     fn kind(&self) -> ObjectKind {
         match self {
-            Self::Curve => ObjectKind::Curve,
-            Self::Surface => ObjectKind::Surface,
+            Self::Curve(_) => ObjectKind::Curve,
+            Self::Surface(_) => ObjectKind::Surface,
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Curve(ivl) => Some(*ivl),
+            Self::Surface(_) => None,
+        }
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        match self {
+            Self::Curve(_) => None,
+            Self::Surface(domain) => Some(*domain),
         }
     }
 }
@@ -3050,7 +3066,10 @@ pub fn compute_support_edge(
     let mut trim_ivl = curve_3d.natural_interval();
     let solutions = fillet_surface.global_curve_intersect(
         k,
-        [SupportHandle::Curve, SupportHandle::Surface],
+        [
+            SupportHandle::Curve(trim_ivl),
+            SupportHandle::Surface(fillet_surface.natural_uv_domain()),
+        ],
         &fillet_surface.natural_uv_domain(),
         &curve_3d,
         &trim_ivl,

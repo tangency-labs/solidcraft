@@ -10,16 +10,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "rect_cleanup_tiny_edge_joined",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/curve.curve_p5/upstream.json#1 (upstream tests/SM_API_test/src/TestSmCurves.cpp:424 (SmApiCreateRectangle((0,0,0), 10, 6)))",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -18694,16 +18690,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen2239",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7577095024496004880",
-      "values_compared": 0
+      "values_compared": 38
     },
     {
       "max_rel_err": 0.0,
@@ -24787,17 +24779,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 2,
+  "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 3095,
+  "cases_passed": 3097,
   "cases_total": 3097,
-  "deferred_by_unit": {
-    "curve.curve_p2": 2
-  },
+  "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,
-  "status": "partial",
+  "status": "green",
   "unit": "curve.curve_p5"
 }

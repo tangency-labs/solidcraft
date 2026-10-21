@@ -123,14 +123,22 @@ impl Default for IntersectEdgesOptions {
     }
 }
 
+/// The source and target curves of a curve/curve intersection here, with their
+/// natural intervals (upstream's objects are the curves, whose natural intervals
+/// `IdenticalSolutions` reads).
 #[derive(Clone, Copy, PartialEq)]
 enum Side {
-    Source,
-    Target,
+    Source(Extent1d),
+    Target(Extent1d),
 }
 impl SolutionObject for Side {
     fn kind(&self) -> ObjectKind {
         ObjectKind::Curve
+    }
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Source(ivl) | Self::Target(ivl) => Some(*ivl),
+        }
     }
 }
 
@@ -184,8 +192,8 @@ fn named<O: Copy>(s: &Solution<Side>, source: O, target: O) -> Solution<O> {
     out.nodes = s.nodes;
     for (to, from) in out.objects.iter_mut().zip(s.objects) {
         *to = from.map(|x| match x {
-            Side::Source => source,
-            Side::Target => target,
+            Side::Source(_) => source,
+            Side::Target(_) => target,
         });
     }
     out
@@ -255,7 +263,10 @@ impl<O: ClassObject> CurveClassification<O> {
                     &edge.interval,
                     tolerance,
                     &CurveIntersectOptions {
-                        handles: [Some(Side::Source), Some(Side::Target)],
+                        handles: [
+                            Some(Side::Source(working.natural_interval())),
+                            Some(Side::Target(target.natural_interval())),
+                        ],
                         ..CurveIntersectOptions::default()
                     },
                 )?;
@@ -319,7 +330,11 @@ impl<O: ClassObject> CurveClassification<O> {
         }
         // `GetOrCreateObjectCache(SM_OC_CURVE, ..)` then `NER(pCC)`: a failed cache
         // build (e.g. a degenerate source) is a NULL cache, SM_ERR_NULL_POINTER.
-        let cache = match make_curve_cache::<Side>(k, source, Some(Side::Source)) {
+        let cache = match make_curve_cache::<Side>(
+            k,
+            source,
+            Some(Side::Source(source.natural_interval())),
+        ) {
             Ok(c) => c,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(OP)),
@@ -484,7 +499,10 @@ impl<O: ClassObject> CurveClassification<O> {
             &trim.natural_interval(),
             tol2d,
             &CurveIntersectOptions {
-                handles: [Some(Side::Source), Some(Side::Target)],
+                handles: [
+                    Some(Side::Source(source.natural_interval())),
+                    Some(Side::Target(trim.natural_interval())),
+                ],
                 ..CurveIntersectOptions::default()
             },
         )?;

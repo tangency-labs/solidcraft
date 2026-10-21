@@ -82,7 +82,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{compute_jacobian, EvalNFunctions};
 use crate::geom::matrix::Matrix;
 use crate::geom::solution_array::{
-    ObjectKind, Solution, SolutionArray, SolutionEnd, SolutionObject, MAX_TREES,
+    ObjectKind, OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, MAX_TREES,
 };
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
@@ -1400,6 +1400,9 @@ impl Surface {
         let use_new =
             (op != SolverOperation::Maximize) || op == SolverOperation::Signed3dDirectedMaximize;
         *solutions = if use_new {
+            // upstream's seam solutions name this surface, whose natural UV domain
+            // IsEqual (AddSortedSolution) reads: solve naming a stand-in for it, and
+            // return the solutions without objects, as before
             self.global_point_solve_1(
                 k,
                 uv_domain,
@@ -1408,8 +1411,9 @@ impl Surface {
                 src_zone_tol_3d,
                 opt_target_distance,
                 requested,
-                None,
+                Some(OperandObject::Surface(0, self.natural_uv_domain())),
             )?
+            .without_objects()
         } else if let Some(surface) = surface {
             self.global_point_solve_0(
                 k,

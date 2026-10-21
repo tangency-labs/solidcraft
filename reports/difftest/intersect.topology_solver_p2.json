@@ -2495,8 +2495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_14_0",
@@ -2507,8 +2507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_5_14_1",
@@ -2607,8 +2607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_14_0",
@@ -2619,8 +2619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_6_14_1",
@@ -2719,8 +2719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_14_0",
@@ -2731,8 +2731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_7_14_1",
@@ -2823,8 +2823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_14_0",
@@ -2835,8 +2835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmSurfaceTracer::DoTrace",
-        "unit": "intersect.surface_tracer"
+        "symbol": "SmPlane::CreateIsoParametricCurve",
+        "unit": "surface.surface_cache_p1"
       },
       "max_rel_err": 0.0,
       "name": "face_included_without_shape_limit_8_14_1",
@@ -19573,8 +19573,8 @@
   "cases_total": 2429,
   "deferred_by_unit": {
     "geom.tol": 6,
-    "intersect.surface_tracer": 8,
     "query.face_p2": 4,
+    "surface.surface_cache_p1": 8,
     "surface.surface_p2": 12,
     "topology.edge": 3
   },

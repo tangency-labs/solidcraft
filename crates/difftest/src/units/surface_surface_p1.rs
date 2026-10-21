@@ -13,6 +13,11 @@
 //! (`0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a
 //! Rust error upstream cannot produce) and the rest as the `out` values.
 //!
+//! `Sil` runs `CreateSilhouetteCurves` on an unwrapped B-spline or plane (translated first
+//! by `Transform` when asked) and records every 3D and UV curve in full; the
+//! `upstream_sil_adv.json` fixtures are the `prog_test` `my_test_sil_adv` faces
+//! (`harness/fixturegen/sil_adv.py`), and `silNNNN` cases come from their own seed stream.
+//!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
 //! curve-bounded and STEP surfaces, `DomCont` of every kind but STEP surfaces; the
@@ -21,7 +26,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::curve::Curve as SmCurve;
+use solidcore::curve::curve::{Curve as SmCurve, CurveKind};
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::{Point2, Vec2};
@@ -170,6 +176,17 @@ enum OpIn {
         uv: [f64; 2],
         vec: [f64; 2],
     },
+    /// `CreateSilhouetteCurves` on the (unwrapped) surface, translated first by
+    /// `translate` (`Transform`) when given.
+    Sil {
+        dom: [f64; 4],
+        eye: [f64; 3],
+        perspective: bool,
+        tol: Option<f64>,
+        ang: Option<f64>,
+        #[serde(default)]
+        translate: Option<[f64; 3]>,
+    },
 }
 
 impl OpIn {
@@ -197,6 +214,7 @@ impl OpIn {
             OpIn::Cache { .. } => Op::Cache,
             OpIn::BBox { .. } => Op::BBox,
             OpIn::DomCont { .. } => Op::DomCont,
+            OpIn::Sil { .. } => Op::Sil,
         }
     }
 }
@@ -234,6 +252,12 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let op = i.op.ffi();
     match &i.op {
         OpIn::NSect { .. } | OpIn::FindIvl { .. } | OpIn::Step { .. } => {}
+        OpIn::Sil { .. } => {
+            if i.wrap {
+                return Err(harness("sil: the surface is not wrapped"));
+            }
+            push_surf(&mut o, &i.surf)?;
+        }
         _ => push_wrapped(&mut o, i.wrap, &i.surf)?,
     }
     match &i.op {
@@ -332,6 +356,22 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             o.push(f64::from(*cont));
             o.extend(uv);
             o.extend(vec);
+        }
+        OpIn::Sil {
+            dom,
+            eye,
+            perspective,
+            tol,
+            ang,
+            translate,
+        } => {
+            o.extend(dom);
+            o.push(flag(*perspective));
+            o.extend(eye);
+            push_opt_tol(&mut o, *tol);
+            push_opt_tol(&mut o, *ang);
+            o.push(flag(translate.is_some()));
+            o.extend(translate.unwrap_or([0.0; 3]));
         }
     }
     Ok((op, o))
@@ -752,6 +792,36 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             })
             .map(|()| o)
         }
+        OpIn::Sil {
+            dom,
+            eye,
+            perspective,
+            tol,
+            ang,
+            translate,
+        } => {
+            let mut s = surface_in(&i.surf)?;
+            if let Some(t) = translate {
+                let mut ax = Axis2Placement::default();
+                ax.translate(v3(*t));
+                match s.transform(&k, &ax, None) {
+                    Ok(()) => {}
+                    Err(e) if e.is_unported() => return Ok(Err(e)),
+                    Err(e) => return Ok(Ok(vec![status(&e)])),
+                }
+            }
+            match s.create_silhouette_curves(&k, &dom_of(*dom), v3(*eye), *perspective, *tol, *ang) {
+                Ok((c3, cuv)) => {
+                    let mut o = vec![0.0, c3.len() as f64, cuv.len() as f64];
+                    for c in c3.iter().chain(&cuv) {
+                        push_sil_curve(&mut o, c);
+                    }
+                    Ok(o)
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => Ok(vec![status(&e)]),
+            }
+        }
         OpIn::DomCont { cont, uv, vec } => {
             let s = run()?;
             let c = continuity(*cont)?;
@@ -766,6 +836,24 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             }
         }
     })
+}
+
+/// A silhouette curve as the shim's `put_sil_curve`: its type code, then for a B-spline
+/// `dim hasNurb [n p m cpts(x y z w) knots]`.
+fn push_sil_curve(o: &mut Vec<f64>, c: &SmCurve) {
+    o.push(c.type_code() as f64);
+    let CurveKind::BSpline(b) = c.kind() else {
+        return;
+    };
+    o.push(b.dim() as f64);
+    o.push(flag(b.gw_nurb().is_some()));
+    if let Some(cur) = b.gw_nurb() {
+        o.extend([cur.n() as f64, cur.degree() as f64, cur.m() as f64]);
+        for p in cur.cpts() {
+            o.extend([p.x, p.y, p.z, p.w]);
+        }
+        o.extend_from_slice(cur.knots());
+    }
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
@@ -1026,6 +1114,84 @@ fn gen_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     Ok(Inputs { wrap, surf, op })
 }
 
+/// Generated `Sil` cases (their own seed stream, `surface.surface_p1:sil`).
+pub const SIL_CASES: usize = 64;
+
+/// A `Sil` case: a B-spline or plane over its domain or a sub-domain; a parallel view
+/// (axis-aligned or random) or an eye point near or far from the surface; default, fine,
+/// coarse or near-limit tolerances; sometimes translated.
+fn gen_sil(rng: &mut Rng) -> Result<Inputs, HarnessError> {
+    let surf = gen_surf(rng);
+    if matches!(surf, SurfIn::CurveBounded(_)) {
+        return Err(harness("sil: a B-spline or a plane"));
+    }
+    let d = surf_domain(&surf)?;
+    let size = surf_size(&surf)?;
+    // tiny surfaces split their surface cache past MAX_SUBDIVISION_NODES on the Rust side
+    // (an InvalidInput where upstream subdivides on; plan/findings.md, surface.surface_cache_p3)
+    if size < 1e-2 {
+        return Err(harness("sil: surface too small for the Rust subdivision bound"));
+    }
+    let dom = if rng.chance(0.5) { d } else { gen_sub_dom(rng, d) };
+    let perspective = rng.chance(0.4);
+    let eye = if perspective {
+        let r = size * if rng.chance(0.7) { rng.uniform(2.0, 10.0) } else { rng.uniform(1.05, 1.5) };
+        let v = gvec(rng, 1.0);
+        let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-3);
+        [v[0] / n * r, v[1] / n * r, v[2] / n * r]
+    } else {
+        match rng.below(6) {
+            0 => [1.0, 0.0, 0.0],
+            1 => [0.0, 1.0, 0.0],
+            2 => [0.0, 0.0, 1.0],
+            3 => [1.0, 0.0, 1e-7],
+            _ => gvec(rng, 1.0),
+        }
+    };
+    let tol = match rng.below(5) {
+        0 => None,
+        1 => Some(size * 2e-6),
+        2 => Some(size * rng.uniform(1e-4, 1e-2)),
+        3 => Some(size * rng.uniform(0.05, 0.5)),
+        _ => Some(1e-3),
+    };
+    let ang = match rng.below(5) {
+        0 => None,
+        1 => Some(20f64.to_radians()),
+        2 => Some(rng.uniform(1e-3, 0.1)),
+        3 => Some(core::f64::consts::PI),
+        _ => Some(rng.uniform(0.1, 1.0)),
+    };
+    let translate = rng.chance(0.3).then(|| gvec(rng, size * 10.0));
+    Ok(Inputs {
+        wrap: false,
+        surf,
+        op: OpIn::Sil {
+            dom,
+            eye,
+            perspective,
+            tol,
+            ang,
+            translate,
+        },
+    })
+}
+
+fn generate_sil(rng: &mut Rng) -> Option<Value> {
+    for _ in 0..64 {
+        let Ok(i) = gen_sil(rng) else {
+            continue;
+        };
+        let Ok((op, input)) = cpp_input(&i) else {
+            continue;
+        };
+        if ffi::validate(op, &input).is_ok() {
+            return serde_json::to_value(i).ok();
+        }
+    }
+    None
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "surface.surface_p1"
@@ -1047,11 +1213,23 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // CreateSilhouetteCurves cases: their own seed stream (`<unit>:sil`), so the other
+        // ops' generated cases are unchanged; named `silNNNN`.
+        let sil = CaseContext {
+            seeds: ctx.seeds.max(SIL_CASES),
+            ..ctx.clone()
+        };
+        for mut c in sil.generated_cases("surface.surface_p1:sil", generate_sil) {
+            c.name = c.name.replacen("gen", "sil", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

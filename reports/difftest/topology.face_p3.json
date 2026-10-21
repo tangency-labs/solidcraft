@@ -83,8 +83,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "endcap_intersect_ang0",
@@ -6731,8 +6731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_48",
@@ -6755,8 +6755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_50",
@@ -6767,8 +6767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_51",
@@ -6791,8 +6791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_53",
@@ -6803,8 +6803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_54",
@@ -6827,8 +6827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_intersect_56",
@@ -7451,8 +7451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_48",
@@ -7475,8 +7475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_50",
@@ -7487,8 +7487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_51",
@@ -7511,8 +7511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_53",
@@ -7523,8 +7523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_54",
@@ -7547,8 +7547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCurve::GetNaturalInterval",
-        "unit": "curve.curve_p2"
+        "symbol": "SmEdge::GetTolerance",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_intersect_56",
@@ -17832,12 +17832,11 @@
   "cases_total": 1781,
   "deferred_by_unit": {
     "curve.crv_on_surf": 24,
-    "curve.curve_p2": 13,
     "geom.tol": 46,
     "intersect.surface_drop_lib_p3": 231,
     "surface.surf_of_extrusion_p2": 112,
     "surface.surface_p2": 228,
-    "topology.edge": 91,
+    "topology.edge": 104,
     "topology.face_p2": 148
   },
   "max_rel_err": 0.0,

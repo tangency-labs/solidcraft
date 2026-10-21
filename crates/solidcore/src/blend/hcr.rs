@@ -1004,8 +1004,7 @@ impl Hcr {
             if matches!(surface.kind(), SurfaceKind::Plane(_)) {
                 continue;
             }
-            // pick tol to limit segment sizes in DoTrace (the partial callee does not
-            // take the tolerances yet)
+            // pick tol to limit segment sizes in DoTrace
             let sil_tol = self.approx_tol_3d.min(self.ray_offset_tolerance / 100.0);
             let uv_domain = face.uv_domain;
             let Some((curves, uv_curves)) = ignored(surface.create_silhouette_curves(

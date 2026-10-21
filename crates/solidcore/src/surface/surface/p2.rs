@@ -169,7 +169,7 @@ use crate::geom::global_solver::{
 };
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::polynomial::solve_quadratic;
-use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject};
+use crate::geom::solution_array::{OperandObject, Solution, SolutionArray, SolutionObject};
 use crate::geom::tol::{are_same, eff_zero_param, scaled_zero2, tol3d};
 use crate::geom::tree::{AuxDataType, Tree, TreeNode, TreeOwner};
 use crate::geom::vector2d::{Point2, Vec2};
@@ -1096,8 +1096,9 @@ impl Surface {
     }
 
     /// `DropPointFast`: the plane and surface of revolution overrides (their
-    /// solutions name no object); the other ported kinds run the base default, which
-    /// fails.
+    /// solutions name no object; the surface of revolution's are merged as
+    /// upstream's, which name the surface); the other ported kinds run the base
+    /// default, which fails.
     ///
     /// # Errors
     ///
@@ -1130,17 +1131,22 @@ impl Surface {
                     "surface.surface_p2",
                 ))
             }
-            SurfaceKind::SurfOfRevolution(s) => s.drop_point_fast(
-                k,
-                uv_domain,
-                operation,
-                test_point,
-                in_pointing_vector,
-                distance_tolerance,
-                target_distance,
-                requested,
-                None,
-            ),
+            // upstream's solutions name this surface, whose natural UV domain
+            // IdenticalSolutions reads: solve naming a stand-in for it, return the
+            // solutions without objects
+            SurfaceKind::SurfOfRevolution(s) => Ok(s
+                .drop_point_fast(
+                    k,
+                    uv_domain,
+                    operation,
+                    test_point,
+                    in_pointing_vector,
+                    distance_tolerance,
+                    target_distance,
+                    requested,
+                    Some(OperandObject::Surface(0, self.natural_uv_domain())),
+                )?
+                .without_objects()),
             SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
@@ -4281,6 +4287,11 @@ fn insert_split(split_params: &mut Vec<f64>, t: f64, tol: f64) {
 /// crosses the plane through `plane_pnt` with normal `plane_norm` to the sorted
 /// `split_params` (skipping values within `SM_EFF_ZERO_SQRT` of one there).
 ///
+/// `handle` is `uv_curve`'s handle in the solver's object space (upstream the
+/// solutions name the curve itself): `IdenticalSolutions` merges two solutions
+/// within 1/10000th of its natural interval, so it must report the curve's natural
+/// interval (`None` would merge only within `100 * SM_EFF_ZERO`).
+///
 /// # Errors
 ///
 /// Those of `SmCurve::GlobalPropertyAnalysis`.
@@ -4290,6 +4301,7 @@ pub fn intersect_and_split<O: SolutionObject>(
     interval: &Extent1d,
     plane_pnt: Point3,
     plane_norm: Vec3,
+    handle: Option<O>,
     split_params: &mut Vec<f64>,
 ) -> Result<()> {
     let plane_d = -plane_norm.dot(plane_pnt);
@@ -4303,7 +4315,7 @@ pub fn intersect_and_split<O: SolutionObject>(
             property_value: Some(plane_d),
             opt_vectors: &vectors,
             want_comb: false,
-            handle: None,
+            handle,
         },
     )?;
 

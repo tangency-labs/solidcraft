@@ -35,10 +35,18 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "lift_crv2_kinked_uv_trim_curve",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p11/upstream_prog_test.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:2587 my_test_drop_curve: lifting a kinked UVTrimCurve to a kinked 3d curve; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve))",
+      "values_compared": 1104
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "lift_crv1_iso_segment_swept",
       "outcome": "pass",
       "pass": true,
-      "source": "fixture:fixtures/surface.surface_p11/upstream_prog_test.json#4 (upstream tests/prog_test/src/smSurfaceTest.cpp:2636 my_test_drop_curve: isoparam segment curve on large aspect ratio swept surface with dramatic turns; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve))",
+      "source": "fixture:fixtures/surface.surface_p11/upstream_prog_test.json#5 (upstream tests/prog_test/src/smSurfaceTest.cpp:2636 my_test_drop_curve: isoparam segment curve on large aspect ratio swept surface with dramatic turns; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve))",
       "values_compared": 292
     },
     {
@@ -6445,8 +6453,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 805,
-  "cases_total": 805,
+  "cases_passed": 806,
+  "cases_total": 806,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

@@ -21,6 +21,10 @@
 //!   equality, in the order this curve, other curve, this analytic, other analytic;
 //!   a handle naming none of them is `SM_ERR_NULL_POINTER`, as upstream's `NER` on a
 //!   failed cast.
+//!   A caller that gives no handles at all gets solutions without objects; the solve
+//!   itself then names stand-ins for the four curves (`operand_handles`) reporting
+//!   their natural intervals, so `IdenticalSolutions` merges within 1/10000th of
+//!   them and `sm_RefineCCSolutions` resolves each curve, as upstream.
 //! - **Caches.** The caches are built for the call with [`make_curve_cache`] (see
 //!   unit `curve.curve_p5`); the same curve (by identity, [`core::ptr::eq`]) shares
 //!   one cache and so one tree, which makes the intersection a self intersection, as
@@ -57,7 +61,7 @@ use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation, MAX_SOLVER_TREES,
 };
 use crate::geom::solution_array::{
-    Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
+    OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
 };
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::Tree;
@@ -75,7 +79,10 @@ const NO_INDEX: usize = usize::MAX;
 pub struct CurveIntersectOptions<O> {
     /// `bSkipGlobalCoincidenceCheck` (upstream default `FALSE`).
     pub skip_global_coincidence_check: bool,
-    /// The handles of this curve and the other curve, named by the solutions.
+    /// The handles of this curve and the other curve, named by the solutions. With
+    /// these and [`CurveIntersectOptions::analytic_handles`] all `None` the solutions
+    /// name no objects, but are merged and refined as upstream's (which always name
+    /// the curves).
     pub handles: [Option<O>; 2],
     /// The handles of the analytic replacements the curve caches make of
     /// non-analytic curves (an `SmLine` of a straight B-spline), named by the
@@ -174,6 +181,30 @@ fn build_cache<O: SolutionObject>(
     }
 }
 
+/// The stand-in objects of a curve/curve solve whose caller names none: this curve,
+/// the other curve (the same object when `other` is this curve, as upstream's
+/// pointers) and their caches' analytic replacements (reporting the natural
+/// interval of the curve they replace).
+pub(crate) fn operand_handles(this: &Curve, other: &Curve) -> [OperandObject; 4] {
+    let this_ivl = this.natural_interval();
+    let other_ivl = other.natural_interval();
+    if core::ptr::eq(this, other) {
+        [
+            OperandObject::Curve(0, this_ivl),
+            OperandObject::Curve(0, this_ivl),
+            OperandObject::Curve(2, this_ivl),
+            OperandObject::Curve(2, this_ivl),
+        ]
+    } else {
+        [
+            OperandObject::Curve(0, this_ivl),
+            OperandObject::Curve(1, other_ivl),
+            OperandObject::Curve(2, this_ivl),
+            OperandObject::Curve(3, other_ivl),
+        ]
+    }
+}
+
 impl Curve {
     /// `GlobalCurveIntersect`: the intersection points (`start.parameters`: this
     /// curve's, then the other curve's parameter) and coincident ranges of this
@@ -205,6 +236,19 @@ impl Curve {
         dist_tol: f64,
         opts: &CurveIntersectOptions<O>,
     ) -> Result<SolutionArray<O>> {
+        // no handles: upstream's solutions still name this curve and the other one
+        // (whose natural intervals IdenticalSolutions reads, and Refine resolves)
+        if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
+            let own = operand_handles(self, other);
+            let inner = CurveIntersectOptions {
+                skip_global_coincidence_check: opts.skip_global_coincidence_check,
+                handles: [Some(own[0]), Some(own[1])],
+                analytic_handles: [Some(own[2]), Some(own[3])],
+            };
+            return Ok(self
+                .global_curve_intersect(k, interval, other, other_interval, dist_tol, &inner)?
+                .without_objects());
+        }
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
 

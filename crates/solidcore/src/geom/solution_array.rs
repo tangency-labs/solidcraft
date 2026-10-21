@@ -44,6 +44,7 @@
 //! | [`SolutionArray::add_sorted_solution`]        | `SmSolutionArray::AddSortedSolution`                       |
 //! | [`SolutionArray::insert_at`], [`SolutionArray::try_insert_at`] | `SmSolutionArray::InsertAt(ULONG, const SmSolution&, ULONG)` |
 //! | [`SolutionArray::remove_at`]                  | `SmSolutionArray::RemoveAt`                                |
+//! | `OperandObject`, `SolutionArray::without_objects` (crate) | the non-null `this` / operand objects of upstream's solves |
 //! | [`SolutionArray::swap`]                       | `SmSolutionArray::Swap`                                    |
 //! | [`SolutionArray::TYPE`], [`SolutionArray::type_code`], [`SolutionArray::type_string`], [`SolutionArray::is_kind_of`] | `SmSolutionArray::GetType`, `GetTypeString`, `IsKindOf` |
 //!
@@ -55,6 +56,10 @@
 //!   can reach its curve, the curve's natural interval
 //!   ([`SolutionObject::natural_interval`], `SmCurve::GetNaturalInterval`). Tree
 //!   nodes (`m_apNodes`) are opaque [`NodeId`]s.
+//!   Solves whose caller gives no handle name `OperandObject` stand-ins internally
+//!   (upstream's solutions always name the solve's curves and surfaces, whose
+//!   natural intervals and domains `IdenticalSolutions` / `IsEqual` read) and hand
+//!   the solutions back without objects (`SolutionArray::without_objects`).
 //! - **Unported geometry.** Evaluating a curve, surface, edge, face, vertex or
 //!   poly vertex, the parameter domains of surfaces, edges, faces and volumes
 //!   (and of curves whose handle does not report it), and
@@ -295,6 +300,45 @@ pub trait SolutionObject: Copy + PartialEq {
     /// vertex; `None` (the default) when it cannot.
     fn poly_vertex_point(&self) -> Option<Point3> {
         None
+    }
+}
+
+/// The solution object a solve names internally when its caller gives no handle
+/// (`None`): upstream's solutions always name the solve's operands (`this` curve or
+/// surface, the other curve, ...), and `IdenticalSolutions` / `IsEqual` merge
+/// solutions within 1/10000th of their natural interval or domain, so the stand-in
+/// reports the operand's natural interval ([`OperandObject::Curve`]) or natural UV
+/// domain ([`OperandObject::Surface`]). The `u8` tells the operands apart. The
+/// caller gets the solutions back without objects
+/// ([`SolutionArray::without_objects`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum OperandObject {
+    /// A curve operand and its natural interval.
+    Curve(u8, Extent1d),
+    /// A surface operand and its natural UV domain.
+    Surface(u8, crate::geom::extent2d::Extent2d),
+}
+
+impl SolutionObject for OperandObject {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Curve(..) => ObjectKind::Curve,
+            Self::Surface(..) => ObjectKind::Surface,
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Curve(_, ivl) => Some(*ivl),
+            Self::Surface(..) => None,
+        }
+    }
+
+    fn natural_uv_domain(&self) -> Option<crate::geom::extent2d::Extent2d> {
+        match self {
+            Self::Curve(..) => None,
+            Self::Surface(_, domain) => Some(*domain),
+        }
     }
 }
 
@@ -1312,6 +1356,26 @@ impl<O: SolutionObject> SolutionArray<O> {
         if let Some(slot) = self.data.get_mut(index) {
             *slot = *solution;
         }
+    }
+
+    /// The solutions with every object cleared (null pointers), in another handle
+    /// type: what a caller that named no objects gets back from a solve that named
+    /// [`OperandObject`]s internally.
+    #[must_use]
+    pub(crate) fn without_objects<P: SolutionObject>(&self) -> SolutionArray<P> {
+        let mut out = SolutionArray::new();
+        for s in &self.data {
+            out.data.push(Solution {
+                solution_type: s.solution_type,
+                num_variables: s.num_variables,
+                start: s.start,
+                end: s.end,
+                num_objects: s.num_objects,
+                objects: [None; MAX_TREES],
+                nodes: s.nodes,
+            });
+        }
+        out
     }
 
     /// Appends `solution`; returns its index (`Add`).

@@ -163,13 +163,19 @@ fn approximate_length(
 }
 
 /// A curve of [`global_curve_intersect`] in its solutions (`0`: the first curve, `1`:
-/// the second, `2` / `3`: their analytic replacements).
+/// the second, `2` / `3`: their analytic replacements) and the natural interval of
+/// the curve (upstream's objects are the curves, whose natural intervals
+/// `IdenticalSolutions` reads).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct GapCurve(u8);
+struct GapCurve(u8, Extent1d);
 
 impl SolutionObject for GapCurve {
     fn kind(&self) -> ObjectKind {
         ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.1)
     }
 }
 
@@ -189,8 +195,14 @@ fn global_curve_intersect(
     let c1 = Curve::from(curve1.clone());
     let opts = CurveIntersectOptions {
         skip_global_coincidence_check: false,
-        handles: [Some(GapCurve(0)), Some(GapCurve(1))],
-        analytic_handles: [Some(GapCurve(2)), Some(GapCurve(3))],
+        handles: [
+            Some(GapCurve(0, c0.natural_interval())),
+            Some(GapCurve(1, c1.natural_interval())),
+        ],
+        analytic_handles: [
+            Some(GapCurve(2, c0.natural_interval())),
+            Some(GapCurve(3, c1.natural_interval())),
+        ],
     };
     let found = ignored(c0.global_curve_intersect(k, ivl0, &c1, ivl1, tol, &opts))?;
     Ok(found.map_or_else(Vec::new, |sols| {

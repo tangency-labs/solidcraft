@@ -14,6 +14,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
@@ -209,6 +210,7 @@ enum
     OP_CACHE = 19,
     OP_BBOX = 20,
     OP_DOM_CONT = 21,
+    OP_SIL = 22,
 };
 
 struct Rd
@@ -785,6 +787,81 @@ void op_dom_cont(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     put_dom(o, s->GetDomainWithContinuity(c, uv, v));
     delete s;
 }
+// A curve: `GetType()`, then for an SmBSplineCurve `dim hasNurb [n p m cpts(x y z w) knots]`.
+void put_sil_curve(std::vector<double>& o, const SmCurve* c)
+{
+    o.push_back((double)c->GetType());
+    if (c->GetType() != SmBSplineCurve_TYPE)
+        return;
+    const SmBSplineCurve* b = (const SmBSplineCurve*)c;
+    o.push_back((double)b->GetDim());
+    const gw_CURVE* cur = b->GetGwNurbPointer();
+    o.push_back(flg(cur != NULL));
+    if (!cur)
+        return;
+    gw_INDEX n = cur->pol->n;
+    gw_INDEX m = cur->knt->m;
+    o.push_back((double)n);
+    o.push_back((double)cur->p);
+    o.push_back((double)m);
+    for (gw_INDEX i = 0; i <= n; i++)
+    {
+        o.push_back(cur->pol->Pw[i].x);
+        o.push_back(cur->pol->Pw[i].y);
+        o.push_back(cur->pol->Pw[i].z);
+        o.push_back(cur->pol->Pw[i].w);
+    }
+    for (gw_INDEX i = 0; i <= m; i++)
+        o.push_back(cur->knt->U[i]);
+}
+
+// `S D persp eye(V) hasTol tol hasAng ang hasMove move(V)`: optionally Transform by the
+// translation `move` (`status` of a failed Transform), then CreateSilhouetteCurves(ctx, D, eye,
+// persp, tol, ang, &c3, &cuv) (prog_test my_test_tsurf_silhouette): `status [n3 nuv curves3
+// curvesuv]`, each curve `put_sil_curve`.
+void op_sil(Rd& rd, const SmContext& ctx, std::vector<double>& o)
+{
+    SmSurface* s = read_surface(rd, ctx);
+    SmExtent2d d = rd.domain();
+    SmBoolean persp = rd.flag() ? TRUE : FALSE;
+    SmPoint3d eye = rd.vec();
+    bool has_tol = rd.flag();
+    SmApproxTol3d tol = rd.num();
+    bool has_ang = rd.flag();
+    double ang = rd.num();
+    bool has_move = rd.flag();
+    SmVector3d move = rd.vec();
+    if (has_move)
+    {
+        SmAxis2Placement ax;
+        ax.Translate(move);
+        SmStatus ts = s->Transform(ax, NULL);
+        if (ts != SM_SUCCESS)
+        {
+            o.push_back(st(ts));
+            delete s;
+            return;
+        }
+    }
+    SmTArray<SmCurve*> c3(ctx), cuv(ctx);
+    SmStatus r = s->CreateSilhouetteCurves(ctx, d, eye, persp, has_tol ? &tol : NULL, has_ang ? &ang : NULL, &c3,
+                                           &cuv);
+    o.push_back(st(r));
+    if (r == SM_SUCCESS)
+    {
+        o.push_back((double)c3.GetSize());
+        o.push_back((double)cuv.GetSize());
+        for (ULONG i = 0; i < c3.GetSize(); i++)
+            put_sil_curve(o, c3[i]);
+        for (ULONG i = 0; i < cuv.GetSize(); i++)
+            put_sil_curve(o, cuv[i]);
+    }
+    for (ULONG i = 0; i < c3.GetSize(); i++)
+        delete c3[i];
+    for (ULONG i = 0; i < cuv.GetSize(); i++)
+        delete cuv[i];
+    delete s;
+}
 } // namespace sc_ssp1
 
 SC_EXPORT int32_t sc_surface_surface_p1_eval(int32_t op, const double* in, int64_t n_in, double* out, int64_t cap,
@@ -819,6 +896,7 @@ SC_EXPORT int32_t sc_surface_surface_p1_eval(int32_t op, const double* in, int64
     case sc_ssp1::OP_CACHE: sc_ssp1::op_cache(rd, ctx, o); break;
     case sc_ssp1::OP_BBOX: sc_ssp1::op_bbox(rd, ctx, o); break;
     case sc_ssp1::OP_DOM_CONT: sc_ssp1::op_dom_cont(rd, ctx, o); break;
+    case sc_ssp1::OP_SIL: sc_ssp1::op_sil(rd, ctx, o); break;
     default: return SC_ERR_ARG;
     }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);

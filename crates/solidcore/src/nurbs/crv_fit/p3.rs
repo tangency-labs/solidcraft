@@ -41,6 +41,9 @@
 //!   way (`A[i][-1]` is the last entry of row `i - 1`). Accesses outside a whole
 //!   block or outside the given slices return [`SolidError::InvalidInput`] instead of
 //!   undefined behaviour.
+//! - [`interp_knots_and_tangents`] rejects a degree above `NL_MAXDEG` with
+//!   `InvalidInput` (upstream overruns its basis scratch arrays; the port would
+//!   otherwise size its knot arrays from the degree).
 //! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number.
 //!   The `NL_STACKS` arguments and the routine-name strings have no counterpart.
 //! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
@@ -65,7 +68,7 @@ use crate::nurbs::fit_arrays::{
     sg,
 };
 use crate::nurbs::geom::{dist_polygon, normalize};
-use crate::nurbs::knots::{KnotVector, Side};
+use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
 use crate::nurbs::math::{combine2_pts, CPoint};
 
 const OP_DERIVS: &str = "nurbs::crv_fit::p3::interp_end_derivs";
@@ -589,8 +592,8 @@ fn rescale(t: &mut Vec3, fac: f64) -> Result<()> {
 /// with one tangent; [`NlibCode::Knot`] for an invalid given knot vector;
 /// `NL_GEO_ERR` for a tangent that cannot be normalised; errors of
 /// [`interp_given_params`], [`interp_knots_and_deriv`] and
-/// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters or
-/// a knot search leaving the given knot vector.
+/// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters, a
+/// degree above `NL_MAXDEG` or a knot search leaving the given knot vector.
 #[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
 pub fn interp_knots_and_tangents(
     a: &[Vec3],
@@ -625,6 +628,12 @@ pub fn interp_knots_and_tangents(
 
     if p < 2 {
         return Err(SolidError::nlib(OP, NlibCode::Input));
+    }
+    if pu > MAX_DEGREE {
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "degree above NL_MAXDEG (upstream scratch array size)",
+        });
     }
     if per < 0.0 || per > 1.0 {
         return Err(SolidError::nlib(OP, NlibCode::Input));

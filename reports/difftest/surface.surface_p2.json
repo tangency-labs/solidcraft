@@ -558,6 +558,54 @@
       "values_compared": 1
     },
     {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink5_w1_h",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#0 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [4, 6] around its C0 knot 5, cut by a horizontal 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink5_w3_h",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#1 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [2, 8] around its C0 knot 5, cut by a horizontal 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink8_w3_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#2 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [5, 11] around its C0 knot 8, cut by a vertical 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 4
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink13_w1_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#3 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [12, 14] around its C0 knot 13, cut by a vertical 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink17_w1_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#4 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [16, 18] around its C0 knot 17, cut by a vertical 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 3
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "isect_curve_split_lift_crv2_kink17_w3_v",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surface_p2/isect_curve_split_kinked.json#5 (upstream TestFiles/pt_TestFiles/Drop/PS_lift_crv2.dat (the kinked UV trim curve of tests/prog_test/src/smSurfaceTest.cpp:2587), knot spans [14, 20] around its C0 knot 17, cut by a vertical 2D line through the kink: sm_IntersectCurveAndSplit's GlobalCurveIntersect solutions name the curves, so IdenticalSolutions merges within 1/10000th of their natural intervals)",
+      "values_compared": 5
+    },
+    {
       "deferred": {
         "symbol": "SmSurfaceDropCurve::DoTrace",
         "unit": "intersect.surface_drop_curve"
@@ -133481,8 +133529,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 21,
   "cases_failed": 0,
-  "cases_passed": 16653,
-  "cases_total": 16674,
+  "cases_passed": 16659,
+  "cases_total": 16680,
   "deferred_by_unit": {
     "intersect.surface_drop_curve": 15,
     "intersect.surface_intersector_p2": 5,

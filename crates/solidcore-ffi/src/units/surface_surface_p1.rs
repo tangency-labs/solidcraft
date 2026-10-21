@@ -34,13 +34,19 @@
 //! | `Cache`      | `CacheMakeOrValidate` (new cache)                      | `W S trim`            |
 //! | `BBox`       | `CalculateBoundingBox`                                 | `W S D normal pseudo expand polar` |
 //! | `DomCont`    | `GetDomainWithContinuity`                              | `W S cont uv V`       |
+//! | `Sil`        | `Transform` (translation, optional), `CreateSilhouetteCurves` | `S D persp eye(V) hasTol tol hasAng ang hasMove move(V)` |
 //!
 //! The output is the op status (`0` = `SM_SUCCESS`, else the `SmStatus`) and the op's
 //! outputs (see the shim). [`eval`] accepts only what upstream handles without undefined
 //! behaviour: the surfaces of [`super::surface_surface_cache_p3`], points and domains
 //! inside the surface domain wherever the surface is evaluated, directional derivative
 //! orders the shim's array holds, valid enumerators, finite values; `FindIvl` a 2D curve,
-//! an interval inside its domain and a trim domain of positive size.
+//! an interval inside its domain and a trim domain of positive size; `Sil` a B-spline or a
+//! plane (not wrapped) over a domain of positive size inside its domain, a non-zero view
+//! vector for a parallel projection (upstream asserts it), and tolerances that keep the trace
+//! bounded: an approximation tolerance of at least [`MIN_SIL_TOL`] times the surface size
+//! (else the march takes millions of steps), an angle tolerance in
+//! [[`MIN_SIL_ANG`], `pi`].
 
 use super::surface_surface_cache_p1::{bad, curve, Reader, Srf};
 use super::surface_surface_cache_p3::{sized_surface, Kind};
@@ -93,6 +99,8 @@ pub enum Op {
     BBox,
     /// `GetDomainWithContinuity`.
     DomCont,
+    /// `CreateSilhouetteCurves` (after an optional translation).
+    Sil,
 }
 
 impl Op {
@@ -122,6 +130,7 @@ impl Op {
             Op::Cache => 19,
             Op::BBox => 20,
             Op::DomCont => 21,
+            Op::Sil => 22,
         }
     }
 }
@@ -141,6 +150,12 @@ mod sys {
 
 /// Highest directional derivative order (the shim's array holds 8 vectors).
 pub const MAX_DIR_DERIV: usize = 7;
+
+/// Smallest `Sil` approximation tolerance, relative to the surface size.
+pub const MIN_SIL_TOL: f64 = 1e-6;
+
+/// Smallest `Sil` angle tolerance (radians).
+pub const MIN_SIL_ANG: f64 = 1e-3;
 
 /// Highest `SmContinuityType`.
 const MAX_CONTINUITY: usize = 13;
@@ -365,6 +380,30 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             rd.index(MAX_CONTINUITY)?;
             uv_in(rd, &srf)?;
             rd.finites(2)?;
+        }
+        Op::Sil => {
+            let (kind, srf, size) = sized_surface(rd)?;
+            if kind == Kind::CurveBounded {
+                return Err(bad("silhouette: a B-spline or a plane"));
+            }
+            rd.domain_in(&srf, true)?;
+            let persp = rd.flag()?;
+            let eye = rd.vec3()?;
+            if !persp && eye.iter().all(|x| *x == 0.0) {
+                return Err(bad("silhouette: zero view vector (upstream asserts)"));
+            }
+            let has_tol = rd.flag()?;
+            let tol = rd.finite()?;
+            if has_tol && tol < MIN_SIL_TOL * size {
+                return Err(bad("silhouette: approximation tolerance too small"));
+            }
+            let has_ang = rd.flag()?;
+            let ang = rd.finite()?;
+            if has_ang && !(MIN_SIL_ANG..=core::f64::consts::PI).contains(&ang) {
+                return Err(bad("silhouette: angle tolerance outside [1e-3, pi]"));
+            }
+            rd.flag()?;
+            rd.vec3()?;
         }
     }
     Ok(())

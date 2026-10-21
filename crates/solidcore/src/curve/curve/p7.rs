@@ -67,7 +67,9 @@ use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation,
 };
 use crate::geom::pseudo_box::{Projection, PseudoBox};
-use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType, SortKey};
+use crate::geom::solution_array::{
+    OperandObject, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+};
 use crate::geom::tol::{are_same, is_zero, ANG_TOL_DEG};
 use crate::geom::tree::{NodeData, Tree, TreeNode};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -1003,6 +1005,8 @@ pub struct PropertyAnalysisOptions<'a, O> {
     /// null).
     pub want_comb: bool,
     /// The curve's handle in the caller's object space, named by the solutions.
+    /// With `None` the solutions name no object, but are merged as upstream's
+    /// (which name the curve).
     pub handle: Option<O>,
 }
 
@@ -1074,6 +1078,30 @@ impl Curve {
         out: &mut PropertyAnalysis<O>,
     ) -> Result<()> {
         type P = CurvePropertyType;
+
+        // no handle: upstream's solutions still name this curve (whose natural
+        // interval IdenticalSolutions reads); the caller gets them without objects
+        if opts.handle.is_none() {
+            let inner = PropertyAnalysisOptions {
+                property_value: opts.property_value,
+                opt_vectors: opts.opt_vectors,
+                want_comb: opts.want_comb,
+                handle: Some(OperandObject::Curve(0, self.natural_interval())),
+            };
+            let mut own = PropertyAnalysis {
+                solutions: SolutionArray::new(),
+                comb_points: Vec::new(),
+                comb_vecs: Vec::new(),
+            };
+            let r = self
+                .global_property_analysis_into(k, interval, property, dist_tol, &inner, &mut own);
+            *out = PropertyAnalysis {
+                solutions: own.solutions.without_objects(),
+                comb_points: own.comb_points,
+                comb_vecs: own.comb_vecs,
+            };
+            return r;
+        }
 
         // init output
         *out = PropertyAnalysis {

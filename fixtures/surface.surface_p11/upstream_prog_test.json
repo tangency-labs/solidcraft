@@ -73,6 +73,24 @@
       }
     },
     {
+      "name": "lift_crv2_kinked_uv_trim_curve",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2587 my_test_drop_curve: lifting a kinked UVTrimCurve to a kinked 3d curve; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve)",
+      "inputs": {
+        "op": 2,
+        "surface": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_srf2.dat"
+          }
+        },
+        "curve": {
+          "file": {
+            "$upstream_file": "Drop/PS_lift_crv2.dat"
+          }
+        },
+        "tol": 0.01
+      }
+    },
+    {
       "name": "lift_crv1_iso_segment_swept",
       "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:2636 my_test_drop_curve: isoparam segment curve on large aspect ratio swept surface with dramatic turns; pSurface->LiftCurve(ctx, GetNaturalUVDomain(), *pCurve, GetNaturalInterval(), 0.01, dMaxDistToSurf, p3DCurve)",
       "inputs": {

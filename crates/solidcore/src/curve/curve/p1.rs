@@ -82,7 +82,9 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation,
 };
-use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType, SortKey};
+use crate::geom::solution_array::{
+    OperandObject, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+};
 use crate::geom::tol::{are_same, is_zero, is_zero_to_tol};
 use crate::geom::tree::{NodeData, Tree};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -1475,7 +1477,9 @@ pub struct GlobalPointSolveOptions<'a, O> {
     pub target_distance: Option<f64>,
     /// `cpOptVectors`: the vectors of the ray, directed and projected operations.
     pub opt_vectors: Option<&'a [Vec3]>,
-    /// The handle of this curve, named by its solutions.
+    /// The handle of this curve, named by its solutions. With this and
+    /// [`GlobalPointSolveOptions::analytic_handle`] both `None` the solutions name no
+    /// object, but are merged as upstream's (which name the curve).
     pub handle: Option<O>,
     /// The handle of the curve cache's analytic replacement (an `SmLine` the cache
     /// makes of a straight B-spline), named by its fast drop's solutions.
@@ -1548,6 +1552,22 @@ impl Curve {
         requested: SolutionRequested,
         opts: &GlobalPointSolveOptions<'_, O>,
     ) -> Result<SolutionArray<O>> {
+        // no handles: upstream's solutions still name this curve (whose natural
+        // interval IdenticalSolutions reads); the caller gets them without objects
+        if opts.handle.is_none() && opts.analytic_handle.is_none() {
+            let ivl = self.natural_interval();
+            let inner = GlobalPointSolveOptions {
+                target_distance: opts.target_distance,
+                opt_vectors: opts.opt_vectors,
+                handle: Some(OperandObject::Curve(0, ivl)),
+                analytic_handle: Some(OperandObject::Curve(2, ivl)),
+            };
+            return Ok(self
+                .global_point_solve_cached(
+                    k, interval, op, test_point, dist_tol, requested, &inner, &mut None,
+                )?
+                .without_objects());
+        }
         self.global_point_solve_cached(
             k, interval, op, test_point, dist_tol, requested, opts, &mut None,
         )
