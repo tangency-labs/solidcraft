@@ -1,0 +1,91 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 25
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -25,
+     0
+    ],
+    "radius": 25
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "profiles": [
+     0,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      -12.5,
+      21.650635,
+      5
+     ],
+     [
+      -12.5,
+      -21.650635,
+      5
+     ]
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      25,
+      0,
+      10
+     ],
+     [
+      -50,
+      0,
+      10
+     ],
+     [
+      -12.5,
+      22.27178,
+      10
+     ],
+     [
+      -12.5,
+      -22.27178,
+      10
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

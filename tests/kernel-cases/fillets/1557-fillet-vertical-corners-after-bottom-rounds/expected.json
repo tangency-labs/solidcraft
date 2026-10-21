@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1557",
+  "tangency-labs/solidcraft#1581"
+ ],
+ "what": "vertical corner fillets R2 on a 25x25x10 box whose four bottom edges are already rounded R2 (the round meets the earlier mitre)",
+ "source": "analytic",
+ "method": "box 25x25x10 with the four bottom edges and the four vertical edges rounded R2, top edges left sharp. That is the body (inner rectangle [r,a-r]x[r,b-r] x [r, c+r] grown by a ball r) cut at z=c. Slices: for z>=r the section is the rounded rectangle, area ab - (4-pi) r^2; for 0<=z<=r it is the inner rectangle grown by a disc of radius rho(z) = sqrt(r^2-(r-z)^2): (a-2r)(b-2r) + 2 rho (a+b-4r) + pi rho^2. With the integrals of rho = pi r^2/4 and rho^2 = 2 r^3/3 over z in 0..r: V = (a-2r)(b-2r) r + (a+b-4r) pi r^2/2 + 2 pi r^3/3 + (c-r)(ab-(4-pi) r^2) = 6135.1799. Faces: top, bottom, 4 sides, 4 vertical R2 cylinders, 4 bottom R2 cylinders, 4 sphere octants = 18.",
+ "body_count": 1,
+ "volume_mm3": 6135.179908635561,
+ "faces": 18
+}

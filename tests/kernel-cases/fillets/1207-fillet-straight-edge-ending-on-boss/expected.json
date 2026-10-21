@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1207"
+ ],
+ "what": "an R2 round along the straight top edge of a bar that runs out against a cylindrical boss",
+ "source": "analytic",
+ "method": "same bar and boss as 1207-fillet-concave-arc-at-boss (V0 = 49756.179). The R2 round on the top edge at y=15 removes the quarter-circle spandrel (y 13..15, z 8..10) swept along x from the boss wall x = sqrt(400-y^2) to x=100: removed = integral over y of [2 - sqrt(4-(y-13)^2)] (100 - sqrt(400-y^2)) dy = 74.0736 (Simpson). V = V0 - removed.",
+ "body_count": 1,
+ "volume_mm3": 49682.10580370255
+}

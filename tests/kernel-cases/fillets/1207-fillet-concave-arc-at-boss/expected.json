@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1207"
+ ],
+ "what": "an R2 round on the concave arc where a bar top meets a boss that only partly sits on it",
+ "source": "analytic",
+ "method": "bar 100x30x10 (x 0..100, y -15..15) joined with a diameter 40 boss 20 tall at the origin. Boss in bar = integral of sqrt(400-y^2) over |y|<=15 = 537.656 mm^2 x 10 high, so V0 = 30000 + 25132.74 - 5376.56. The R2 concave round along the arc (r=20, z=10, from y=-15 to y=15) adds the spandrel region 20<=r<=22, 10<=z<=12 outside the circle at (22,12) swept over the angle 2 asin(15/r) (the strip ends on the side planes y=+-15, not on radial planes): add = integral over r of [2 - sqrt(4-(r-22)^2)] r 2 asin(15/r) dr = 28.9190 (Simpson). V = V0 + add.",
+ "body_count": 1,
+ "volume_mm3": 49785.098450739075
+}

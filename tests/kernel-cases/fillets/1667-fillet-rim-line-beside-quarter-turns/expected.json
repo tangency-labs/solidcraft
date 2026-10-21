@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1667",
+  "tangency-labs/solidcraft#1702"
+ ],
+ "what": "an R5 round of the top rim of a 297 mm long box whose corners are R5 (a 287 mm line beside 7.85 mm quarter turns)",
+ "source": "analytic",
+ "method": "box 297x100x60 with the four vertical edges rounded R5: area 297*100 - (4-pi)*25, 60 high. One pick on the long top edge takes the whole tangent loop (2 lines of 287, 2 of 90, 4 quarter arcs R5; perimeter P = 785.416). The R5 round (equal to the corner radius, so each corner becomes a sphere octant) removes (1-pi/4) r^2 (P - 2 pi x r), x r = r (5/6-pi/4)/(1-pi/4) the spandrel centroid offset. V = 1776536.245.",
+ "body_count": 1,
+ "volume_mm3": 1776536.244666527
+}

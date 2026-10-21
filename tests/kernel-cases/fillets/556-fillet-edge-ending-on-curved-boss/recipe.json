@@ -1,0 +1,38 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 20
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     40,
+     20,
+     0
+    ],
+    "radius": 12,
+    "height": 40,
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      40,
+      4,
+      0
+     ]
+    ],
+    "radius": 0.5
+   }
+  }
+ ]
+}
