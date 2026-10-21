@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#450",
+  "tangency-labs/solidcraft#452"
+ ],
+ "what": "a half ring between two arcs (both radial lines on the axis) revolved a full turn from a sketch plane 10 mm above the origin (volume +34 %)",
+ "source": "analytic",
+ "method": "the revolve is a hollow ball of radii 40 and 18.5 centred at (0,0,10): V = 4/3 pi (40^3 - 18.5^3), A = 4 pi (40^2 + 18.5^2); two spherical faces, one body with an inner shell.",
+ "body_count": 1,
+ "volume_mm3": 241560.72432594837,
+ "area_mm2": 24407.033325739103,
+ "faces": 2,
+ "bbox": {
+  "min": [
+   -40,
+   -40,
+   -30
+  ],
+  "max": [
+   40,
+   40,
+   50
+  ]
+ }
+}
