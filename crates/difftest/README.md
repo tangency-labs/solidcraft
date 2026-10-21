@@ -17,6 +17,7 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --list
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --unit harness.selftest --perturb   # sensitivity check
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green          # every status=green|partial unit (~35 min on 16 threads; C++ topology units dominate)
+nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4 # same, 4 units at a time (below)
 nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --status-of nlib.knots   # prints green|partial|fail
 nice -n 10 cargo test -p difftest --features cpp                     # harness self-tests
 ```

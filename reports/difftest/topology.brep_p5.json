@@ -3,8 +3,8 @@
   "cases": [
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op1_editing_False",
@@ -15,8 +15,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op1_editing_True",
@@ -34,16 +34,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
-      },
       "max_rel_err": 0.0,
       "name": "isolated_op3_editing_True",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p5/branches.json#3 (upstream source/SMLib/src/SmBrep.cpp)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -71,8 +67,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op5_editing_False",
@@ -83,8 +79,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "isolated_op5_editing_True",
@@ -275,8 +271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "translate_deferred_kind0",
@@ -287,8 +283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "nonuniform_deferred_kind0",
@@ -299,8 +295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "reflection_deferred_kind0",
@@ -403,8 +399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "translate_deferred_kind1",
@@ -415,8 +411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "nonuniform_deferred_kind1",
@@ -427,8 +423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "reflection_deferred_kind1",
@@ -519,8 +515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "translate_deferred_kind2",
@@ -531,8 +527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "nonuniform_deferred_kind2",
@@ -543,8 +539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "reflection_deferred_kind2",
@@ -611,8 +607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::TurnToNURBS",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "identity_scale_delta_1e-11",
@@ -623,8 +619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "identity_placement_delta_1e-11",
@@ -1747,8 +1743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "defined_placement_zero_x",
@@ -1759,8 +1755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "defined_placement_zero_y",
@@ -1779,8 +1775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "defined_placement_tiny_axis",
@@ -2063,8 +2059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_False_0",
@@ -2075,8 +2071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_True_0",
@@ -2087,8 +2083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_False_1",
@@ -2099,8 +2095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_True_1",
@@ -2111,8 +2107,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_False_2",
@@ -2123,8 +2119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_True_2",
@@ -2135,8 +2131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_False_3",
@@ -2147,8 +2143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::UpdateVertexEdgeIntervals",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_wire_True_3",
@@ -2159,8 +2155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_00_False_0",
@@ -2171,8 +2167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_00_True_0",
@@ -2183,8 +2179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_00_False_1",
@@ -2195,8 +2191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_00_True_1",
@@ -2207,8 +2203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_02_False_0",
@@ -2219,8 +2215,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::DeleteVertex",
+        "unit": "topology.brep_p4"
       },
       "max_rel_err": 0.0,
       "name": "combine_alias_isolated_02_True_0",
@@ -2879,8 +2875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -3235,8 +3231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -3743,8 +3739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0161",
@@ -3755,8 +3751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0162",
@@ -3847,8 +3843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0173",
@@ -4115,8 +4111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0206",
@@ -4335,8 +4331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0233",
@@ -5083,8 +5079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0326",
@@ -5399,8 +5395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0365",
@@ -5579,8 +5575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0387",
@@ -5903,8 +5899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0427",
@@ -6355,8 +6351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0483",
@@ -6463,8 +6459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmBrep::Notify",
-        "unit": "topology.brep_p2"
+        "symbol": "SmBrep::GetCurves",
+        "unit": "topology.brep_p1"
       },
       "max_rel_err": 0.0,
       "name": "gen0496",
@@ -6595,13 +6591,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 54,
+  "cases_deferred": 53,
   "cases_failed": 0,
-  "cases_passed": 743,
+  "cases_passed": 744,
   "cases_total": 797,
   "deferred_by_unit": {
-    "topology.brep_p2": 46,
-    "topology.brep_p4": 4,
+    "topology.brep_p1": 28,
+    "topology.brep_p3": 7,
+    "topology.brep_p4": 14,
     "topology.brep_p9": 4
   },
   "max_rel_err": 0.0,

@@ -10913,6 +10913,303 @@ with maximum relative error 0.
   Reproduced with main's unpatched `cone/p2.rs` too. Tracked in issue #276; the
   `surface.cone_p2` refusals that are now stricter than needed are issue #277.
 
+### blend.fillet_executive_p3 — dependency and coverage boundaries (PR #244)
+
+All three executive control-flow bodies are present, including the continuation
+following every missing call. Dependency objects remain in adapters, following the
+existing topology-intersector handle model; metadata views never clone a B-rep.
+The p1 executive/error-info data needed by these methods is co-ported in
+`blend::fillet_executive::p3::{FilletExecutive, ErrorInfo}`; p1/p2 algorithms and
+claimed solver/corner/geometry records are not copied.
+
+Native parity currently covers explicit control states over **empty B-reps**.
+Passing cases are precondition failures with status/state/tolerance observations;
+there are **zero successful geometric fillets**. Construction paths defer at
+`SmFilletExecutive::ProcessSmoothEdgeSequences` (executive p2), and initialized
+`DoFillet` defers at `CreateFilletCorners` (executive p1). The upstream API fillet
+examples listed for this unit require those setup/corner/solver owners and are
+not represented as passing geometry cases. Control-flow unit tests with scripted
+dependencies check ignored statuses, deferral propagation, both temporary-flag
+restorations, selective error-info assignment, and the five stitching attempts;
+these are not substitutes for native geometry parity.
+
+Callgraph ownership gap: `SmFilletCorner::MakeCornerTopology` is pure virtual;
+its concrete overrides are listed in `unused_functions.txt`, not in units.json.
+`ExecutiveAccess::make_corner_topology` is a required virtual-dispatch adapter
+method, with no fabricated UNPORTED owner. The future corner adapters must supply
+that dispatch when their types can first be constructed.
+
+C++ `SmFilletErrorInfo::operator=` does not copy comment, entity name, location,
+side face, fillet-vertex pointers, or fillet curves. Rust retains this exact subset.
+The native fixture always explicitly initializes `m_bIsInitialized` (UB-185), and
+clears intersector references before freeing a leftover preview B-rep.
+
+The seven fixed examples from `tests/SM_API_test/src/TestSmFillets.cpp` are also
+re-expressed as native API fixtures: circular/chamfer on 5×10×15 boxes,
+first-four-edge and per-edge-radius fillets, variable radius on 10³ boxes, and
+round/bevel-corner variants. Rust defers these fixture entrypoints explicitly to
+executive p1; they do not contribute direct p3 passes. Their native outputs are
+status and final entity counts, not complete topology parity. Full geometric and
+topological parity remains pending the setup and geometry owners.
+
+Metadata getters are intentionally lazy: non-blending/non-tangent corners never
+request solver metadata, and corner names/type are queried only on error.
+`SmFace::Notify` is a required executive adapter to `topology::face::p3::notify`,
+with `PreEdit`, the face, null and null forwarded as separate arguments.
+`SM_NO_GET_BREP(face)` expands to a null object (`SmTypes.h:659`), not `GetBrep()`.
+
+Current UNPORTED audit for #244 (main 862746f4 integrated; 34 symbols / 13 owners):
+
+- `blend.fillet_corner_p1` (`todo`): `SmFilletCorner::GetFilletSolvers`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner`, `SmFilletCorner::AdjustTopology`, `SmFilletCorner::CalcCornerEdgeGeom`, `SmFilletCorner::CalcCornerVertGeom`, `SmFilletCorner::CheckAndFixDegeneracy`, `SmFilletCorner::InsertIntersectionTopology`, `SmFilletCorner::ReInitializeCornerEdges`.
+- `blend.fillet_corner_p2` (`todo`): `SmFilletConvexNxNCorner::AdjustTopology`, `SmFilletNx1ClosedCorner::AdjustTangentCorner`.
+- `blend.fillet_corner_p3`: none since it became `partial` on main (#256). `SmFilletCorner::CalcCornerGeom` is the required adapter `ExecutiveAccess::calc_corner_geom`, documented as delegating to `FilletCorner::calc_corner_geom`. Nx2 `AdjustTopology` / `AdjustTangentCorner` dispatch to corner p3's `FilletCorner::adjust_topology` / `adjust_tangent_corner`.
+- `blend.fillet_executive_p1` (`todo`): `SmApiChamferFillet`, `SmApiCircularFillet`, `SmApiFilletEdges`, `SmApiFilletEdgesPerEdge`, `SmApiSetBevelCorners`, `SmApiVariableRadiusFillet`, `SmFilletExecutive::CreateFilletCorners`, `SmFilletExecutive::DoPiecewiseMerge`, `SmFilletExecutive::RemoveTopoEdges`.
+- `blend.fillet_executive_p2` (`todo`): `SmFilletExecutive::ProcessSmoothEdgeSequences`, `SmFilletExecutive::SetFilletBrepEdgeMap`.
+- `blend.fillet_geom_p4`: none since it merged (#252). `SmFilletGeom::MakeFaceBrep` and `SmFilletGeom::InsertIntersectionTopology` are the required adapters `ExecutiveAccess::make_face_brep` and `insert_geom_topology`, documented as delegating to `FilletBrep::make_face_brep` and `FilletBrep::insert_intersection_topology`. Status handling is unchanged: the `MakeFaceBrep` status is ignored per solver (`:2519`), and `InsertIntersectionTopology` propagates (`SER`, `:3113`).
+- `blend.fillet_geom_p6` (`todo`): `SmFilletGeom::TrimOriginalSurfaces`.
+- `blend.fillet_solver_p1`: none since it became `partial` on main (#192). `SmFilletSolver::TrimRails` is the required adapter `ExecutiveAccess::trim_rails`, documented as delegating to `FilletSolver::trim_rails`.
+- `blend.fillet_solver_p4` (`todo`): `SmFilletSolver::CalcFilletGeom`.
+- `blend.fillet_standard_solver_p2` (`todo`): `SmSurfaceSurfaceFS::CalcFilletGeom`.
+- `blend.fillet_solver_p5` (`todo`): `SmFilletSolver::TestRollOver`.
+- `heal.stitch_p2`: none since it became `partial` on main (#205). `SmStitch::DoStitching` is the required adapter `ExecutiveAccess::do_stitching`, documented as delegating to `heal::stitch::p2::Stitch::do_stitching`.
+- `topology.brep_p2` (`todo`): `SmBrep::SetTolerance`.
+- `topology.brep_p3` (`todo`): `SmBrep::MergeBrep`, `SmBrep::OrientTrimmedSurfaces`.
+- `topology.brep_p4` (`todo`): `SmBrep::StitchFaces`.
+
+Direct-state output also compares both full comment byte sequences (not merely
+lengths). Fixture intersector setup preserves the executive constructor's
+`ignore_tangency = true` and `SM_DEG2RAD(30)` operation order. Passing operations
+all return early error statuses; their observed post-error state is compared as
+data rather than being discarded by error-string normalization.
+
+Verification for the full-comment-byte candidate after merging main `05731370`:
+fmt (including the included runner/FFI/test files), both workspace clippy modes,
+1,389 kernel tests, four FFI guard tests and wasm pass. Direct parity remains
+287 cases / 112 state-error passes / 0 failures / 175 deferred, with_values=112
+and no_values=0, max_rel_err=0. Perturbation detects 112/112 changed cases.
+Fuzz: 2,000 cases, rejected=1764, malformed=21, ran=215, differs=0, crashes=0,
+panics=0, timeouts=0. Valgrind compares 40 C++/Rust programs with their baseline:
+matching protocol, zero errors, zero definitely/indirectly/possibly lost bytes.
+These checks establish no successful geometric or topological parity.
+The final parallel green/partial matrix passes all 210 units; a separate per-unit
+log audit confirms zero failures and zero units declared green with deferrals.
+
+
+### blend.fillet_executive_p3 — response to bb84f1a5 pre-review (PR #244)
+
+- Removed all three inactive `cbi_MAP_TOPO_EDGES` experiments: both intersection
+  collection sites and the extra mate-attribute scan. The pinned C++ macro is 0.
+  The regression supplies populated real mate maps and no original topo candidates,
+  checks unchanged intersection arrays with trimming off/on, and checks that no
+  extra candidates or keep attributes are introduced.
+- All parent-linked corner/solver/geometry stage hooks now borrow the live
+  `FilletExecutive`, including topology creation, degeneracy, adjustment,
+  vertex/edge/face geometry, rail trimming, rollover, insertion and surface trimming.
+  This carries options, topo edges, error info and the existing intersector through
+  every stage; adapters must not keep a duplicate executive/intersector. Insertion
+  regressions verify mate and SSI writes across hooks and into the subsequent mark
+  and trim phases; other regressions check global-merge enablement and candidate
+  deletion before the attribute scan.
+- Hook audit: `GetFilletSolvers` resolves edgeuses through the parent solver list
+  (`SmFilletCorner.cpp:4073`), so it now receives the executive read-only; error-only
+  metadata also receives it. Solver/geometry error notifications can reach parent
+  `NoteFilletError` (`SmFilletSolver.cpp:7943`, `SmFilletGeom.cpp:13220`), covered by
+  the mutable stage contract. Standalone B-rep, stitch and attribute hooks receive
+  their explicit objects/context; intersector operations already borrow the actual
+  intersector. The remaining corner predicates/point/tolerance getters and the
+  nonvirtual `SetCalcAsConstRad` are local record accesses, not parent mutations.
+- The intersector-p1 change is a cfg(test)-only mate-map fixture initializer; it
+  changes no production API/algorithm. It avoids a second, fake intersector in the
+  regression world. The full matrix rechecks intersector p1 as well as p3.
+- Native and Rust fixture setup now both construct a zone tolerance: the positive
+  `SM_USE_DEFAULT` sentinel converts before `fabs`, and finite negatives are
+  accepted and absolutized. Fixed paired cases include the positive sentinel,
+  -0.25, a tiny negative, and the negative sentinel magnitude (which must not be
+  confused with the positive default sentinel).
+- Temporary keep attributes now survive orientation and are unlinked afterwards,
+  including on failures and deferrals. Tests observe live attributes in orientation
+  and cleanup both there and when merge exits earlier.
+- Face construction and first-geometry queries now use indexed live access;
+  snapshot copies remain only where C++ explicitly copies its array. A regression
+  appends geometry during face creation and verifies two visits with zero array
+  snapshots, preserving live upstream iteration rather than capturing a stale list.
+
+Validation of this revision: fmt (including included files), both clippy modes,
+1,401 core tests (18 executive tests), four FFI tests and wasm pass. Paired parity:
+291 cases / 116 state-error passes / 0 failures / 175 deferred (p1=46, p2=129),
+with_values=116, no_values=0, max_rel_err=0. All four new constructor-domain cases
+match C++. Perturb detects 116/116 changes. Fuzz 2000: rejected=1720, malformed=16,
+ran=264, differs=0, crashes=0, panics=0, timeouts=0. Valgrind: 52 valid programs
+ran on both engines, baseline protocol equal, zero errors and zero lost bytes
+(definite/indirect/possible), no suppressions. The final 211-unit matrix passes;
+its per-unit log audit confirms zero failures and green_but_deferred=0.
+Coverage still establishes zero successful geometric/topological comparisons.
+
+
+### blend.fillet_executive_p3 — response to cbfc8dcc Opus review (PR #244)
+
+- Corrected `SmFace::Notify(PreEdit, face, NULL, NULL)` and its scripted
+  regression. `SM_NO_GET_BREP(face)` is the null-object macro at `SmTypes.h:659`;
+  the alternative `GetBrep()` macro is commented out. The earlier note above now
+  states the actual payload. No native passing fixture reaches this stub today.
+- `AdjustTopology`, `AdjustTangentCorner` and `CalcFilletGeom` are now required
+  virtual-dispatch adapters, with no inherited base-owner default deferral.
+  Adapters must resolve the actual concrete type and either call its implementation
+  or return `Unported` for that implementation's owner. Source tags list every
+  owner: base/4x3/NxN topology adjustment in corner p1, ConvexNxN adjustment and
+  Nx1Closed tangent adjustment in corner p2, Nx2 adjustment/tangent adjustment
+  in corner p3, base fillet geometry in solver p4 and SurfaceSurfaceFS geometry
+  in standard-solver p2. This prevents future base wiring from silently replacing
+  a missing derived implementation. The empty-B-rep runner constructs no corners
+  or solvers and rejects nonexistent handles in these required adapters.
+- `corner_solvers` is now a default `UNPORTED(blend.fillet_corner_p1)` stub for
+  `SmFilletCorner::GetFilletSolvers`. This is real owned logic, not a getter:
+  `SmFilletCorner.cpp:4067-4075` resets the result, loops over the edgeuse count
+  and **always looks up edgeuse [0]**, preserving repeated entries of the first
+  solver. The future port must keep that source quirk, including executive p1's
+  `GetFilletSolverOfEdgeuse` lookup. It has not been executed or established as
+  an upstream defect, so no WR id is reserved. The scripted tangent regression
+  now returns repeated first-solver entries; it is not a port of that algorithm.
+- Extended ownership audit: the tags now cover **34 distinct symbols / 13 owners**,
+  all `todo` in the merged plan; the complete list above includes all new tags.
+  Added GetFilletSolvers; added seven derived symbols and two new owners; removed
+  no dependency owners. Required-but-owned-elsewhere corner accessors are also
+  explicit: `IsBlendingCorner`, virtual `IsTangentCorner` (all current overrides
+  in corner p1), `SetCalcAsConstRad`, `GetFilletedVertex`, and
+  corner `GetThisApproxTol3d` are inline corner-p1 record accesses; solver
+  `GetThisApproxTol3d` is an inline `blend.fillet_solver_p1` record access. They must use those
+  owners' records and concrete dispatch when wired, never supply fake metadata.
+  `GetCornerType` is pure virtual, with inline derived constants in
+  `SmFilletCorner.h`; those symbols are omitted from units.json. Error metadata
+  must use the actual derived type, without inventing a callgraph owner.
+  Error-only `GetName` uses the object's real name. These required reads do not
+  have default `Unported` implementations and are separate from the 41 tags.
+  `MakeCornerTopology` retains its previously documented callgraph ownership gap.
+- Converted the solver's raw approximate tolerance with existing `zone_tol3d`
+  at the `SetTolerance` call site, matching the implicit `SmZoneTol3d(double)`
+  conversion in `SmBrep.h:700`. A scripted regression covers the default sentinel
+  in this p3 call (distinct from the paired fixture-constructor sentinel case).
+- Coverage is **three distinct p3 control paths, all precondition exits**:
+  uninitialized DoFillet; null-target CreateFilletBrep; and DoFilleting reaching
+  that null-target check then restoring temporary flags. The paired tolerance
+  values only read back fixture setup; the four constructor-domain fixtures
+  check harness setup, not a p3 tolerance mutation. No geometric success is paired.
+- FFI docs now distinguish exact Boolean encodings / finite-only tolerances as
+  fixture-encoding choices, not UB guards. Fuzz over empty B-reps does not establish
+  crash safety for eventual geometric paths.
+- Open dependencies include solver p1 (#192, `TrimRails`) and brep p3 (#204,
+  `MergeBrep`/`OrientTrimmedSurfaces`); `todo` is their merged-plan status, not
+  absence of claimed work. Solver p1 uses owned solver objects, so wiring the
+  handle adapter will require a shim that mutates the same executive-backed object.
+  Likewise executive p1 must allocate the actual `m_pAttributeE` on construction;
+  the runner's current `edge_attribute: None` is unreachable before deferral.
+
+Validation of this revision on sc-builder-7: fmt (including include!-ed files),
+both workspace clippy configurations, 1,414 core tests (19 executive regressions),
+four FFI guard tests and wasm pass. Paired results: 291 cases / 116 passes /
+0 failures / 175 deferrals (executive p1=46, p2=129), with_values=116,
+no_values=0, max_rel_err=0. Perturb detects 116/116 changes. Fuzz 2000:
+rejected=1720, malformed=16, ran=264, differs=0, crashes=0, panics=0,
+timeouts=0. Valgrind: all 52 valid programs actually ran on both engines,
+protocol equal to baseline, 0 errors and 0 definite/indirect/possible lost bytes,
+no suppressions. The final 213-unit green/partial matrix passes; the strict
+per-unit log audit confirms zero declared-green units with deferrals.
+The three paired control paths remain precondition exits, with no geometric
+success comparisons. Latest main 0cf3e290 is merged; unrelated plan entries are
+unchanged from main (only executive p1 co-port notes and this unit differ).
+
+
+### blend.fillet_executive_p3 — clean re-check and readiness integration (PR #244)
+
+The Opus re-check of 612c6631 is CLEAN. Its runner-error nit is folded in:
+`adjust_topology`, `adjust_tangent_corner` and `calc_fillet_geom` now return
+`SolidError::Unported` for the base corner-p1 / solver-p4 symbols instead of
+`InvalidInput` through `missing()`. This empty-B-rep fixture constructs no concrete
+corner or solver; future fixtures must dispatch real derived objects to their
+actual owners. Explicit UNPORTED tags sit on each runner stub body, and the
+complete override-owner tags remain discoverable at the required trait methods.
+The audit counts 34 distinct upstream symbols / 13 owners, including required
+virtual-dispatch targets, not 34 independently implemented stub bodies.
+
+Merged origin/main 46ddc4ff (#179 blend.fillet_intersector), preserving both
+`fillet_executive` and `fillet_intersector` exports in the sorted blend module list.
+None of this unit's 41 deferred callee symbols is among #179's 12 owned functions
+or its solver `SetSurfacesToZeroOffset` / `ReloadSurfaceOffsets` co-ports; no
+executive-p3 stub points at fillet_intersector. No new call can therefore be wired
+here. The intersector's internal solver/geometry integration remains with those
+owners. The main merge retains the incoming fillet intersector/custom-solver code
+and all unrelated plan entries unchanged.
+
+The subsequent main 8e79624a update changes only generated PROGRESS.md and is
+also merged; the tested kernel and 214-unit plan are unchanged from 46ddc4ff.
+
+Readiness validation after this merge: fmt (including include!-ed files), both
+workspace clippy configurations, 1,422 core tests (19 executive regressions),
+four FFI tests and wasm pass. Paired results remain 291 cases / 116 passes /
+0 failures / 175 deferrals (executive p1=46, p2=129), with_values=116,
+no_values=0, max_rel_err=0. Perturb detects 116/116 changes. Fuzz 2000:
+rejected=1720, malformed=16, ran=264, differs=0, crashes=0, panics=0,
+timeouts=0. Valgrind: all 52 valid programs actually ran on both engines,
+protocol equal to baseline, 0 errors and 0 definite/indirect/possible lost bytes,
+no suppressions. The final 214-unit matrix passes, with zero declared-green
+units carrying deferrals in the strict per-unit log audit. Coverage remains three
+paired p3 precondition paths and zero geometric-success comparisons.
+
+
+### blend.fillet_executive_p3 — shared corner metadata (#244 / #247)
+
+Per brett19's coordination request, `CornerView::corner_type` now reuses
+`blend::fillet_geom::p1::FilletCornerType`. The error-info record carries the same
+strongly typed value, including `Unknown` as its existing zero default, so the
+kernel propagates the enum without integer conversion. The scripted corner-error
+regression uses `NByTwo` (upstream discriminant 9). The runner and native fixture
+explicitly encode the two error-info corner kinds at their wire boundary; paired
+precondition fixtures observe `Unknown`, not geometric corner classification.
+Existing numeric values and the three precondition-only control paths are retained.
+The requested read-only `CornerView` co-port note is appended to corner-p1 notes.
+
+The canonical enum is not on main c5c8395a yet. This branch therefore builds on
+#147 (fillet_geom_p1 head 4a987837), merged as-is per AGENTS.md rather than copying
+the claimed enum. The p3 dependency on geom-p1 is now hard because its type is
+required. Incoming #147 code, co-port notes and regenerated reports are preserved;
+no geometry-p1 algorithm is reimplemented. Validation before the #259 batch merge: fmt/includes, clippy x2, core 1431/1431
+(19 executive tests), FFI 4/4 and wasm pass. Paired 291/116/0/175,
+with_values=116 no_values=0 max_rel_err=0; perturb detects 116/116 changes.
+Fuzz 2000: rejected=1720 malformed=16 ran=264 differs=0 crashes=0 panics=0
+timeouts=0. Valgrind: 52 actual programs, both engines, baseline equal, zero
+errors and zero definite/indirect/possible lost bytes, no suppressions. Main then
+merged #259 during verification; its integration and final gates are pending.
+
+
+### blend.fillet_executive_p3 — main batch #259 compatibility
+
+Merged main 4db3d6602, retaining #147's canonical enum and cache changes and both
+sides' upstream issue entries. The existing mate-map test initializer remains
+cfg(test)-only. The now-ported `SmFace::Notify`,
+`SmTopologyIntersector::DeleteFaces` and `IntersectInsertRelate` no longer have
+`UNPORTED` defaults: like the existing ported BooleanPostProcess hook, these are
+required storage adapters. Their contracts name the canonical APIs and require
+the live records, attributes, cache and intersector world/identity. No dependency
+algorithm is copied. The empty-B-rep runner cannot supply those nonexistent face
+handles or a geometry/intersector world and explicitly rejects them, as its
+other topology accessors do; no passing native fixture reaches these adapters.
+Scripted tests override them only to exercise p3 continuation order. A concrete
+executive p1/p2 object adapter is still needed for geometric integration; this
+change does not claim a new geometric pass. The current UNPORTED inventory is
+34 symbols across 13 owners; all remaining tagged callees are still unported.
+Final integrated-tree checks pending.
+
+## blend.fillet_executive_p2 (`SmFilletExecutive.cpp` part 2: `SetFilletParameters`, `SurfaceSurfaceFillet`, `DoSurfaceFilleting`, `SetFilletBrepEdgeMap`, smooth edge sequences, `SmTemporaryRadiusChange`, the linear and elliptical fillet-law constructors; PR #267, 2026-10-20; partial, no disagreements)
+
+- **Coverage.** The only comparisons with values are the law constructors: 224 fixture cases and 16 generated ones. They compare every field of the law, including the degree-2 law curve's control points and knots. Every executive member with a non-empty input defers at executive p1 (`NoteError`, `AddFilletSurfaceGenerator`, `LoadFilletSolver`, `CreateFilletCorners`). The remaining passes are the empty-edge `SetFilletParameters` cases (switches, solver count, error code), the two null-dereference guards (UB-206, compared as errors on both sides) and the three members on an executive without solvers. No geometric fillet output is compared.
+- **Fixture box.** The executive cases run on an `SmApiCreateBox` box. The C++ side builds it and the Rust side imports it through `heal.stitch_p2`'s export, because Rust's `primitive::api_primitives::create_box` is still `Unported` (`primitive.primitive_creation_p1`). Box edges are in `SmBrep::GetEdges` order, which is the export order.
+- **Native crashes found while building the shim** (caller misuse of internal members; the shim avoids them rather than reporting them as upstream defects):
+  - `SetFilletBrepEdgeMap` with solvers whose geometry `CalcFilletGeom` has not built reads null rails. The FFI refuses the edge map with solvers.
+  - `CollectTangentEdgeSequence` with two or more solvers before `CreateFilletCorners` reads garbage from `m_vVertexCornerMap`. The shim runs `CreateFilletCorners` first, as `CreateFilletBrep` does.
+- **Adapter.** Calls into partial units are required `ExecutiveAccess` methods: the `blend.fillet_solver_p1` surface-generator records and `SetFilletSurfaceGenerator`, `GetEdgeuse`, and `blend.fillet_standard_solver_p1`'s constant-radius constructor. `GetSetBackDist` is an inline read of `m_dSetBackDist`. The constant-distance, variable-radius and surface/surface solver constructors stay `UNPORTED(blend.fillet_standard_solver_p2)`.
+- **Duplicate enums on main.** `FilletSolverType` and `FilletSurfaceGeneratorType` exist both in `blend::fillet_solver::p1` and in `blend::fillet_standard_solver::p1` (#168's co-port), as distinct types. p2 takes the latter, as `FilletLaw` does, and maps them onto `fillet_solver::p1::FilletSurfaceGenerator`. A later dedup should re-export one of them.
+- **Not wired.** `blend::fillet_geom::p2`'s `UNPORTED(blend.fillet_executive_p2)` `SmTemporaryRadiusChange::SetUp` receives a base `FilletSolver`. Reaching the variable-radius law from it needs #260's `FilletSolverKind`, so the stub stays until that lands.
+
 ## curve.curve_p8 (`SmCurve::GlobalCurveIntersect`): Rust runs for minutes where C++ returns at once on a 1e300 control point (found by `offset.offset_geometry_creation`'s fuzz, 2026-10-20)
 
 Draws of `offset.offset_geometry_creation`'s fuzz, each a `trim_extended_edge` script with

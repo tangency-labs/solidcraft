@@ -34,8 +34,9 @@
 //! `RemoveExcessFaces` borrows the original B-rep immutably (its arenas have no editing flag)
 //! and uses the existing canonical arena-identity cache adapter; custom geometry owner keys
 //! or indirect owner chains are explicitly unsupported rather than silently skipped.
-//! Result-edge enumeration uses arena order, not `SmBrep::GetEdges` linked-list order
-//! (owned by `topology.brep_p1`); nonempty queries still defer at `NormalizedEvaluate`.
+//! Result-edge enumeration uses `SmBrep::GetEdges` list order (`topology::brep::p1::edges`);
+//! nonempty queries still defer at `NormalizedEvaluate`. `BuildSideWallOfEdgeuse` takes
+//! the original B-rep as an argument (upstream reaches it through the edge use pointer).
 //! `BuildOffsetOfFaceuse` moves the offset surface into `MakeFaceWithCurves` (upstream
 //! hands over the pointer); a failed constructor drops it and, as upstream, relates no
 //! face. Its `SmSSIData` UV curves are cloned into the merge input; a missing entry,
