@@ -1,0 +1,471 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "HP compresseur 1 — disque — profil axial",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "closed": true,
+    "points": [
+     [
+      11.41984,
+      88.9
+     ],
+     [
+      11.41984,
+      101.6
+     ],
+     [
+      59.95416,
+      101.6
+     ],
+     [
+      59.95416,
+      88.9
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "X",
+    "body_name": "HP compresseur 1 — disque",
+    "name": "HP compresseur 1 — disque",
+    "sketch": "HP compresseur 1 — disque — profil axial"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "HP compresseur 1 — aube — section 1",
+    "plane": {
+     "origin": [
+      35.687,
+      99.06,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "periodic": true,
+    "points": [
+     [
+      -28.87138948,
+      -20.9762923
+     ],
+     [
+      -28.44419823,
+      -18.52855307
+     ],
+     [
+      -26.53108815,
+      -15.69743162
+     ],
+     [
+      -22.61356214,
+      -11.37514747
+     ],
+     [
+      -15.644211,
+      -5.18190517
+     ],
+     [
+      -7.05530744,
+      1.2107885
+     ],
+     [
+      3.17203981,
+      7.77693192
+     ],
+     [
+      13.81643744,
+      13.76905473
+     ],
+     [
+      22.86860424,
+      18.30983423
+     ],
+     [
+      28.82733926,
+      21.03692222
+     ],
+     [
+      28.91543969,
+      20.91566238
+     ],
+     [
+      23.79329117,
+      17.03711185
+     ],
+     [
+      15.87870265,
+      10.93059018
+     ],
+     [
+      6.36279192,
+      3.38523839
+     ],
+     [
+      -3.08519731,
+      -4.25359932
+     ],
+     [
+      -11.45413995,
+      -10.94904321
+     ],
+     [
+      -18.87617404,
+      -16.51922089
+     ],
+     [
+      -23.6739244,
+      -19.62998015
+     ],
+     [
+      -26.61596063,
+      -21.04490625
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "HP compresseur 1 — aube — section 2",
+    "plane": {
+     "origin": [
+      35.687,
+      245.745,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "periodic": true,
+    "points": [
+     [
+      -31.55029053,
+      -13.98116431
+     ],
+     [
+      -30.65021465,
+      -11.75337891
+     ],
+     [
+      -28.26746614,
+      -9.46429679
+     ],
+     [
+      -23.68724912,
+      -6.17159331
+     ],
+     [
+      -15.84223605,
+      -1.7284767
+     ],
+     [
+      -6.4254806,
+      2.5749393
+     ],
+     [
+      4.57560867,
+      6.71024047
+     ],
+     [
+      15.85467128,
+      10.21825916
+     ],
+     [
+      25.33406458,
+      12.67675598
+     ],
+     [
+      31.52093009,
+      14.04741992
+     ],
+     [
+      31.57965098,
+      13.9149087
+     ],
+     [
+      25.95038894,
+      11.28594101
+     ],
+     [
+      17.22921681,
+      7.11642087
+     ],
+     [
+      6.70231576,
+      1.91105314
+     ],
+     [
+      -3.7793141,
+      -3.39647483
+     ],
+     [
+      -13.04946071,
+      -8.03073246
+     ],
+     [
+      -21.19619701,
+      -11.79297191
+     ],
+     [
+      -26.36310309,
+      -13.76173626
+     ],
+     [
+      -29.43165371,
+      -14.50321795
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "HP compresseur 1 — aube — section 3",
+    "plane": {
+     "origin": [
+      35.687,
+      365.76,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "periodic": true,
+    "points": [
+     [
+      -32.54932697,
+      -8.11545869
+     ],
+     [
+      -31.31508433,
+      -6.13255159
+     ],
+     [
+      -28.65078449,
+      -4.33874353
+     ],
+     [
+      -23.71444686,
+      -1.95112378
+     ],
+     [
+      -15.45946156,
+      0.99249503
+     ],
+     [
+      -5.72271793,
+      3.53965294
+     ],
+     [
+      5.50309282,
+      5.66103596
+     ],
+     [
+      16.89025502,
+      7.13527368
+     ],
+     [
+      26.37864214,
+      7.90526159
+     ],
+     [
+      32.53228451,
+      8.18381227
+     ],
+     [
+      32.56636943,
+      8.0471051
+     ],
+     [
+      26.73639166,
+      6.47040661
+     ],
+     [
+      17.68811901,
+      3.93521603
+     ],
+     [
+      6.73755393,
+      0.7098829
+     ],
+     [
+      -4.18673319,
+      -2.62084535
+     ],
+     [
+      -13.83837676,
+      -5.50932095
+     ],
+     [
+      -22.26849929,
+      -7.75050271
+     ],
+     [
+      -27.54538444,
+      -8.77226094
+     ],
+     [
+      -30.60776263,
+      -8.96946398
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "body_name": "HP compresseur 1 — aube",
+    "name": "HP compresseur 1 — aube — loft vrillé",
+    "operation": "new",
+    "sections": [
+     {
+      "sketch": "HP compresseur 1 — aube — section 1"
+     },
+     {
+      "sketch": "HP compresseur 1 — aube — section 2"
+     },
+     {
+      "sketch": "HP compresseur 1 — aube — section 3"
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "axis": "X",
+    "bodies": [
+     "HP compresseur 1 — aube"
+    ],
+    "count": 36
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "operation": "join",
+    "target": "HP compresseur 1 — disque",
+    "tools": [
+     "HP compresseur 1 — aube",
+     "HP compresseur 1 — aube (2)",
+     "HP compresseur 1 — aube (3)",
+     "HP compresseur 1 — aube (4)",
+     "HP compresseur 1 — aube (5)",
+     "HP compresseur 1 — aube (6)",
+     "HP compresseur 1 — aube (7)",
+     "HP compresseur 1 — aube (8)",
+     "HP compresseur 1 — aube (9)",
+     "HP compresseur 1 — aube (10)",
+     "HP compresseur 1 — aube (11)",
+     "HP compresseur 1 — aube (12)",
+     "HP compresseur 1 — aube (13)",
+     "HP compresseur 1 — aube (14)",
+     "HP compresseur 1 — aube (15)",
+     "HP compresseur 1 — aube (16)",
+     "HP compresseur 1 — aube (17)",
+     "HP compresseur 1 — aube (18)",
+     "HP compresseur 1 — aube (19)",
+     "HP compresseur 1 — aube (20)",
+     "HP compresseur 1 — aube (21)",
+     "HP compresseur 1 — aube (22)",
+     "HP compresseur 1 — aube (23)",
+     "HP compresseur 1 — aube (24)",
+     "HP compresseur 1 — aube (25)",
+     "HP compresseur 1 — aube (26)",
+     "HP compresseur 1 — aube (27)",
+     "HP compresseur 1 — aube (28)",
+     "HP compresseur 1 — aube (29)",
+     "HP compresseur 1 — aube (30)",
+     "HP compresseur 1 — aube (31)",
+     "HP compresseur 1 — aube (32)",
+     "HP compresseur 1 — aube (33)",
+     "HP compresseur 1 — aube (34)",
+     "HP compresseur 1 — aube (35)",
+     "HP compresseur 1 — aube (36)"
+    ]
+   }
+  }
+ ]
+}

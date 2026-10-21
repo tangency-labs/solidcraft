@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1985",
+    "tangency-labs/solidcraft#2243"
+  ],
+  "what": "a small enclosure (rounded box, inner cut, corner gusset with a screw hole, two standoffs, USB cut-out) whose STEP export never finished (the export meshes its own file back)",
+  "source": "invariants",
+  "method": "the script builds one connected part: the export must finish, and the part is one valid closed solid",
+  "body_count": 1
+}
