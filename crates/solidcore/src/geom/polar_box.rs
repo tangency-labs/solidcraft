@@ -58,6 +58,11 @@
 //!   leaves the partial basis upstream's out-params hold.
 //! - `SM_ASSERT`, `SM_DEBUG_CODE` blocks and the error-log side effect of `SE(...)`
 //!   are compiled out upstream (release build) and omitted.
+//! - `EvaluateNormalized` (`SM_PS_REGION`) uses `sin_cos` wrapped in
+//!   `core::hint::black_box` where the reference build fuses sin/cos into sincos;
+//!   glibc sincos differs from sin by 1 ulp for some arguments, and without the
+//!   barrier LLVM sinks `sin` past the 90-degree early return and does not fuse
+//!   (issue #357). Pure codegen hint: same values on targets without sincos (wasm32).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -515,10 +520,12 @@ impl PolarBox {
                 // (angle 1) and v0/v1 (angle 2) planes
                 let p = self.domain.evaluate(alpha, beta);
 
-                let ca1 = p.x.cos();
-                let sa1 = p.x.sin();
-                let ca2 = p.y.cos();
-                let sa2 = p.y.sin();
+                // the reference build (GCC -O2) fuses each pair into glibc sincos, which
+                // can differ from sin by 1 ulp. black_box keeps both halves of each pair
+                // in one block so LLVM fuses them too instead of sinking sin past the
+                // early return below (plan/findings.md, issue #357)
+                let (sa1, ca1) = core::hint::black_box(p.x.sin_cos());
+                let (sa2, ca2) = core::hint::black_box(p.y.sin_cos());
 
                 // no unique vector at 90 degrees
                 if ca1 <= EFF_ZERO || ca2 <= EFF_ZERO {

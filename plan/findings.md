@@ -152,6 +152,24 @@ are also logged, one entry each, in `plan/upstream-issues.md` for the upstream m
     difftest that reaches these conversions. Other x86-64 emulations of the same kind
     (the `(long)` of a NaN quotient in `EvaluateBoundingBoxSimple`, under
     `surface.twist_volume`) will disagree on arm64 in the same way.
+- **Difftest parity depends on GCC and LLVM fusing the same `sin`/`cos` pairs into
+  glibc `sincos` (issue #357).** At `-O2` both compilers merge `sin(x)` and `cos(x)` of one
+  argument into a single `sincos()` call when both sit in one basic block (`libSMLib.a`:
+  32 `sincos` references; the solidcore rlib: 25). glibc 2.35's `sincos` is not
+  bit-identical to `sin`: for x = -0.2914567944778674 (`0xbfd2a73a661eaf0b`) a C repro
+  (gcc 11.4) gives `0xbfd263e862c542da` at `-O2` (fused) and `0xbfd263e862c542d9` with
+  `-O2 -fno-builtin-sin -fno-builtin-cos` (separate `sin`); `cos` is
+  `0x3feea6834f48c4b7` both ways. So a site where only one compiler fuses can differ by
+  1 ulp, and only on machines/libms where that argument rounds differently, which is why
+  `geom.polar_box`'s `arc_to_region` showed `max_rel_err` 2.14e-16 on one machine and 0 on
+  another. Disabling fusion in the C++ build is not a fix: with `-fno-builtin-sin/-cos` 27
+  green reports change and 4 units fail, because the sites where both sides fuse then
+  disagree. Fix per site instead: `PolarBox::evaluate_normalized` (`SM_PS_REGION`) is fused
+  by GCC, but LLVM sinks `sin` past the 90-degree early return and calls `sin`/`cos`
+  separately; `core::hint::black_box(x.sin_cos())` keeps each pair in one block so LLVM
+  emits `sincos` too (`sin_cos` alone produces the same IR as separate calls). To check a
+  suspect site: `objdump -d -r` the function in `bin/cpp/lib/libSMLib.a` and in the
+  solidcore rlib and compare `sin`/`cos`/`sincos` relocations.
 
 ## nlib.knots (green; no disagreements)
 
