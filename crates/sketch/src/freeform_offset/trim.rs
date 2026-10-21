@@ -137,7 +137,11 @@ impl Raw {
         }
         let mut segs = Vec::new();
         for (curve, forward) in order {
-            let mut pieces = sk.exact_segs(*curve).ok_or_else(|| bad("offset source changed shape"))?;
+            // Lines and arcs of the chain come from their analytic form, free-form curves exactly.
+            let mut pieces = sk.exact_pieces(*curve);
+            if pieces.is_empty() {
+                return Err(bad("offset source has a curve with no exact pieces"));
+            }
             if !forward {
                 pieces.reverse();
                 pieces = pieces.into_iter().map(|p| p.reversed()).collect();
