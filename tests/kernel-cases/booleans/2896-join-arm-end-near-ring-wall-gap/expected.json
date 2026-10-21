@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2896"
+  ],
+  "what": "a join of a ring and an arm whose R5 convex tip stops 0.01 mm short of the ring's outer wall: nothing overlaps, so nothing fuses",
+  "source": "analytic",
+  "method": "ring pi*(30^2-24^2)*6 and arm 6*(350+12.5*pi) are 0.01 mm apart (arm tip at x=30.01): the join has nothing to fuse, so the two bodies stay apart (body_count 2) and V is the sum of the two",
+  "body_count": 2,
+  "volume_mm3": 8442.875567597792
+}

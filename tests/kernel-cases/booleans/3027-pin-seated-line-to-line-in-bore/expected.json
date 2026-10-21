@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3027"
+  ],
+  "what": "a pin (r4) seated line to line in a bore (r4, exactly coaxial) of a bush: the two cylinder walls coincide",
+  "source": "analytic",
+  "method": "the pin exactly fills the bore (same radius, same axis, same length 10), so the join is the plain block 30x30x10: V = 9000, one body, bbox x,y +-15, z 0..10",
+  "body_count": 1,
+  "volume_mm3": 9000.0,
+  "bbox": {
+    "min": [
+      -15,
+      -15,
+      0
+    ],
+    "max": [
+      15,
+      15,
+      10
+    ]
+  }
+}

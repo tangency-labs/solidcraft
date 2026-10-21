@@ -1,0 +1,338 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#2541",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2543",
+  "why": "other area: import (mesh body from an imported file: a boolean needs a solid body, by design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2551",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2553",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2565",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2566",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2574",
+  "why": "feature request, not a wrong result (a hexagonal or skip-instance pattern option)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2581",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2586",
+  "why": "needs the user's design: draft refused on faces next to the drafted walls, only the command is reported"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2599",
+  "why": "other area: assemblies (joint.as_built does not follow a parameter change), not kernel geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2602",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2610",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2696",
+  "why": "CI/test infrastructure only (xtask skips the nightly boolean_props tests), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2740",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2750",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2765",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2766",
+  "why": "needs the user's design: draft refused on faces next to the drafted walls, only the command is reported"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2770",
+  "why": "needs the user's design (a 22 KB Gridfinity base shared with the author's permission); not rebuilt or committed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2783",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2798",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2799",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2803",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2843",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2873",
+  "why": "UI/feature request: press-pull on a round face has no selection path; no wrong geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2882",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2885",
+  "why": "UI: the pattern got a construction axis name the command does not accept; no wrong geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2887",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2890",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2911",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2941",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2946",
+  "why": "other area: import (B-spline patch and loosely-fitted imported faces; no small public geometry rebuilt)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2949",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2950",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2959",
+  "why": "UI: selecting the whole sketch line (with its fillet) as a split tool; no wrong geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2965",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2970",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2973",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2979",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2997",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3007",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3019",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3026",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3034",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3035",
+  "why": "perf only: the motivating design is private, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3038",
+  "why": "other area: import (mesh body from an imported file: a boolean needs a solid body, by design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3042",
+  "why": "UI: no visual feedback when a patterned hole misses the surface; no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3050",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3051",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3056",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3079",
+  "why": "needs the user's design: the sketch loop is not closed, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3090",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3100",
+  "why": "other area: import (split of a body imported from STEP; the file is not available)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3101",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3112",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3117",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3118",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3130",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3132",
+  "why": "feature request (pick target bodies in Edit Extrude); no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3138",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3147",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3149",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3157",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3176",
+  "why": "needs the user's design: draft refused on faces next to the drafted walls, only the command is reported"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3185",
+  "why": "other area: crashes (a boolean retry hang on a broken candidate; the design from the report is private)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3192",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3193",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3194",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3205",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3211",
+  "why": "no description, only a screenshot or nothing: no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3212",
+  "why": "other area: import (an imported assembly, nested shells)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3227",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3232",
+  "why": "no description or geometry: only that an intersect does not seem to work"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3247",
+  "why": "feature request, not a wrong result (a hexagonal or skip-instance pattern option)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3251",
+  "why": "other area: import (mesh body from an imported file: a boolean needs a solid body, by design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3255",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3271",
+  "why": "UI only: no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3276",
+  "why": "other area: fillets (the failing step is the fillet/chamfer after three extrudes; no dimensions given)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3279",
+  "why": "sketch pattern editing (sketch.pattern.circular), not solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3293",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3302",
+  "why": "UI: the pattern was started with nothing selected; no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3324",
+  "why": "other area: sheet metal (flat pattern and DXF ignore non-sheet features)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3374",
+  "why": "other area: import (mesh body from an imported file: a boolean needs a solid body, by design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3396",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3403",
+  "why": "needs the user's design: only the failing command's parameters are reported, no geometry to rebuild"
+ }
+]

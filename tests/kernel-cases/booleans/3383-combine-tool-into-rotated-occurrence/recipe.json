@@ -1,0 +1,70 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Part"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 10,
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": "Part:1",
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle": "90 deg"
+   }
+  },
+  {
+   "command": "component.capture_position",
+   "params": {}
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     -5,
+     -5,
+     -25
+    ],
+    "operation": "new",
+    "body_name": "Boss"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Plate",
+    "tools": [
+     "Boss"
+    ]
+   }
+  }
+ ]
+}
