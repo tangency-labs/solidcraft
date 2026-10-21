@@ -9,10 +9,13 @@
 //! [`EvalSurface`] forms defined here, so the two cannot drift apart.
 //!
 //! References: Piegl & Tiller, *The NURBS Book* (2nd ed.), A2.1 (span), A2.3 (basis
-//! functions and derivatives), §4.5 (derivatives of a rational surface).
+//! functions and derivatives), §4.5 (derivatives of a rational surface). [`uv`] finds the
+//! parameters of a point on an evaluator surface.
 
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::{Mesh, Vec3};
+
+pub mod uv;
 
 /// Most knots in one evaluable knot vector (bounds the shader's span search).
 pub const MAX_EVAL_KNOTS: usize = 1 << 12;

@@ -344,12 +344,12 @@ fn diff(want: &str, got: &str, cap: usize) -> Vec<String> {
             if i < a.len() && j < b.len() && a[i] == b[j] {
                 i += 1;
                 j += 1;
-            } else if j < b.len() && (i == a.len() || lcs[i][j + 1] >= lcs[i + 1][j]) {
-                out.push(format!("+ {}", b[j]));
-                j += 1;
-            } else {
+            } else if i < a.len() && (j == b.len() || lcs[i + 1][j] >= lcs[i][j + 1]) {
                 out.push(format!("- {}", a[i]));
                 i += 1;
+            } else {
+                out.push(format!("+ {}", b[j]));
+                j += 1;
             }
         }
     }
@@ -427,7 +427,7 @@ fn corpus_designs_rebuild_with_the_same_names_and_references() {
     }
     assert!(
         problems.is_empty(),
-        "{} design(s) rebuild with other names than tests/naming records (if that is intended, record it with NAMING_CORPUS_BLESS=1 and say why in the pull request):\n{}",
+        "{} design(s) rebuild with other names than tests/naming records (if that is intended, record it with NAMING_CORPUS_BLESS=1 and say why in the pull request; - recorded, + now):\n{}",
         problems.len(),
         problems.join("\n")
     );

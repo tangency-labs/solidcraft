@@ -161,6 +161,9 @@ the most complete description of the house style.
 A geometry change that changes the robustness goldens re-records them in the same pull request:
 `ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::`
 (see [docs/robustness.md](docs/robustness.md)); CI runs every seed on pull requests that touch geometry.
+A change to the persistent names of faces and edges, or to what a stored name finds, re-records the
+corpus's names in the same pull request, saying why:
+`NAMING_CORPUS_BLESS=1 cargo test --profile ci -p solidcraft-cli --test naming_corpus` (`tests/naming/`).
 [docs/mutation-testing.md](docs/mutation-testing.md) shows how to find kernel behaviour these
 black-box suites miss.
 
