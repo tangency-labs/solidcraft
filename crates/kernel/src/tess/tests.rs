@@ -632,6 +632,37 @@ fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan) {
     }
 }
 
+/// #1995: an M8x1 thread through a 7 mm hole in a 20 mm block, both ends open. Truck meshed the
+/// groove's winding walls with triangles reaching past both ends of the block; the body's mesh
+/// now comes from the display plan, inside the block and with the analytic volume.
+#[cfg(feature = "smlib")]
+#[test]
+fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
+    use solidcraft_smlib::Brep as S;
+    let (Ok(block), Ok(bore)) = (S::make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]), S::make_cylinder([0.0, 0.0, -1.0], 3.5, 12.0)) else {
+        panic!("stock")
+    };
+    let threaded = smlib_cut(&smlib_cut(&block, &bore), &smlib_groove(iso_groove(1.0, 8.0, 3.5, true), -1.0, 1.0, 12.0));
+    let body = ok(crate::native::body_from_smlib(&threaded));
+    assert!(seam::turns_more_than_once(&body.solid), "the groove's walls wind round the bore");
+    let m = ok(body.tessellate(0.01));
+    let (lo, hi) = m
+        .positions
+        .iter()
+        .fold((Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    assert!(lo.z > -1e-6 && hi.z < 10.0 + 1e-6 && lo.x > -10.0 - 1e-6 && hi.x < 10.0 + 1e-6, "mesh outside the block: {lo:?} {hi:?}");
+    // Block less the bore less ten turns of the groove where it is in the material (as the
+    // kernel case works it out from the ISO profile).
+    let volume = m.measure().volume;
+    assert!((volume - 3567.1757).abs() < 0.002 * 3567.1757, "volume {volume}");
+    for tol in [0.1, 0.01] {
+        let m = closed_display_mesh("thread in a bore", &body, tol);
+        let chord = max_chord(&body, &m);
+        assert!(chord <= tol * 1.05, "thread in a bore at {tol}: chord {chord}");
+        assert_faces_lie_flat("thread in a bore", &ok(body.display_plan_angular(tol, crate::DISPLAY_ANGLE)));
+    }
+}
+
 /// An M10 thread over the lower half of a 30 mm shaft. The groove's root band leaves the shaft's
 /// end face obliquely: a strip a quarter pitch wide winding ten turns, narrower everywhere than
 /// a triangle's side, with no four corners to blend. The butterfly of a round face made it a
@@ -643,6 +674,12 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
     let Ok(shaft) = solidcraft_smlib::Brep::make_cylinder([0.0; 3], 5.0, 30.0) else { panic!("shaft") };
     let threaded = smlib_cut(&shaft, &smlib_groove(iso_groove(1.5, 10.0, 5.0, false), -1.5, 1.5, 11.0));
     let body = ok(crate::native::body_from_smlib(&threaded));
+    let m = ok(body.tessellate(0.01));
+    let (lo, hi) = m
+        .positions
+        .iter()
+        .fold((Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    assert!(lo.z > -1e-6 && hi.z < 30.0 + 1e-6 && hi.x < 5.0 + 1e-6, "mesh outside the shaft: {lo:?} {hi:?}");
     for tol in [0.1, 0.01] {
         let m = closed_display_mesh("thread run out", &body, tol);
         let chord = max_chord(&body, &m);

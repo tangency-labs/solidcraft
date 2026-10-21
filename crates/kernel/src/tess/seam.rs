@@ -385,29 +385,18 @@ fn seam_nodes(s: &EvalSurface, swap: bool, x: f64, y0: f64, y1: f64, rules: &Rul
     Some(inner.iter().map(|&y| (y, s.eval(uv(y)[0], uv(y)[1]).0)).collect())
 }
 
-/// Whether a face of `solid` lies on a B-spline surface that joins itself (a lofted tube).
-/// Truck meshes a face in its surface's parameters and treats only a revolved surface's
-/// rotation as periodic, so a face that runs across such a join comes out folded over itself or
-/// with a hole in it. The reference mesh of such a body is made from the display plan,
-/// which knows the join is periodic.
-pub(crate) fn closes_on_itself(solid: &crate::body::Solid) -> bool {
-    solid.face_iter().any(|f| matches!(super::surface::eval_surface(&f.surface()), Some(EvalSurface::Nurbs { closed, .. }) if closed[0] || closed[1]))
-}
-
-/// Whether a face of `solid` lies on a surface of revolution and has a boundary loop turning
-/// more than once around its axis (a helical trim). Truck's mesher cannot mesh such a face (its
-/// triangles cut across the solid), so the reference mesh is made from the display plan instead.
+/// Whether a face of `solid` has a boundary loop turning more than once around the axis its
+/// surface turns about (a helical trim): a surface of revolution's own axis, or the axis a
+/// spline's iso-line winds around (the flank of a screw sweep, as SMLib writes a modelled
+/// thread's groove, whose bore or shaft it splits into one face per turn). Truck's mesher cannot
+/// mesh such a face (its triangles cut across the solid, or its triangulation fails), so the
+/// reference mesh is made from the display plan instead.
 pub(crate) fn turns_more_than_once(solid: &crate::body::Solid) -> bool {
     use truck_meshalgo::prelude::*;
     use truck_modeling as mt;
     let tau = std::f64::consts::TAU;
     for face in solid.face_iter() {
-        let mt::Surface::RevolutedCurve(proc) = face.surface() else { continue };
-        let rev = proc.entity();
-        let m = *proc.transform();
-        let o = crate::body::from_p3(m.transform_point(rev.origin()));
-        let a = m.transform_vector(rev.axis());
-        let Some(k) = Vec3::new(a.x, a.y, a.z).normalized() else { continue };
+        let Some((o, k)) = winding_axis(&face.surface()) else { continue };
         let e1 = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().unwrap_or(Vec3::X);
         let e2 = k.cross(e1);
         let angle = |p: mt::Point3| {
@@ -424,7 +413,7 @@ pub(crate) fn turns_more_than_once(solid: &crate::body::Solid) -> bool {
                 let mut n = 16usize;
                 let steps = loop {
                     let xs: Vec<f64> = (0..=n).map(|i| angle(c.subs(t0 + (t1 - t0) * i as f64 / n as f64))).collect();
-                    let ok = xs.windows(2).all(|w| ((w[1] - w[0] + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI).abs() < 1.0);
+                    let ok = xs.windows(2).all(|w| half_turn(w[1] - w[0]).abs() < 1.0);
                     if ok || n >= 4096 {
                         break xs;
                     }
@@ -432,7 +421,7 @@ pub(crate) fn turns_more_than_once(solid: &crate::body::Solid) -> bool {
                 };
                 for x in steps {
                     if let Some(p) = prev {
-                        total += (x - p + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI;
+                        total += half_turn(x - p);
                         lo = lo.min(total);
                         hi = hi.max(total);
                     }
@@ -445,4 +434,68 @@ pub(crate) fn turns_more_than_once(solid: &crate::body::Solid) -> bool {
         }
     }
     false
+}
+
+/// An angle step taken the short way round, in (−π, π].
+fn half_turn(x: f64) -> f64 {
+    let pi = std::f64::consts::PI;
+    (x + pi).rem_euclid(std::f64::consts::TAU) - pi
+}
+
+/// Samples per knot span of a spline's iso-line in [`winding_axis`], and their bounds.
+const ISO_SPAN_SAMPLES: usize = 4;
+const ISO_MIN_SAMPLES: usize = 64;
+const ISO_MAX_SAMPLES: usize = 8192;
+
+/// The axis (a point on it, its unit direction) a face's surface turns about, if it turns at
+/// all: a surface of revolution's own axis; for a spline, the axis an iso-line through the
+/// middle of the other parameter winds more than once around (a screw sweep's flank, a coil's
+/// wall). That axis is the mean binormal of the iso-line (each pair of successive tangents
+/// turns about it), through the mean of its samples; `None` for a spline neither iso-line of
+/// which turns more than once about it.
+fn winding_axis(surface: &truck_modeling::Surface) -> Option<(Vec3, Vec3)> {
+    use truck_meshalgo::prelude::*;
+    use truck_modeling as mt;
+    if let mt::Surface::RevolutedCurve(proc) = surface {
+        let rev = proc.entity();
+        let m = *proc.transform();
+        let o = crate::body::from_p3(m.transform_point(rev.origin()));
+        let a = m.transform_vector(rev.axis());
+        return Vec3::new(a.x, a.y, a.z).normalized().map(|k| (o, k));
+    }
+    if matches!(surface, mt::Surface::Plane(_)) {
+        return None;
+    }
+    let s = super::surface::eval_surface(surface)?;
+    let EvalSurface::Nurbs { knots, .. } = &s else { return None };
+    let dom = super::uv::domain(&s);
+    let tau = std::f64::consts::TAU;
+    (0..2).find_map(|d| {
+        let (a, b) = dom.range[d]?;
+        let (c0, c1) = dom.range[1 - d]?;
+        let across = 0.5 * (c0 + c1);
+        let n = knots.get(d).map_or(0, |k| k.len()).saturating_mul(ISO_SPAN_SAMPLES).clamp(ISO_MIN_SAMPLES, ISO_MAX_SAMPLES);
+        let pts: Vec<Vec3> = (0..=n)
+            .filter_map(|i| {
+                let t = a + (b - a) * i as f64 / n as f64;
+                s.derivs(if d == 0 { t } else { across }, if d == 0 { across } else { t }).map(|(p, _, _)| p)
+            })
+            .collect();
+        if pts.len() != n + 1 {
+            return None;
+        }
+        let tangents: Vec<Vec3> = pts.windows(2).filter_map(|w| (w[1] - w[0]).normalized()).collect();
+        let binormal = tangents.windows(2).fold(Vec3::ZERO, |acc, w| acc + w[0].cross(w[1]));
+        let k = binormal.normalized()?;
+        let o = pts.iter().fold(Vec3::ZERO, |acc, p| acc + *p) * (1.0 / pts.len() as f64);
+        let e1 = k.cross(if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized()?;
+        let e2 = k.cross(e1);
+        let angles: Vec<f64> = pts.iter().map(|p| (*p - o).dot(e2).atan2((*p - o).dot(e1))).collect();
+        // Too coarse to follow the turns (a step of a radian or more): not taken as winding.
+        let steps: Vec<f64> = angles.windows(2).map(|w| half_turn(w[1] - w[0])).collect();
+        if steps.iter().any(|x| x.abs() >= 1.0) {
+            return None;
+        }
+        (steps.iter().sum::<f64>().abs() > tau * 1.01).then_some((o, k))
+    })
 }

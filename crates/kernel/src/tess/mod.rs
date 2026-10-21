@@ -61,8 +61,10 @@ const PARALLEL_FACES: usize = 4;
 const PARALLEL_CURVES: usize = 2;
 const PARALLEL_EDGES: usize = 256;
 
-/// Most lines a curved face's grid gets in one direction.
-const MAX_LINES: usize = 1024;
+/// Most lines a curved face's grid gets in one direction: a turn's worth for each of the many
+/// turns a coil's or a thread's wall winds (the grid as a whole stays within
+/// [`grid::MAX_FACE_GRID`]).
+const MAX_LINES: usize = 8192;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
 /// Two boundary nodes this close together on the surface (mm) are one node. Far below any
