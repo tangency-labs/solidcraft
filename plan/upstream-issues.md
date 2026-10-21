@@ -1984,6 +1984,24 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** crash / use after free.
 - **Rust port:** Reproduces the control flow; queries on the deleted edge id return `NotFound`.
 
+#### UB-248. `sm_RefineRailCurveClassification` works on interval `ii`, not on small interval `ii`, and can read past the classification
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:5596`-`5690` (`sm_RefineRailCurveClassification`).
+- **What happens:** The loop counts `ii` from `crSmallIntervals.GetSize()` down to 1 but never reads `crSmallIntervals`: it refines classification interval `ii` itself (so the small intervals TestRollOver found are ignored unless they happen to be intervals `1..n`). It compares `ii` with the interval count taken before any `RemoveAt`, and a refinable interval `ii = size - 1` reads `rRailCurveClassification[ii + 1]`, past the end; after a removal later indices can also be past the end.
+- **Trigger:** `TestRollOver` passing more small intervals than (interval count - 2), or a refinable second-to-last interval.
+- **How found:** read during porting (unit `blend.fillet_solver_p3`).
+- **Confirmed:** no (the refinement path defers at `RailEdgeuseIntersect`, unit `blend.fillet_solver_p2`).
+- **Severity:** wrong result / out-of-bounds read.
+- **Rust port:** Faithful loop and indexing; an index past the classification is `InvalidInput` instead of a read past the array.
+
+#### UB-249. `SplitAndTrimFilletSurface` can index past a rail classification
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:4800`-`4866` (`SmFilletSolver::SplitAndTrimFilletSurface`, the interval walk).
+- **What happens:** When both current intervals end within `SM_EFF_ZERO_SQ`, both sides advance, but the second branch sets `bFound1 = TRUE` unconditionally after the first branch's search, so a first rail with no further good interval keeps looping with `lStartSearch1` one past its last interval (or on a non-good interval) and reads `(*pCC1)[lStartSearch1]`.
+- **Trigger:** Rail classifications whose last good intervals end at the same parameter while the second rail has more good intervals after it.
+- **How found:** read during porting (unit `blend.fillet_solver_p3`).
+- **Confirmed:** no.
+- **Severity:** out-of-bounds read.
+- **Rust port:** Faithful flags; an index past the classification is `InvalidInput`.
+
 ## Hang
 
 #### HANG-1. `SmExtent1d::PeriodicWrap` steps one period per iteration

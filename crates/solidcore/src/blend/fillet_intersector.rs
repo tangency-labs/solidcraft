@@ -92,6 +92,7 @@
 use crate::blend::fillet_custom_solver::{offset_evaluate_1st, ConstantRadiusAssistedFs};
 use crate::blend::fillet_geom::p1::{set_rail_curve, FilletBrep, FilletGeomId};
 use crate::blend::fillet_solver::p1::{compute_uv_vectors, FilletSolver};
+use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -235,24 +236,18 @@ pub trait FilletSolverOps {
     ///
     /// # Errors
     ///
-    /// The solver's failure; [`SolidError::Unported`] until ported.
+    /// The solver's failure (`FilletSolver::step_solve`, unit `blend.fillet_solver_p3`).
     #[allow(clippy::too_many_arguments)]
     fn step_solve(
         &mut self,
-        _k: &Kernel,
-        _point: &TsectPnt,
-        _step_size: &mut f64,
-        _uv_domain1: &Extent2d,
-        _uv_domain2: &Extent2d,
-        _flags: &mut StepSolve,
-        _next: &mut TsectPnt,
-    ) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p3): SmFilletSolver::StepSolve
-        Err(SolidError::unported(
-            "SmFilletSolver::StepSolve",
-            "blend.fillet_solver_p3",
-        ))
-    }
+        k: &Kernel,
+        point: &TsectPnt,
+        step_size: &mut f64,
+        uv_domain1: &Extent2d,
+        uv_domain2: &Extent2d,
+        flags: &mut StepSolve,
+        next: &mut TsectPnt,
+    ) -> Result<()>;
 
     /// `PointOnPlaneSolve(crPlaneOrig, crPlaneNormal, crUVDomain1, crUVDomain2, crUV1,
     /// crUV2, rbFoundSolution, rTsectPnt)`: the fillet point on the plane near the
@@ -457,6 +452,29 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     fn compute_uv_vectors(&mut self, _k: &Kernel, point: &mut TsectPnt) -> Result<()> {
         // SmFilletSolver::ComputeUVVectors reads only the intersection point
         compute_uv_vectors(point)
+    }
+
+    fn step_solve(
+        &mut self,
+        k: &Kernel,
+        point: &TsectPnt,
+        step_size: &mut f64,
+        uv_domain1: &Extent2d,
+        uv_domain2: &Extent2d,
+        flags: &mut StepSolve,
+        next: &mut TsectPnt,
+    ) -> Result<()> {
+        // non-virtual in the base; it dispatches on this solver's virtuals
+        // (GetSolverType, LoadInitialValues, ...), so the solver itself is passed. The
+        // flags are copied back on an error too: upstream sets them in place.
+        let mut out = StepSolveOutcome::default();
+        let r = FilletSolver::step_solve(
+            self, k, None, point, step_size, uv_domain1, uv_domain2, next, &mut out,
+        );
+        flags.found_answer = out.found_good_point;
+        flags.clipped = out.clipped;
+        flags.boundary_hit = out.boundary_hit;
+        r
     }
 
     fn set_status(&mut self, status: FilStatus) -> Result<()> {
@@ -2353,6 +2371,37 @@ mod tests {
             .unwrap();
         assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
         assert_eq!(s.surface(1).unwrap().offset_distance(), -2.0);
+        assert_eq!(
+            crate::blend::fillet_solver::p1::FilletSolverOps::solver_type(&s).unwrap(),
+            crate::blend::fillet_solver::p1::FilletSolverType::ConstRadius
+        );
+
+        // StepSolve is the base's (unit blend.fillet_solver_p3) dispatched on this
+        // solver: a clipped step finds no boundary point here and goes on to the Newton
+        // solve, which stops at the SmConstantRadiusFS::LoadInitialValues override
+        // (blend.fillet_standard_solver_p2); the clip it recorded first is kept
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let cur = pnt([0.9, 0.5], [0.9, 0.5], [1.0, 0.0, 0.0], 0.0);
+        let mut step = 0.5;
+        let mut flags = StepSolve::default();
+        let mut next = TsectPnt::new();
+        let e = s
+            .step_solve(&k, &cur, &mut step, &d, &d, &mut flags, &mut next)
+            .unwrap_err();
+        assert!(
+            matches!(
+                e,
+                SolidError::Unported {
+                    unit: "blend.fillet_standard_solver_p2",
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        assert!(
+            flags.clipped && !flags.found_answer && !flags.boundary_hit,
+            "{flags:?}"
+        );
     }
 
     #[test]

@@ -70,7 +70,9 @@
 //!   evaluations use the real offset port; point solvers and default singularity
 //!   construction propagate the errors of their surface dispatchers.
 
-use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
+use crate::blend::fillet_solver::p1::{
+    FilletSolver, FilletSolverOps, FilletSolverType, OffsetSurfaceSlot,
+};
 use crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
@@ -1644,6 +1646,12 @@ macro_rules! fillet_solver_ops {
                 ))
             }
 
+            /// `SmConstantRadiusAssistedFS::GetSolverType` (inherited):
+            /// `SM_FS_CONST_RADIUS_ASSISTED` (`SmFilletStandardSolver.h:112`).
+            fn solver_type(&self) -> Result<FilletSolverType> {
+                Ok(FilletSolverType::ConstRadiusAssisted)
+            }
+
             fn load_jacobian(
                 &mut self,
                 k: &Kernel,
@@ -1738,6 +1746,14 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`).
     fn type_code(&self) -> Result<i64> {
         Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+    }
+
+    /// `GetSolverType`: `SM_FS_CONST_RADIUS` (`SmConstantRadiusFS::GetSolverType`,
+    /// `SmFilletStandardSolver.h:58`), the class the intersector shim builds; `StepSolve`
+    /// branches on it, and `SM_FS_CONST_RADIUS_ASSISTED` would send a clipped step down
+    /// the assisted branch the C++ does not take. Added by `blend.fillet_solver_p3`.
+    fn solver_type(&self) -> Result<FilletSolverType> {
+        Ok(FilletSolverType::ConstRadius)
     }
 
     /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`,
