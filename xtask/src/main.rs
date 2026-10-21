@@ -11,6 +11,7 @@ mod features;
 mod i18n;
 mod icons;
 mod kernel_cases;
+mod kernel_ladder;
 mod layers;
 mod licences;
 mod lists;
@@ -51,6 +52,10 @@ commands:
                   process each, killed after --timeout, default 180 s) with each kernel asked for,
                   grade it against the case's own answer and write docs/kernel-cases.md (--results:
                   every result as JSON too)
+                  --ladder [--record REASON]: the complexity ladder instead
+                  (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
+                  with its timing golden, into docs/kernel-ladder.md; --record re-measures the
+                  golden one case at a time and re-sorts each tier by time
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;
