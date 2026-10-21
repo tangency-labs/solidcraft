@@ -1,58 +1,156 @@
 //! SolidCraft-owned portable B-rep data, independent of a modelling backend.
 //! Millimetres, radians, right-handed Z-up. See docs/native-brep.md for semantics.
 //! Validation checks structure and resource budgets, not geometric equivalence or trust.
+//!
+//! The records follow SMLib's flat form (`SmBrepData`): one record per logical use, the mated
+//! halves a kernel keeps at run time left for it to rebuild. Names are STEP's B-rep names; each
+//! type says its SMLib counterpart and STEP entity. Curves and surfaces are unbounded: an edge's
+//! bounds are its `interval`, a face's its `domain` and loops.
 use serde::{Deserialize, Serialize};
 
 mod curve2;
 pub mod envelope;
 pub mod history;
+mod topology;
 pub use curve2::Curve2;
 
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const MAX_ITEMS: usize = 1_000_000;
+pub const MAX_SHELLS: usize = 1024;
 const MAX_DEPTH: usize = 16;
-/// Most control points along one direction of a spline (a helical thread flank written as one
-/// spline has thousands along the helix); the item budget bounds a surface's grid as a whole.
-pub const MAX_SPLINE_CONTROLS: usize = 8192;
+const TAU: f64 = std::f64::consts::TAU;
 
+/// A body (SMLib `SmBrep`, STEP `MANIFOLD_SOLID_BREP`/`BREP_WITH_VOIDS`/`SHELL_BASED_SURFACE_MODEL`).
+/// Every list is in canonical order (docs/native-brep.md, "Canonical order"): a face's index
+/// here is its face index everywhere, and so for edges and vertices.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Brep {
     pub version: u32,
+    /// Intersection tolerance, mm (SMLib's per-brep `XSectTol3d`).
+    pub tolerance: f64,
+    /// `regions[0]` is the infinite region, then the bounded regions.
+    pub regions: Vec<Region>,
     pub shells: Vec<Shell>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Shell {
-    pub vertices: Vec<[f64; 3]>,
-    pub edges: Vec<Edge>,
     pub faces: Vec<Face>,
+    pub edges: Vec<Edge>,
+    pub vertices: Vec<Vertex>,
 }
 
+/// A connected volume of space (SMLib `SmRegionData`). The infinite region has no outer shell
+/// and is never a void. A bounded region's `shells[0]` is its outer shell, a closed face shell;
+/// the rest are inner shells. A closed shell separates two regions and is listed by both: as
+/// the outer shell of the one it encloses and as an inner shell of the one around it. An open
+/// shell, a wire shell or a vertex shell lies in one region and is listed by that one only.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Edge {
-    pub vertices: [u32; 2],
-    pub curve: Curve,
+pub struct Region {
+    pub shells: Vec<u32>,
+    /// A bounded region that is empty space (a void), not material. False for the infinite region.
+    pub void: bool,
 }
 
+/// A connected boundary component (SMLib `SmShellData`; STEP `CLOSED_SHELL`/`OPEN_SHELL`,
+/// `WIRE_SHELL`, `VERTEX_SHELL`). One record stands for both runtime sides of a shell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Shell {
+    /// Connected faces, with wire edges embedded in them (`wires`, edges no face uses).
+    Faces { faces: Vec<OrientedFace>, wires: Vec<u32> },
+    /// A connected graph of wire edges and no faces.
+    Wire { edges: Vec<u32> },
+    /// One isolated point.
+    Vertex { vertex: u32 },
+}
+
+/// A face as one shell uses it (SMLib `SmFaceuseData`, STEP `ORIENTED_FACE`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrientedFace {
+    pub face: u32,
+    /// The face's normal in this shell is its surface's natural normal (∂S/∂u × ∂S/∂v). In a
+    /// closed shell the normals point out of the material.
+    pub forward: bool,
+}
+
+/// A bounded piece of a surface (SMLib `SmFaceData`, STEP `ADVANCED_FACE`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Face {
-    pub loops: Vec<Vec<EdgeUse>>,
     pub surface: Surface,
-    pub forward: bool,
+    /// The modelled rectangle in surface parameters, `[[u0, u1], [v0, v1]]`, inside the
+    /// surface's natural domain and around every loop.
+    pub domain: [[f64; 2]; 2],
+    /// `loops[0]` is the outer loop, the rest inner. Loops are stored relative to the surface's
+    /// natural normal, whatever side a shell uses: seen from that normal, the outer loop runs
+    /// counter-clockwise and inner loops clockwise.
+    pub loops: Vec<Loop>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// A face boundary (SMLib `SmLoopData`; STEP `FACE_BOUND` of an `EDGE_LOOP` or `VERTEX_LOOP`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Loop {
+    /// A closed chain of oriented edges, in traversal order (STEP `EDGE_LOOP`).
+    Edges { edges: Vec<OrientedEdge> },
+    /// A one-vertex loop: a pole or a collapsed boundary (STEP `VERTEX_LOOP`). Inner only.
+    Vertex { vertex: u32 },
+}
+
+/// One occurrence of an edge in a face's loop (SMLib `SmEUData`, one mated pair of runtime
+/// edgeuses; STEP `ORIENTED_EDGE` with its `PCURVE`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EdgeUse {
+pub struct OrientedEdge {
     pub edge: u32,
+    /// The loop runs along the edge from interval min (start vertex) to max (end vertex).
     pub forward: bool,
+    /// The edge in this face's (u, v), on the edge's own interval and running min → max
+    /// whatever `forward` says. A seam edge has two uses on one face, each with its pcurve.
+    pub pcurve: Curve2,
 }
 
-/// Right-handed orthonormal frame; z = x_axis cross y_axis.
+/// A bounded piece of a curve (SMLib `SmEdgeData`, STEP `EDGE_CURVE`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Edge {
+    pub curve: Curve,
+    /// The modelled interval in the curve's own parameter, min < max.
+    pub interval: [f64; 2],
+    /// `[start, end]`, at interval min and max; equal for a closed edge.
+    pub vertices: [u32; 2],
+    /// mm.
+    pub tolerance: f64,
+    /// Every oriented edge on this edge, each once, the primary use (the first in canonical
+    /// order) first and the rest in radial order: right-hand rule about the edge's direction.
+    /// Empty for a wire edge.
+    pub uses: Vec<EdgeUseRef>,
+}
+
+/// Where one use of an edge sits (SMLib `SmEUData`'s radial fields): `faces[face]`,
+/// `loops[loop]`, `edges[position]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeUseRef {
+    pub face: u32,
+    pub r#loop: u32,
+    pub position: u32,
+    /// Going round the edge, the radial cycle enters this use at the side on the surface's
+    /// natural normal (SMLib's selected member of the mated pair). It follows from the loop
+    /// convention: always `!forward` of the use it names.
+    pub upper: bool,
+}
+
+/// A point (SMLib `SmVertexData`, STEP `VERTEX_POINT`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Vertex {
+    pub point: [f64; 3],
+    /// mm.
+    pub tolerance: f64,
+}
+
+/// Right-handed orthonormal frame; z = x_axis cross y_axis (STEP `AXIS2_PLACEMENT_3D`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Frame {
@@ -61,116 +159,61 @@ pub struct Frame {
     pub y_axis: [f64; 3],
 }
 
+/// Unbounded 3D curves, each with its parameter `t` (docs/native-brep.md, "Curves").
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Curve {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    CircleArc {
-        frame: Frame,
-        radius: f64,
-        angle: [f64; 2],
-    },
-    EllipseArc {
-        frame: Frame,
-        radii: [f64; 2],
-        angle: [f64; 2],
-    },
-    Polyline {
-        points: Vec<[f64; 3]>,
-    },
-    Spline {
-        knots: Vec<f64>,
-        points: Vec<[f64; 3]>,
-    },
-    RationalSpline {
-        knots: Vec<f64>,
-        homogeneous: Vec<[f64; 4]>,
-    },
-    Intersection {
-        knots: Vec<f64>,
-        points: Vec<[f64; 3]>,
-        fitting_tolerance: f64,
-        faces: Option<[u32; 2]>,
-    },
+    /// The line through both points: `start + t * (end - start)`, t = 0 at `start` and 1 at
+    /// `end` (STEP `LINE`; truck's `Line`).
+    Line { start: [f64; 3], end: [f64; 3] },
+    /// `origin + radius * (cos t * x + sin t * y)`, t the angle from x (STEP `CIRCLE`).
+    Circle { frame: Frame, radius: f64 },
+    /// `origin + radii[0] cos t * x + radii[1] sin t * y` (STEP `ELLIPSE`).
+    Ellipse { frame: Frame, radii: [f64; 2] },
+    /// Straight segments; segment i spans t in [i, i + 1] (STEP `POLYLINE`).
+    Polyline { points: Vec<[f64; 3]> },
+    /// A B-spline on its knots (STEP `B_SPLINE_CURVE_WITH_KNOTS`).
+    Spline { knots: Vec<f64>, points: Vec<[f64; 3]> },
+    /// A NURBS curve: homogeneous `[x*w, y*w, z*w, w]` coefficients (STEP `RATIONAL_B_SPLINE_CURVE`).
+    RationalSpline { knots: Vec<f64>, homogeneous: Vec<[f64; 4]> },
     /// The intersection of two surfaces, traced from `leader` (a polyline or spline near it)
-    /// to within `tolerance`: the procedural curve itself, exactly as its producer holds it.
-    SurfaceIntersection {
-        surfaces: [Box<Surface>; 2],
-        leader: Box<Curve>,
-        tolerance: f64,
-    },
+    /// to within `tolerance`: the procedural curve itself, exactly as its producer holds it
+    /// (STEP `INTERSECTION_CURVE`). t is the leader's parameter.
+    SurfaceIntersection { surfaces: [Box<Surface>; 2], leader: Box<Curve>, tolerance: f64 },
 }
 
+/// Unbounded surfaces, each with its (u, v) (docs/native-brep.md, "Surfaces"). Natural
+/// normals are ∂S/∂u × ∂S/∂v.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
-    Plane {
-        origin: [f64; 3],
-        u_axis: [f64; 3],
-        v_axis: [f64; 3],
-    },
-    /// The plane through three points, parameter (1, 0) at `u_point` and (0, 1) at `v_point`:
-    /// the points themselves, as its producer holds them (axes worked out from them would round).
-    PlaneThrough {
-        origin: [f64; 3],
-        u_point: [f64; 3],
-        v_point: [f64; 3],
-    },
-    Cylinder {
-        frame: Frame,
-        radius: f64,
-        angle: [f64; 2],
-        height: [f64; 2],
-    },
-    Cone {
-        frame: Frame,
-        radius_at_origin: f64,
-        half_angle: f64,
-        angle: [f64; 2],
-        height: [f64; 2],
-    },
-    Sphere {
-        frame: Frame,
-        radius: f64,
-        longitude: [f64; 2],
-        latitude: [f64; 2],
-    },
-    Torus {
-        frame: Frame,
-        major_radius: f64,
-        minor_radius: f64,
-        longitude: [f64; 2],
-        meridian: [f64; 2],
-    },
-    Spline {
-        u_knots: Vec<f64>,
-        v_knots: Vec<f64>,
-        points: Vec<Vec<[f64; 3]>>,
-    },
-    RationalSpline {
-        u_knots: Vec<f64>,
-        v_knots: Vec<f64>,
-        homogeneous: Vec<Vec<[f64; 4]>>,
-    },
-    Revolution {
-        profile: Box<Curve>,
-        origin: [f64; 3],
-        axis: [f64; 3],
-        angle: [f64; 2],
-    },
-    /// A full revolution of `profile` about `origin` and unit `axis`, then mapped by the
-    /// column-major affine `matrix`, with the normal reversed unless `forward`: the
-    /// revolution exactly as its producer holds it, nothing baked into the profile.
-    PlacedRevolution {
-        profile: Box<Curve>,
-        origin: [f64; 3],
-        axis: [f64; 3],
-        matrix: [[f64; 4]; 4],
-        forward: bool,
-    },
+    /// `origin + u * u_axis + v * v_axis` (STEP `PLANE`).
+    Plane { origin: [f64; 3], u_axis: [f64; 3], v_axis: [f64; 3] },
+    /// `origin + u * (u_point - origin) + v * (v_point - origin)`: the plane through three points,
+    /// as its producer holds them (axes worked out from them would round; truck's `Plane`).
+    PlaneThrough { origin: [f64; 3], u_point: [f64; 3], v_point: [f64; 3] },
+    /// `origin + v z + radius (cos u x + sin u y)`: u the angle, v the height (STEP
+    /// `CYLINDRICAL_SURFACE`).
+    Cylinder { frame: Frame, radius: f64 },
+    /// `origin + v z + r(v) (cos u x + sin u y)`, `r(v) = radius_at_origin + v tan(half_angle)`,
+    /// v ≥ the apex's height (STEP `CONICAL_SURFACE`).
+    Cone { frame: Frame, radius_at_origin: f64, half_angle: f64 },
+    /// `origin + radius (cos v (cos u x + sin u y) + sin v z)`: u the longitude, v the latitude
+    /// in [-π/2, π/2] (STEP `SPHERICAL_SURFACE`).
+    Sphere { frame: Frame, radius: f64 },
+    /// `origin + (R + r cos v)(cos u x + sin u y) + r sin v z`: u the longitude, v the meridian
+    /// angle (STEP `TOROIDAL_SURFACE`).
+    Torus { frame: Frame, major_radius: f64, minor_radius: f64 },
+    /// A tensor-product B-spline: `points[i][j]`, i along u (STEP `B_SPLINE_SURFACE_WITH_KNOTS`).
+    Spline { u_knots: Vec<f64>, v_knots: Vec<f64>, points: Vec<Vec<[f64; 3]>> },
+    /// A NURBS surface: homogeneous `[x*w, y*w, z*w, w]` coefficients.
+    RationalSpline { u_knots: Vec<f64>, v_knots: Vec<f64>, homogeneous: Vec<Vec<[f64; 4]>> },
+    /// `profile` revolved about `origin` and unit `axis` (right-hand rule), then mapped by the
+    /// column-major affine `matrix`: the revolution exactly as its producer holds it, nothing
+    /// baked into the profile (truck's `RevolutedCurve` under a `Processor`). When `forward`,
+    /// u is the profile's parameter and v the angle in [0, 2π); otherwise u and v swap (u the
+    /// angle, v the profile's), which reverses the natural normal.
+    PlacedRevolution { profile: Box<Curve>, origin: [f64; 3], axis: [f64; 3], matrix: [[f64; 4]; 4], forward: bool },
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -201,7 +244,7 @@ fn knots(values: &[f64], count: usize, budget: &mut Budget) -> Result<()> {
     budget.add(values.len())?;
     numbers(values.iter().copied())?;
     let degree = values.len().checked_sub(count.saturating_add(1)).ok_or(Invalid("spline degree"))?;
-    require((2..=MAX_SPLINE_CONTROLS).contains(&count) && (1..=16).contains(&degree) && degree < count, "spline degree or size")?;
+    require((2..=4096).contains(&count) && (1..=16).contains(&degree) && degree < count, "spline degree or size")?;
     require(values.windows(2).all(|w| w.first() <= w.get(1)), "unordered knots")?;
     require(values.get(degree) < values.get(count), "empty spline domain")?;
     // No knot may have multiplicity greater than degree + 1.
@@ -233,17 +276,87 @@ fn frame(f: &Frame, budget: &mut Budget) -> Result<()> {
     let (x, y) = (vector(f.x_axis), vector(f.y_axis));
     require((x.len() - 1.).abs() <= 1e-8 && (y.len() - 1.).abs() <= 1e-8 && x.dot(y).abs() <= 1e-8, "nonorthonormal frame")
 }
-fn range(r: &[f64; 2]) -> Result<()> {
-    numbers(*r)?;
-    require(r[0] < r[1], "empty parameter range")
-}
-fn angle(r: &[f64; 2]) -> Result<()> {
-    range(r)?;
-    require(r[1] - r[0] <= std::f64::consts::TAU + 1e-12, "angular range exceeds one turn")
-}
 fn radius(r: f64) -> Result<()> {
     require(r.is_finite() && (1e-12..=1e12).contains(&r), "radius")
 }
+/// A tolerance in mm.
+fn tolerance(t: f64) -> Result<()> {
+    require(t.is_finite() && t > 0. && t <= 1e3, "tolerance")
+}
+
+/// A parameter's natural range: periodic with period 2π, or between two bounds (infinite for
+/// an unbounded direction).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Natural {
+    Periodic,
+    Range(f64, f64),
+}
+const UNBOUNDED: Natural = Natural::Range(f64::NEG_INFINITY, f64::INFINITY);
+
+/// The active interval of a spline's knots (already validated).
+fn knot_domain(k: &[f64], count: usize) -> Natural {
+    let degree = k.len().saturating_sub(count + 1);
+    match (k.get(degree), k.get(count)) {
+        (Some(a), Some(b)) => Natural::Range(*a, *b),
+        _ => Natural::Range(0., 0.),
+    }
+}
+fn curve_natural(c: &Curve) -> Natural {
+    match c {
+        Curve::Line { .. } => UNBOUNDED,
+        Curve::Circle { .. } | Curve::Ellipse { .. } => Natural::Periodic,
+        Curve::Polyline { points } => Natural::Range(0., points.len().saturating_sub(1) as f64),
+        Curve::Spline { knots, points } => knot_domain(knots, points.len()),
+        Curve::RationalSpline { knots, homogeneous } => knot_domain(knots, homogeneous.len()),
+        Curve::SurfaceIntersection { leader, .. } => curve_natural(leader),
+    }
+}
+fn surface_natural(s: &Surface) -> [Natural; 2] {
+    use std::f64::consts::FRAC_PI_2;
+    match s {
+        Surface::Plane { .. } | Surface::PlaneThrough { .. } => [UNBOUNDED; 2],
+        Surface::Cylinder { .. } => [Natural::Periodic, UNBOUNDED],
+        Surface::Cone { radius_at_origin, half_angle, .. } => {
+            [Natural::Periodic, Natural::Range(-radius_at_origin / half_angle.tan(), f64::INFINITY)]
+        }
+        Surface::Sphere { .. } => [Natural::Periodic, Natural::Range(-FRAC_PI_2, FRAC_PI_2)],
+        Surface::Torus { .. } => [Natural::Periodic; 2],
+        Surface::Spline { u_knots, v_knots, points } => {
+            [knot_domain(u_knots, points.len()), knot_domain(v_knots, points.first().map_or(0, Vec::len))]
+        }
+        Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            [knot_domain(u_knots, homogeneous.len()), knot_domain(v_knots, homogeneous.first().map_or(0, Vec::len))]
+        }
+        Surface::PlacedRevolution { profile, forward: true, .. } => [curve_natural(profile), Natural::Periodic],
+        Surface::PlacedRevolution { profile, forward: false, .. } => [Natural::Periodic, curve_natural(profile)],
+    }
+}
+impl Curve {
+    /// The range of `t`. Call on a validated record.
+    pub fn natural(&self) -> Natural {
+        curve_natural(self)
+    }
+}
+impl Surface {
+    /// The ranges of u and v. Call on a validated record.
+    pub fn natural(&self) -> [Natural; 2] {
+        surface_natural(self)
+    }
+}
+
+/// `[min, max]`: finite, min < max, inside `natural` (at most one turn long where periodic).
+fn interval(r: &[f64; 2], natural: Natural) -> Result<()> {
+    numbers(*r)?;
+    require(r[0] < r[1], "empty parameter interval")?;
+    match natural {
+        Natural::Periodic => {
+            let slack = 1e-12 * (1. + r[0].abs().max(r[1].abs()));
+            require(r[1] - r[0] <= TAU + slack, "parameter interval exceeds one turn")
+        }
+        Natural::Range(a, b) => require(a <= r[0] && r[1] <= b, "parameter interval outside the natural domain"),
+    }
+}
+
 fn curve(c: &Curve, depth: usize, budget: &mut Budget) -> Result<()> {
     require(depth <= MAX_DEPTH, "geometry depth")?;
     budget.add(1)?;
@@ -252,17 +365,13 @@ fn curve(c: &Curve, depth: usize, budget: &mut Budget) -> Result<()> {
             points(&[*start, *end], budget)?;
             require(start != end, "collapsed line")
         }
-        Curve::CircleArc { frame: f, radius: r, angle: a } => {
+        Curve::Circle { frame: f, radius: r } => {
             frame(f, budget)?;
-            radius(*r)?;
-            angle(a)
+            radius(*r)
         }
-        Curve::EllipseArc { frame: f, radii, angle: a } => {
+        Curve::Ellipse { frame: f, radii } => {
             frame(f, budget)?;
-            for r in radii {
-                radius(*r)?;
-            }
-            angle(a)
+            radii.iter().try_for_each(|r| radius(*r))
         }
         Curve::Polyline { points: p } => {
             require(p.len() >= 2, "empty polyline")?;
@@ -277,11 +386,6 @@ fn curve(c: &Curve, depth: usize, budget: &mut Budget) -> Result<()> {
             knots(k, p.len(), budget)?;
             points(p, budget)?;
             weights(p)
-        }
-        Curve::Intersection { knots: k, points: p, fitting_tolerance, .. } => {
-            require((1e-12..=1.0).contains(fitting_tolerance), "intersection fitting tolerance")?;
-            knots(k, p.len(), budget)?;
-            points(p, budget)
         }
         Curve::SurfaceIntersection { surfaces, leader, tolerance } => {
             require(tolerance.is_finite() && (0.0..=1e3).contains(tolerance), "intersection tolerance")?;
@@ -319,34 +423,20 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
             let o = vector(*origin);
             require((vector(*u_point) - o).cross(vector(*v_point) - o).len() > 1e-12, "degenerate plane")
         }
-        Surface::Cylinder { frame: f, radius: r, angle: a, height } => {
+        Surface::Cylinder { frame: f, radius: r } | Surface::Sphere { frame: f, radius: r } => {
             frame(f, budget)?;
-            radius(*r)?;
-            angle(a)?;
-            range(height)
+            radius(*r)
         }
-        Surface::Cone { frame: f, radius_at_origin, half_angle, angle: a, height } => {
+        Surface::Cone { frame: f, radius_at_origin, half_angle } => {
             frame(f, budget)?;
             numbers([*radius_at_origin, *half_angle])?;
-            require(*radius_at_origin >= 0. && *half_angle > 0. && *half_angle < std::f64::consts::FRAC_PI_2, "cone dimensions")?;
-            angle(a)?;
-            range(height)?;
-            require(height.iter().all(|h| radius_at_origin + h * half_angle.tan() >= 0.), "negative cone radius")
+            require(*radius_at_origin >= 0. && *half_angle >= 1e-12 && *half_angle < std::f64::consts::FRAC_PI_2, "cone dimensions")
         }
-        Surface::Sphere { frame: f, radius: r, longitude, latitude } => {
-            frame(f, budget)?;
-            radius(*r)?;
-            angle(longitude)?;
-            range(latitude)?;
-            require(latitude[0] >= -std::f64::consts::FRAC_PI_2 && latitude[1] <= std::f64::consts::FRAC_PI_2, "sphere latitude")
-        }
-        Surface::Torus { frame: f, major_radius, minor_radius, longitude, meridian } => {
+        Surface::Torus { frame: f, major_radius, minor_radius } => {
             frame(f, budget)?;
             radius(*major_radius)?;
             radius(*minor_radius)?;
-            require(major_radius > minor_radius, "ring torus radii")?;
-            angle(longitude)?;
-            angle(meridian)
+            require(major_radius > minor_radius, "ring torus radii")
         }
         Surface::Spline { u_knots, v_knots, points: p } => grid(u_knots, v_knots, p, budget),
         Surface::RationalSpline { u_knots, v_knots, homogeneous: p } => {
@@ -355,12 +445,6 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
                 weights(row)?;
             }
             Ok(())
-        }
-        Surface::Revolution { profile, origin, axis, angle: a } => {
-            points(&[*origin, *axis], budget)?;
-            require((vector(*axis).len() - 1.0).abs() <= 1e-8, "revolution axis is not unit length")?;
-            angle(a)?;
-            curve(profile, depth + 1, budget)
         }
         Surface::PlacedRevolution { profile, origin, axis, matrix, .. } => {
             points(&[*origin, *axis], budget)?;
@@ -374,197 +458,46 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
 }
 
 impl Brep {
-    /// Validate portable structure without calling a kernel or evaluating geometry.
-    /// Does not certify watertightness, surface coincidence, or authoritative state.
+    /// Validate portable structure without calling a kernel or evaluating geometry: resource
+    /// budgets, geometry records, parameter ranges, references, loops, regions, every edge's
+    /// list of uses and the canonical order. Does not certify watertightness, that edges lie on
+    /// their surfaces or that pcurves lift onto their edges.
     pub fn validate(&self) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
-        require(!self.shells.is_empty() && self.shells.len() <= 1024, "shell count")?;
+        tolerance(self.tolerance)?;
+        require(!self.shells.is_empty() && self.shells.len() <= MAX_SHELLS, "shell count")?;
+        require(!self.regions.is_empty() && self.regions.len() <= 2 * MAX_SHELLS + 1, "region count")?;
         let mut budget = Budget(0);
-        for shell in &self.shells {
-            points(&shell.vertices, &mut budget)?;
-            budget.add(shell.edges.len())?;
-            budget.add(shell.faces.len())?;
-            require(!shell.faces.is_empty(), "empty shell")?;
-            for edge in &shell.edges {
-                require(edge.vertices.iter().all(|&v| (v as usize) < shell.vertices.len()), "edge vertices")?;
-                curve(&edge.curve, 0, &mut budget)?;
-                if let Curve::Intersection { faces: Some(hints), .. } = &edge.curve {
-                    require(hints.iter().all(|&i| (i as usize) < shell.faces.len()), "intersection face hint")?;
-                }
-            }
-            for face in &shell.faces {
-                require(!face.loops.is_empty(), "face loops")?;
-                surface(&face.surface, 0, &mut budget)?;
-                for wire in &face.loops {
-                    require(!wire.is_empty(), "empty wire")?;
-                    budget.add(wire.len())?;
-                    let mut first = None;
-                    let mut last = None;
-                    for use_ in wire {
-                        let edge = shell.edges.get(use_.edge as usize).ok_or(Invalid("edge reference"))?;
-                        let [a, b] = edge.vertices;
-                        let (start, end) = if use_.forward { (a, b) } else { (b, a) };
-                        require(last.is_none_or(|v| v == start), "disconnected wire")?;
-                        first.get_or_insert(start);
-                        last = Some(end);
+        budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
+        for v in &self.vertices {
+            points(&[v.point], &mut budget)?;
+            tolerance(v.tolerance)?;
+        }
+        for e in &self.edges {
+            curve(&e.curve, 0, &mut budget)?;
+            interval(&e.interval, curve_natural(&e.curve))?;
+            require(e.vertices.iter().all(|&v| (v as usize) < self.vertices.len()), "edge vertices")?;
+            tolerance(e.tolerance)?;
+            budget.add(e.uses.len())?;
+        }
+        for f in &self.faces {
+            surface(&f.surface, 0, &mut budget)?;
+            let [u, v] = surface_natural(&f.surface);
+            interval(&f.domain[0], u)?;
+            interval(&f.domain[1], v)?;
+            budget.add(f.loops.len())?;
+            for l in &f.loops {
+                if let Loop::Edges { edges } = l {
+                    budget.add(edges.len())?;
+                    for e in edges {
+                        curve2::curve2(&e.pcurve, &mut budget)?;
                     }
-                    require(first == last, "open wire")?;
                 }
             }
         }
-        Ok(())
+        topology::check(self)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn triangle() -> Brep {
-        let vertices = vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]];
-        let edges = (0..3)
-            .map(|i| Edge { vertices: [i as u32, ((i + 1) % 3) as u32], curve: Curve::Line { start: vertices[i], end: vertices[(i + 1) % 3] } })
-            .collect();
-        Brep {
-            version: VERSION,
-            shells: vec![Shell {
-                vertices,
-                edges,
-                faces: vec![Face {
-                    loops: vec![(0..3).map(|edge| EdgeUse { edge, forward: true }).collect()],
-                    surface: Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
-                    forward: true,
-                }],
-            }],
-        }
-    }
-    #[test]
-    fn portable_open_face_round_trip_without_a_kernel() {
-        let body = triangle();
-        body.validate().unwrap();
-        let bytes = serde_json::to_vec(&body).unwrap();
-        let restored: Brep = serde_json::from_slice(&bytes).unwrap();
-        restored.validate().unwrap();
-        assert_eq!(body, restored);
-        assert!(!String::from_utf8(bytes).unwrap().contains("truck"));
-    }
-    #[test]
-    fn topology_references_and_wire_orientation_are_checked() {
-        let mut b = triangle();
-        b.shells[0].faces[0].loops[0][0].edge = u32::MAX;
-        assert!(b.validate().is_err());
-        let mut b = triangle();
-        b.shells[0].faces[0].loops[0][1].forward = false;
-        assert!(b.validate().is_err());
-        let mut b = triangle();
-        b.shells[0].edges[0].vertices[0] = u32::MAX;
-        assert!(b.validate().is_err());
-        let mut b = triangle();
-        b.version += 1;
-        assert!(b.validate().is_err());
-        let mut b = triangle();
-        b.shells[0].vertices[0][0] = f64::NAN;
-        assert!(b.validate().is_err());
-    }
-    #[test]
-    fn closed_edge_can_share_its_endpoint_vertex() {
-        let mut body = triangle();
-        body.shells[0].vertices.truncate(1);
-        body.shells[0].edges =
-            vec![Edge { vertices: [0, 0], curve: Curve::Polyline { points: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 0.]] } }];
-        body.shells[0].faces[0].loops = vec![vec![EdgeUse { edge: 0, forward: true }]];
-        body.validate().unwrap();
-    }
-
-    #[test]
-    fn spline_domains_weights_and_nesting_are_bounded() {
-        let mut budget = Budget(0);
-        assert!(knots(&[0., 0., 1., 1.], 2, &mut budget).is_ok());
-        for bad in [vec![0., 0., 0., 0.], vec![0., 1., 0., 1.], vec![0., 0., f64::INFINITY, 1.]] {
-            assert!(knots(&bad, 2, &mut Budget(0)).is_err());
-        }
-        let c = Curve::RationalSpline { knots: vec![0., 0., 1., 1.], homogeneous: vec![[0., 0., 0., 0.], [1., 0., 0., 1.]] };
-        assert!(curve(&c, 0, &mut Budget(0)).is_err());
-        let p = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [2., 0., 0.] };
-        assert!(surface(&p, 0, &mut Budget(0)).is_err());
-        assert!(curve(&Curve::Line { start: [0.; 3], end: [1.; 3] }, MAX_DEPTH + 1, &mut Budget(0)).is_err());
-        assert!(Budget(MAX_ITEMS).add(1).is_err());
-        // Control points along one direction: up to the cap, not one more (a clamped cubic).
-        let clamped = |count: usize| {
-            let mut k = vec![0.0; 4];
-            k.extend((1..count - 3).map(|i| i as f64));
-            k.extend([(count - 3) as f64; 4]);
-            k
-        };
-        assert!(knots(&clamped(MAX_SPLINE_CONTROLS), MAX_SPLINE_CONTROLS, &mut Budget(0)).is_ok());
-        assert!(knots(&clamped(MAX_SPLINE_CONTROLS + 1), MAX_SPLINE_CONTROLS + 1, &mut Budget(0)).is_err());
-    }
-
-    #[test]
-    fn exact_procedural_records_are_validated_and_round_trip() {
-        let plane = |z: f64| Box::new(Surface::Plane { origin: [0., 0., z], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
-        let leader = Box::new(Curve::Polyline { points: vec![[0.; 3], [0.; 3], [1., 0., 0.]] });
-        let c = Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: leader.clone(), tolerance: 1e-6 };
-        curve(&c, 0, &mut Budget(0)).unwrap();
-        assert_eq!(serde_json::from_str::<Curve>(&serde_json::to_string(&c).unwrap()).unwrap(), c);
-        let line = Box::new(Curve::Line { start: [0.; 3], end: [1.; 3] });
-        for bad in [
-            Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: line.clone(), tolerance: 1e-6 },
-            Curve::SurfaceIntersection { surfaces: [plane(0.), plane(1.)], leader: leader.clone(), tolerance: f64::NAN },
-            Curve::SurfaceIntersection { surfaces: [plane(f64::INFINITY), plane(1.)], leader, tolerance: 1e-6 },
-        ] {
-            assert!(curve(&bad, 0, &mut Budget(0)).is_err());
-        }
-        let identity = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
-        let s = Surface::PlacedRevolution { profile: line.clone(), origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: false };
-        surface(&s, 0, &mut Budget(0)).unwrap();
-        assert_eq!(serde_json::from_str::<Surface>(&serde_json::to_string(&s).unwrap()).unwrap(), s);
-        let mut flat = identity;
-        flat[2] = [0.; 4];
-        let bad = Surface::PlacedRevolution { profile: line, origin: [0.; 3], axis: [0., 0., 1.], matrix: flat, forward: true };
-        assert!(surface(&bad, 0, &mut Budget(0)).is_err());
-    }
-
-    #[test]
-    fn analytic_records_have_independent_frames_and_domains() {
-        use std::f64::consts::{FRAC_PI_2, TAU};
-        let f = Frame { origin: [1., 2., 3.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
-        let surfaces = [
-            Surface::Cylinder { frame: f.clone(), radius: 2., angle: [0., TAU], height: [-1., 3.] },
-            Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.2, angle: [0., TAU], height: [0., 3.] },
-            Surface::Sphere { frame: f.clone(), radius: 2., longitude: [0., TAU], latitude: [-FRAC_PI_2, FRAC_PI_2] },
-            Surface::Torus { frame: f.clone(), major_radius: 4., minor_radius: 1., longitude: [0., TAU], meridian: [0., TAU] },
-            Surface::Revolution {
-                profile: Box::new(Curve::Line { start: [2., 0., 0.], end: [2., 0., 3.] }),
-                origin: [0.; 3],
-                axis: [0., 0., 1.],
-                angle: [0., TAU],
-            },
-        ];
-        for s in surfaces {
-            surface(&s, 0, &mut Budget(0)).unwrap();
-            let encoded = serde_json::to_string(&s).unwrap();
-            assert_eq!(serde_json::from_str::<Surface>(&encoded).unwrap(), s);
-            assert!(!encoded.contains("columns") && !encoded.contains("forward"));
-        }
-        for c in [
-            Curve::CircleArc { frame: f.clone(), radius: 2., angle: [0., FRAC_PI_2] },
-            Curve::EllipseArc { frame: f.clone(), radii: [2., 3.], angle: [0., TAU] },
-            Curve::Intersection { knots: vec![0., 0., 1., 1.], points: vec![[0.; 3], [1.; 3]], fitting_tolerance: 1e-6, faces: None },
-        ] {
-            curve(&c, 0, &mut Budget(0)).unwrap();
-            let encoded = serde_json::to_string(&c).unwrap();
-            assert_eq!(serde_json::from_str::<Curve>(&encoded).unwrap(), c);
-            assert!(!encoded.contains("leader") && !encoded.contains("surfaces"));
-        }
-        let mut bad = f;
-        bad.y_axis = bad.x_axis;
-        assert!(frame(&bad, &mut Budget(0)).is_err());
-        assert!(angle(&[0., TAU + 0.1]).is_err());
-        assert!(range(&[2., 1.]).is_err());
-        assert!(radius(f64::NAN).is_err());
-        let mut b = triangle();
-        b.shells[0].edges[0].curve =
-            Curve::Intersection { knots: vec![0., 0., 1., 1.], points: vec![[0.; 3], [1., 0., 0.]], fitting_tolerance: 1e-6, faces: Some([0, 1]) };
-        assert!(b.validate().is_err());
-    }
-}
+mod tests;

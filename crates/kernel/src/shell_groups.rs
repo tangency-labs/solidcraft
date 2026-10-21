@@ -113,6 +113,22 @@ pub(super) fn meshes_meet(a: &Mesh, b: &Mesh, gap: f64) -> Result<bool> {
 }
 
 pub(super) fn groups(meshes: &[Mesh], volumes: &[f64], gap: f64) -> Result<Vec<Vec<usize>>> {
+    let parent = parents(meshes, volumes, gap)?;
+    let mut groups = Vec::new();
+    for (i, v) in volumes.iter().enumerate() {
+        if *v <= 0.0 {
+            continue;
+        }
+        let mut group = vec![i];
+        group.extend(parent.iter().enumerate().filter_map(|(j, p)| (*p == Some(i)).then_some(j)));
+        groups.push(group);
+    }
+    Ok(groups)
+}
+
+/// The shell directly around each closed shell (`None` for one in the open): outward shells
+/// (positive volume) bound material, inward ones voids, and nesting alternates them.
+pub(super) fn parents(meshes: &[Mesh], volumes: &[f64], gap: f64) -> Result<Vec<Option<usize>>> {
     if meshes.is_empty() || meshes.len() != volumes.len() || meshes.len() > MAX_SHELLS {
         return Err(failed("shell count exceeds the grouping limit or is invalid"));
     }
@@ -229,14 +245,5 @@ pub(super) fn groups(meshes: &[Mesh], volumes: &[f64], gap: f64) -> Result<Vec<V
         }
         parent.push(owner);
     }
-    let mut groups = Vec::new();
-    for (i, v) in volumes.iter().enumerate() {
-        if *v <= 0.0 {
-            continue;
-        }
-        let mut group = vec![i];
-        group.extend(parent.iter().enumerate().filter_map(|(j, p)| (*p == Some(i)).then_some(j)));
-        groups.push(group);
-    }
-    Ok(groups)
+    Ok(parent)
 }
