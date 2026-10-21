@@ -304,3 +304,4 @@ SC_EXPORT int32_t sc_blend_fillet_corner_p1_helper(int32_t op, const char* path,
 // blend.fillet_corner_p2 (#268) adds its entry points for the p2 static helpers of
 // SmFilletCorner.cpp (sm_FindConcaveEdgeuses) here, in this translation unit, via
 // `#include "blend_fillet_corner_p2_static.inc"`.
+#include "blend_fillet_corner_p2_static.inc"

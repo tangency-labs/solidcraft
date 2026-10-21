@@ -297,14 +297,38 @@ void c1_solvers(C1Corner& C, Rd& rd, std::vector<double>& o)
         o.push_back(C1_REFUSE);
         return;
     }
-    // the closed Nx1 and Nx2 overrides belong to blend.fillet_corner_p2 (Rust stubs)
-    if (C.kind == 2 || C.kind == 7)
-    {
-        o.push_back(C1_NOT_RUN);
-        return;
-    }
     P4Solver foreign(ctx, 1e-3, SM_EFF_ZERO_RAD, 1e-2);
     const SmFilletSolver* query = q == ns ? (const SmFilletSolver*)&foreign : (const SmFilletSolver*)S.v[(size_t)q];
+    // The closed Nx1 and Nx2 overrides (unit blend.fillet_corner_p2) run sm_TestG1Continuity
+    // on the filleted edges, which evaluates both edges' curves (dereferenced) once the
+    // corner vertex and the edges are set: refuse a curveless edge there. The closed Nx1
+    // override tests only when its one filleted edge use's solver is the queried one, the
+    // Nx2 override when it has exactly two filleted edge uses.
+    if (C.kind == 2 || C.kind == 7)
+    {
+        SmTArray<SmEdgeuse*>& s = *(c->*P3CornerPeek::solver());
+        const SmVertex* v = c->GetFilletedVertex();
+        auto curveless = [](SmEdgeuse* eu) {
+            return eu->GetEdge() != NULL && eu->GetEdge()->GetCurve() == NULL;
+        };
+        bool tests = false;
+        bool bad = false;
+        if (C.kind == 2 && s.GetSize() == 1)
+        {
+            tests = C.exec->GetFilletSolverOfEdgeuse(s[0]) == query;
+            bad = curveless(s[0]);
+        }
+        else if (C.kind == 7 && s.GetSize() == 2)
+        {
+            tests = s[0]->GetEdge() != NULL && s[1]->GetEdge() != NULL;
+            bad = curveless(s[0]) || curveless(s[1]);
+        }
+        if (tests && v != NULL && bad)
+        {
+            o.push_back(C1_REFUSE);
+            return;
+        }
+    }
     SmFilletSolver* t = c->GetTangentFilletSolver(query);
     o.push_back(0.0);
     o.push_back((double)index_of(S.v, (P4Solver*)t));

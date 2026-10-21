@@ -71,9 +71,10 @@
 //!
 //! A record of `-2` is "refused" (upstream would dereference null, or free an object twice:
 //! a squeezed non-rail edge with both ends at the deleted vertex, or a squeezed closed edge
-//! whose surviving vertex is the deleted one), `-3` "not run" (the Rust port of a
-//! callee is a stub: `GetTangentFilletSolver` of the closed Nx1 and Nx2 corners, unit
-//! `blend.fillet_corner_p2`; `SmFilletVertex::CalcCornerVertGeom` /
+//! whose surviving vertex is the deleted one; for `GetTangentFilletSolver` of the closed
+//! Nx1 and Nx2 corners, unit `blend.fillet_corner_p2`, a curveless filleted edge that
+//! `sm_TestG1Continuity` would evaluate), `-3` "not run" (the Rust port of a callee is a
+//! stub: `SmFilletVertex::CalcCornerVertGeom` /
 //! `SmFilletEdge::CalcCornerEdgeGeom` of `blend.fillet_geom_p3` for a corner with any
 //! vertex / edge; `MakeFaceBrep` for an end patch with an original face).
 

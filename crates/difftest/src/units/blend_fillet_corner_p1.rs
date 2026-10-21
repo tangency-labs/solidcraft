@@ -71,13 +71,13 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 pub struct Runner;
 
 /// The reason [`corner`] gives where upstream dereferences null.
-const NULL_DEREF: &str = "upstream dereferences null";
+pub(super) const NULL_DEREF: &str = "upstream dereferences null";
 
 /// The box-like fillet test files (planar faces with convex and concave corners, one
 /// all-NURBS box, one with a cylinder; filleted and B-spline parts whose tangential
 /// edges reach the success paths of the tangency tests). Not `SmallBox.smb`: `SmBrep::ReadFromFile`
 /// crashes on it (UB-1).
-const CORNER_FILES: [&str; 13] = [
+pub(super) const CORNER_FILES: [&str; 13] = [
     "Fillet/box1x1x2.smb",
     "Fillet/brick.smb",
     "Fillet/corner_box.smb",
@@ -364,7 +364,7 @@ fn status_of(e: &SolidError) -> Option<f64> {
 
 /// A Rust error as an output: deferred for `Unported`, `refused` for a null
 /// dereference, else the status.
-fn rust_err(e: &SolidError) -> Output {
+pub(super) fn rust_err(e: &SolidError) -> Output {
     if let Some(o) = Output::unported(e) {
         return o;
     }
@@ -466,15 +466,15 @@ fn closure_of(code: i64) -> Result<SurfParamType, HarnessError> {
 
 /// The built B-rep of a topology case on both sides and the resolved graph indices of the
 /// op's arguments (`-1` = NULL).
-struct Topo {
-    path: String,
-    block: Vec<f64>,
-    brep: Brep,
-    types: ImportTypes,
-    args: Vec<i64>,
+pub(super) struct Topo {
+    pub(super) path: String,
+    pub(super) block: Vec<f64>,
+    pub(super) brep: Brep,
+    pub(super) types: ImportTypes,
+    pub(super) args: Vec<i64>,
 }
 
-fn eu_vertex(b: &Brep, eu: EdgeuseId) -> Option<VertexId> {
+pub(super) fn eu_vertex(b: &Brep, eu: EdgeuseId) -> Option<VertexId> {
     let vu = b.edgeuse(eu).ok()?.vertexuse?;
     b.vertexuse(vu).ok()?.vertex
 }
@@ -634,7 +634,7 @@ const HARNESS_ANALYTIC_EXPORT: &str = "harness:analytic-geometry-export";
 
 /// The deferral of a case that evaluates geometry the import holds only as its B-spline
 /// part: the labels of `topology.edgeuse_p2`'s `inexact_geometry`.
-fn inexact(t: &Topo, edges: &[EdgeId], eus: &[EdgeuseId]) -> Option<Output> {
+pub(super) fn inexact(t: &Topo, edges: &[EdgeId], eus: &[EdgeuseId]) -> Option<Output> {
     let b = &t.brep;
     let mut all_edges = edges.to_vec();
     for &eu in eus {
@@ -1245,7 +1245,7 @@ fn gen_closure(rng: &mut Rng) -> Inputs {
     Inputs::Closure { surface, dom }
 }
 
-fn gen_topo_brep(rng: &mut Rng) -> BrepIn {
+pub(super) fn gen_topo_brep(rng: &mut Rng) -> BrepIn {
     if rng.chance(0.8) {
         BrepIn::File {
             file: (*rng.choose(&CORNER_FILES).unwrap_or(&"Fillet/box1x1x2.smb")).to_string(),

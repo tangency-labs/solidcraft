@@ -225,15 +225,28 @@ void run_create(Rd& rd, const char* path, std::vector<double>& o)
     double pre = precheck(g, solverEUs, g.edgeuses.size(), allEUs);
     if (pre == 0.0 && ns >= 3)
     {
-        // NxN without chamfer reaches sm_FindConcaveEdgeuses (a stub on the Rust side)
+        // An NxN corner (the walk's count equals the solver count, not 4x3) without chamfer
+        // runs sm_FindConcaveEdgeuses over pAllEUs, whose concavity test dereferences both
+        // edge uses of a pair, their radials, vertex uses and edges. It stops at the first
+        // concave pair; this shim cannot call that file-static test (SmFilletCorner.cpp is
+        // compiled in blend_fillet_corner_p1.cpp), so every cyclic pair must be usable.
         bool chamfer = true;
         for (int64_t k : kinds)
             if (k != 1)
                 chamfer = false;
-        // total EUs are recomputed by Create; the 4x3 case and a count mismatch never test
-        // concavity, so only defer when the corner could be NxN
-        if (!chamfer)
-            pre = -4.0; // decided after Create's own classification below
+        size_t total = allEUs.size();
+        bool nxn = !(ns == 3 && total == 4) && total == (size_t)ns;
+        auto usable = [](SmEdgeuse* p) {
+            return p != nullptr && p->GetVertexuse() != nullptr && p->GetEdge() != nullptr;
+        };
+        if (!chamfer && nxn)
+            for (size_t i = 0; i < total; ++i)
+            {
+                SmEdgeuse* a = allEUs[(i + total - 1) % total];
+                SmEdgeuse* b = allEUs[i];
+                if (!usable(a) || !usable(b) || !usable(a->GetRadial()) || !usable(b->GetRadial()))
+                    pre = P3_NULL_DEREF;
+            }
     }
     if (pre == P3_NULL_DEREF || pre == P3_NOT_RUN)
     {
@@ -254,43 +267,6 @@ void run_create(Rd& rd, const char* path, std::vector<double>& o)
         (exec->*ExecPeek::map()).Insert(solverEUs[(size_t)i], s);
     }
 
-    // The walk's edge-use count decides between 4x3, NxN and "not implemented"; only NxN
-    // (count == ns) without chamfer tests concavity.
-    bool defer = false;
-    if (pre == -4.0)
-    {
-        // repeat the walk count (precheck already validated it)
-        SmEdgeuse* start = solverEUs[0];
-        std::vector<SmEdgeuse*> all;
-        all.push_back(start);
-        SmEdgeuse* eu = start;
-        while (true)
-        {
-            SmEdgeuse* eu0 = eu;
-            SmEdgeuse* eu1 = eu0->GetCWEdgeuse();
-            eu = eu1->GetRadial();
-            if (eu == start)
-                break;
-            if (eu0->GetEdge() == eu1->GetEdge())
-                continue;
-            bool found = false;
-            for (SmEdgeuse* p : all)
-                if (eu->GetEdge() == p->GetEdge())
-                    found = true;
-            if (found)
-                continue;
-            all.push_back(eu);
-        }
-        size_t total = all.size();
-        bool is4x3 = ns == 3 && total == 4;
-        defer = !is4x3 && total == (size_t)ns;
-    }
-
-    if (defer)
-    {
-        o.push_back(P3_NOT_RUN);
-    }
-    else
     {
         SmTArray<SmEdgeuse*>* pSolverEUs = new (ctx) SmTArray<SmEdgeuse*>(ctx);
         for (SmEdgeuse* p : solverEUs)

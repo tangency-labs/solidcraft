@@ -8,8 +8,9 @@
 // fillet corner of the given derived class (its upstream constructor) on the Model, with the
 // given fillet vertices, fillet edges, flags and tolerances, the intersection points of some
 // vertex uses set (curve parameter, UV positions, m_apUserPointer surfaces), then one of
-// SmFilletCorner::CalcCornerGeom, the virtual CreateCornerPatch, AdjustTopology or
-// AdjustTangentCorner. Layout in crates/solidcore-ffi/src/units/blend_fillet_corner_p3.rs.
+// SmFilletCorner::CalcCornerGeom, the virtual CreateCornerPatch, AdjustTopology,
+// AdjustTangentCorner or (unit blend.fillet_corner_p2, two more inputs `orig split`: target
+// faces) UpdateSplitFace. Layout in crates/solidcore-ffi/src/units/blend_fillet_corner_p3.rs.
 //
 // Output: `-2` (refused: upstream would dereference null, read past an array or free the
 // Model's objects), `-3` (not run: upstream would reach a routine whose Rust port is a stub,
@@ -25,6 +26,7 @@ enum : int32_t
     P3_PATCH = 1,
     P3_ADJ_TOPO = 2,
     P3_ADJ_TANGENT = 3,
+    P3_UPDATE_SPLIT = 4, // SmFilletCorner::UpdateSplitFace (unit blend.fillet_corner_p2)
 };
 
 const double P3C_REFUSE = -2.0;
@@ -254,6 +256,61 @@ double p3_check_calc(int64_t kind, SmFilletCorner* c, Model& M)
     return p3_check_patch(kind, c, M);
 }
 
+// SmFilletNx2Corner::AdjustConcaveCornerTopology up to its first SmFilletEdge::MakeFilletEdge
+// (blend.fillet_geom_p5, a stub on the Rust side): -2 where it dereferences null or casts a
+// classification object that is not an edge use, 0 when it returns before (no such vertex:
+// NER; rails meeting within tolerance), else -3.
+double p3_check_concave(SmFilletCorner* c)
+{
+    SmTArray<SmFilletVertex*>& V = c->*P3CornerPeek::verts();
+    SmFilletVertex* adjust = NULL;
+    SmTArray<SmFilletGeom*> gs;
+    for (ULONG ii = 0; ii < V.GetSize(); ++ii)
+    {
+        if (V[ii]->GetFilletVertexType() != SM_FV_RAIL_X_EDGEUSE)
+            continue;
+        V[ii]->GetFilletGeoms(gs);
+        if (gs.GetSize() != 2)
+            continue;
+        adjust = V[ii];
+        break;
+    }
+    if (adjust == NULL)
+        return 0.0; // NER
+    SmEdgeuse* side = SM_CAST_PTR(SmEdgeuse, adjust->GetPointClassObject());
+    if (side == NULL)
+        return P3C_REFUSE;
+    SmFilletVertexuse* vu1 = adjust->GetVUAtRailEnd(gs[0]);
+    SmFilletVertexuse* vu2 = vu1 ? adjust->GetVUAtRailEnd(gs[1], vu1) : NULL;
+    if (vu1 == NULL || vu2 == NULL || side->GetEdge() == NULL || side->GetEdge()->GetCurve() == NULL)
+        return P3C_REFUSE;
+    SmPoint3d p1, p2;
+    side->GetEdge()->GetCurve()->EvaluatePoint(vu1->GetTsectPnt().m_dCurveParameter, p1);
+    side->GetEdge()->GetCurve()->EvaluatePoint(vu2->GetTsectPnt().m_dCurveParameter, p2);
+    if (p1.DistanceBetween(p2) < c->*P3CornerPeek::tol())
+        return 0.0;
+    const SmVertex* cv = c->GetFilletedVertex();
+    if (cv == NULL)
+        return P3C_REFUSE;
+    SmPoint3d vp = cv->GetPoint();
+    if (!(p1.DistanceBetween(vp) < p2.DistanceBetween(vp)) && side->GetRadial() == NULL)
+        return P3C_REFUSE;
+    return P3C_NOT_RUN; // SmFilletEdge::MakeFilletEdge
+}
+
+// SmFilletCorner::UpdateSplitFace: a fillet edge whose original face is the split face calls
+// SmFilletEdge::ShouldSwapFaces (blend.fillet_geom_p6, a stub on the Rust side), after the
+// fillet vertices are updated: -3. A vertex's point classification object of another kind
+// than a face is compared as a pointer only (well defined).
+double p3_check_split(SmFilletCorner* c, SmFace* orig)
+{
+    SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
+    for (ULONG ii = 0; ii < E.GetSize(); ++ii)
+        if (E[ii]->GetOriginalFace() == orig)
+            return P3C_NOT_RUN; // SmFilletEdge::ShouldSwapFaces
+    return 0.0;
+}
+
 double p3_check_topo(int64_t kind, SmFilletCorner* c, Model& M)
 {
     if (kind == 9 || kind == 10)
@@ -268,7 +325,7 @@ double p3_check_topo(int64_t kind, SmFilletCorner* c, Model& M)
     SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
     SmTArray<SmFilletVertex*>& V = c->*P3CornerPeek::verts();
     if (E.GetSize() == 3)
-        return P3C_NOT_RUN; // AdjustConcaveCornerTopology
+        return p3_check_concave(c); // AdjustConcaveCornerTopology (blend.fillet_corner_p2)
     for (ULONG ii = 0; ii < V.GetSize(); ++ii)
     {
         SmFilletVertex* v = V[ii];
@@ -559,6 +616,16 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
         c->GetOrCreateGwNurbPointer();
         e->SetCurve(c, TRUE);
     }
+    SmFace* splitFaces[2] = {NULL, NULL};
+    if (op == P3_UPDATE_SPLIT)
+        for (int k = 0; k < 2 && ok && !rd.bad; ++k)
+        {
+            int64_t f = rd.idx();
+            if (f < 0 || (size_t)f >= M.targetFaces.size())
+                ok = false;
+            else
+                splitFaces[k] = M.targetFaces[(size_t)f];
+        }
     SmVertex* vertex = NULL;
     if (vEdge >= 0)
     {
@@ -603,6 +670,7 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
     case P3_CALC_GEOM: pre = p3_check_calc(kind, c, M); break;
     case P3_PATCH: pre = p3_check_patch(kind, c, M); break;
     case P3_ADJ_TOPO: pre = p3_check_topo(kind, c, M); break;
+    case P3_UPDATE_SPLIT: pre = p3_check_split(c, splitFaces[0]); break;
     default: pre = p3_check_tangent(kind, c, M); break;
     }
     if (pre != 0.0)
@@ -617,6 +685,7 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
         case P3_CALC_GEOM: r = c->CalcCornerGeom(); break;
         case P3_PATCH: r = c->CreateCornerPatch(); break;
         case P3_ADJ_TOPO: r = c->AdjustTopology(); break;
+        case P3_UPDATE_SPLIT: r = c->UpdateSplitFace(splitFaces[0], splitFaces[1]); break;
         default: r = c->AdjustTangentCorner(); break;
         }
         o.push_back(st(r));
@@ -634,12 +703,17 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
 SC_EXPORT int32_t sc_blend_fillet_corner_p3_corner(int32_t op, const double* in, int64_t n_in, double* out,
                                                    int64_t cap, int64_t* out_len)
 {
-    if (op < P3_CALC_GEOM || op > P3_ADJ_TANGENT)
+    if (op < P3_CALC_GEOM || op > P3_UPDATE_SPLIT)
         return SC_ERR_ARG;
     if (out == NULL || out_len == NULL || n_in < 0 || cap < 0)
         return SC_ERR_ARG;
     SC_TRY
     Rd rd(in, n_in);
+    // UpdateSplitFace classifies fillet vertices on the target faces (sm_ClassifyFacePoint
+    // builds their surface caches): the UB-166 constructed-v-knot guard of read_surface
+    // (blend_fillet_geom_p1.cpp) refuses such a surface while the Model is built, before
+    // any classification, as for OP_FB_SPLIT_FACE.
+    rd.cache_op = op == P3_UPDATE_SPLIT;
     std::vector<double> o;
     int32_t rc = p3_run(op, rd, o);
     if (rc != SC_OK)

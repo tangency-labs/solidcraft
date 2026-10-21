@@ -41,8 +41,7 @@
 //! - **Unported callees.** `MakeFaceBrep` (unit `blend.fillet_corner_p1`;
 //!   `sm_TestG1Continuity`, `SmFilletNx1Corner::CheckNx1Degeneracy`, `CreateEndPatch`
 //!   and `CalcCornerVertGeom` are [`crate::blend::fillet_corner::p1`]'s),
-//!   `sm_FindConcaveEdgeuses`, `MakeAnalyticCornerSurface`,
-//!   `AdjustConcaveCornerTopology` and the `SmFilletConvexNxNCorner` /
+//!   `MakeAnalyticCornerSurface`, the `SmFilletConvexNxNCorner` /
 //!   `SmFilletNx1ClosedCorner` overrides (`blend.fillet_corner_p2`),
 //!   `TestAndConvertBigRadFillet` and `NoteFilletError` (`blend.fillet_executive_p1`),
 //!   `SmFilletEdge::MakeFilletEdge` (`blend.fillet_geom_p5`), `ReCalcFilletGeom`
@@ -76,6 +75,7 @@
 use std::collections::BTreeMap;
 
 use crate::blend::fillet_corner::p1;
+use crate::blend::fillet_corner::p2::find_concave_edgeuses;
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletGeomType,
     FilletSolverId, FilletVertex, FilletVertexType,
@@ -293,7 +293,7 @@ fn set_vertex_point(pseudo: &mut FilletBrep, v: VertexId, point: Point3) -> Resu
 }
 
 /// `pFrom->Remove(pVU); pTo->PostInsert(pVU)` for a vertex use of the pseudo B-rep.
-fn move_vertexuse(
+pub(super) fn move_vertexuse(
     pseudo: &mut FilletBrep,
     vu: VertexuseId,
     from: VertexId,
@@ -336,7 +336,7 @@ fn bspline_surface(surface: &Surface) -> Result<&BSplineSurface> {
 }
 
 /// The primary edge use of a pseudo-B-rep edge (`GetPrimaryEdgeuse`), required.
-fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Result<EdgeuseId> {
+pub(super) fn primary_eu(pseudo: &FilletBrep, e: EdgeId, op: &'static str) -> Result<EdgeuseId> {
     eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| SolidError::null_pointer(op))
 }
 
@@ -603,7 +603,7 @@ impl FilletCorner {
                 } else {
                     let mut concave_eus: Vec<EdgeuseId> = Vec::new();
                     if !is_chamfer_corner {
-                        concave_eus = find_concave_edgeuses(b, vertex, &all_eus)?;
+                        concave_eus = find_concave_edgeuses(k, b, vertex, &all_eus)?;
                     }
                     if concave_eus.is_empty() {
                         let mut c = make(FilletCornerKind::ConvexNByN);
@@ -1163,11 +1163,7 @@ impl FilletCorner {
         let num_vertex_edges = self.edges.len();
         if num_vertex_edges == 3 {
             // Mixed-convexity corners
-            // UNPORTED(blend.fillet_corner_p2): SmFilletNx2Corner::AdjustConcaveCornerTopology
-            return Err(unported(
-                "SmFilletNx2Corner::AdjustConcaveCornerTopology",
-                "blend.fillet_corner_p2",
-            ));
+            return self.adjust_concave_corner_topology(env);
         }
 
         let mut ii = 0usize;
@@ -1763,7 +1759,7 @@ impl FilletCorner {
 /// An evaluation whose status upstream ignores (`EvaluatePoint` without `SER`): a
 /// failure leaves the default-constructed point ([`Point3::UNDEF`]); an unported
 /// evaluator still propagates.
-fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
+pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
     match r {
         Ok(p) => Ok(p),
         Err(e) if e.is_unported() => Err(e),
@@ -1839,16 +1835,6 @@ fn check_nx1_degeneracy(k: &Kernel, b: &mut Brep, vertex: VertexId, eu: EdgeuseI
     // nonzero (true); the guards (a null dereference, a dangling id, an unported callee)
     // stay errors
     Ok(p1::check_nx1_degeneracy_status(k, b, vertex, eu)?.unwrap_or(true))
-}
-
-/// `sm_FindConcaveEdgeuses` (unit `blend.fillet_corner_p2`).
-fn find_concave_edgeuses(
-    _b: &Brep,
-    _vertex: VertexId,
-    _all: &[EdgeuseId],
-) -> Result<Vec<EdgeuseId>> {
-    // UNPORTED(blend.fillet_corner_p2): sm_FindConcaveEdgeuses
-    Err(unported("sm_FindConcaveEdgeuses", "blend.fillet_corner_p2"))
 }
 
 #[cfg(test)]
