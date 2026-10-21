@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2243",
+    "tangency-labs/solidcraft#1985"
+  ],
+  "what": "a flanged enclosure with two standoffs and no screw hole whose STEP export also never finished",
+  "source": "invariants",
+  "method": "one connected part: the export finishes and the part is one valid closed solid",
+  "body_count": 1
+}

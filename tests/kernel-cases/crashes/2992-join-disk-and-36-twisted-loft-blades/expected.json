@@ -1,0 +1,9 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2992"
+  ],
+  "what": "join of a disk and a circular pattern of 36 twisted lofted blades (embedded 2.54 mm in the disk): blocks for minutes",
+  "source": "invariants",
+  "method": "each blade root is embedded in the disk, so the 37 bodies join into one connected solid; the join must finish with one valid closed solid",
+  "body_count": 1
+}

@@ -1,0 +1,508 @@
+{
+ "commands": [
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Native_loft_pad_union_repro"
+   }
+  },
+  {
+   "command": "document.units",
+   "params": {
+    "units": "mm"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": "36 mm",
+    "height": "21 mm",
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "name": "01_Neck_outer_D36_H21",
+    "body_name": "NATIVE_CAP_BODY"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "02_Outer_transition_round",
+    "plane": "XY",
+    "offset": "21 mm"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "diameter": 36
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "03_Outer_transition_ellipse",
+    "plane": "XY",
+    "offset": "38 mm"
+   }
+  },
+  {
+   "command": "sketch.ellipse",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "major": [
+     30.0,
+     0
+    ],
+    "minor_radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "02_Outer_transition_round"
+     },
+     {
+      "sketch": "03_Outer_transition_ellipse"
+     }
+    ],
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "04_Outer_round_to_oval_transition"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "05_Upper_chamber_60x40",
+    "plane": "XY",
+    "offset": "38 mm"
+   }
+  },
+  {
+   "command": "sketch.ellipse",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "major": [
+     30.0,
+     0
+    ],
+    "minor_radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "05_Upper_chamber_60x40",
+    "distance": 26,
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "06_Upper_chamber_blank"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Handle_outer_D24",
+    "plane": {
+     "origin": [
+      -5,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     30,
+     47
+    ],
+    "diameter": 24
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Handle_outer_D24",
+    "distance": 10,
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "Handle_outer_D24_thickness10"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Handle_lower_rib_X-8",
+    "plane": {
+     "origin": [
+      -8,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     18.0,
+     37.5
+    ],
+    "end": [
+     19.5,
+     36.0
+    ],
+    "through": [
+     18.439339828220177,
+     36.43933982822018
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      19.5,
+      36.0
+     ],
+     [
+      24.4516191451179,
+      36.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     24.4516191451179,
+     36.0
+    ],
+    "end": [
+     25.20742568340403,
+     38.79566835134765
+    ],
+    "through": [
+     25.89963546529897,
+     37.10853003117829
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      25.20742568340403,
+      38.79566835134765
+     ],
+     [
+      20.25580653828613,
+      41.68411285266642
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     20.25580653828613,
+     41.68411285266642
+    ],
+    "end": [
+     18.0,
+     40.38844450131877
+    ],
+    "through": [
+     18.75290891031588,
+     41.68915773017231
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      18.0,
+      40.38844450131877
+     ],
+     [
+      18.0,
+      37.5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Handle_lower_rib_X-8",
+    "distance": 4,
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "Handle_lower_rib_X-8_R1p5_thickness4"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Handle_lower_rib_X4",
+    "plane": {
+     "origin": [
+      4,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     18.0,
+     37.5
+    ],
+    "end": [
+     19.5,
+     36.0
+    ],
+    "through": [
+     18.439339828220177,
+     36.43933982822018
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      19.5,
+      36.0
+     ],
+     [
+      24.4516191451179,
+      36.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     24.4516191451179,
+     36.0
+    ],
+    "end": [
+     25.20742568340403,
+     38.79566835134765
+    ],
+    "through": [
+     25.89963546529897,
+     37.10853003117829
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      25.20742568340403,
+      38.79566835134765
+     ],
+     [
+      20.25580653828613,
+      41.68411285266642
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     20.25580653828613,
+     41.68411285266642
+    ],
+    "end": [
+     18.0,
+     40.38844450131877
+    ],
+    "through": [
+     18.75290891031588,
+     41.68915773017231
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      18.0,
+      40.38844450131877
+     ],
+     [
+      18.0,
+      37.5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Handle_lower_rib_X4",
+    "distance": 4,
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "Handle_lower_rib_X4_R1p5_thickness4"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Handle_root_pad_R3",
+    "plane": {
+     "origin": [
+      0,
+      18,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -8,
+     36
+    ],
+    "p1": [
+     8,
+     59
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Handle_root_pad_R3",
+    "distance": 7,
+    "direction": "negative",
+    "operation": "join",
+    "targets": [
+     "NATIVE_CAP_BODY"
+    ],
+    "name": "Native_root_pad_R3"
+   }
+  }
+ ]
+}

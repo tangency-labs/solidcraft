@@ -1,0 +1,9 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4092"
+  ],
+  "what": "join extrude of a rounded pad over a lofted body with ring and ribs: repeated truck intersection_curve panics, then 'boolean Union: no result'",
+  "source": "invariants",
+  "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic",
+  "body_count": 1
+}
