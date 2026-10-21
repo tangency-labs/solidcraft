@@ -24,6 +24,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
@@ -51,8 +52,14 @@ impl SolutionObject for PathCurve {
 
 /// `Evaluate(t, 1, from_left, out)` (non-zero tangents) whose ignored status keeps
 /// the previous position and tangent.
-fn evaluate_keep(curve: &Curve, t: f64, from_left: bool, out: &mut [Vec3; 2]) -> Result<()> {
-    if let Some(values) = ignored(curve.evaluate(t, 1, from_left, true))? {
+fn evaluate_keep(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    from_left: bool,
+    out: &mut [Vec3; 2],
+) -> Result<()> {
+    if let Some(values) = ignored(curve.evaluate(k, t, 1, from_left, true))? {
         for (target, value) in out.iter_mut().zip(values) {
             *target = value;
         }
@@ -209,12 +216,14 @@ impl PrimitiveCreation {
         let mut start_pv = [Vec3::UNDEF; 2];
         let mut end_pv = [Vec3::UNDEF; 2];
         evaluate_keep(
+            a.kernel(context_of)?,
             first_path,
             first_path.natural_interval().min(),
             true,
             &mut start_pv,
         )?;
         evaluate_keep(
+            a.kernel(context_of)?,
             last_path,
             last_path.natural_interval().max(),
             true,
@@ -255,7 +264,7 @@ impl PrimitiveCreation {
 
         // get the normal to the plane of the path
         let path_normal =
-            ignored(crate::curve::curve::p3::compute_crvs_normal(paths))?.unwrap_or(Vec3::UNDEF);
+            ignored(crate::curve::curve::p3::compute_crvs_normal(k, paths))?.unwrap_or(Vec3::UNDEF);
 
         // Prepare for loop where we position profile curves, sweep, and trim
         let mut new_breps: Vec<BrepId> = Vec::new();
@@ -272,7 +281,7 @@ impl PrimitiveCreation {
         for (ii, (path, extended_path)) in paths.iter().zip(&extended).enumerate() {
             // find start point and derivative of new path segment
             let range = path.natural_interval();
-            evaluate_keep(path, range.min(), false, &mut after)?;
+            evaluate_keep(a.kernel(context_of)?, path, range.min(), false, &mut after)?;
             after[1] = after[1].unitize_or_z();
 
             // position profile curves at the start of the path segment
@@ -334,7 +343,11 @@ impl PrimitiveCreation {
                     .checked_sub(1)
                     .and_then(|i| paths.get(i))
                     .ok_or_else(|| SolidError::sm_err(OP))?;
-                if path.is_linear(tol, false)?.linear && previous.is_linear(tol, false)?.linear {
+                if path.is_linear(a.kernel(context_of)?, tol, false)?.linear
+                    && previous
+                        .is_linear(a.kernel(context_of)?, tol, false)?
+                        .linear
+                {
                     cutting.clone_from(&temp_cutting);
                 } else {
                     // Intersect the temp cutting curve with every intersection curve
@@ -385,13 +398,16 @@ impl PrimitiveCreation {
                                 let solution = solutions.get_at(index)?;
                                 let on_line = match solution.start.param(0) {
                                     Ok(t) => {
-                                        ignored(temp.evaluate_point(t))?.unwrap_or(Vec3::UNDEF)
+                                        ignored(temp.evaluate_point(a.kernel(context_of)?, t))?
+                                            .unwrap_or(Vec3::UNDEF)
                                     }
                                     Err(_) => Vec3::UNDEF,
                                 };
                                 let on_intersection = match solution.start.param(1) {
-                                    Ok(t) => ignored(intersection.evaluate_point(t))?
-                                        .unwrap_or(Vec3::UNDEF),
+                                    Ok(t) => ignored(
+                                        intersection.evaluate_point(a.kernel(context_of)?, t),
+                                    )?
+                                    .unwrap_or(Vec3::UNDEF),
                                     Err(_) => Vec3::UNDEF,
                                 };
                                 let dist = on_intersection.distance(on_line);
@@ -450,7 +466,7 @@ impl PrimitiveCreation {
             before_brep = Some(after_brep);
 
             // find end derivative of path before
-            evaluate_keep(path, range.max(), true, &mut before)?;
+            evaluate_keep(a.kernel(context_of)?, path, range.max(), true, &mut before)?;
             before[1] = before[1].unitize_or_z();
 
             // a closed path trims the end of the last and the beginning of the first

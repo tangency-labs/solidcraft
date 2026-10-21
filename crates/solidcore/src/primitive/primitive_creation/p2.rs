@@ -421,11 +421,11 @@ mod tests {
         let mut a = Model::new()?;
         a.set_brep_tolerance(B, 0.5)?;
         assert_eq!(a.b.tolerance(), 0.5);
-        // zero takes the tolerance from the B-rep's box, which is not ported yet; p2's
-        // callers pass the result B-rep's own (positive) tolerance
+        // zero takes the tolerance from the B-rep's box (query.brep, now ported)
         let zero = a.set_brep_tolerance(B, 0.0);
-        assert!(matches!(&zero, Err(e) if e.is_unported()), "{zero:?}");
-        assert_eq!(a.b.tolerance(), 0.5);
+        assert!(zero.is_ok(), "{zero:?}");
+        // an empty box: the default zone tolerance
+        assert_eq!(a.b.tolerance(), 1.0e-5);
         // only the infinite region: not a solid
         assert!(!a.is_manifold_solid(B)?);
         Ok(())

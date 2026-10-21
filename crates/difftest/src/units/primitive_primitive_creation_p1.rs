@@ -292,7 +292,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                     &frame,
                 ),
                 3 => primitive.create_cylindrical_box(
-                    &k,
+                    &mut k,
                     &mut brep,
                     [
                         value(v, 1),

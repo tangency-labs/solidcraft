@@ -243,7 +243,12 @@ fn skin_with_scratch(
             for flag in transferred.get_mut(range.clone()).unwrap_or_default() {
                 *flag = true;
             }
-            let built = CompositeCurve::build_composites_from_curves(profile, brep_tol, 0.0)?;
+            let built = CompositeCurve::build_composites_from_curves(
+                a.kernel(brep)?,
+                profile,
+                brep_tol,
+                0.0,
+            )?;
             if built.composites.len() != 1 {
                 return Err(SolidError::sm_err(OP));
             }

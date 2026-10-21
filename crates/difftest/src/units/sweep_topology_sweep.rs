@@ -855,9 +855,12 @@ mod tests {
         ));
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
-        assert_unported(
-            model.stitch(b, &mut TopologySweep::default(), 0.125, false),
-            "query.brep",
+        // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,
+        // in the B-rep merge, and still restores the caller's context.
+        let stitched = model.stitch(b, &mut TopologySweep::default(), 0.125, false);
+        assert!(
+            matches!(stitched, Err(SolidError::Upstream { code: 1006, .. })),
+            "{stitched:?}"
         );
         assert!(!model.b[0].editing_enabled());
         assert!(!model.k.context.doing_boolean());

@@ -207,7 +207,7 @@ impl PrimitiveCreation {
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
             face_surface(a, face)?.evaluate_normal(
-                a.kernel(face.0)?,
+                a.kernel(brep)?,
                 domain.evaluate(0.5, 0.5),
                 Side::Left,
                 Side::Left,
@@ -486,8 +486,8 @@ mod tests {
                 for j in 0..=4 {
                     let uv = domain.evaluate(f64::from(i) / 4.0, f64::from(j) / 4.0);
                     assert_eq!(
-                        surface.evaluate_point(&kernel, uv)?,
-                        expected.evaluate_point(&kernel, uv)?,
+                        surface.evaluate_point(&Kernel::default(), uv)?,
+                        expected.evaluate_point(&Kernel::default(), uv)?,
                     );
                 }
             }

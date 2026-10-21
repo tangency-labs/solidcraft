@@ -154,7 +154,7 @@ fn extrusion_face(
     ))
 }
 fn trimmed_face(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     region: Option<RegionId>,
     curves: Vec<Curve>,
@@ -196,7 +196,7 @@ fn face_edges(_k: &Kernel, _b: &Brep, _face: FaceId) -> Result<Vec<crate::topolo
     Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
 }
 pub(super) fn detailed_face(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     region: Option<RegionId>,
     boundary: crate::topology::face::p2::FaceCurves,
@@ -399,7 +399,7 @@ impl PrimitiveCreation {
     /// `notifications` supplies the caller's topology records, attributes and keys.
     pub fn create_cylindrical_box(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         brep: &mut Brep,
         dimensions: [f64; 5],
         frame: &Axis2Placement,

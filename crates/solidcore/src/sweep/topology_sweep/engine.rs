@@ -1755,16 +1755,8 @@ mod tests {
                 access.brep_mut(owner).unwrap().set_editing_enabled(editing);
                 access.kernel.context.set_doing_boolean(doing_boolean);
                 let result = access.stitch(owner, &mut sweep, 0.125, false);
-                assert!(
-                    matches!(
-                        result,
-                        Err(SolidError::Unported {
-                            upstream: "SmBrep::CalculateBoundingBox",
-                            unit: "query.brep",
-                        })
-                    ),
-                    "stitch result: {result:?}"
-                );
+                // query.brep (CalculateBoundingBox) is ported: the stitch completes.
+                assert!(result.is_ok(), "stitch result: {result:?}");
                 assert_eq!(access.brep(owner).unwrap().editing_enabled(), editing);
                 assert_eq!(access.kernel.context.doing_boolean(), doing_boolean);
             }

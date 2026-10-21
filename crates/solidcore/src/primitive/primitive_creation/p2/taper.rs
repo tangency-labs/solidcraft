@@ -32,6 +32,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::ANG_TOL_DEG;
+use crate::kernel::Kernel;
 use crate::math::{Vec3, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::BSplineSurface;
@@ -86,6 +87,7 @@ fn sync_generators(composite: &mut CompositeCurve, generators: &[BSplineCurve]) 
 /// One ruled surface between an offset curve and its generating curve
 /// (`sm_CreateRuledSurfaceFromOffsetCurve`), with the split curves' current state.
 fn ruled(
+    k: &Kernel,
     offset_curve: &mut BSplineCurve,
     map: Option<OffsetMapAttribute>,
     state: &mut TaperState,
@@ -96,6 +98,7 @@ fn ruled(
     let (first_interval, first_rational) = first.ok_or_else(|| SolidError::sm_err(OP))?;
     let second_interval = second.map_or_else(Extent1d::new, |(interval, _)| interval);
     ruled_surface_from_offset(
+        k,
         offset_curve,
         map,
         &mut state.generators,
@@ -212,7 +215,7 @@ fn taper(
 
     if normal.length_squared() < 0.00001 {
         // compute the normal from curve sample points (zeroed before it can fail)
-        *normal = ignored(compute_crvs_normal(&input))?.unwrap_or(Vec3::ZERO);
+        *normal = ignored(compute_crvs_normal(a.kernel(brep)?, &input))?.unwrap_or(Vec3::ZERO);
         // snap curves to Z axis when close
         if normal.z > 0.98 {
             normal.x = 0.0;
@@ -226,7 +229,7 @@ fn taper(
         }
     } else {
         // check that the curves order conforms to the specified input normal
-        let computed = ignored(compute_crvs_normal(&input))?.unwrap_or(Vec3::ZERO);
+        let computed = ignored(compute_crvs_normal(a.kernel(brep)?, &input))?.unwrap_or(Vec3::ZERO);
         let angle = ignored(computed.angle_between(*normal))?.unwrap_or(0.0);
         if (angle - PI).abs() < 0.0001 {
             // reverse all the curves, then rechain them
@@ -279,6 +282,7 @@ fn taper(
 
     // connect the split curves into composite curves
     let built = ignored(CompositeCurve::build_composites_from_curves(
+        a.kernel(brep)?,
         split.iter().map(|c| Curve::from(c.clone())).collect(),
         same_point_tol,
         0.0,
@@ -365,7 +369,13 @@ fn taper(
         for (curve, map) in trim_curves.iter_mut().zip(fixed_maps) {
             let mut offset_curve = as_bspline(curve)
                 .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
-            let result = ruled(&mut offset_curve, map, &mut state, rule_options(false));
+            let result = ruled(
+                a.kernel(brep)?,
+                &mut offset_curve,
+                map,
+                &mut state,
+                rule_options(false),
+            );
             *curve = Curve::from(offset_curve);
             match result {
                 Err(e) if e.is_unported() => return Err(e),
@@ -500,7 +510,13 @@ fn surface_intersection_method(
     for piece in untrimmed {
         let mut offset_curve = as_bspline(&piece.curve)
             .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
-        match ruled(&mut offset_curve, piece.attribute, state, *rule_options) {
+        match ruled(
+            a.kernel(brep)?,
+            &mut offset_curve,
+            piece.attribute,
+            state,
+            *rule_options,
+        ) {
             Err(e) if e.is_unported() => return Err(e),
             // no ruled surface: skip this offset curve
             Err(_) => {}

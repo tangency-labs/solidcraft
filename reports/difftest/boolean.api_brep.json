@@ -2848,7 +2848,7 @@
   "cases_passed": 151,
   "cases_total": 287,
   "deferred_by_unit": {
-    "query.brep": 114,
+    "primitive.primitive_creation_p1": 114,
     "topology.brep_p3": 22
   },
   "max_rel_err": 0.0,

@@ -2732,8 +2732,8 @@ mod tests {
         };
         assert_dependency(
             exec.fill_offset_edgeuse_gaps(&kernel, &original, edge, &synchronized),
-            "SmPrimitiveCreation::CreatePipeSweep",
-            "primitive.primitive_creation_p2",
+            "SmBrep::CreateFacesFromSurface",
+            "topology.brep_p8",
         );
     }
 

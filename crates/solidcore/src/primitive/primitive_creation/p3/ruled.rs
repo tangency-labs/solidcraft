@@ -16,6 +16,7 @@ use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::p1::circle_from_3_points;
+use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
@@ -44,7 +45,7 @@ pub struct OffsetRuleOptions {
 /// `unmarried` records whether each original generator remains unused.
 /// A missing map returns `SM_ERR` after reducing the offset's degree.
 pub fn ruled_surface_from_offset(
-    k: &crate::kernel::Kernel,
+    k: &Kernel,
     offset_curve: &mut BSplineCurve,
     map: Option<OffsetMapAttribute>,
     generators: &mut [BSplineCurve],
@@ -182,8 +183,9 @@ mod tests {
         let mut missing = false;
         let mut movement = Axis2Placement::IDENTITY;
         movement.translate(2.0 * Vec3::Z);
+        let k = Kernel::default();
         let result = ruled_surface_from_offset(
-            &crate::kernel::Kernel::default(),
+            &k,
             &mut offset,
             Some(map),
             &mut generators,
