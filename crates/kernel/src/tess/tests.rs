@@ -450,9 +450,46 @@ fn a_boundary_running_back_along_itself_is_all_slit() {
     assert_eq!(kept, vec![lens]);
 }
 
+/// Distance of `p` from the analytic surface `fs`.
+fn off_surface(fs: &crate::FaceSurface, p: Vec3) -> f64 {
+    use crate::FaceSurface as F;
+    match *fs {
+        F::Plane { normal, point } => (p - point).dot(normal.vec()).abs(),
+        F::Cylinder { origin, axis, radius } => {
+            let v = p - origin;
+            ((v - axis.vec() * v.dot(axis.vec())).len() - radius).abs()
+        }
+        F::Cone { apex, axis, half_angle } => {
+            let v = p - apex;
+            let h = v.dot(axis.vec());
+            ((v - axis.vec() * h).len() * half_angle.cos() - h * half_angle.sin()).abs()
+        }
+        F::Sphere { center, radius } => ((p - center).len() - radius).abs(),
+        F::Torus { center, axis, major, minor } => {
+            let v = p - center;
+            let h = v.dot(axis.vec());
+            (((v - axis.vec() * h).len() - major.abs()).hypot(h) - minor).abs()
+        }
+    }
+}
+
+/// The farthest a triangle's centroid lies from its face's analytic surface, over the faces
+/// that have one.
+fn max_chord(b: &Body, m: &Mesh) -> f64 {
+    let surfs: Vec<Option<crate::FaceSurface>> = (0..b.face_count()).map(|f| crate::face_surface(b, f)).collect();
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter_map(|(t, f)| {
+            let fs = surfs.get(*f as usize).copied().flatten()?;
+            let [a, b, c] = t.map(|i| m.positions[i as usize]);
+            Some(off_surface(&fs, (a + b + c) * (1.0 / 3.0)))
+        })
+        .fold(0.0, f64::max)
+}
+
 /// The display plan of `b` at `tol` (and the display angle), evaluated: closed, with no
 /// zero-area or needle triangle.
-#[cfg(feature = "smlib")]
 fn closed_display_mesh(name: &str, b: &Body, tol: f64) -> Mesh {
     let plan = ok(b.display_plan_angular(tol, crate::DISPLAY_ANGLE));
     let m = ok(b.display_mesh_of(&plan));
@@ -477,6 +514,38 @@ fn a_half_sphere_from_smlib_is_closed_along_its_seam() {
     let Ok(Some(half)) = ball.boolean(&lid, BooleanOp::Subtract) else { panic!("cut") };
     let body = ok(crate::native::body_from_smlib(&half));
     for tol in [0.1, 0.01] {
-        closed_display_mesh("half sphere", &body, tol);
+        let m = closed_display_mesh("half sphere", &body, tol);
+        let chord = max_chord(&body, &m);
+        assert!(chord <= tol * 1.05, "half sphere at {tol}: chord {chord}");
+    }
+}
+
+/// Every triangle of a display plan lies within the chord tolerance of its face, whatever
+/// layout the face got: on a doubly curved grid the sags along both directions add up at a
+/// cell's middle, and a trimmed sphere face round a pocket is not a grid at all.
+#[test]
+fn display_plans_stay_within_the_chord_tolerance() {
+    let ball = ok(crate::sphere(Vec3::ZERO, 12.0));
+    let pocket = cut(&ok(crate::sphere(Vec3::ZERO, 10.0)), &ok(crate::box_solid(Vec3::new(-2.0, -2.0, 5.0), Vec3::new(2.0, 2.0, 11.0))));
+    let ring = ok(crate::torus(Vec3::ZERO, 22.0, 4.0));
+    for (name, body) in [("sphere", &ball), ("pocket in a sphere", &pocket), ("torus", &ring)] {
+        for tol in [0.1, 0.01] {
+            let m = closed_display_mesh(name, body, tol);
+            let chord = max_chord(body, &m);
+            assert!(chord <= tol * 1.05, "{name} at {tol}: chord {chord}");
+        }
+    }
+}
+
+/// SMLib's torus is one face bounded by its two seams: a grid over the whole parameter box.
+#[cfg(feature = "smlib")]
+#[test]
+fn an_smlib_torus_stays_within_the_chord_tolerance() {
+    let Ok(ring) = solidcraft_smlib::Brep::make_torus([0.0; 3], 22.0, 4.0) else { panic!("torus") };
+    let body = ok(crate::native::body_from_smlib(&ring));
+    for tol in [0.1, 0.01] {
+        let m = closed_display_mesh("SMLib torus", &body, tol);
+        let chord = max_chord(&body, &m);
+        assert!(chord <= tol * 1.05, "SMLib torus at {tol}: chord {chord}");
     }
 }

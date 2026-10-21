@@ -25,6 +25,7 @@ pub(crate) mod fallback;
 pub(crate) mod grid;
 pub(crate) mod motorcycle;
 pub(crate) mod pieces;
+pub(crate) mod sag;
 pub(crate) mod seam;
 pub(crate) mod size;
 pub(crate) mod ssi;
@@ -824,6 +825,10 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
+    // Whatever the layout, no triangle leaves the surface by more than the tolerance.
+    if !planar {
+        sag::refine(s, tol, &fixed, &mut all, &mut triangles, MAX_REFINE);
+    }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {
         *q = s.wrap(*q);
