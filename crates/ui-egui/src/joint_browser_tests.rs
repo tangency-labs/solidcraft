@@ -89,6 +89,18 @@ fn a_hidden_joint_still_drives_and_shows_while_picked() {
 }
 
 #[test]
+fn hovering_a_joint_row_lights_its_glyph_until_the_pointer_leaves() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let row = crate::scenario::handle_at("row:Hinge").unwrap();
+    h.step(&json!({"move": [row.x, row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    assert!(h.app.tree.picked_joints.is_empty(), "hovering doesn't pick");
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
+}
+
+#[test]
 fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     let mut h = harness();
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
