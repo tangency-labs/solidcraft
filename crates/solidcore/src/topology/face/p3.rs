@@ -26,8 +26,8 @@
 //!   `NER` returns are the callee's error or [`SolidError::Upstream`] `SM_ERR`.
 //! - **`SmFace::GetEdges`** with default arguments is the co-ported
 //!   `topology_traverser::face_edges`; `GetEdges(.., TRUE)` (outer loop only),
-//!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` and `GetBrep` are
-//!   [`SolidError::Unported`] (`topology.face_p4`).
+//!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` (default arguments)
+//!   and `GetBrep` call `topology::face::p4`.
 //! - **Statuses.** `ComputeProjectedLoopOrientation`'s status is checked as upstream (a
 //!   failure falls through to the 3D walk); `sm_AreConnected` and `IsDegenerate` of a
 //!   curve return values; ignored as upstream: the `Trim`, `EvaluatePoint` and
@@ -65,7 +65,7 @@
 //!   [`edge::NotifyEnv`]. `SE_MSG` for `SM_NO_UNKNOWN` is compiled out.
 //! - **Unported callees** return [`SolidError::Unported`]: the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), `SmFace::Point3DClassify`
-//!   (`query.face_p1`) and the `topology.face_p4` accessors above. `SmEdgeuse::NormalizedEvaluate`
+//!   (`query.face_p1`). `SmEdgeuse::NormalizedEvaluate`
 //!   and `GetOrCreateUVTrimCurve` are wired (`topology.edgeuse_p3`; their own unported
 //!   callees still return it).
 //! - **Bounds.** No recursion; every loop is over B-rep arrays or a fixed sample count.
@@ -150,42 +150,28 @@ fn get_or_create_uv_trim_curve(
 }
 
 /// `GetUpwardLoopuses(sLoopuses)` (default arguments).
-fn upward_loopuses(_b: &Brep, _f: FaceId) -> Result<Vec<LoopuseId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetUpwardLoopuses
-    Err(SolidError::unported(
-        "SmFace::GetUpwardLoopuses",
-        "topology.face_p4",
-    ))
+fn upward_loopuses(b: &Brep, f: FaceId) -> Result<Vec<LoopuseId>> {
+    crate::topology::face::p4::upward_loopuses(b, f, false, None)
 }
 
 /// `GetUpwardEdgeuses(sEdgeuses)` (default arguments).
-fn upward_edgeuses(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeuseId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetUpwardEdgeuses
-    Err(SolidError::unported(
-        "SmFace::GetUpwardEdgeuses",
-        "topology.face_p4",
-    ))
+fn upward_edgeuses(b: &Brep, f: FaceId) -> Result<Vec<EdgeuseId>> {
+    crate::topology::face::p4::upward_edgeuses(b, f, false, None)
 }
 
 /// `GetUpwardVertexuses(sVertexuses)` (default arguments).
-fn upward_vertexuses(_b: &Brep, _f: FaceId) -> Result<Vec<VertexuseId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetUpwardVertexuses
-    Err(SolidError::unported(
-        "SmFace::GetUpwardVertexuses",
-        "topology.face_p4",
-    ))
+fn upward_vertexuses(b: &Brep, f: FaceId) -> Result<Vec<VertexuseId>> {
+    crate::topology::face::p4::upward_vertexuses(b, f, false, None)
 }
 
 /// `GetEdges(sEdges, NULL, TRUE)`: the edges of the outer loop only.
-fn outer_loop_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges (bTgtLoopsOnly = TRUE)
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+fn outer_loop_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, f, None, true, None)
 }
 
 /// `this->GetBrep() ? this->GetBrep()->GetTolerance() : 0.0`.
-fn brep_tolerance(_b: &Brep, _f: FaceId) -> Result<f64> {
-    // UNPORTED(topology.face_p4): SmFace::GetBrep
-    Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
+fn brep_tolerance(b: &Brep, f: FaceId) -> Result<f64> {
+    Ok(crate::topology::face::p4::brep(b, f)?.map_or(0.0, Brep::tolerance))
 }
 
 /// `new SmCurveClassification(pCurve, sInterval, pUVCurve, sSrcZoneTol3d)`.

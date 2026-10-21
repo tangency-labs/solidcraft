@@ -60,10 +60,9 @@
 //! Extrusion, cone, sphere and torus faces stay inexact: ops that dispatch on their kind
 //! defer under `harness:analytic-geometry-export`.
 //!
-//! **Deferred.** The offset surface of a non-plane analytic face
-//! (`harness:analytic-geometry-export`), `UpdateFaceSurfaceDomain`
-//! (`SmFace::CreateUVTrimCurves` inside `CalculateUVDomainFromUVTrimCurves`,
-//! `topology.face_p3`), the trimmed surface cache of a face's own surface that the
+//! **Deferred.** The offset surface of a non-plane analytic face and
+//! `UpdateFaceSurfaceDomain` of an inexact one (`harness:analytic-geometry-export`), the
+//! trimmed surface cache of a face's own surface that the
 //! seeded `GetCreateExtendedSurface` hands to the surface intersections of `MateEdges`
 //! and `TrimExtendedEdge` (`SmTol::GetZoneTol3d`, `surface.surface_cache_p2`, and the face
 //! handle, `topology.face_p2`), the drops inside `CreateUVTrimCurve`
@@ -2636,6 +2635,18 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                 if two.face_surface(f)?.is_none() || ClassGeometry::surface(&two, s).is_none() {
                     o.push(NULL_DEREF);
                     continue;
+                }
+                if !two
+                    .face_exact(f)
+                    .ok_or_else(|| Fail::Harness(harness("face outside the import table")))?
+                {
+                    // the trim-curve drops and GetNaturalUVDomain are virtual on the face's
+                    // surface, which the record also compares afterwards: a face imported as
+                    // its B-spline part dispatches (and reports) the B-spline kind instead
+                    return Err(Fail::Solid(SolidError::Unported {
+                        upstream: "UpdateFaceSurfaceDomain on a face surface imported as its B-spline part",
+                        unit: ANALYTIC_EXPORT,
+                    }));
                 }
                 let r = geom.update_face_surface_domain(&k, &mut two, f, s);
                 status(r, &mut o)?; // the face's domain and surface: after every status

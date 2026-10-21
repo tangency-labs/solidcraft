@@ -3,7 +3,7 @@
 //! Initial graphs are exported before either operation. Split refusals compare
 //! their retained endpoint as well as the complete semantic topology/geometry
 //! snapshot. Successful native mutations on deferred paths are not parity passes.
-use super::boolean_merge_p1::{graph, Canon};
+use super::boolean_merge_p1::{graph_reachable, Canon};
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
 use super::topology_vertexuse::import;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
@@ -284,7 +284,10 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
                     &mut env,
                     &curve_ref,
                 );
-                record.extend([-1.0, -1.0, -1.0]);
+                match &output {
+                    Ok(out) => record.extend([id(Some(out.edge)), id(out.loop_), id(out.face)]),
+                    Err(_) => record.extend([-1.0, -1.0, -1.0]),
+                }
                 ordinary(output)
             }
             6 | 7 => {
@@ -406,7 +409,8 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
         Ok(code) => {
             record.insert(0, f64::from(code));
             canon_record(&b, i.op, &mut record);
-            Ok(graph(&b, record))
+            skeleton_caches(&mut b);
+            Ok(graph_reachable(&b, record))
         }
         Err(SolidError::Upstream { code, .. }) if i.op <= 4 => {
             // These APIs clear their pointer outputs before the first fallible
@@ -421,7 +425,8 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
             record.resize(slots, -1.0);
             record.insert(0, f64::from(code));
             canon_record(&b, i.op, &mut record);
-            Ok(graph(&b, record))
+            skeleton_caches(&mut b);
+            Ok(graph_reachable(&b, record))
         }
         Err(e) => status(&e),
     }
@@ -441,10 +446,29 @@ impl solidcore::intersect::point_class::ClassObject for Handle {
         }
     }
 }
+/// Empties the Rust-only face loop and loop edge lists (`Face::loops`, `Loop::edges`,
+/// which `make_edge_in_face_with_vu` and friends keep in step) as the shared importer
+/// leaves them on the C++ side, which has no such lists: the graph compares the
+/// upstream topology links.
+fn skeleton_caches(b: &mut Brep) {
+    let faces: Vec<FaceId> = b.faces().ids().collect();
+    for f in faces {
+        if let Ok(r) = b.face_mut(f) {
+            r.loops.clear();
+        }
+    }
+    let loops: Vec<solidcore::topology::LoopId> = b.loops().ids().collect();
+    for l in loops {
+        if let Ok(r) = b.loop_mut(l) {
+            r.edges.clear();
+        }
+    }
+}
+
 /// Puts the B-rep ids of `record` (status first) in [`Canon`] numbering, the shim's
 /// `fresh.find` of a walk after the op.
 fn canon_record(b: &Brep, op: u8, record: &mut [f64]) {
-    let c = Canon::of(b);
+    let c = Canon::reachable(b);
     let mut map = |at: usize, f: &dyn Fn(f64) -> f64| {
         if let Some(x) = record.get_mut(at) {
             *x = f(*x);
@@ -464,6 +488,11 @@ fn canon_record(b: &Brep, op: u8, record: &mut [f64]) {
             map(1, &|x| c.edges.of_slot(x));
             map(2, &|x| c.edges.of_slot(x));
             map(3, &|x| c.vertices.of_slot(x));
+        }
+        5 => {
+            map(1, &|x| c.edges.of_slot(x));
+            map(2, &|x| c.loops.of_slot(x));
+            map(3, &|x| c.faces.of_slot(x));
         }
         6 | 7 => map(2, &|x| c.vertices.of_slot(x)),
         _ => {}
@@ -501,7 +530,7 @@ impl UnitDiff for Runner {
                 .ok_or_else(|| error("short native graph"))?,
         )?;
         canon_record(&b, i.op, &mut record);
-        Ok(graph(&b, record))
+        Ok(graph_reachable(&b, record))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;

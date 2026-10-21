@@ -28,9 +28,10 @@
 //! Deferred: `SmFace::ComputeLoopOrientation` (`CheckFace` after its first loop check,
 //! `FixTrimLoopOrientation`, `FixTrimLoopOrder`) at its `sm_AreConnected` /
 //! `GetOrCreateUVTrimCurve` / `NormalizedEvaluate` calls (`topology.edgeuse_p3`),
-//! `SplitAtSeams`, `ClearUVTrimCurves`, `CreateUVTrimCurves` (`topology.face_p1` /
-//! `topology.face_p4`, and the face-owned surface's `SmFace::GetTolerance` stub of
-//! `GetSingularities`, `topology.face_p2`), `SmEdgeuse::GetOrCreateUVTrimCurve`
+//! `SplitAtSeams` (`topology.face_p1` / `topology.face_p4`), `CreateUVTrimCurves` at the
+//! face-owned surface's `SmFace::GetTolerance` stub of `GetSingularities`
+//! (`topology.face_p2`; it and `ClearUVTrimCurves` are compared, with every edge use's
+//! UV trim curve after the call), `SmEdgeuse::GetOrCreateUVTrimCurve`
 //! (`topology.edgeuse_p3`), and the vertex-use UV points some B-reps need
 //! (`ComputeUVPoint`'s own deferrals). Last run: 3263 cases, 2842 pass, 421 deferred
 //! (`topology.edgeuse_p3` 409, `topology.face_p2` 3, `topology.face_p4` 9).
@@ -1837,6 +1838,9 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
                 _ => tt::create_uv_trim_curves(k, b, fc),
             };
             o.push(status(&r)?);
+            // ClearUVTrimCurves, CreateUVTrimCurves: every edge use's UV trim curve after
+            // the call
+            put_uv_curves(&mut o, b);
         }
         _ => return Err(Fail::Harness(harness("not a B-rep op"))),
     }

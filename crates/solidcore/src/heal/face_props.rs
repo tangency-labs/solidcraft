@@ -1130,9 +1130,24 @@ pub struct SeamProblem {
     pub near_miss: SurfParamType,
 }
 
+/// `SmFace::HasSeamProblem` as `SetProps_Stage2` calls it (see
+/// [`FaceProps::set_props_stage2_with`]): the face's seam classifications into `cu`,
+/// `cv`, its raw and done touch lists into `props`, and the seam problem.
+pub type SeamProblemFn<'f, O> = dyn FnMut(
+        &Kernel,
+        &Brep,
+        FaceId,
+        &mut CurveClassification<O>,
+        &mut CurveClassification<O>,
+        &mut FaceProps<O>,
+    ) -> Result<SeamProblem>
+    + 'f;
+
 /// `m_pFace->HasSeamProblem(*m_pCrvClassU, *m_pCrvClassV, crossed, missing, nearMiss,
-/// FALSE, &m_bClosedU, &m_bClosedV, this)`: the caller's `props` receive the raw and
-/// done touch lists ([`FaceProps::raw_touch_list_u`] and the like).
+/// FALSE, &m_bClosedU, &m_bClosedV, this)` for the callers of
+/// [`FaceProps::set_props_stage2`], which have no classification objects for
+/// [`crate::topology::face::p4::has_seam_problem`] (callers that have them use
+/// [`FaceProps::set_props_stage2_with`]).
 fn face_has_seam_problem<O: LoopObject>(
     _b: &Brep,
     _f: FaceId,
@@ -1140,7 +1155,8 @@ fn face_has_seam_problem<O: LoopObject>(
     _class_v: &mut CurveClassification<O>,
     _props: &mut FaceProps<O>,
 ) -> Result<SeamProblem> {
-    // UNPORTED(topology.face_p4): SmFace::HasSeamProblem
+    // UNPORTED(topology.face_p4): SmFace::HasSeamProblem without a classification-object
+    // mapper (face::p4::has_seam_problem takes one; see set_props_stage2_with)
     Err(SolidError::unported(
         "SmFace::HasSeamProblem",
         "topology.face_p4",
@@ -1674,6 +1690,33 @@ impl<O: LoopObject> FaceProps<O> {
         face_index: u64,
         exe_heal_op: HealerOpType,
     ) -> Result<()> {
+        self.set_props_stage2_with(
+            k,
+            b,
+            face,
+            face_index,
+            exe_heal_op,
+            &mut |_, b, f, cu, cv, p| face_has_seam_problem(b, f, cu, cv, p),
+        )
+    }
+
+    /// [`FaceProps::set_props_stage2`] with `seam` as its `SmFace::HasSeamProblem` call
+    /// (`m_pFace->HasSeamProblem(*m_pCrvClassU, *m_pCrvClassV, .., FALSE, &m_bClosedU,
+    /// &m_bClosedV, this)`, made at [`PropStage::Stage2A`]): a caller holding the
+    /// classification objects passes [`crate::topology::face::p4::has_seam_problem`].
+    ///
+    /// # Errors
+    ///
+    /// As [`FaceProps::set_props_stage2`], with `seam`'s errors for its seam call.
+    pub fn set_props_stage2_with(
+        &mut self,
+        k: &Kernel,
+        b: &Brep,
+        face: FaceId,
+        face_index: u64,
+        exe_heal_op: HealerOpType,
+        seam: &mut SeamProblemFn<'_, O>,
+    ) -> Result<()> {
         // no work - already done or being done
         if self.prop_stage >= PropStage::Stage2A {
             return Ok(());
@@ -1833,7 +1876,7 @@ impl<O: LoopObject> FaceProps<O> {
         // when pFace->Surface is closed the seam classifications, touch lists and the
         // bad seam directions are set by this SmFace::HasSeamProblem call
         if self.closed_u.is_true() || self.closed_v.is_true() {
-            let seam = face_has_seam_problem(b, m_face, &mut class_u, &mut class_v, self);
+            let seam = seam(k, b, m_face, &mut class_u, &mut class_v, self);
             self.crv_class_u = Some(class_u);
             self.crv_class_v = Some(class_v);
             let seam = seam?;

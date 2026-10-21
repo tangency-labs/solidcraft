@@ -1183,9 +1183,8 @@ fn face_set_tolerance(
 }
 
 /// `SmFace::GetEdges(rEdges)`.
-fn face_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
 /// The topology object `SmTol::UpdateObjectTolerance` is given.

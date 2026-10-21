@@ -102,16 +102,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#9 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -130,16 +126,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#12 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -158,16 +150,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#15 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -226,52 +214,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#23 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#24 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#25 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#26 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -746,52 +718,36 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#70 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#71 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#72 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#73 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "deferred": {
@@ -906,16 +862,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#85 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -934,16 +886,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#88 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -962,16 +910,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#91 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1030,52 +974,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#99 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#100 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#101 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#102 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -1550,52 +1478,36 @@
       "values_compared": 79
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#146 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#147 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#148 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#149 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 57
     },
     {
       "deferred": {
@@ -1710,16 +1622,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#161 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1738,16 +1646,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#164 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1766,16 +1670,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#167 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -1834,52 +1734,36 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#175 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#176 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#177 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#178 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -2354,52 +2238,36 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#222 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#223 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#224 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#225 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2514,16 +2382,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#237 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2542,16 +2406,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#240 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2570,16 +2430,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#243 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -2638,52 +2494,36 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#251 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#252 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#253 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#254 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -3158,52 +2998,36 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#298 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#299 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#300 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#301 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -3318,16 +3142,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#313 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3346,16 +3166,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#316 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3374,16 +3190,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#319 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -3442,52 +3254,36 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#327 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#328 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#329 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#330 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -3962,52 +3758,36 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#374 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#375 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#376 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#377 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "deferred": {
@@ -4122,16 +3902,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#389 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4150,16 +3926,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#392 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4178,16 +3950,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#395 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4246,52 +4014,36 @@
       "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#403 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#404 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#405 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#406 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 22
     },
     {
       "max_rel_err": 0.0,
@@ -4766,52 +4518,36 @@
       "values_compared": 43
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_46",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#450 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_46_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#451 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_47",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#452 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_47_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#453 (upstream source/SMLib/src/SmFace.cpp:7965)",
-      "values_compared": 0
+      "values_compared": 33
     },
     {
       "deferred": {
@@ -4926,16 +4662,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#465 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4954,16 +4686,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#468 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -4982,16 +4710,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#471 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5050,52 +4774,36 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#479 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#480 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#481 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#482 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -5770,16 +5478,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#541 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5798,16 +5502,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#544 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5826,16 +5526,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#547 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -5894,52 +5590,36 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#555 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#556 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#557 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#558 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -6614,16 +6294,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#617 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6642,16 +6318,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#620 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6670,16 +6342,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#623 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -6738,52 +6406,36 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#631 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#632 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#633 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#634 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -7207,8 +6859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_46",
@@ -7219,8 +6871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_46_gaps",
@@ -7231,8 +6883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_47",
@@ -7243,8 +6895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_47_gaps",
@@ -7378,16 +7030,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#693 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7406,16 +7054,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#696 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7434,16 +7078,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#699 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -7502,52 +7142,36 @@
       "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#707 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#708 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#709 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#710 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 12
     },
     {
       "max_rel_err": 0.0,
@@ -7971,8 +7595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_46",
@@ -7983,8 +7607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_46_gaps",
@@ -7995,8 +7619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_47",
@@ -8007,8 +7631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_47_gaps",
@@ -8142,16 +7766,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#769 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8170,16 +7790,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#772 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8198,16 +7814,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#775 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -8266,52 +7878,36 @@
       "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#783 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#784 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#785 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#786 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
       "max_rel_err": 0.0,
@@ -8986,16 +8582,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#845 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9014,16 +8606,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#848 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9042,16 +8630,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#851 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9110,52 +8694,36 @@
       "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#859 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#860 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#861 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#862 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 302
     },
     {
       "max_rel_err": 0.0,
@@ -9830,16 +9398,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#921 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9858,16 +9422,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#924 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9886,16 +9446,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#927 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -9954,52 +9510,36 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#935 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#936 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#937 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#938 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -10674,16 +10214,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#997 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10702,16 +10238,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1000 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10730,16 +10262,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1003 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -10798,52 +10326,36 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1011 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1012 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1013 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "cone_rebuilt_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1014 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -11518,16 +11030,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1073 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11546,16 +11054,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1076 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11574,16 +11078,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1079 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -11642,52 +11142,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1087 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1088 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1089 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1090 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -12111,8 +11595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_46",
@@ -12123,8 +11607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_46_gaps",
@@ -12135,8 +11619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_47",
@@ -12147,8 +11631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_47_gaps",
@@ -12270,16 +11754,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1149 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12298,16 +11778,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1152 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12326,16 +11802,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1155 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -12394,52 +11866,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1163 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1164 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1165 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1166 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -12863,8 +12319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_46",
@@ -12875,8 +12331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_46_gaps",
@@ -12887,8 +12343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_47",
@@ -12899,8 +12355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_47_gaps",
@@ -13022,16 +12478,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1225 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13050,16 +12502,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1228 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13078,16 +12526,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1231 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13146,52 +12590,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1239 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1240 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1241 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1242 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -13615,8 +13043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_46",
@@ -13627,8 +13055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_46_gaps",
@@ -13639,8 +13067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_47",
@@ -13651,8 +13079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_47_gaps",
@@ -13786,16 +13214,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1301 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13814,16 +13238,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1304 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13842,16 +13262,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1307 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -13910,52 +13326,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1315 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1316 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1317 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1318 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -14379,8 +13779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_46",
@@ -14391,8 +13791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_46_gaps",
@@ -14403,8 +13803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_47",
@@ -14415,8 +13815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_47_gaps",
@@ -14550,16 +13950,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1377 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14578,16 +13974,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1380 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14606,16 +13998,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1383 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -14674,52 +14062,36 @@
       "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1391 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1392 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1393 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "triangle_pole_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1394 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 32
     },
     {
       "max_rel_err": 0.0,
@@ -15143,8 +14515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_46",
@@ -15155,8 +14527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_46_gaps",
@@ -15167,8 +14539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_47",
@@ -15179,8 +14551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_47_gaps",
@@ -15314,16 +14686,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_lamina_02",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1453 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15342,16 +14710,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_lamina_05",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1456 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15370,16 +14734,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_lamina_08",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1459 (upstream source/SMLib/src/SmFace.cpp:15304)",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -15438,52 +14798,36 @@
       "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_notify_15",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1467 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_notify_15_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1468 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_notify_16",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1469 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "biquadratic_notify_16_gaps",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p3/constructed.json#1470 (upstream source/SMLib/src/SmFace.cpp:11856)",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -15907,8 +15251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_46",
@@ -15919,8 +15263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_46_gaps",
@@ -15931,8 +15275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_47",
@@ -15943,8 +15287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_47_gaps",
@@ -16529,8 +15873,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_vloop_50_uv_trim",
@@ -16661,8 +16005,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_vloop_25_uv_trim",
@@ -16793,8 +16137,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_vloop_50_uv_trim",
@@ -16925,8 +16269,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_vloop_25_uv_trim",
@@ -17057,8 +16401,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_vloop_50_uv_trim",
@@ -17189,8 +16533,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_vloop_25_uv_trim",
@@ -17321,8 +16665,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_vloop_50_uv_trim",
@@ -17453,8 +16797,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_vloop_25_uv_trim",
@@ -17473,8 +16817,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_46_own",
@@ -17485,8 +16829,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_46_gaps_own",
@@ -17497,8 +16841,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_47_own",
@@ -17509,8 +16853,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_uv_trim_47_gaps_own",
@@ -17521,8 +16865,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_46_own",
@@ -17533,8 +16877,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_46_gaps_own",
@@ -17545,8 +16889,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_47_own",
@@ -17557,8 +16901,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuilt_uv_trim_47_gaps_own",
@@ -17569,8 +16913,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_46_own",
@@ -17581,8 +16925,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_46_gaps_own",
@@ -17593,8 +16937,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_47_own",
@@ -17605,8 +16949,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_uv_trim_47_gaps_own",
@@ -17617,8 +16961,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_46_own",
@@ -17629,8 +16973,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_46_gaps_own",
@@ -17641,8 +16985,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_47_own",
@@ -17653,8 +16997,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuilt_uv_trim_47_gaps_own",
@@ -17665,8 +17009,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_46_own",
@@ -17677,8 +17021,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_46_gaps_own",
@@ -17689,8 +17033,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_47_own",
@@ -17701,8 +17045,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_uv_trim_47_gaps_own",
@@ -17713,8 +17057,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_46_own",
@@ -17725,8 +17069,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_46_gaps_own",
@@ -17737,8 +17081,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_47_own",
@@ -17749,8 +17093,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "disk_rebuilt_uv_trim_47_gaps_own",
@@ -17857,8 +17201,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_46_own",
@@ -17869,8 +17213,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_46_gaps_own",
@@ -17881,8 +17225,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_47_own",
@@ -17893,8 +17237,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_uv_trim_47_gaps_own",
@@ -17905,8 +17249,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_46_own",
@@ -17917,8 +17261,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_46_gaps_own",
@@ -17929,8 +17273,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_47_own",
@@ -17941,8 +17285,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuilt_uv_trim_47_gaps_own",
@@ -18145,8 +17489,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_46_own",
@@ -18157,8 +17501,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_46_gaps_own",
@@ -18169,8 +17513,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_47_own",
@@ -18181,8 +17525,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_uv_trim_47_gaps_own",
@@ -18193,8 +17537,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_46_own",
@@ -18205,8 +17549,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_46_gaps_own",
@@ -18217,8 +17561,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_47_own",
@@ -18229,8 +17573,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_face_tilted_uv_trim_47_gaps_own",
@@ -18241,8 +17585,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_46_own",
@@ -18253,8 +17597,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_46_gaps_own",
@@ -18265,8 +17609,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_47_own",
@@ -18277,8 +17621,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_uv_trim_47_gaps_own",
@@ -18289,8 +17633,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_46_own",
@@ -18301,8 +17645,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_46_gaps_own",
@@ -18313,8 +17657,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_47_own",
@@ -18325,8 +17669,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "bilinear_subdomain_uv_trim_47_gaps_own",
@@ -18337,8 +17681,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_46_own",
@@ -18349,8 +17693,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_46_gaps_own",
@@ -18361,8 +17705,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_47_own",
@@ -18373,8 +17717,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "triangle_pole_uv_trim_47_gaps_own",
@@ -18385,8 +17729,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_46_own",
@@ -18397,8 +17741,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_46_gaps_own",
@@ -18409,8 +17753,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_47_own",
@@ -18421,8 +17765,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "biquadratic_uv_trim_47_gaps_own",
@@ -18513,8 +17857,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_bspline_uv_trim_plain",
@@ -18525,8 +17869,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_bspline_uv_trim_own",
@@ -18609,8 +17953,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -18629,16 +17973,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751867694585732548",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "deferred": {
@@ -18661,16 +18001,12 @@
       "values_compared": 25
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0006",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751867694585732551",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "max_rel_err": 0.0,
@@ -18697,16 +18033,12 @@
       "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0010",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751867694585732555",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
       "max_rel_err": 0.0,
@@ -18737,43 +18069,35 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetEdges",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0014",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751867694585732559",
-      "values_compared": 0
+      "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=9751867694585732560",
-      "values_compared": 0
+      "values_compared": 42
     }
   ],
   "cases_both_errored": 3,
-  "cases_deferred": 1127,
+  "cases_deferred": 958,
   "cases_failed": 0,
-  "cases_passed": 654,
+  "cases_passed": 823,
   "cases_total": 1781,
   "deferred_by_unit": {
+    "curve.crv_on_surf": 24,
     "geom.tol": 46,
     "intersect.curve_class_p2": 210,
-    "intersect.surface_drop_lib_p3": 115,
+    "intersect.surface_drop_lib_p3": 190,
     "surface.surf_of_extrusion_p2": 112,
     "surface.surface_p2": 228,
-    "topology.face_p2": 148,
-    "topology.face_p4": 268
+    "topology.face_p2": 148
   },
   "max_rel_err": 0.0,
   "pass": true,

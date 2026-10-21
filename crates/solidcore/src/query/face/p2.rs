@@ -101,7 +101,6 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, Vertexu
 
 const OP_CLASSIFY: &str = "query::face::p2::point_classify";
 const OP_CURVE: &str = "query::face::p2::curve_on_classify";
-const OP_VERTICES: &str = "query::face::p2::face_vertices";
 
 impl ClassObject for EntityRef {
     fn class_kind(&self) -> ClassObjectKind {
@@ -126,8 +125,8 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
 
 // ---- co-ported topology access ----------------------------------------------------------
 
-/// `SmFace::GetVertices(SmTArray&, NULL, bTgtLoopsOnly, pOptTgtLoops)` (CO-PORTED from
-/// unit `topology.face_p4`): the vertices of the loop uses of the upward face use
+/// `SmFace::GetVertices(SmTArray&, NULL, bTgtLoopsOnly, pOptTgtLoops)`
+/// ([`crate::topology::face::p4::vertices`] without attribute filter): the vertices of the loop uses of the upward face use
 /// selected as [`eu1::faceuse_loopuses`] selects them ([`loopuse::vertices`]: the vertex
 /// of a vertex loop use, else the distinct start vertices of its edge uses in CCW
 /// order), appended (a vertex shared by two loops is listed twice). None without face
@@ -144,20 +143,7 @@ pub fn face_vertices(
     tgt_loops_only: bool,
     tgt_loops: Option<&[LoopId]>,
 ) -> Result<Vec<VertexId>> {
-    // init output
-    let mut out = Vec::new();
-
-    // for every upwardFaceuse->Loopuse
-    let Some(fu) = b.face(f)?.faceuse else {
-        return Ok(out);
-    };
-    for lu in eu1::faceuse_loopuses(b, fu, tgt_loops_only, tgt_loops)? {
-        // accumulate vertices
-        for v in loopuse::vertices(b, lu, None)? {
-            out.push(v.ok_or_else(|| null(OP_VERTICES, "vertex use without vertex"))?);
-        }
-    }
-    Ok(out)
+    crate::topology::face::p4::vertices(b, f, None, tgt_loops_only, tgt_loops)
 }
 
 /// A copy of `surface` with out-of-bounds evaluation enabled, when it is an
@@ -912,13 +898,12 @@ fn intersect_ts_bound<O: ClassObject>(
 
 /// `SmFace::GetEdges(SmTArray&, NULL, bTgtLoopsOnly, pOptTgtLoops)`.
 fn face_edges(
-    _b: &Brep,
-    _f: FaceId,
-    _tgt_loops_only: bool,
-    _tgt_loops: Option<&[LoopId]>,
+    b: &Brep,
+    f: FaceId,
+    tgt_loops_only: bool,
+    tgt_loops: Option<&[LoopId]>,
 ) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+    crate::topology::face::p4::edges(b, f, None, tgt_loops_only, tgt_loops)
 }
 
 /// `SmCurveClassification::IntersectEdges(edges, *this, bHasBigGaps)`.

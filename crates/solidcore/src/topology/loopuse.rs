@@ -1629,13 +1629,11 @@ mod tests {
         assert_eq!(orientation(&b, lu(0)).unwrap(), OrientType::Opposite);
         set_loop(&mut b, lu(0), None).unwrap();
         assert_eq!(loop_(&b, lu(0)).unwrap(), None);
-        // flipping a loop on a face needs SmFace::GetUpwardEdgeuses (post-edit notification)
+        // flipping a loop on a face runs its post-edit notification through
+        // SmFace::GetUpwardEdgeuses (topology.face_p4)
         let mut b = square(0.0);
-        assert!(flip_loop_orientation(&mut b, LoopId::from_index(0))
-            .unwrap_err()
-            .is_unported());
-        // without the face, the edge use lists swap loop uses (the failed flip above had
-        // already swapped them before its post-edit notification returned Unported)
+        flip_loop_orientation(&mut b, LoopId::from_index(0)).unwrap();
+        // without the face, the edge use lists swap loop uses
         let mut b = square(0.0);
         b.faceuse_mut(FaceuseId::from_index(0)).unwrap().face = None;
         flip_loop_orientation(&mut b, LoopId::from_index(0)).unwrap();

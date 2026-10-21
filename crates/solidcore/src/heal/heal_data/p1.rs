@@ -974,9 +974,10 @@ mod tests {
         ));
         // on a B-rep the whole-B-rep target lists are gathered (its one face) and the
         // heal sequence of heal_data_p3 runs past Fix_TolSizes (SmBrep::SetTolerance
-        // raises the face's tolerance through SmFace::SetTolerance) up to
-        // Cache_DegenFaces' SmFace::GetEdges (unit topology.face_p4; SmBrep::HealBrep
-        // passes Unported through, ignoring every other status)
+        // raises the face's tolerance through SmFace::SetTolerance) past
+        // Cache_DegenFaces (SmFace::GetEdges, topology.face_p4) up to the
+        // SmLockBrepBox of topology.brep_p1 (SmBrep::HealBrep passes Unported through,
+        // ignoring every other status)
         let mut b = Brep::default();
         let face = b
             .add_face_record(Face::new(ShellId::from_index(0)))
@@ -984,8 +985,8 @@ mod tests {
         assert!(matches!(
             api_heal_brep(&mut k, Some(&mut b)),
             Err(SolidError::Unported {
-                upstream: "SmFace::GetEdges",
-                unit: "topology.face_p4",
+                upstream: "SmLockBrepBox::SmLockBrepBox",
+                unit: "topology.brep_p1",
                 ..
             })
         ));
@@ -999,8 +1000,8 @@ mod tests {
         assert!(matches!(
             r,
             Err(SolidError::Unported {
-                upstream: "SmFace::GetEdges",
-                unit: "topology.face_p4",
+                upstream: "SmLockBrepBox::SmLockBrepBox",
+                unit: "topology.brep_p1",
                 ..
             })
         ));

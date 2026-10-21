@@ -358,7 +358,7 @@ fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
 /// The handles of the UV line classifications of [`calculate_an_internal_point`]: the
 /// face, its surface, the UV line and the face's boundary topology and curves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UvLineHandle {
+pub(crate) enum UvLineHandle {
     Face,
     Surface,
     Line,
@@ -386,10 +386,18 @@ impl ClassObject for UvLineHandle {
 
 /// The UV line `sm_FaceClassifyUVLine` made last (`sCurveClassification.GetCurve()`),
 /// and the face `f` of `b` whose objects the other handles name.
-struct UvLineObjects<'a> {
+pub(crate) struct UvLineObjects<'a> {
     b: &'a Brep,
     f: FaceId,
     line: Option<Curve>,
+}
+
+impl<'a> UvLineObjects<'a> {
+    /// The objects of face `f` of `b`, before `sm_FaceClassifyUVLine` makes its line
+    /// (also used by `topology::face::p4`'s `GlobalLineIntersect`).
+    pub(crate) const fn new(b: &'a Brep, f: FaceId) -> Self {
+        Self { b, f, line: None }
+    }
 }
 
 impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {

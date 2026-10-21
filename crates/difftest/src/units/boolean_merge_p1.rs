@@ -162,8 +162,20 @@ pub(crate) struct Canon {
     pub(crate) vertices: Order<VertexId>,
 }
 impl Canon {
-    #[allow(clippy::too_many_lines)]
+    /// Every record: the walk from the B-rep's regions and edge list, then the
+    /// unreachable records in arena order (and the walk from them).
     pub(crate) fn of(b: &Brep) -> Self {
+        Self::walk(b, true)
+    }
+
+    /// Only the records reachable from the B-rep's regions and edge list, in the order
+    /// of [`Canon::of`] (an arena keeps the records an op deleted, reset).
+    pub(crate) fn reachable(b: &Brep) -> Self {
+        Self::walk(b, false)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn walk(b: &Brep, unreachable: bool) -> Self {
         let mut g = Self {
             regions: Order::new(),
             shells: Order::new(),
@@ -317,7 +329,7 @@ impl Canon {
                 l += 1;
                 more = true;
             }
-            if !more {
+            if !more && unreachable {
                 // unreachable records, in arena order, then walk on from them
                 let before = g.len();
                 for (id, _) in b.regions().iter() {
@@ -370,21 +382,53 @@ impl Canon {
 }
 /// The B-rep's records and links in [`Canon`] numbering, after `record` (which the
 /// caller has already put in that numbering, see [`Canon::of`]).
-#[allow(clippy::too_many_lines)]
 pub(crate) fn graph(b: &Brep, record: Vec<f64>) -> Output {
-    let c = Canon::of(b);
-    let mut ints = vec![
-        b.regions().len() as i64,
-        b.shells().len() as i64,
-        b.faceuses().len() as i64,
-        b.faces().len() as i64,
-        b.loopuses().len() as i64,
-        b.loops().len() as i64,
-        b.edgeuses().len() as i64,
-        b.edges().len() as i64,
-        b.vertexuses().len() as i64,
-        b.vertices().len() as i64,
-    ];
+    graph_counted(b, record, false)
+}
+
+/// [`graph`] with the record counts of the reachable topology ([`Canon`]) instead of
+/// the arena lengths: for ops that delete records, which an arena only resets (the C++
+/// side exports a fresh walk, so its counts are the reachable ones).
+pub(crate) fn graph_reachable(b: &Brep, record: Vec<f64>) -> Output {
+    graph_counted(b, record, true)
+}
+
+#[allow(clippy::too_many_lines)]
+fn graph_counted(b: &Brep, record: Vec<f64>, reachable: bool) -> Output {
+    let c = if reachable {
+        Canon::reachable(b)
+    } else {
+        Canon::of(b)
+    };
+    let mut ints = if reachable {
+        [
+            c.regions.items.len(),
+            c.shells.items.len(),
+            c.faceuses.items.len(),
+            c.faces.items.len(),
+            c.loopuses.items.len(),
+            c.loops.items.len(),
+            c.edgeuses.items.len(),
+            c.edges.items.len(),
+            c.vertexuses.items.len(),
+            c.vertices.items.len(),
+        ]
+        .map(|n| n as i64)
+        .to_vec()
+    } else {
+        vec![
+            b.regions().len() as i64,
+            b.shells().len() as i64,
+            b.faceuses().len() as i64,
+            b.faces().len() as i64,
+            b.loopuses().len() as i64,
+            b.loops().len() as i64,
+            b.edgeuses().len() as i64,
+            b.edges().len() as i64,
+            b.vertexuses().len() as i64,
+            b.vertices().len() as i64,
+        ]
+    };
     let regions: Vec<_> = c
         .regions
         .items

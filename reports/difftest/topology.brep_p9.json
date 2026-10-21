@@ -298,16 +298,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_orient_sheet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#37 (upstream source/SMLib/src/SmBrep.cpp:11620)",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -326,40 +322,28 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_vertex_loop_False",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#40 (upstream source/SMLib/src/SmBrep.cpp:19101)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_vertex_loop_True",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#41 (upstream source/SMLib/src/SmBrep.cpp:19101)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "plane_insert_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#42 (upstream source/SMLib/src/SmBrep.cpp:12242)",
-      "values_compared": 0
+      "values_compared": 72
     },
     {
       "max_rel_err": 0.0,
@@ -418,16 +402,12 @@
       "values_compared": 51
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bspline_face_orient_sheet",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#50 (upstream source/SMLib/src/SmBrep.cpp:11620)",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -446,28 +426,20 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bspline_face_vertex_loop_False",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#53 (upstream source/SMLib/src/SmBrep.cpp:19101)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "bspline_face_vertex_loop_True",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/boundaries.json#54 (upstream source/SMLib/src/SmBrep.cpp:19101)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "deferred": {
@@ -1222,16 +1194,12 @@
       "values_compared": 50
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "real_plane_square_orient_sheet_opposite",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/real_files.json#56 (upstream source/SMLib/src/SmBrep.cpp:11620-11704)",
-      "values_compared": 0
+      "values_compared": 50
     },
     {
       "max_rel_err": 0.0,
@@ -1242,16 +1210,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "real_plane_circ_orient_sheet_opposite",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/real_files.json#58 (upstream source/SMLib/src/SmBrep.cpp:11620-11704)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1346,16 +1310,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "review_op3_point_NaN",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/review.json#11 (upstream source/SMLib/src/SmBrep.cpp:19101-19199)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -1382,16 +1342,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "review_op3_point_inf",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/review.json#15 (upstream source/SMLib/src/SmBrep.cpp:19101-19199)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -1418,16 +1374,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetUpwardEdgeuses",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "review_op3_point_-inf",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p9/review.json#19 (upstream source/SMLib/src/SmBrep.cpp:19101-19199)",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -5535,15 +5487,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 15,
+  "cases_deferred": 3,
   "cases_failed": 0,
-  "cases_passed": 669,
+  "cases_passed": 681,
   "cases_total": 684,
   "deferred_by_unit": {
     "intersect.surface_drop_curve": 1,
     "intersect.surface_drop_lib_p3": 1,
-    "query.brep": 1,
-    "topology.face_p4": 12
+    "query.brep": 1
   },
   "max_rel_err": 0.0,
   "pass": true,

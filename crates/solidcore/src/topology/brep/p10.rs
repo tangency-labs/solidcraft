@@ -1846,20 +1846,14 @@ fn brep_faces(b: &Brep) -> Result<Vec<FaceId>> {
     p1::faces(b, None)
 }
 
-fn face_vertices(_b: &Brep, _f: FaceId) -> Result<Vec<VertexId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetVertices
-    Err(SolidError::Unported {
-        upstream: "SmFace::GetVertices",
-        unit: "topology.face_p4",
-    })
+/// `SmFace::GetVertices(rVertices)` (unit `topology.face_p4`; default arguments).
+fn face_vertices(b: &Brep, f: FaceId) -> Result<Vec<VertexId>> {
+    crate::topology::face::p4::vertices(b, f, None, false, None)
 }
 
-fn face_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::Unported {
-        upstream: "SmFace::GetEdges",
-        unit: "topology.face_p4",
-    })
+/// `SmFace::GetEdges(rEdges)` (unit `topology.face_p4`; default arguments).
+fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
 fn brep_bounding_box(_k: &Kernel, _b: &Brep) -> Result<Extent3d> {

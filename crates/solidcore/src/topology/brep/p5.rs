@@ -1653,13 +1653,13 @@ pub fn remove_faces(
     result.and(released)
 }
 
-fn face_edges(_b: &Brep, _face: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    missing("SmFace::GetEdges", "topology.face_p4")
+/// `SmFace::GetEdges(rEdges)` (unit `topology.face_p4`; default arguments).
+fn face_edges(b: &Brep, face: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, face, None, false, None)
 }
-fn face_vertices(_b: &Brep, _face: FaceId) -> Result<Vec<VertexId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetVertices
-    missing("SmFace::GetVertices", "topology.face_p4")
+/// `SmFace::GetVertices(rVertices)` (unit `topology.face_p4`; default arguments).
+fn face_vertices(b: &Brep, face: FaceId) -> Result<Vec<VertexId>> {
+    crate::topology::face::p4::vertices(b, face, None, false, None)
 }
 
 /// Stitching and orientation options with the native defaults.

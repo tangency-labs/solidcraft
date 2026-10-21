@@ -1563,8 +1563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "constructed_03_op7_00",
@@ -1944,8 +1944,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "constructed_04_op7_00",
@@ -2325,8 +2325,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "constructed_05_op7_00",
@@ -2706,8 +2706,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "constructed_06_op7_00",
@@ -3087,8 +3087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "constructed_07_op7_00",
@@ -3468,8 +3468,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adversarial_00_op7_00",
@@ -3849,8 +3849,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adversarial_01_op7_00",
@@ -4229,14 +4229,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "adversarial_02_op7_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#516 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -4611,8 +4607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adversarial_03_op7_00",
@@ -4992,8 +4988,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adversarial_04_op7_00",
@@ -5372,14 +5368,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "adversarial_05_op7_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#657 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -5753,14 +5745,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "adversarial_06_op7_00",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.topology_traverser/traversals.json#704 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
@@ -6928,8 +6916,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_00_op7_00",
@@ -7309,8 +7297,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "upstream_files_01_op7_00",
@@ -7329,8 +7317,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0001",
@@ -7340,21 +7328,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0002",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12051413912706926658",
       "values_compared": 0
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -7364,14 +7348,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0004",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12051413912706926660",
       "values_compared": 0
     },
@@ -7434,8 +7414,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetUpwardLoopuses",
-        "unit": "topology.face_p4"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0012",
@@ -7445,14 +7425,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GlobalLineIntersect",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0013",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12051413912706926669",
       "values_compared": 0
     },
@@ -7475,12 +7451,13 @@
     }
   ],
   "cases_both_errored": 120,
-  "cases_deferred": 20,
+  "cases_deferred": 14,
   "cases_failed": 0,
-  "cases_passed": 889,
+  "cases_passed": 895,
   "cases_total": 909,
   "deferred_by_unit": {
-    "topology.face_p4": 20
+    "intersect.curve_class_p2": 4,
+    "intersect.surface_drop_lib_p3": 10
   },
   "max_rel_err": 0.0,
   "pass": true,

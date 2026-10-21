@@ -59,8 +59,7 @@
 //!   `pbOptCrvOnSurf` without UV curves (upstream loops over a null array).
 //! - **Unported callees** return [`SolidError::Unported`]: `MakeWireEdge`,
 //!   `MakeWireEdgeVertex` (`topology.brep_p3`); `DeleteEdge` (`topology.brep_p4`);
-//!   `SmFace::GetBrep`, `GetEdges`
-//!   (`topology.face_p4`); `SmMerge` (`boolean.merge_p2`); the curve constructor of
+//!   `SmMerge` (`boolean.merge_p2`); the curve constructor of
 //!   `SmCurveClassification` (`intersect.curve_class_p4`), which
 //!   `MergeSelfIntersectionCurves` reaches first. `GlueVertices` calls
 //!   `topology.brep_p5` with the caller's notification environment. Its classification of a UV curve
@@ -353,16 +352,15 @@ fn face_create_uv_trim_curves(
     .map(|_| ())
 }
 
-/// `pFace->GetBrep() == this`.
-fn face_in_brep(_b: &Brep, _f: FaceId) -> Result<bool> {
-    // UNPORTED(topology.face_p4): SmFace::GetBrep
-    Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
+/// `pFace->GetBrep() == this` (unit `topology.face_p4`): a face of this arena whose
+/// shell's region is in the B-rep.
+fn face_in_brep(b: &Brep, f: FaceId) -> Result<bool> {
+    Ok(crate::topology::face::p4::brep(b, f)?.is_some())
 }
 
-/// `pFace->GetEdges(sEdges)`.
-fn face_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+/// `pFace->GetEdges(sEdges)` (unit `topology.face_p4`; default arguments).
+fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
 /// `SmMerge(ctx, dest, src, tol, 20 deg)`, then per face the `GetBrep() == this` check

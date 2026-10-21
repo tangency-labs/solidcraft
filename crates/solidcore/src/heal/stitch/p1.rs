@@ -58,8 +58,7 @@
 //! - `SmBrep::GlueVertices`, `RemoveFaces` (with the B-rep's own editing flag) and
 //!   `StitchAndOrient` call `topology.brep_p5`, which defers at its own barriers.
 //! - The calls into `GlueEdgesGeneral` (`topology.brep_p7`), `SqueezeEdge`
-//!   (`topology.brep_p3`), `CalculateBoundingBox` (`query.brep`), `SmFace::GetBrep`,
-//!   `GetVertices`, `GetEdges` (`topology.face_p4`) and `SmMerge::MergeAddedFace`
+//!   (`topology.brep_p3`), `CalculateBoundingBox` (`query.brep`) and `SmMerge::MergeAddedFace`
 //!   (`boolean.merge_p2`) return [`SolidError::Unported`]. The API entry points call
 //!   `DoStitching`, `StitchIntoSolid` and `StitchIntoShell` in [`super::p2`].
 //!   `SmBrep::Notify(SM_NO_PRE_EDIT)` is `topology::brep::p2::notify` on an empty notify
@@ -2114,28 +2113,20 @@ fn brep_bounding_box(
     ))
 }
 
-/// Whether `SmFace::GetBrep()` is `b` (unit `topology.face_p4`).
+/// Whether `SmFace::GetBrep()` is `b` (unit `topology.face_p4`): a face of this arena
+/// whose shell's region is in the B-rep.
 fn face_in_brep(b: &Brep, f: FaceId) -> Result<bool> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p4): SmFace::GetBrep
-    Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
+    Ok(crate::topology::face::p4::brep(b, f)?.is_some())
 }
 
-/// `SmFace::GetVertices` (unit `topology.face_p4`).
+/// `SmFace::GetVertices(rVertices)` (unit `topology.face_p4`; default arguments).
 fn face_vertices(b: &Brep, f: FaceId) -> Result<Vec<VertexId>> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p4): SmFace::GetVertices
-    Err(SolidError::unported(
-        "SmFace::GetVertices",
-        "topology.face_p4",
-    ))
+    crate::topology::face::p4::vertices(b, f, None, false, None)
 }
 
-/// `SmFace::GetEdges` (unit `topology.face_p4`).
+/// `SmFace::GetEdges(rEdges)` (unit `topology.face_p4`; default arguments).
 fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+    crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
 /// `SmEdgeuse::NormalizedEvaluate(t, bParameterSpaceEval, rPoint, pOptFirstDeriv,

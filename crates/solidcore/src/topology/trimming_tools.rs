@@ -322,9 +322,8 @@ fn face_flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 }
 
 /// `SmFace::GetEdges` (unit `topology.face_p4`).
-fn face_edges(_b: &Brep, _f: FaceId) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
+    crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
 /// The classification object of the seam classifications `SplitAtSeams` passes on: the
@@ -577,8 +576,7 @@ pub fn face_uv_curves_present(b: &Brep, f: FaceId) -> Result<bool> {
 ///
 /// # Errors
 ///
-/// Those of [`crate::topology::face::p3::create_uv_trim_curves`] ([`SolidError::Unported`]
-/// at `SmFace::GetUpwardLoopuses`, `topology.face_p4`).
+/// Those of [`crate::topology::face::p3::create_uv_trim_curves`].
 pub fn create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
     face_create_uv_trim_curves(k, b, f)
 }
@@ -588,8 +586,7 @@ pub fn create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> 
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmFace::GetEdges`, `topology.face_p4`); those of
-/// [`eu1::set_uv_trim_curve`].
+/// Those of [`eu1::set_uv_trim_curve`] and `SmFace::GetEdges` (`topology::face::p4`).
 pub fn clear_uv_trim_curves(b: &mut Brep, f: FaceId) -> Result<()> {
     for e in face_edges(b, f)? {
         for eu in crate::topology::edge::edgeuses(b, e, None, None)? {

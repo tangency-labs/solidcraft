@@ -1342,14 +1342,11 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
+      "both_errored": true,
       "max_rel_err": 0.0,
       "name": "two_squares_simple",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/heal.stitch_p1/constructed.json#135",
       "values_compared": 0
     },
@@ -2546,16 +2543,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetBrep",
-        "unit": "topology.face_p4"
-      },
       "max_rel_err": 0.0,
       "name": "gen0001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10358690932861732225",
-      "values_compared": 0
+      "values_compared": 1
     },
     {
       "max_rel_err": 0.0,
@@ -2674,18 +2667,17 @@
       "values_compared": 5
     }
   ],
-  "cases_both_errored": 0,
-  "cases_deferred": 68,
+  "cases_both_errored": 1,
+  "cases_deferred": 66,
   "cases_failed": 0,
-  "cases_passed": 232,
+  "cases_passed": 234,
   "cases_total": 300,
   "deferred_by_unit": {
     "harness:analytic-geometry-export": 1,
     "query.brep": 10,
     "topology.brep_p1": 5,
     "topology.brep_p4": 1,
-    "topology.face_p2": 49,
-    "topology.face_p4": 2
+    "topology.face_p2": 49
   },
   "max_rel_err": 0.0,
   "pass": true,
