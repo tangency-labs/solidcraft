@@ -1873,6 +1873,23 @@ fn a_loaded_coil_cannot_be_both_primitive_and_from_a_sketch() {
 }
 
 #[test]
+fn a_loaded_sketch_coil_cannot_also_set_the_primitive_section() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    for (field, value) in [("section", json!("square")), ("position", json!(1)), ("start_angle", json!("45 deg"))] {
+        let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        let coil = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "coil").unwrap();
+        coil[field] = value;
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+        let err = reopened.model.results.iter().find_map(|r| r.error.clone()).unwrap_or_default();
+        assert!(err.contains("cannot also set"), "{field}: {err}");
+    }
+}
+
+#[test]
 fn a_sketch_coil_never_panics_on_hostile_parameters() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));

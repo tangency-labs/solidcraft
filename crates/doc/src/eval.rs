@@ -4856,8 +4856,16 @@ fn feature_tools_with_constructor(
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let p = val(vals, pitch, Kind::Length)?;
             let n = val(vals, turns, Kind::Unitless)?;
-            if sketch.is_some() && (diameter.is_some() || section_size.is_some() || start_angle.is_some()) {
-                return Err(DocError::Invalid("a coil with a `sketch` cannot also set `diameter`, `section_size` or `start_angle`".into()));
+            if sketch.is_some()
+                && (diameter.is_some()
+                    || section_size.is_some()
+                    || start_angle.is_some()
+                    || !matches!(section, crate::CoilSection::Circular)
+                    || *position != 0)
+            {
+                return Err(DocError::Invalid(
+                    "a coil with a `sketch` cannot also set `diameter`, `section_size`, `section`, `section_position` or `start_angle`".into(),
+                ));
             }
             if sketch.is_none() && !matches!(profiles, ProfileSel::All) {
                 return Err(DocError::Invalid("a coil's `profiles` need a `sketch`".into()));
