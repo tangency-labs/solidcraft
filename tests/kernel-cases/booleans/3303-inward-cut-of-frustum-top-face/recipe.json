@@ -1,0 +1,94 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      1,
+      0
+     ],
+     [
+      5,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      5,
+      -10
+     ],
+     [
+      0,
+      -10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      -10
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "body_name": "Cone"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     2,
+     0,
+     10
+    ],
+    "face_body": "Cone",
+    "distance": -4.4,
+    "operation": "cut"
+   }
+  }
+ ]
+}

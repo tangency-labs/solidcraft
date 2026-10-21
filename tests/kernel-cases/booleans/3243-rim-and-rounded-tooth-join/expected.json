@@ -1,0 +1,9 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3243"
+  ],
+  "what": "a join of a cylindrical rim (r 15.27..16.65, to z=5) and a rounded tooth trimmed to the same two cylinders that overlaps it by 0.01 mm in Z",
+  "source": "invariants",
+  "method": "the tooth (z 4.99..7.7) and the rim (z 1.76..5) overlap in z 4.99..5 with positive volume, so the join succeeds and gives one closed solid; the result is larger than the rim alone. No closed form is derived for the tooth, so only the outcome, validity and the body count are graded",
+  "body_count": 1
+}
