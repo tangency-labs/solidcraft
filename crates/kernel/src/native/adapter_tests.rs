@@ -251,3 +251,33 @@ fn smlib_primitives_decode_with_their_volume_and_orientation() {
         );
     }
 }
+
+/// SMLib's fillet round a hole's rim is a rational spline closed on itself in u, bounded by its
+/// seam used twice: the seam's pcurves lie a period apart, so the face meshes and the decoded
+/// body has SMLib's volume (both seam uses on u = 0 left the face empty, 149 mm³ short).
+#[cfg(feature = "smlib")]
+#[test]
+fn smlib_hole_rim_fillet_decodes_with_its_volume() {
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    let block = S::make_box([0.; 3], [20.; 3]).unwrap();
+    let pin = S::make_cylinder([10., 10., -1.], 4., 22.).unwrap();
+    let holed = block.boolean(&pin, BooleanOp::Subtract).unwrap().unwrap();
+    let rim = holed.fillet(&[[10., 14., 20.]], 0.1, 1.).unwrap();
+    let record = rim.to_native().unwrap();
+    assert!(
+        record
+            .faces
+            .iter()
+            .any(|f| matches!(&f.surface, b::Surface::RationalSpline { homogeneous, .. } if homogeneous.first() == homogeneous.last())),
+        "the fillet is a spline closed in u"
+    );
+    record.check_geometry().unwrap();
+    let body = crate::native::body_from_smlib(&rim).unwrap();
+    let mesh = body.tessellate(0.02).unwrap();
+    for f in 0..body.face_count() {
+        assert!(mesh.tri_face.iter().any(|&t| t as usize == f), "face {f} meshes");
+    }
+    let smlib = rim.mass_properties(solidcraft_smlib::MEASURE_ACCURACY).unwrap().volume;
+    let ours = crate::measure(&body).unwrap().volume;
+    assert!((ours - smlib).abs() < 1e-3 * smlib, "decoded volume {ours}, SMLib's {smlib}");
+}

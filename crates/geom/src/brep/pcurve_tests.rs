@@ -321,6 +321,117 @@ fn a_torus_bounded_by_its_seams_spans_both_periods() {
     }
 }
 
+/// A surface of revolution about +z as a rational spline closed in u, as SMLib writes a fillet
+/// ring round a hole's rim and STEP a NURBS cylinder: u the nine-point rational quadratic
+/// circle on [0, 1] (first and last rows the same), v the profile's `[radius, height, weight]`
+/// points on `v_knots`.
+pub(crate) fn closed_ring(profile: &[[f64; 3]], v_knots: &[f64]) -> Surface {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let around = [[1., 0., 1.], [1., 1., w], [0., 1., 1.], [-1., 1., w], [-1., 0., 1.], [-1., -1., w], [0., -1., 1.], [1., -1., w], [1., 0., 1.]];
+    let homogeneous = around
+        .iter()
+        .map(|&[cx, cy, wu]| {
+            profile
+                .iter()
+                .map(|&[r, z, wv]| {
+                    let wt = wu * wv;
+                    [r * cx * wt, r * cy * wt, z * wt, wt]
+                })
+                .collect()
+        })
+        .collect();
+    Surface::RationalSpline { u_knots: vec![0., 0., 0., 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1., 1., 1.], v_knots: v_knots.to_vec(), homogeneous }
+}
+
+/// The pcurves of a loop on a spline closed in u (period 1): each lifts within `tol`, the
+/// seam's two uses (`seam`: their positions) lie one period apart, the loop closes (in v alone
+/// where it meets a pole) and turns counter-clockwise once around the whole (u, v) box, all in
+/// the base period.
+fn closes_around_the_box(surface: &Surface, l: &[EdgeUse<'_>], seam: [usize; 2], pole: Option<usize>, tol: f64, what: &str) {
+    let pcs = &pcurves(surface, &[l.to_vec()], tol).unwrap_or_else(|e| panic!("{what}: {e}"))[0];
+    for (u, pc) in l.iter().zip(pcs) {
+        assert!(lift_error(surface, u.curve, u.interval, pc) <= tol, "{what}: lifts");
+    }
+    let iv = l[seam[0]].interval;
+    let mid = 0.5 * (iv[0] + iv[1]);
+    let (a, b) = (pcs[seam[0]].eval(mid).unwrap(), pcs[seam[1]].eval(mid).unwrap());
+    assert!(((a[0] - b[0]).abs() - 1.).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9, "{what}: seam uses a period apart: {a:?} {b:?}");
+    let (ends, area) = walk(l, pcs);
+    let n = l.len();
+    for k in 0..n {
+        let (end, start) = (ends[k].1, ends[(k + 1) % n].0);
+        let free_u = pole == Some((k + 1) % n);
+        assert!((free_u || (end[0] - start[0]).abs() < 1e-9) && (end[1] - start[1]).abs() < 1e-9, "{what}: closes at {k}: {end:?} {start:?}");
+    }
+    // At a pole `walk` cuts the corner (it joins each use's 16th sample to the next use's
+    // start, across the pole's line): a sliver of the box less.
+    let least = if pole.is_some() { 0.9 } else { 1. - 1e-6 };
+    assert!(area >= least && area < 1. + 1e-6, "{what}: counter-clockwise around the box: {area}");
+    for pc in pcs {
+        let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) = pc;
+        for k in 0..=32 {
+            let t = knots[0] + (knots[knots.len() - 1] - knots[0]) * k as f64 / 32.;
+            let q = pc.eval(t).unwrap();
+            assert!((-1e-9..=1. + 1e-9).contains(&q[0]), "{what}: base period: {q:?}");
+        }
+    }
+}
+
+/// Splines closed on themselves in u (their first and last control rows the same) are periodic
+/// there, one knot interval per period: a ring of a torus bounded by two circles and a seam used
+/// twice (SMLib's fillet round a hole's rim), a NURBS cylinder, and a NURBS dome whose seam runs
+/// into its pole. Each seam's uses come out a period apart, never both on u = 0.
+#[test]
+fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let full = [0., TAU];
+    let (big, small) = (5., 1.);
+    // The torus band: the tube's quarter from its outer equator (v = 0) to its top (v = 1).
+    let band = closed_ring(&[[big + small, 0., 1.], [big + small, small, w], [big, small, 1.]], &[0., 0., 0., 1., 1., 1.]);
+    let outer = Curve::Circle { frame: about_z([0.; 3], false), radius: big + small };
+    let top = Curve::Circle { frame: about_z([0., 0., small], false), radius: big };
+    let quarter = Curve::Circle { frame: frame([big, 0., 0.], [1., 0., 0.], [0., 0., 1.]), radius: small };
+    let l = vec![
+        EdgeUse { edge: 0, curve: &outer, interval: full, forward: true },
+        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: true },
+        EdgeUse { edge: 2, curve: &top, interval: full, forward: false },
+        EdgeUse { edge: 1, curve: &quarter, interval: [0., FRAC_PI_2], forward: false },
+    ];
+    for tol in [1e-4, 1e-7] {
+        closes_around_the_box(&band, &l, [1, 3], None, tol, &format!("torus band, tol {tol}"));
+    }
+    // The cylinder: radius 3 from z = 0 (v = 0) to z = 4 (v = 1), its seam a line.
+    let cylinder = closed_ring(&[[3., 0., 1.], [3., 4., 1.]], &[0., 0., 1., 1.]);
+    let (low, high) =
+        (Curve::Circle { frame: about_z([0.; 3], false), radius: 3. }, Curve::Circle { frame: about_z([0., 0., 4.], false), radius: 3. });
+    let line = Curve::Line { start: [3., 0., 0.], end: [3., 0., 4.] };
+    let l = vec![
+        EdgeUse { edge: 0, curve: &low, interval: full, forward: true },
+        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: true },
+        EdgeUse { edge: 2, curve: &high, interval: full, forward: false },
+        EdgeUse { edge: 1, curve: &line, interval: [0., 1.], forward: false },
+    ];
+    closes_around_the_box(&cylinder, &l, [1, 3], None, 1e-7, "cylinder");
+    // The dome: radius 6 from its equator (v = 0) to its pole (v = 1), the seam a meridian.
+    let dome = closed_ring(&[[6., 0., 1.], [6., 6., w], [0., 6., 1.]], &[0., 0., 0., 1., 1., 1.]);
+    let equator = Curve::Circle { frame: about_z([0.; 3], false), radius: 6. };
+    let meridian = Curve::Circle { frame: frame([0.; 3], [1., 0., 0.], [0., 0., 1.]), radius: 6. };
+    let l = vec![
+        EdgeUse { edge: 0, curve: &equator, interval: full, forward: true },
+        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: true },
+        EdgeUse { edge: 1, curve: &meridian, interval: [0., FRAC_PI_2], forward: false },
+    ];
+    closes_around_the_box(&dome, &l, [1, 2], Some(2), 1e-7, "dome");
+    // A spline whose ends merely come near each other stays open: no period, so the seam's
+    // second use cannot be moved and the loop does not close around the box.
+    let Surface::RationalSpline { u_knots, v_knots, homogeneous } = &cylinder else { panic!("a rational spline") };
+    let mut open = homogeneous.clone();
+    open[8][0][1] += 1e-3;
+    let open = Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: open };
+    assert_eq!(SurfaceEval::new(&open).unwrap().domain().period, [None, None]);
+    assert_eq!(SurfaceEval::new(&cylinder).unwrap().domain().period, [Some(1.), None]);
+}
+
 /// An intersection record evaluates to the point of both surfaces in the leader's normal
 /// plane, and its pcurves on either surface fit.
 #[test]

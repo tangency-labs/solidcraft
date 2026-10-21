@@ -237,26 +237,37 @@ impl EvalSurface {
         }
     }
 
-    /// Point and first partial derivatives.
+    /// `uv` with each parameter along which a spline closes on itself moved by whole periods
+    /// into the spline's active knot interval (unchanged inside it, and for any other surface):
+    /// the parameters both evaluators take for a point of a closed spline found a period away.
+    pub fn wrap(&self, uv: [f64; 2]) -> [f64; 2] {
+        let EvalSurface::Nurbs { degree, knots, count, ctrl, .. } = self else { return uv };
+        let range = |d: usize| Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?));
+        let outside: Vec<usize> = (0..2).filter(|&d| range(d).is_some_and(|(a, b)| !(a..=b).contains(&uv[d]))).collect();
+        if outside.is_empty() {
+            return uv;
+        }
+        let shut = uv::closed(*degree, knots, *count, ctrl);
+        let mut out = uv;
+        for d in outside {
+            if let (true, Some(r)) = (shut[d], range(d)) {
+                out[d] = uv::wrap_into(uv[d], r);
+            }
+        }
+        out
+    }
+
+    /// Point and first partial derivatives (a closed spline's parameters wrapped into its
+    /// active interval first, [`EvalSurface::wrap`]).
     pub fn derivs(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
         if !(u.is_finite() && v.is_finite()) {
             return None;
         }
         match self {
             EvalSurface::Plane { origin, du, dv } => Some((*origin + *du * u + *dv * v, *du, *dv)),
-            EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => {
-                // The knot range of direction `d`: the parameters the surface is defined over.
-                let range = |d: usize| -> Option<(f64, f64)> {
-                    let k = knots.get(d)?;
-                    Some((*k.get(*degree.get(d)?)?, *k.get(*count.get(d)?)?))
-                };
-                // A direction the surface joins itself along repeats, so a parameter outside the
-                // range is moved by whole ranges back into it. Any other direction is left alone.
-                let wrap = |d: usize, t: f64| match range(d) {
-                    Some((a, b)) if closed.get(d).copied().unwrap_or(false) && b > a && !(a..=b).contains(&t) => a + (t - a).rem_euclid(b - a),
-                    _ => t,
-                };
-                nurbs_derivs(*degree, knots, *count, ctrl, wrap(0, u), wrap(1, v))
+            EvalSurface::Nurbs { degree, knots, count, ctrl, .. } => {
+                let [u, v] = self.wrap([u, v]);
+                nurbs_derivs(*degree, knots, *count, ctrl, u, v)
             }
             EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
                 let (s, a) = if *swap { (v, u) } else { (u, v) };

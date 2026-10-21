@@ -158,7 +158,12 @@ max, whatever the oriented edge's direction. Its interval must equal the edge's
 within 10⁻⁹ of the interval's magnitude (at least 1), room for a linear remap's
 rounding. A seam edge has two uses on one face, each with its own pcurve, a
 period apart. On a periodic surface a loop's pcurves are unwrapped, so each one
-starts where the one before it ends.
+starts where the one before it ends. A spline surface that closes on itself in a
+direction (knots clamped there, first and last control rows the same points with
+the same weights, within 10⁻⁹ of the control net's extent) is periodic in it for
+pcurves and tessellation, one active knot interval per period: a seam on it has
+its two uses an interval apart. The record is unchanged; a parameter outside the
+interval is evaluated a whole number of periods back inside it.
 
 Pcurves are SolidCraft's own, never a kernel's internal parameter space:
 `brep::pcurve::pcurves` computes them from a face's surface record and each

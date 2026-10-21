@@ -160,6 +160,47 @@ fn tube() -> Brep {
     fit_pcurves(&mut b);
     b
 }
+/// One face on `surface` bounded by one loop of `uses` (edge index, forward), each edge's
+/// pcurves fitted, as an open sheet.
+fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2], [u32; 2])>, vertices: &[[f64; 3]], uses: &[(u32, bool)]) -> Brep {
+    let mut b = Brep {
+        version: VERSION,
+        tolerance: 1e-7,
+        regions: vec![infinite(vec![0])],
+        shells: vec![Shell::Faces { faces: vec![OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![Face {
+            surface,
+            domain,
+            loops: vec![Loop::Edges { edges: uses.iter().map(|&(edge, forward)| OrientedEdge { edge, forward, pcurve: segment(0., 1.) }).collect() }],
+        }],
+        edges: edges.into_iter().map(|(curve, interval, vertices)| Edge { curve, interval, vertices, tolerance: 1e-7, uses: vec![] }).collect(),
+        vertices: vertices.iter().map(|&point| Vertex { point, tolerance: 1e-7 }).collect(),
+    };
+    list_uses(&mut b);
+    fit_pcurves(&mut b);
+    b
+}
+/// A ring of a torus as a rational spline closed in u (first and last control rows the same),
+/// as SMLib writes the fillet round a hole's rim: bounded by its two circles and the tube's
+/// quarter at u = 0, a seam used twice.
+fn closed_band() -> Brep {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let (big, small) = (5., 1.);
+    let surface = pcurve::tests::closed_ring(&[[big + small, 0., 1.], [big + small, small, w], [big, small, 1.]], &[0., 0., 0., 1., 1., 1.]);
+    let about = |z: f64| Frame { origin: [0., 0., z], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let quarter = Curve::Circle { frame: Frame { origin: [big, 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] }, radius: small };
+    one_face(
+        surface,
+        [[0., 1.], [0., 1.]],
+        vec![
+            (Curve::Circle { frame: about(0.), radius: big + small }, [0., TAU], [0, 0]),
+            (quarter, [0., FRAC_PI_2], [0, 1]),
+            (Curve::Circle { frame: about(small), radius: big }, [0., TAU], [1, 1]),
+        ],
+        &[[big + small, 0., 0.], [big, 0., small]],
+        &[(0, true), (1, true), (2, false), (1, false)],
+    )
+}
 /// The sheet with a vertex loop inside it, a wire shell and a vertex shell beside it.
 fn sheet_with_lower_forms() -> Brep {
     let mut b = sheet();
@@ -182,7 +223,14 @@ fn sheet_with_lower_forms() -> Brep {
 
 #[test]
 fn every_form_validates_and_round_trips_without_a_kernel() {
-    for (name, body) in [("sheet", sheet()), ("closed", tetra()), ("void", hollow()), ("seam", tube()), ("lower forms", sheet_with_lower_forms())] {
+    for (name, body) in [
+        ("sheet", sheet()),
+        ("closed", tetra()),
+        ("void", hollow()),
+        ("seam", tube()),
+        ("seam on a closed spline", closed_band()),
+        ("lower forms", sheet_with_lower_forms()),
+    ] {
         body.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
         body.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = serde_json::to_vec(&body).unwrap();
@@ -470,6 +518,16 @@ fn geometric_defects_are_refused_by_record() {
             b.vertices[6].point[2] = 0.01;
             b
         }),
+        (
+            "seam uses of a closed spline on one line",
+            Record::Use { face: 0, r#loop: 0, position: 1 },
+            Box::new(|p: &Problem| *p == Problem::Period { gap: 1., period: 1. }),
+            {
+                let mut b = closed_band();
+                shift(pcurve_of(&mut b, 0, 1), [-1., 0.]);
+                b
+            },
+        ),
     ];
     for (name, record, problem, body) in cases {
         body.validate().unwrap_or_else(|e| panic!("{name}: structurally valid: {e}"));
