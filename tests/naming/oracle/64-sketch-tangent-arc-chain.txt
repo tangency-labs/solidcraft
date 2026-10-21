@@ -1,0 +1,32 @@
+# oracle/64-sketch-tangent-arc-chain: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Wave: 9 faces, 21 edges
+Wave face F2:side:a1
+Wave face F2:side:a2
+Wave face F2:side:a3
+Wave face F2:side:a4
+Wave face F2:side:l1
+Wave face F2:side:l2
+Wave face F2:side:l3
+Wave face F2:start
+Wave face F2:top
+Wave edge F2:side:a1|F2:side:a2
+Wave edge F2:side:a1|F2:side:l3
+Wave edge F2:side:a1|F2:start
+Wave edge F2:side:a1|F2:top
+Wave edge F2:side:a2|F2:side:a3
+Wave edge F2:side:a2|F2:start
+Wave edge F2:side:a2|F2:top
+Wave edge F2:side:a3|F2:side:a4
+Wave edge F2:side:a3|F2:start
+Wave edge F2:side:a3|F2:top
+Wave edge F2:side:a4|F2:side:l1
+Wave edge F2:side:a4|F2:start
+Wave edge F2:side:a4|F2:top
+Wave edge F2:side:l1|F2:side:l2
+Wave edge F2:side:l1|F2:start
+Wave edge F2:side:l1|F2:top
+Wave edge F2:side:l2|F2:side:l3
+Wave edge F2:side:l2|F2:start
+Wave edge F2:side:l2|F2:top
+Wave edge F2:side:l3|F2:start
+Wave edge F2:side:l3|F2:top

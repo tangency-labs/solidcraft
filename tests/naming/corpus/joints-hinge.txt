@@ -1,0 +1,61 @@
+# corpus/joints-hinge: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 6 faces, 12 edges
+Body1 face F3:+x
+Body1 face F3:+y
+Body1 face F3:+z
+Body1 face F3:-x
+Body1 face F3:-y
+Body1 face F3:-z
+Body1 edge F3:+x|F3:+y
+Body1 edge F3:+x|F3:+z
+Body1 edge F3:+x|F3:-y
+Body1 edge F3:+x|F3:-z
+Body1 edge F3:+y|F3:+z
+Body1 edge F3:+y|F3:-x
+Body1 edge F3:+y|F3:-z
+Body1 edge F3:+z|F3:-x
+Body1 edge F3:+z|F3:-y
+Body1 edge F3:-x|F3:-y
+Body1 edge F3:-x|F3:-z
+Body1 edge F3:-y|F3:-z
+body Body2: 4 faces, 6 edges
+Body2 face F4:bottom
+Body2 face F4:side#1
+Body2 face F4:side#2
+Body2 face F4:top
+Body2 edge F4:bottom|F4:side#1
+Body2 edge F4:bottom|F4:side#2
+Body2 edge F4:side#1|F4:side#2~1 [geometric]
+Body2 edge F4:side#1|F4:side#2~2 [geometric]
+Body2 edge F4:side#1|F4:top
+Body2 edge F4:side#2|F4:top
+body Body3: 6 faces, 12 edges
+Body3 face F7:+x
+Body3 face F7:+y
+Body3 face F7:+z
+Body3 face F7:-x
+Body3 face F7:-y
+Body3 face F7:-z
+Body3 edge F7:+x|F7:+y
+Body3 edge F7:+x|F7:+z
+Body3 edge F7:+x|F7:-y
+Body3 edge F7:+x|F7:-z
+Body3 edge F7:+y|F7:+z
+Body3 edge F7:+y|F7:-x
+Body3 edge F7:+y|F7:-z
+Body3 edge F7:+z|F7:-x
+Body3 edge F7:+z|F7:-y
+Body3 edge F7:-x|F7:-y
+Body3 edge F7:-x|F7:-z
+Body3 edge F7:-y|F7:-z
+body Body4: 4 faces, 6 edges
+Body4 face F8:bottom
+Body4 face F8:side#1
+Body4 face F8:side#2
+Body4 face F8:top
+Body4 edge F8:bottom|F8:side#1
+Body4 edge F8:bottom|F8:side#2
+Body4 edge F8:side#1|F8:side#2~1 [geometric]
+Body4 edge F8:side#1|F8:side#2~2 [geometric]
+Body4 edge F8:side#1|F8:top
+Body4 edge F8:side#2|F8:top

@@ -1,0 +1,29 @@
+# regressions/chamfer_curved_holder_top_lip: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 8 faces, 18 edges
+Body1 face F2:side:a1
+Body1 face F2:side:a2
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F4:side:c1
+Body1 face F5:blend:F2:top|F4:side:c1
+Body1 edge F2:side:a1|F2:side:l1
+Body1 edge F2:side:a1|F2:side:l2
+Body1 edge F2:side:a1|F2:start
+Body1 edge F2:side:a1|F4:side:c1
+Body1 edge F2:side:a2|F2:side:l1
+Body1 edge F2:side:a2|F2:side:l2
+Body1 edge F2:side:a2|F2:start
+Body1 edge F2:side:a2|F2:top
+Body1 edge F2:side:a2|F5:blend:F2:top|F4:side:c1~1 [geometric]
+Body1 edge F2:side:a2|F5:blend:F2:top|F4:side:c1~2 [geometric]
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F4:side:c1
+Body1 edge F2:side:l1|F5:blend:F2:top|F4:side:c1
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F4:side:c1
+Body1 edge F2:side:l2|F5:blend:F2:top|F4:side:c1
+Body1 edge F2:top|F5:blend:F2:top|F4:side:c1
+Body1 edge F4:side:c1|F5:blend:F2:top|F4:side:c1
+ref Chamfer1 (5) edge 0 `F2:top|F4:side:c1` -> Body1 edge F2:top|F4:side:c1

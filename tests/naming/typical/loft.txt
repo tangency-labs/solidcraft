@@ -1,0 +1,38 @@
+# typical/loft: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 11 faces, 24 edges
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F6:end
+Body1 face F6:side:l5
+Body1 face F6:side:l6
+Body1 face F6:side:l7
+Body1 face F6:side:l8
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F2:top
+Body1 edge F2:side:l2|F2:side:l3
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F2:top
+Body1 edge F2:side:l3|F2:side:l4
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l3|F2:top
+Body1 edge F2:side:l4|F2:start
+Body1 edge F2:side:l4|F2:top
+Body1 edge F2:top|F6:side:l5
+Body1 edge F2:top|F6:side:l6
+Body1 edge F2:top|F6:side:l7
+Body1 edge F2:top|F6:side:l8
+Body1 edge F6:end|F6:side:l5
+Body1 edge F6:end|F6:side:l6
+Body1 edge F6:end|F6:side:l7
+Body1 edge F6:end|F6:side:l8
+Body1 edge F6:side:l5|F6:side:l6
+Body1 edge F6:side:l5|F6:side:l8
+Body1 edge F6:side:l6|F6:side:l7
+Body1 edge F6:side:l7|F6:side:l8
+ref Bottom (3) plane `F2:cap:high:ed6121d9bed14d3fd103f347231990d103349f33b7874ad292d3c4d3539266c3` on Body1 (extrude_cap) -> healthy: Body1 faces F2:top

@@ -1,0 +1,36 @@
+# oracle/27-sketch-trapezoid: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Trapezoid: 10 faces, 24 edges
+Trapezoid face F2:side:h1#1
+Trapezoid face F2:side:h1#2
+Trapezoid face F2:side:h2#1
+Trapezoid face F2:side:h2#2
+Trapezoid face F2:side:l1
+Trapezoid face F2:side:l2
+Trapezoid face F2:side:l3
+Trapezoid face F2:side:l4
+Trapezoid face F2:start
+Trapezoid face F2:top
+Trapezoid edge F2:side:h1#1|F2:side:h1#2~1 [geometric]
+Trapezoid edge F2:side:h1#1|F2:side:h1#2~2 [geometric]
+Trapezoid edge F2:side:h1#1|F2:start
+Trapezoid edge F2:side:h1#1|F2:top
+Trapezoid edge F2:side:h1#2|F2:start
+Trapezoid edge F2:side:h1#2|F2:top
+Trapezoid edge F2:side:h2#1|F2:side:h2#2~1 [geometric]
+Trapezoid edge F2:side:h2#1|F2:side:h2#2~2 [geometric]
+Trapezoid edge F2:side:h2#1|F2:start
+Trapezoid edge F2:side:h2#1|F2:top
+Trapezoid edge F2:side:h2#2|F2:start
+Trapezoid edge F2:side:h2#2|F2:top
+Trapezoid edge F2:side:l1|F2:side:l2
+Trapezoid edge F2:side:l1|F2:side:l4
+Trapezoid edge F2:side:l1|F2:start
+Trapezoid edge F2:side:l1|F2:top
+Trapezoid edge F2:side:l2|F2:side:l3
+Trapezoid edge F2:side:l2|F2:start
+Trapezoid edge F2:side:l2|F2:top
+Trapezoid edge F2:side:l3|F2:side:l4
+Trapezoid edge F2:side:l3|F2:start
+Trapezoid edge F2:side:l3|F2:top
+Trapezoid edge F2:side:l4|F2:start
+Trapezoid edge F2:side:l4|F2:top

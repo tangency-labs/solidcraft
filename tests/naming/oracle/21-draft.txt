@@ -1,0 +1,24 @@
+# oracle/21-draft: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 6 faces, 12 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box edge F2:side:l1|F2:side:l2
+Box edge F2:side:l1|F2:side:l4
+Box edge F2:side:l1|F2:start
+Box edge F2:side:l1|F2:top
+Box edge F2:side:l2|F2:side:l3
+Box edge F2:side:l2|F2:start
+Box edge F2:side:l2|F2:top
+Box edge F2:side:l3|F2:side:l4
+Box edge F2:side:l3|F2:start
+Box edge F2:side:l3|F2:top
+Box edge F2:side:l4|F2:start
+Box edge F2:side:l4|F2:top
+ref Draft1 (3) face 0 `F2:side:l3` -> Box face F2:side:l3
+ref Draft1 (3) face 1 `F2:side:l2` -> Box face F2:side:l2
+ref Draft1 (3) face 2 `F2:side:l1` -> Box face F2:side:l1
+ref Draft1 (3) face 3 `F2:side:l4` -> Box face F2:side:l4

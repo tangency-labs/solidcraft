@@ -1,0 +1,38 @@
+# oracle/12-mirror-feature: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Base: 12 faces, 24 edges
+Base face F2:side:l1
+Base face F2:side:l2
+Base face F2:side:l3
+Base face F2:side:l4
+Base face F2:start
+Base face F2:top
+Base face F4:side:c1#1
+Base face F4:side:c1#2
+Base face F4:side:c1@F5.1#1
+Base face F4:side:c1@F5.1#2
+Base face F4:top
+Base face F4:top@F5.1
+Base edge F2:side:l1|F2:side:l2
+Base edge F2:side:l1|F2:side:l4
+Base edge F2:side:l1|F2:start
+Base edge F2:side:l1|F2:top
+Base edge F2:side:l2|F2:side:l3
+Base edge F2:side:l2|F2:start
+Base edge F2:side:l2|F2:top
+Base edge F2:side:l3|F2:side:l4
+Base edge F2:side:l3|F2:start
+Base edge F2:side:l3|F2:top
+Base edge F2:side:l4|F2:start
+Base edge F2:side:l4|F2:top
+Base edge F2:top|F4:side:c1#1
+Base edge F2:top|F4:side:c1#2
+Base edge F2:top|F4:side:c1@F5.1#1
+Base edge F2:top|F4:side:c1@F5.1#2
+Base edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Base edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Base edge F4:side:c1#1|F4:top
+Base edge F4:side:c1#2|F4:top
+Base edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~1 [geometric]
+Base edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~2 [geometric]
+Base edge F4:side:c1@F5.1#1|F4:top@F5.1
+Base edge F4:side:c1@F5.1#2|F4:top@F5.1

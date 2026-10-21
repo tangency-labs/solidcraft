@@ -1,0 +1,28 @@
+# oracle/26-sketch-belt: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Belt: 8 faces, 18 edges
+Belt face F2:side:c1
+Belt face F2:side:c2
+Belt face F2:side:c3#1
+Belt face F2:side:c3#2
+Belt face F2:side:l1
+Belt face F2:side:l2
+Belt face F2:start
+Belt face F2:top
+Belt edge F2:side:c1|F2:side:l1
+Belt edge F2:side:c1|F2:side:l2
+Belt edge F2:side:c1|F2:start
+Belt edge F2:side:c1|F2:top
+Belt edge F2:side:c2|F2:side:l1
+Belt edge F2:side:c2|F2:side:l2
+Belt edge F2:side:c2|F2:start
+Belt edge F2:side:c2|F2:top
+Belt edge F2:side:c3#1|F2:side:c3#2~1 [geometric]
+Belt edge F2:side:c3#1|F2:side:c3#2~2 [geometric]
+Belt edge F2:side:c3#1|F2:start
+Belt edge F2:side:c3#1|F2:top
+Belt edge F2:side:c3#2|F2:start
+Belt edge F2:side:c3#2|F2:top
+Belt edge F2:side:l1|F2:start
+Belt edge F2:side:l1|F2:top
+Belt edge F2:side:l2|F2:start
+Belt edge F2:side:l2|F2:top

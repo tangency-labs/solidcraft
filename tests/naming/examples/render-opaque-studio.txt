@@ -1,0 +1,96 @@
+# examples/render-opaque-studio: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Nonmetal smooth: 6 faces, 12 edges
+Nonmetal smooth face F1:face:0 [geometric]
+Nonmetal smooth face F1:face:1 [geometric]
+Nonmetal smooth face F1:face:2 [geometric]
+Nonmetal smooth face F1:face:3 [geometric]
+Nonmetal smooth face F1:face:4 [geometric]
+Nonmetal smooth face F1:face:5 [geometric]
+Nonmetal smooth edge F1:face:0|F1:face:2 [geometric]
+Nonmetal smooth edge F1:face:0|F1:face:3 [geometric]
+Nonmetal smooth edge F1:face:0|F1:face:4 [geometric]
+Nonmetal smooth edge F1:face:0|F1:face:5 [geometric]
+Nonmetal smooth edge F1:face:1|F1:face:2 [geometric]
+Nonmetal smooth edge F1:face:1|F1:face:3 [geometric]
+Nonmetal smooth edge F1:face:1|F1:face:4 [geometric]
+Nonmetal smooth edge F1:face:1|F1:face:5 [geometric]
+Nonmetal smooth edge F1:face:2|F1:face:4 [geometric]
+Nonmetal smooth edge F1:face:2|F1:face:5 [geometric]
+Nonmetal smooth edge F1:face:3|F1:face:4 [geometric]
+Nonmetal smooth edge F1:face:3|F1:face:5 [geometric]
+body Nonmetal rough: 6 faces, 12 edges
+Nonmetal rough face F2:face:0 [geometric]
+Nonmetal rough face F2:face:1 [geometric]
+Nonmetal rough face F2:face:2 [geometric]
+Nonmetal rough face F2:face:3 [geometric]
+Nonmetal rough face F2:face:4 [geometric]
+Nonmetal rough face F2:face:5 [geometric]
+Nonmetal rough edge F2:face:0|F2:face:2 [geometric]
+Nonmetal rough edge F2:face:0|F2:face:3 [geometric]
+Nonmetal rough edge F2:face:0|F2:face:4 [geometric]
+Nonmetal rough edge F2:face:0|F2:face:5 [geometric]
+Nonmetal rough edge F2:face:1|F2:face:2 [geometric]
+Nonmetal rough edge F2:face:1|F2:face:3 [geometric]
+Nonmetal rough edge F2:face:1|F2:face:4 [geometric]
+Nonmetal rough edge F2:face:1|F2:face:5 [geometric]
+Nonmetal rough edge F2:face:2|F2:face:4 [geometric]
+Nonmetal rough edge F2:face:2|F2:face:5 [geometric]
+Nonmetal rough edge F2:face:3|F2:face:4 [geometric]
+Nonmetal rough edge F2:face:3|F2:face:5 [geometric]
+body Metal smooth: 6 faces, 12 edges
+Metal smooth face F3:face:0 [geometric]
+Metal smooth face F3:face:1 [geometric]
+Metal smooth face F3:face:2 [geometric]
+Metal smooth face F3:face:3 [geometric]
+Metal smooth face F3:face:4 [geometric]
+Metal smooth face F3:face:5 [geometric]
+Metal smooth edge F3:face:0|F3:face:2 [geometric]
+Metal smooth edge F3:face:0|F3:face:3 [geometric]
+Metal smooth edge F3:face:0|F3:face:4 [geometric]
+Metal smooth edge F3:face:0|F3:face:5 [geometric]
+Metal smooth edge F3:face:1|F3:face:2 [geometric]
+Metal smooth edge F3:face:1|F3:face:3 [geometric]
+Metal smooth edge F3:face:1|F3:face:4 [geometric]
+Metal smooth edge F3:face:1|F3:face:5 [geometric]
+Metal smooth edge F3:face:2|F3:face:4 [geometric]
+Metal smooth edge F3:face:2|F3:face:5 [geometric]
+Metal smooth edge F3:face:3|F3:face:4 [geometric]
+Metal smooth edge F3:face:3|F3:face:5 [geometric]
+body Metal rough: 6 faces, 12 edges
+Metal rough face F4:face:0 [geometric]
+Metal rough face F4:face:1 [geometric]
+Metal rough face F4:face:2 [geometric]
+Metal rough face F4:face:3 [geometric]
+Metal rough face F4:face:4 [geometric]
+Metal rough face F4:face:5 [geometric]
+Metal rough edge F4:face:0|F4:face:2 [geometric]
+Metal rough edge F4:face:0|F4:face:3 [geometric]
+Metal rough edge F4:face:0|F4:face:4 [geometric]
+Metal rough edge F4:face:0|F4:face:5 [geometric]
+Metal rough edge F4:face:1|F4:face:2 [geometric]
+Metal rough edge F4:face:1|F4:face:3 [geometric]
+Metal rough edge F4:face:1|F4:face:4 [geometric]
+Metal rough edge F4:face:1|F4:face:5 [geometric]
+Metal rough edge F4:face:2|F4:face:4 [geometric]
+Metal rough edge F4:face:2|F4:face:5 [geometric]
+Metal rough edge F4:face:3|F4:face:4 [geometric]
+Metal rough edge F4:face:3|F4:face:5 [geometric]
+body Study base: 6 faces, 12 edges
+Study base face F5:+x
+Study base face F5:+y
+Study base face F5:+z
+Study base face F5:-x
+Study base face F5:-y
+Study base face F5:-z
+Study base edge F5:+x|F5:+y
+Study base edge F5:+x|F5:+z
+Study base edge F5:+x|F5:-y
+Study base edge F5:+x|F5:-z
+Study base edge F5:+y|F5:+z
+Study base edge F5:+y|F5:-x
+Study base edge F5:+y|F5:-z
+Study base edge F5:+z|F5:-x
+Study base edge F5:+z|F5:-y
+Study base edge F5:-x|F5:-y
+Study base edge F5:-x|F5:-z
+Study base edge F5:-y|F5:-z

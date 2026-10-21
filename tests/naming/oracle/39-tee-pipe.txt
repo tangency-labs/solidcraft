@@ -1,0 +1,39 @@
+# oracle/39-tee-pipe: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Tee: 11 faces, 26 edges
+Tee face F2:bottom
+Tee face F2:side:c1#1
+Tee face F2:side:c1#2
+Tee face F2:top
+Tee face F4:side:c1#1
+Tee face F4:side:c1#2
+Tee face F4:top
+Tee face F6:side:c1#1
+Tee face F6:side:c1#2
+Tee face F8:side:c1#1
+Tee face F8:side:c1#2
+Tee edge F2:bottom|F2:side:c1#1
+Tee edge F2:bottom|F2:side:c1#2
+Tee edge F2:bottom|F6:side:c1#1
+Tee edge F2:bottom|F6:side:c1#2
+Tee edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Tee edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Tee edge F2:side:c1#1|F2:side:c1#2~3 [geometric]
+Tee edge F2:side:c1#1|F2:top
+Tee edge F2:side:c1#1|F4:side:c1#1
+Tee edge F2:side:c1#2|F2:top
+Tee edge F2:side:c1#2|F4:side:c1#2
+Tee edge F2:top|F6:side:c1#1
+Tee edge F2:top|F6:side:c1#2
+Tee edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Tee edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Tee edge F4:side:c1#1|F4:top
+Tee edge F4:side:c1#2|F4:top
+Tee edge F4:top|F8:side:c1#1
+Tee edge F4:top|F8:side:c1#2
+Tee edge F6:side:c1#1|F6:side:c1#2~1 [geometric]
+Tee edge F6:side:c1#1|F6:side:c1#2~2 [geometric]
+Tee edge F6:side:c1#1|F6:side:c1#2~3 [geometric]
+Tee edge F6:side:c1#1|F8:side:c1#1
+Tee edge F6:side:c1#2|F8:side:c1#2
+Tee edge F8:side:c1#1|F8:side:c1#2~1 [geometric]
+Tee edge F8:side:c1#1|F8:side:c1#2~2 [geometric]

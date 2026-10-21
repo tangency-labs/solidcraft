@@ -1,0 +1,29 @@
+# oracle/35-fillet-curved-curved: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Tee: 9 faces, 17 edges
+Tee face F2:bottom
+Tee face F2:side:c1#1
+Tee face F2:side:c1#2
+Tee face F2:top
+Tee face F4:side:c1#1
+Tee face F4:side:c1#2
+Tee face F4:top
+Tee face F5:blend:F2:side:c1#1|F4:side:c1#1
+Tee face F5:blend:F2:side:c1#2|F4:side:c1#2
+Tee edge F2:bottom|F2:side:c1#1
+Tee edge F2:bottom|F2:side:c1#2
+Tee edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Tee edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Tee edge F2:side:c1#1|F2:side:c1#2~3 [geometric]
+Tee edge F2:side:c1#1|F2:top
+Tee edge F2:side:c1#1|F5:blend:F2:side:c1#1|F4:side:c1#1
+Tee edge F2:side:c1#2|F2:top
+Tee edge F2:side:c1#2|F5:blend:F2:side:c1#2|F4:side:c1#2
+Tee edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Tee edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Tee edge F4:side:c1#1|F4:top
+Tee edge F4:side:c1#1|F5:blend:F2:side:c1#1|F4:side:c1#1
+Tee edge F4:side:c1#2|F4:top
+Tee edge F4:side:c1#2|F5:blend:F2:side:c1#2|F4:side:c1#2
+Tee edge F5:blend:F2:side:c1#1|F4:side:c1#1|F5:blend:F2:side:c1#2|F4:side:c1#2~1 [geometric]
+Tee edge F5:blend:F2:side:c1#1|F4:side:c1#1|F5:blend:F2:side:c1#2|F4:side:c1#2~2 [geometric]
+ref SaddleFillet (5) edge 0 `F2:side:c1#1|F4:side:c1#1` -> Tee edge F2:side:c1#1|F4:side:c1#1

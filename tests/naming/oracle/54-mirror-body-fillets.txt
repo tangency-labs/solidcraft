@@ -1,0 +1,54 @@
+# oracle/54-mirror-body-fillets: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Bracket: 14 faces, 36 edges
+Bracket face F2:side:l1
+Bracket face F2:side:l2
+Bracket face F2:side:l2@F6.1
+Bracket face F2:side:l3
+Bracket face F2:start
+Bracket face F2:top
+Bracket face F3:blend:F2:side:l1|F2:side:l2
+Bracket face F3:blend:F2:side:l1|F2:side:l2@F6.1
+Bracket face F3:blend:F2:side:l2|F2:side:l3
+Bracket face F3:blend:F2:side:l2|F2:side:l3@F6.1
+Bracket face F5:side:c1#1
+Bracket face F5:side:c1#1@F6.1
+Bracket face F5:side:c1#2
+Bracket face F5:side:c1#2@F6.1
+Bracket edge F2:side:l1|F2:start
+Bracket edge F2:side:l1|F2:top
+Bracket edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l2
+Bracket edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l2@F6.1
+Bracket edge F2:side:l2@F6.1|F2:start
+Bracket edge F2:side:l2@F6.1|F2:top
+Bracket edge F2:side:l2@F6.1|F3:blend:F2:side:l1|F2:side:l2@F6.1
+Bracket edge F2:side:l2@F6.1|F3:blend:F2:side:l2|F2:side:l3@F6.1
+Bracket edge F2:side:l2|F2:start
+Bracket edge F2:side:l2|F2:top
+Bracket edge F2:side:l2|F3:blend:F2:side:l1|F2:side:l2
+Bracket edge F2:side:l2|F3:blend:F2:side:l2|F2:side:l3
+Bracket edge F2:side:l3|F2:start
+Bracket edge F2:side:l3|F2:top
+Bracket edge F2:side:l3|F3:blend:F2:side:l2|F2:side:l3
+Bracket edge F2:side:l3|F3:blend:F2:side:l2|F2:side:l3@F6.1
+Bracket edge F2:start|F3:blend:F2:side:l1|F2:side:l2
+Bracket edge F2:start|F3:blend:F2:side:l1|F2:side:l2@F6.1
+Bracket edge F2:start|F3:blend:F2:side:l2|F2:side:l3
+Bracket edge F2:start|F3:blend:F2:side:l2|F2:side:l3@F6.1
+Bracket edge F2:start|F5:side:c1#1
+Bracket edge F2:start|F5:side:c1#1@F6.1
+Bracket edge F2:start|F5:side:c1#2
+Bracket edge F2:start|F5:side:c1#2@F6.1
+Bracket edge F2:top|F3:blend:F2:side:l1|F2:side:l2
+Bracket edge F2:top|F3:blend:F2:side:l1|F2:side:l2@F6.1
+Bracket edge F2:top|F3:blend:F2:side:l2|F2:side:l3
+Bracket edge F2:top|F3:blend:F2:side:l2|F2:side:l3@F6.1
+Bracket edge F2:top|F5:side:c1#1
+Bracket edge F2:top|F5:side:c1#1@F6.1
+Bracket edge F2:top|F5:side:c1#2
+Bracket edge F2:top|F5:side:c1#2@F6.1
+Bracket edge F5:side:c1#1@F6.1|F5:side:c1#2@F6.1~1 [geometric]
+Bracket edge F5:side:c1#1@F6.1|F5:side:c1#2@F6.1~2 [geometric]
+Bracket edge F5:side:c1#1|F5:side:c1#2~1 [geometric]
+Bracket edge F5:side:c1#1|F5:side:c1#2~2 [geometric]
+ref Fillet1 (3) edge 0 `F2:side:l2|F2:side:l3` -> Bracket edge F2:side:l2|F2:side:l3
+ref Fillet1 (3) edge 1 `F2:side:l1|F2:side:l2` -> Bracket edge F2:side:l1|F2:side:l2

@@ -1,0 +1,28 @@
+# oracle/03-box-through-hole: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 8 faces, 18 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box face F4:side:c1#1
+Box face F4:side:c1#2
+Box edge F2:side:l1|F2:side:l2
+Box edge F2:side:l1|F2:side:l4
+Box edge F2:side:l1|F2:start
+Box edge F2:side:l1|F2:top
+Box edge F2:side:l2|F2:side:l3
+Box edge F2:side:l2|F2:start
+Box edge F2:side:l2|F2:top
+Box edge F2:side:l3|F2:side:l4
+Box edge F2:side:l3|F2:start
+Box edge F2:side:l3|F2:top
+Box edge F2:side:l4|F2:start
+Box edge F2:side:l4|F2:top
+Box edge F2:start|F4:side:c1#1
+Box edge F2:start|F4:side:c1#2
+Box edge F2:top|F4:side:c1#1
+Box edge F2:top|F4:side:c1#2
+Box edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Box edge F4:side:c1#1|F4:side:c1#2~2 [geometric]

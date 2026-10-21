@@ -1,0 +1,38 @@
+# oracle/15-combine-intersect: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body A: 12 faces, 24 edges
+A face F2:bottom
+A face F2:side:l1
+A face F2:side:l2
+A face F2:side:l3
+A face F2:side:l4
+A face F2:top
+A face F4:side:a1#1
+A face F4:side:a1#2
+A face F4:side:a1#3
+A face F4:side:a1#4
+A face F4:side:a1#5
+A face F4:side:a1#6
+A edge F2:bottom|F4:side:a1#6~1 [geometric]
+A edge F2:bottom|F4:side:a1#6~2 [geometric]
+A edge F2:side:l1|F4:side:a1#4~1 [geometric]
+A edge F2:side:l1|F4:side:a1#4~2 [geometric]
+A edge F2:side:l2|F4:side:a1#1~1 [geometric]
+A edge F2:side:l2|F4:side:a1#1~2 [geometric]
+A edge F2:side:l3|F4:side:a1#3~1 [geometric]
+A edge F2:side:l3|F4:side:a1#3~2 [geometric]
+A edge F2:side:l4|F4:side:a1#2~1 [geometric]
+A edge F2:side:l4|F4:side:a1#2~2 [geometric]
+A edge F2:top|F4:side:a1#5~1 [geometric]
+A edge F2:top|F4:side:a1#5~2 [geometric]
+A edge F4:side:a1#1|F4:side:a1#3
+A edge F4:side:a1#1|F4:side:a1#4
+A edge F4:side:a1#1|F4:side:a1#5
+A edge F4:side:a1#1|F4:side:a1#6
+A edge F4:side:a1#2|F4:side:a1#3
+A edge F4:side:a1#2|F4:side:a1#4
+A edge F4:side:a1#2|F4:side:a1#5
+A edge F4:side:a1#2|F4:side:a1#6
+A edge F4:side:a1#3|F4:side:a1#5
+A edge F4:side:a1#3|F4:side:a1#6
+A edge F4:side:a1#4|F4:side:a1#5
+A edge F4:side:a1#4|F4:side:a1#6
