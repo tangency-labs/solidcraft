@@ -6,6 +6,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::boolean_record::tests::{self, Reach, changes, to_edge, to_face};
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, History};
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude};
 

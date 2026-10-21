@@ -1,6 +1,7 @@
 use solidcraft_geom::Vec3;
 
 use super::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
+use crate::history::BodyHistory;
 use crate::{Body, box_solid, transform};
 
 fn face(operand: usize, face: usize) -> FaceOrigin {

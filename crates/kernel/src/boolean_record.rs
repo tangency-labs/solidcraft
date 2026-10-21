@@ -12,11 +12,12 @@ use truck_modeling as mt;
 
 use crate::Result;
 use crate::body::{Body, Solid, edge_order};
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv, History};
 use crate::record;
 
 /// A composition step's history, or none (logged) where the lineage can't be expressed.
-pub(crate) fn composed(h: Result<History>) -> Option<History> {
+pub(crate) fn composed<E: std::fmt::Display>(h: std::result::Result<History, E>) -> Option<History> {
     h.map_err(|e| log::debug!("no history: {e}")).ok()
 }
 

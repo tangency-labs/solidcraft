@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use crate::body::{Body, Solid, from_p3};
 use crate::boolean_diagnostics::{BooleanFallback, BooleanStrategy, capture_boolean_diagnostics, merge, record, reject};
 use crate::boolean_record::{self as recorded, Traced};
+use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard, record};
 
 #[cfg(test)]

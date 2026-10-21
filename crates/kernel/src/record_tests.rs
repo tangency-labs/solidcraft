@@ -7,6 +7,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::build::PathSeg;
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv, History, Side};
 
 const P: fn(usize) -> FaceOrigin = |segment| FaceOrigin::Profile { segment };

@@ -3,6 +3,7 @@ use solidcraft_geom::{Aabb3, Mesh, Vec3};
 use truck_meshalgo::prelude::*;
 use truck_modeling as mt;
 
+use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard};
 
 #[path = "planar_regularize.rs"]

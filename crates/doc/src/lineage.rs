@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 
 use solidcraft_geom::Region2;
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
 
 use crate::SolvedSketch;
 

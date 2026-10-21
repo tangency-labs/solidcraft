@@ -1,4 +1,5 @@
 use super::*;
+use crate::history::BodyHistory;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 fn dome() -> Body {
