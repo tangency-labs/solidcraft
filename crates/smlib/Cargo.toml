@@ -32,4 +32,5 @@ solidcraft-geom = { workspace = true }
 cc = { version = "1.2", features = ["parallel"] }
 
 [dev-dependencies]
+flate2 = "1.1"
 serde_json = { workspace = true }

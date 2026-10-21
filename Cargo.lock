@@ -4417,6 +4417,7 @@ name = "solidcraft-smlib"
 version = "0.18.1"
 dependencies = [
  "cc",
+ "flate2",
  "log",
  "serde_json",
  "solidcraft-geom",
