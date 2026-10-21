@@ -1,8 +1,9 @@
 {
  "sources": [
-  "tangency-labs/solidcraft#3576"
+  "tangency-labs/solidcraft#3576",
+  "tangency-labs/solidcraft#3573"
  ],
- "what": "a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces",
+ "what": "a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design)",
  "source": "invariants",
  "method": "no closed-form volume (tilted rounds). Invariants: the shell succeeds, one closed body, and the record's geometry check holds (every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject)",
  "body_count": 1

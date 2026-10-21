@@ -8,18 +8,6 @@
   "why": "no geometry given (a screenshot and 'the shell removed everything'); needs the user's design"
  },
  {
-  "source": "tangency-labs/solidcraft#451",
-  "why": "other area: booleans (cut with a hollow spherical-shell tool)"
- },
- {
-  "source": "tangency-labs/solidcraft#1107",
-  "why": "other area: booleans (combine of a hollow hub with 9 lofted blades; cavity ownership)"
- },
- {
-  "source": "tangency-labs/solidcraft#1140",
-  "why": "other area: booleans (cutting a hollow lofted tube in half; a vertex a hair inside an edge)"
- },
- {
   "source": "tangency-labs/solidcraft#1379",
   "why": "needs the user's design; the refusal ('rim would have no thickness': round r2 tangent to the open face, shell 2 mm) is also the intended clean refusal, so no wrong result is recorded"
  },
@@ -33,7 +21,7 @@
  },
  {
   "source": "tangency-labs/solidcraft#2259",
-  "why": "other area: booleans (second cut beside an earlier cut through a shelled arched block; mesh edge snapping, seed 61)"
+  "why": "needs the eight-command script of #2258 (a shelled arched block, two cylinder cuts); neither it nor the arch dimensions are in the PR, and the failure hangs on 2e-6 mm vertex gaps that a re-guessed profile would not reproduce"
  },
  {
   "source": "tangency-labs/solidcraft#2421",
@@ -94,10 +82,6 @@
  {
   "source": "tangency-labs/solidcraft#2917",
   "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
- },
- {
-  "source": "tangency-labs/solidcraft#2928",
-  "why": "other area: booleans (join of cap-touching prisms with slightly offset cylinder walls)"
  },
  {
   "source": "tangency-labs/solidcraft#2935",
@@ -206,10 +190,6 @@
  {
   "source": "tangency-labs/solidcraft#3828",
   "why": "other area: 2D sketch offset of splines (sketch.offset), not a solid operation"
- },
- {
-  "source": "tangency-labs/solidcraft#3850",
-  "why": "other area: booleans (cut whose end face touches a round side leaves an empty shell)"
  },
  {
   "source": "tangency-labs/solidcraft#3933",
