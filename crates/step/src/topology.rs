@@ -49,12 +49,14 @@ use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
 
+mod seams;
+
 /// Tolerance (mm) when the file states no uncertainty.
 pub const DEFAULT_TOLERANCE: f64 = 1e-3;
 /// The least tolerance (mm) a record gets, whatever the file states.
 pub const MIN_TOLERANCE: f64 = 1e-7;
 /// The loosest tolerance (mm) a face's pcurves are fitted at before the solid is refused.
-pub const MAX_FIT_TOLERANCE: f64 = 0.1;
+pub const MAX_FIT_TOLERANCE: f64 = 1.0;
 /// Most faces in one solid.
 pub const MAX_FACES: usize = 500_000;
 /// Most edges in one loop, and in all of one face's loops.
@@ -611,6 +613,10 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// Pcurves, outer loops, domains and the canonical order: the finished record.
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let mut notes = Vec::new();
+        let seams = self.add_seams()?;
+        if seams > 0 {
+            notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
+        }
         if self.sense_mismatches > 0 {
             notes.push(format!("{} edges run against their same_sense (read by their vertices)", self.sense_mismatches));
         }
