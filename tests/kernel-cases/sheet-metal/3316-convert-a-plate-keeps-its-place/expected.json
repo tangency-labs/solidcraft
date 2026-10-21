@@ -1,0 +1,28 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3316"
+ ],
+ "what": "a 100 x 60 x 2 plate converted from its top face moved down by one thickness (z -2..0 instead of 0..2)",
+ "source": "analytic",
+ "method": "the plate stays where it was: box 100 x 60 x 2 from the origin, V = 12000, A = 2*(6000 + 200 + 120) = 12640, centre (50, 30, 1)",
+ "body_count": 1,
+ "volume_mm3": 12000.0,
+ "area_mm2": 12640.0,
+ "center_of_mass": [
+  50,
+  30,
+  1
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   60,
+   2
+  ]
+ }
+}
