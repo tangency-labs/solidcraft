@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2005",
+  "tangency-labs/solidcraft#2010"
+ ],
+ "what": "an 8 x 8 square swept a full turn round a circle of radius 30 with a 90 degree twist, as a new body (the sweep that closes on itself)",
+ "source": "analytic",
+ "method": "twisting about the section centre leaves the section area unchanged and its centre follows the circle, so V = A * 2 pi R = 64 * 2 pi 30 = 12063.7; the 90 degree twist maps the square onto itself, so the end sections meet and the body is one closed ring.",
+ "body_count": 1,
+ "volume_mm3": 12063.715789784805
+}

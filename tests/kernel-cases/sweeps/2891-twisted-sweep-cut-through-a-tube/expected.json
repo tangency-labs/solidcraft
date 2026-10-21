@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2891",
+  "tangency-labs/solidcraft#3695"
+ ],
+ "what": "a 20 x 20 square swept 250 mm along the axis of a tube (ID 20, OD 30, 250 long) with a 30 degree twist, cut from it (the twisted cut froze the app)",
+ "source": "analytic",
+ "method": "the square (inscribed circle r 10 = the bore, half diagonal 14.14 < 15) turns about the tube axis, so at every height the cut section is the same: the part of the annulus inside the square = square - bore disc. What is left is the OD disc minus the square: area pi 225 - 400 = 306.86, a connected ring, V = 250 (225 pi - 400) = 76714.6.",
+ "body_count": 1,
+ "volume_mm3": 76714.58676442585
+}
