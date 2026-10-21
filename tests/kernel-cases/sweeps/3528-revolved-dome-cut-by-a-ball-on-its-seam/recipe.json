@@ -1,0 +1,144 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Mushroom"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      7,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      7,
+      0
+     ],
+     [
+      7,
+      20
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      7,
+      20
+     ],
+     [
+      26,
+      39
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     32.1
+    ],
+    "start": [
+     26,
+     39
+    ],
+    "end": [
+     0,
+     59
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      59
+     ],
+     [
+      0,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "angle": "360 deg",
+    "operation": "new",
+    "body_name": "Cap"
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "diameter": 8,
+    "center": [
+     17.38629136,
+     4.658642729,
+     52.090595805
+    ],
+    "operation": "new",
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Cap",
+    "tools": [
+     "Ball"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

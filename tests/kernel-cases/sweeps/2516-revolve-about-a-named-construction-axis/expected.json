@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3796",
+  "tangency-labs/solidcraft#3619",
+  "tangency-labs/solidcraft#2516"
+ ],
+ "what": "a rectangle revolved about a construction axis picked by name (\"unknown sketch line `Axis1`\")",
+ "source": "analytic",
+ "method": "axis through (5,0,0) parallel to Z; the 10 x 15 rectangle at x 10..20 is 5..15 from it: a tube, V = pi (15^2 - 5^2) 15 = 9424.8; faces: outer wall, bore, two annular ends.",
+ "body_count": 1,
+ "volume_mm3": 9424.77796076938,
+ "area_mm2": 3141.5926535897934,
+ "faces": 4
+}

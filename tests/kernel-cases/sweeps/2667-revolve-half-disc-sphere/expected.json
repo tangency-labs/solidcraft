@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2667"
+ ],
+ "what": "a half disc of radius 6 on the axis revolved a full turn (mutation survivor: half_disc area factor)",
+ "source": "analytic",
+ "method": "a ball: V = 4/3 pi 6^3 = 904.78, A = 4 pi 36 = 452.39; one spherical face.",
+ "body_count": 1,
+ "volume_mm3": 904.7786842338603,
+ "area_mm2": 452.3893421169302,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   -6,
+   -6,
+   -6
+  ],
+  "max": [
+   6,
+   6,
+   6
+  ]
+ }
+}
