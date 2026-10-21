@@ -36,6 +36,7 @@ fn refused(op: &str, e: SmError) -> KernelError {
         SmError::NoRoom => KernelError::Invalid(format!("{op}: the wall is too thick: it leaves no room inside the body")),
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
+        SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
         e => failed(op, "operation", e),
     }
 }
@@ -120,6 +121,35 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
     let step = if symmetric { thickness.abs() / 2.0 } else { thickness.abs() };
     // The walls first, while the sheet's edges still carry their tags on both copies.
     let h = h.map(with_edge_walls).and_then(|h| with_offsets(&r, b, h, step));
+    Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
+/// [`crate::draft`] through SMLib: the faces under the points `at` (flat, parallel to `pull`)
+/// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
+/// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).
+/// A face SMLib can't draft (not flat, or not parallel to the pull) is "not supported yet".
+pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
+        return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));
+    }
+    let pull = pull.normalized().ok_or_else(|| KernelError::Invalid("pull direction".into()))?;
+    let normal = neutral.normal().normalized().ok_or_else(|| KernelError::Invalid("neutral plane".into()))?;
+    if normal.dot(pull).abs() < 1e-9 {
+        return Err(KernelError::Failed("the neutral plane is parallel to the pull direction".into()));
+    }
+    let chosen = faces_under(b, at)?;
+    let tol = pick_tolerance(b);
+    let pts = points(&face_points(b, &chosen)?);
+    let o = neutral.origin;
+    let (r, h) = run("draft", b, |s| s.draft(&pts, tol, [o.x, o.y, o.z], [normal.x, normal.y, normal.z], [pull.x, pull.y, pull.z], angle))?;
+    let h = h.map(|mut h| {
+        for f in &mut h.faces {
+            if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { face, .. } if chosen.contains(face))) {
+                f.change = Change::Modified;
+            }
+        }
+        h
+    });
     Ok(r.with_checked_history(h, &record::counts(&[b])))
 }
 
