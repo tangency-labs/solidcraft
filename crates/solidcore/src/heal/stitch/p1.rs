@@ -2484,33 +2484,23 @@ mod tests {
         // Two wire edges between the same vertices: the wrapper runs the part 7 routine
         // (its notifies are live since #149) on the kernel's context, so the installed
         // callback sees the B-rep PreEdit that upstream emits (SmBrep.cpp:9840-9848)
-        // before the wire edge's `SmBrep::DeleteEdge` defers (topology.brep_p4), and
-        // the callback is back on the kernel afterwards. The same edge twice is the
+        // first, then the wire edge's `SmBrep::DeleteEdge` (topology.brep_p4) runs,
+        // and the callback is back on the kernel afterwards. The same edge twice is the
         // upstream no-op.
         let (mut k, events) = recording_kernel();
         let mut b = Brep::new();
         let shell = b.add_shell_record(Shell::default()).unwrap();
         let edges = edges_between(&mut b, EdgeuseOwner::Shell(Some(shell)), 2);
         let (e0, e1) = (edges[0], edges[1]);
-        let err = glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None)
-            .unwrap_err();
-        assert!(
-            matches!(
-                err,
-                SolidError::Unported {
-                    upstream: "SmBrep::DeleteEdge",
-                    unit: "topology.brep_p4",
-                }
-            ),
-            "{err}"
-        );
+        glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e1, None).unwrap();
+        let seen = events.lock().unwrap().len();
         assert_eq!(
-            events.lock().unwrap().as_slice(),
-            [NotifyOperation::PreEdit]
+            events.lock().unwrap().first(),
+            Some(&NotifyOperation::PreEdit)
         );
         assert!(k.context.user_notify_callback().is_some());
         glue_edges_general(&mut k, &mut b, e0, OrientType::Same, 0.0, false, e0, None).unwrap();
-        assert_eq!(events.lock().unwrap().len(), 1);
+        assert_eq!(events.lock().unwrap().len(), seen);
     }
 
     #[test]

@@ -80,6 +80,7 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
 use crate::topology::brep::p4::shrink_geometry;
+use crate::topology::brep::p7::{self as bp7, FaceCurvesInput, SelfIntersectionCurve};
 use crate::topology::brep_cache::{
     arena_identity, make_brep_cache, BrepCache, BrepObjects, CacheObject, CacheSource,
 };

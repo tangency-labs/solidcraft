@@ -2784,8 +2784,11 @@ mod tests {
         let mut b = Brep::new();
         let v = b.add_vertex_record(Vertex::default()).unwrap();
         let mut edge = Some(EdgeId::from_index(3));
+        // With `SmBrep::DeleteVertex` (topology.brep_p4) and `Notify` ported, the
+        // isolated-vertex branch completes (upstream ignores both statuses); the
+        // deleted-edge output is still reset first.
         assert!(
-            combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge).is_err()
+            combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge).is_ok()
         );
         assert!(edge.is_none());
         let mut out = SqueezedFace {

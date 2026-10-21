@@ -13,9 +13,9 @@
 //! upstream preserves its partial contents on failure. Classification (including
 //! face/edge-to-region resolution) waits for `query.brep`; graph deletion is
 //! `topology.brep_p4`'s `DeleteEdge` / `DeleteVertex`, notified through `copy`'s
-//! records, attributes and primary identities and the kernel's context (hence
-//! `&mut Kernel`); edge copying waits for `boolean.merge_p2`. Vertex
-//! copying delegates to [`p1::merge_vertex`]. B-rep
+//! records, attributes and primary identities and the primary kernel's context
+//! (hence `&mut Kernel`). Edge copying is [`p2::merge_edge`] of each edge's
+//! primary edge use; vertex copying delegates to [`p1::merge_vertex`]. B-rep
 //! caches are not attached to arena B-reps yet, so the optional cache resizing is
 //! absent. The deletion retry loop is iterative; wire collection uses the bounded
 //! explicit stack of `topology_traverser`. No input-dependent recursion is added.
@@ -26,7 +26,7 @@
 //! Missing/dangling mates are rejected only when added to the keep list:
 //! typed ids cannot represent the null pointer upstream can append there.
 
-use crate::boolean::merge::p1;
+use crate::boolean::merge::p1::{self, VertexCopy};
 use crate::boolean::merge::p2::{self, MergeContext, TopologyCopy};
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::{EntityRef, Result, SolidError};
@@ -36,6 +36,7 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::topology::brep::p4::{self, DeleteEnv};
+use crate::topology::edgeuse::p1 as eu;
 use crate::topology::topology_traverser::{collect_wire_edges, Entity, Marks};
 use crate::topology::{
     edge, face, vertex, vertexuse, Brep, EdgeId, EdgeuseId, RegionId, ShellId, VertexId,
@@ -191,14 +192,12 @@ pub fn process_wires_and_shell_vertices(
 ) -> Result<()> {
     let mut stage = SharedStage { k, context, copy };
     let keep_vertices = collect_wires_and_shell_vertices(
-        k,
-        None,
+        &mut stage,
         brep,
         other,
         brep_marks,
         other_marks,
         relations,
-        copy,
         operation,
         brep_mark,
         other_mark,
@@ -244,14 +243,12 @@ pub fn process_wires_and_shell_vertices_with_kernels(
         copy,
     };
     let keep_vertices = collect_wires_and_shell_vertices(
-        primary_kernel,
-        other_kernel.as_deref(),
+        &mut stage,
         brep,
         other,
         brep_marks,
         other_marks,
         relations,
-        copy,
         operation,
         brep_mark,
         other_mark,
@@ -278,6 +275,11 @@ pub fn process_wires_and_shell_vertices_with_kernels(
 trait StageKernels {
     fn primary(&self) -> &Kernel;
     fn other(&self) -> &Kernel;
+    /// `SmBrep::DeleteEdge(edge)` on the primary B-rep, notified through the
+    /// primary kernel's context and the copy's records, attributes and identities.
+    fn delete_edge(&mut self, brep: &mut Brep, edge: EdgeId) -> Result<()>;
+    /// `SmBrep::DeleteVertex(vertex)` on the primary B-rep (as `delete_edge`).
+    fn delete_vertex(&mut self, brep: &mut Brep, vertex: VertexId) -> Result<()>;
     fn merge_edge(
         &mut self,
         brep: &mut Brep,
@@ -301,6 +303,12 @@ impl StageKernels for SharedStage<'_, '_> {
     }
     fn other(&self) -> &Kernel {
         self.k
+    }
+    fn delete_edge(&mut self, brep: &mut Brep, edge: EdgeId) -> Result<()> {
+        delete_edge(self.k, brep, &mut self.copy.vertices, edge)
+    }
+    fn delete_vertex(&mut self, brep: &mut Brep, vertex: VertexId) -> Result<()> {
+        delete_vertex(self.k, brep, &mut self.copy.vertices, vertex)
     }
     fn merge_edge(
         &mut self,
@@ -338,6 +346,12 @@ impl StageKernels for SplitStage<'_, '_> {
     fn other(&self) -> &Kernel {
         self.other.as_deref().unwrap_or(self.primary)
     }
+    fn delete_edge(&mut self, brep: &mut Brep, edge: EdgeId) -> Result<()> {
+        delete_edge(self.primary, brep, &mut self.copy.vertices, edge)
+    }
+    fn delete_vertex(&mut self, brep: &mut Brep, vertex: VertexId) -> Result<()> {
+        delete_vertex(self.primary, brep, &mut self.copy.vertices, vertex)
+    }
     fn merge_edge(
         &mut self,
         brep: &mut Brep,
@@ -365,14 +379,12 @@ impl StageKernels for SplitStage<'_, '_> {
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn collect_wires_and_shell_vertices(
-    k: &mut Kernel,
-    other_k: Option<&Kernel>,
+    kernels: &mut impl StageKernels,
     brep: &mut Brep,
     other: &mut Brep,
     brep_marks: &mut Marks,
     other_marks: &mut Marks,
-    relations: &Relations,
-    copy: &mut VertexCopy<'_>,
+    relations: &mut Relations,
     operation: BooleanOperation,
     brep_mark: MarkType,
     other_mark: MarkType,
@@ -419,12 +431,12 @@ fn collect_wires_and_shell_vertices(
                     if let Some(slot) = edges.iter_mut().find(|slot| **slot == Some(edge_id)) {
                         *slot = None;
                     }
-                    delete_edge(k, brep, copy, edge_id)?;
+                    kernels.delete_edge(brep, edge_id)?;
                     for v in [Some(v1), (v1 != v2).then_some(v2)].into_iter().flatten() {
                         if vertex::is_shell_vertex(brep, v)?
                             && relations.vertices.other(v).is_none()
                         {
-                            delete_vertex(k, brep, copy, v)?;
+                            kernels.delete_vertex(brep, v)?;
                         }
                     }
                 }
@@ -436,7 +448,7 @@ fn collect_wires_and_shell_vertices(
     let other_edges: Vec<EdgeId> = other.edges().ids().collect();
     for id in other_edges {
         let is_wire = vertexuse::edge_is_wire(other, id)?;
-        let marked = other_marks.is_marked(other_k.unwrap_or(&*k), Entity::Edge(id), other_mark);
+        let marked = other_marks.is_marked(kernels.other(), Entity::Edge(id), other_mark);
         if is_wire && marked {
             match operation {
                 BooleanOperation::Union
@@ -468,7 +480,7 @@ fn collect_wires_and_shell_vertices(
         )?;
         let Some(region) = region else { continue };
         collect_wire_edges(
-            other_k.unwrap_or(&*k),
+            kernels.other(),
             other,
             other_marks,
             Some(id),
@@ -499,7 +511,7 @@ fn collect_wires_and_shell_vertices(
                 classify_region(kernels.other(), &other_query, other, point, false, false)?
                     .ok_or_else(|| SolidError::sm_err(OP))?;
             if remove_in_region(operation, region.is_void) {
-                delete_vertex(k, brep, copy, v)?;
+                kernels.delete_vertex(brep, v)?;
             }
         }
     }
@@ -507,7 +519,7 @@ fn collect_wires_and_shell_vertices(
     let brep_query = BrepQuery::default();
     let mut keep_vertices = Vec::new();
     for v in other.vertices().ids() {
-        if other_marks.is_marked(other_k.unwrap_or(&*k), Entity::Vertex(v), other_mark)
+        if other_marks.is_marked(kernels.other(), Entity::Vertex(v), other_mark)
             || !vertex::is_shell_vertex(other, v)?
         {
             continue;
@@ -540,7 +552,7 @@ mod tests {
         attributes: &'a mut AttributeStore,
     ) -> TopologyCopy<'a> {
         TopologyCopy {
-            vertices: p1::VertexCopy {
+            vertices: VertexCopy {
                 records,
                 attributes,
                 source_key: &|v| ObjectRef {

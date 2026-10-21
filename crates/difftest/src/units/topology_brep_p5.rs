@@ -555,6 +555,8 @@ impl UnitDiff for Runner {
         let raw = ffi::eval(Op::Export, &i.fixture, &args(&i))
             .map_err(|e| HarnessError::new(e.to_string()))?;
         let (mut b, _) = import(&raw)?;
+        // The shim sets `m_bEditingEnabled` from the editing argument for every op.
+        b.set_editing_enabled(i.editing);
         if i.op == 15 {
             return Ok(Output::new().values(
                 "notification_stage",

@@ -119,6 +119,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1;
 use crate::topology::brep::p10::{self, MakeTopologyOptions, TopologyEnv};
+use crate::topology::brep::p2;
 use crate::topology::brep::p4;
 use crate::topology::brep::p6;
 use crate::topology::brep_data::BrepData;
