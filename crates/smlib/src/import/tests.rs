@@ -150,3 +150,73 @@ fn a_skewed_plane_goes_as_an_exact_bilinear_patch() {
     let b = crate::Brep::from_record(&r, true).unwrap();
     assert!((b.volume(1e-7).unwrap() - 36.0).abs() < 1e-6, "{:?}", b.volume(1e-7));
 }
+
+/// The surface `arrays` wrote for the first face, back as a schema 4 rational spline, with its range.
+fn first_nurbs(a: &Arrays) -> (Surface, [f64; 4]) {
+    let (nu, nv) = (a.ints[&flat::FACE_NURBS_U_VERTEX_COUNT][0] as usize, a.ints[&flat::FACE_NURBS_V_VERTEX_COUNT][0] as usize);
+    let cvs = &a.reals[&flat::FACE_NURBS_CVS];
+    let w = &a.reals[&flat::FACE_NURBS_WEIGHTS];
+    let homogeneous = (0..nu)
+        .map(|i| {
+            (0..nv)
+                .map(|j| {
+                    let k = i * nv + j;
+                    [cvs[3 * k] * w[k], cvs[3 * k + 1] * w[k], cvs[3 * k + 2] * w[k], w[k]]
+                })
+                .collect()
+        })
+        .collect();
+    let r = &a.reals[&flat::FACE_RANGE];
+    (
+        Surface::RationalSpline {
+            u_knots: a.reals[&flat::FACE_NURBS_U_KNOTS].clone(),
+            v_knots: a.reals[&flat::FACE_NURBS_V_KNOTS].clone(),
+            homogeneous,
+        },
+        [r[0], r[1], r[2], r[3]],
+    )
+}
+
+#[test]
+fn revolutions_become_the_same_surface_as_a_rational_spline() {
+    use solidcraft_geom::brep::eval::SurfaceEval;
+    // A quarter-circle profile (rational) away from the axis, so the surface is a torus piece.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let profile = Curve::RationalSpline {
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        homogeneous: vec![[3.0, 0.0, 0.0, 1.0], [3.0 * s, 0.0, 1.0 * s, s], [2.0, 0.0, 1.0, 1.0]],
+    };
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let mirror = [[0.0, 1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0], [1.0, -2.0, 3.0, 1.0]];
+    for matrix in [identity, mirror] {
+        for forward in [true, false] {
+            let rev =
+                Surface::PlacedRevolution { profile: Box::new(profile.clone()), origin: [0.0, 0.0, 0.0], axis: [0.0, 0.0, 1.0], matrix, forward };
+            let (angles, prof) = ([0.4, 0.4 + 1.9 * std::f64::consts::PI], [0.0, 1.0]);
+            let domain = if forward { [prof, angles] } else { [angles, prof] };
+            let mut a = Arrays::default();
+            surface(&mut a, &rev, domain).unwrap();
+            let (nurbs, range) = first_nurbs(&a);
+            let (re, ne) = (SurfaceEval::new(&rev).unwrap(), SurfaceEval::new(&nurbs).unwrap());
+            let det = {
+                let col = |c: usize| [matrix[c][0], matrix[c][1], matrix[c][2]];
+                dot(cross(col(0), col(1)), col(2))
+            };
+            for i in 0..=6 {
+                for j in 0..=6 {
+                    let (sp, ang) = (i as f64 / 6.0, angles[0] + (angles[1] - angles[0]) * j as f64 / 6.0);
+                    let uv = if forward { [sp, ang] } else { [ang, sp] };
+                    let (p, du, dv) = re.derivs(uv[0], uv[1]).unwrap();
+                    let n = du.cross(dv) * det.signum();
+                    let t = circle_param(ang - angles[0]);
+                    let profile_first = forward == (det > 0.0);
+                    let q = if profile_first { [sp, t] } else { [t, sp] };
+                    assert!(q[0] >= range[0] - 1e-12 && q[0] <= range[2] + 1e-12 && q[1] >= range[1] - 1e-12 && q[1] <= range[3] + 1e-12);
+                    let (pn, nu_, nv_) = ne.derivs(q[0], q[1]).unwrap();
+                    assert!((pn - p).len() < 1e-12, "forward {forward} det {det}: {p:?} vs {pn:?}");
+                    assert!(nu_.cross(nv_).dot(n) > 0.0, "normal flipped: forward {forward} det {det}");
+                }
+            }
+        }
+    }
+}

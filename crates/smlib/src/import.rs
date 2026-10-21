@@ -276,9 +276,114 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2]) -> R<bool> {
             a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
             return Ok(true);
         }
-        b::Surface::PlacedRevolution { .. } => return Err(Unsupported::NotYet("revolved surfaces")),
+        b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
     }
     Ok(false)
+}
+
+/// The quarter-circle arc's rational parameter `s` in [0, 1] at angle `phi` in [0, π/2]: the
+/// circle NURBS below is not linear in the angle, so end values are converted pointwise.
+fn quarter_param(phi: f64) -> f64 {
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let angle = |s: f64| {
+        let (b0, b1, b2) = ((1.0 - s) * (1.0 - s), 2.0 * s * (1.0 - s) * c, s * s);
+        (b1 + b2).atan2(b0 + b1)
+    };
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        if angle(mid) < phi {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+/// The circle NURBS's parameter (knots 0..4, one quarter turn per span) at `angle` after its start.
+fn circle_param(angle: f64) -> f64 {
+    let q = std::f64::consts::FRAC_PI_2;
+    let a = angle.clamp(0.0, 4.0 * q);
+    let k = (a / q).floor().min(3.0);
+    k + quarter_param(a - k * q)
+}
+
+/// A revolution, exactly, as a rational B-spline surface: each profile control point swept round
+/// the axis by a full circle of four rational quadratic quarters starting at the face's first
+/// angle, then mapped by the placement. The circle's parameter is not the angle, so the face's
+/// angle range is converted pointwise and its pcurves are not carried (SMLib rebuilds the trims).
+/// Where the placement mirrors, the record's natural normal is the opposite of the map's
+/// (`brep::eval`), so the B-spline takes the two directions the other way round.
+fn revolution(
+    a: &mut Arrays,
+    profile: &b::Curve,
+    origin: [f64; 3],
+    axis: [f64; 3],
+    m: &[[f64; 4]; 4],
+    forward: bool,
+    domain: [[f64; 2]; 2],
+) -> R<()> {
+    let (knots, pts): (Vec<f64>, Vec<([f64; 3], f64)>) = match profile {
+        b::Curve::Line { start, end } => (vec![0.0, 0.0, 1.0, 1.0], vec![(*start, 1.0), (*end, 1.0)]),
+        b::Curve::Spline { knots, points } => (knots.clone(), points.iter().map(|p| (*p, 1.0)).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } => {
+            (knots.clone(), homogeneous.iter().map(|h| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3])).collect())
+        }
+        _ => return Err(Unsupported::NotYet("revolutions of conic, polyline or intersection profiles")),
+    };
+    let len = dot(axis, axis).sqrt();
+    if !(len > 0.0) {
+        return Err(Unsupported::Invalid("revolution axis"));
+    }
+    let z = scale(axis, 1.0 / len);
+    // The record's u and v: the profile's parameter and the angle, or the other way round.
+    let ([p0, p1], [a0, a1]) = if forward { (domain[0], domain[1]) } else { (domain[1], domain[0]) };
+    let t1 = circle_param(a1 - a0);
+    // Column-major placement: point' = M · (p, 1).
+    let place = |p: [f64; 3]| [0, 1, 2].map(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r]);
+    let det = {
+        let col = |c: usize| [m[c][0], m[c][1], m[c][2]];
+        dot(cross(col(0), col(1)), col(2))
+    };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    // net[i][k]: profile point i at circle control point k.
+    let mut net: Vec<Vec<([f64; 3], f64)>> = Vec::with_capacity(pts.len());
+    for (p, w) in &pts {
+        let r = sub(*p, origin);
+        let centre = add(origin, scale(z, dot(r, z)));
+        let x0 = sub(*p, centre);
+        let y0 = cross(z, x0);
+        // Start at the face's first angle.
+        let (s0, c0) = a0.sin_cos();
+        let (x, y) = (add(scale(x0, c0), scale(y0, s0)), sub(scale(y0, c0), scale(x0, s0)));
+        let row = (0..9)
+            .map(|k| {
+                let (sk, ck) = (k as f64 * std::f64::consts::FRAC_PI_4).sin_cos();
+                let (f, wk) = if k % 2 == 1 { (1.0 / c, c) } else { (1.0, 1.0) };
+                (place(add(centre, scale(add(scale(x, ck), scale(y, sk)), f))), w * wk)
+            })
+            .collect();
+        net.push(row);
+    }
+    let circle_knots = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0];
+    // Profile along the B-spline's first direction when the record's u is the profile and the
+    // placement keeps orientation, or the angle is u and it mirrors; else the angle goes first.
+    let profile_first = forward == (det > 0.0);
+    if profile_first {
+        nurbs_face(a, &knots, &circle_knots, pts.len(), 9)?;
+        net_rows(a, net.iter().flatten().copied());
+        a.r(flat::FACE_RANGE).extend([p0, 0.0, p1, t1]);
+    } else {
+        nurbs_face(a, &circle_knots, &knots, 9, pts.len())?;
+        net_rows(a, (0..9).flat_map(|k| net.iter().filter_map(move |row| row.get(k).copied())));
+        a.r(flat::FACE_RANGE).extend([0.0, p0, t1, p1]);
+    }
+    Ok(())
+}
+
+fn net_rows(a: &mut Arrays, cps: impl Iterator<Item = ([f64; 3], f64)>) {
+    net(a, cps);
 }
 
 /// A plane `origin + u·U + v·V`. With unit, orthogonal axes it is SMLib's plane, whose (u, v) are
