@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3655",
+  "tangency-labs/solidcraft#3660"
+ ],
+ "what": "a plain box with all 12 edges chamfered, the edges listed in an order that was refused",
+ "source": "analytic",
+ "method": "box 40x30x12.5, equal chamfer d=2.5 on all 12 edges. Each edge prism removes d^2/2 x L, summed over L = 4(40+30+12.5) = 330. At each of the 8 corners the three prisms overlap: pairwise overlaps d^3/3 each (x3), triple overlap d^3/4, so the prisms count d^3 - ... = 0.75 d^3 too much per corner. V = 15000 - 3.125*330 + 8*0.75*2.5^3 = 14062.5. The result does not depend on the order the edges are listed. Faces: 6 box faces + 12 chamfer faces (each corner has no extra facet: the three chamfer planes meet in one point).",
+ "body_count": 1,
+ "volume_mm3": 14062.5,
+ "faces": 18
+}

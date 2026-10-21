@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3868"
+ ],
+ "what": "a chamfer of an inside (concave) edge fills the corner and adds material, one on the outside edge removes it",
+ "source": "analytic",
+ "method": "box 20^3 shelled to a 2 mm wall, open top: cavity 16x16x18, V0 = 8000 - 4608 = 3392. 1 mm chamfer on the inside bottom edge (concave, 16 mm long): adds the triangle 1^2/2 x 16 = +8. 1 mm chamfer on the outside bottom edge (convex, 20 mm long): removes 1^2/2 x 20 = 10. V = 3392 + 8 - 10 = 3390. Each chamfer ends on planes (the side walls), so no corner overlaps.",
+ "body_count": 1,
+ "volume_mm3": 3390.0
+}

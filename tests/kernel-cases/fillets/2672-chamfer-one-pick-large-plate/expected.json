@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2672",
+  "tangency-labs/solidcraft#3295"
+ ],
+ "what": "one pick on a stadium boss top rim chamfers the whole tangent loop, also when the part is more than 200 mm across",
+ "source": "analytic",
+ "method": "plate 145x145x10 + stadium boss (straights 40, end arcs R5) 10 tall = 145^2*10 + 10*(40*10 + pi*25). One pick takes the whole tangent chain: 2 straight edges of c^2/2*40 = 20 each, plus the two end half-arcs, one full revolution of the triangle (c^2/2) about the boss axis at its centroid radius R - c/3 (Pappus): c^2/2*2*pi*(R - c/3) = 14.66, with c=1, R=5. Removed 54.66 in all. The tolerance is tightened to 5e-6 because the whole-rim result differs from the one-edge result (21.5) by 0.015% of the part volume. Faces: plate 6 (the top with the boss footprint cut out stays one face) + boss walls 4 + boss top 1 + 4 chamfer faces = 15.",
+ "body_count": 1,
+ "volume_mm3": 214980.7373976807,
+ "faces": 15,
+ "tolerance": {
+  "rel": 5e-06
+ }
+}

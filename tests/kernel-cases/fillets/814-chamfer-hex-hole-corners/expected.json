@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#814",
+  "tangency-labs/solidcraft#1067"
+ ],
+ "what": "a 2 mm chamfer on the six vertical corners of a hexagonal hole: one bevel each, not a notch",
+ "source": "analytic",
+ "method": "disc diameter 55 x 10 with a regular hexagonal hole of circumradius 25: V0 = pi 27.5^2 10 - 10 (3 sqrt(3)/2) 625 = 7520.3. Each hole corner is a 120 degree concave edge: the equal chamfer 2 fills the triangle with two sides 2 and the included 120 degrees, area 0.5 2 2 sin(120) = 1.732, x 10 high x 6 corners = +103.92. V = 7624.241. Faces: disc top, bottom, outer cylinder, 6 walls, 6 bevels = 15.",
+ "body_count": 1,
+ "volume_mm3": 7624.241170268724,
+ "faces": 15
+}
