@@ -1829,3 +1829,50 @@ fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
     run(&mut s, "sketch.finish", json!({}));
     assert!(s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).is_err(), "runs into itself");
 }
+
+#[test]
+fn a_sketch_coil_refuses_contradictory_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for (k, v) in [("diameter", json!(40)), ("section_size", json!(2)), ("section", json!("square")), ("section_position", json!("outside")), ("start_angle", json!(0))] {
+        let mut p = json!({"sketch": "Section", "revolutions": 3, "pitch": 8});
+        p[k] = v;
+        let e = s.execute("solid.coil", &p).unwrap_err().to_string();
+        assert!(e.contains("does not apply with `sketch`"), "{k}: {e}");
+    }
+    let e = s.execute("solid.coil", &json!({"profiles": "all", "diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 2})).unwrap_err().to_string();
+    assert!(e.contains("`profiles` needs `sketch`"), "{e}");
+    let e = s.execute("solid.coil", &json!({"sketch": "Nope", "revolutions": 3, "pitch": 8})).unwrap_err().to_string();
+    assert!(e.contains("no sketch `Nope`"), "{e}");
+}
+
+#[test]
+fn a_loaded_coil_cannot_be_both_primitive_and_from_a_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let coil = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "coil").unwrap();
+    coil["diameter"] = json!("40");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let err = reopened.model.results.iter().find_map(|r| r.error.clone()).unwrap_or_default();
+    assert!(err.contains("cannot also set"), "{err}");
+}
+
+#[test]
+fn a_sketch_coil_never_panics_on_hostile_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for hostile in [json!(true), json!(-1), json!(1e308), json!("nope"), json!([]), json!([0, 0, 0]), json!({"type": "indices"})] {
+        for k in ["sketch", "profiles", "pitch", "revolutions"] {
+            let result = s.execute("solid.coil", &json!({k: hostile.clone()}));
+            assert!(!matches!(result, Err(crate::EngineError::Internal(..))), "{k} {hostile} panicked: {result:?}");
+        }
+    }
+}
