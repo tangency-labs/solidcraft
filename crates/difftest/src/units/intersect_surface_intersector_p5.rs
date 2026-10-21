@@ -341,8 +341,13 @@ fn rust_cache(surface: Surface, t: &[NodeIn], handle: H) -> Result<SurfaceCache<
 /// `type dim knot_type form has [n p m cpts(x y z w) knots] ivl[2]`.
 fn put_bspline(o: &mut Vec<f64>, c: &Curve) -> Result<(), HarnessError> {
     o.extend([c.type_code() as f64, c.dim() as f64]);
-    let CurveKind::BSpline(bs) = c.kind() else {
-        return Err(harness("output curve is not a B-spline"));
+    // the shim casts to `SmBSplineCurve`: the B-spline part of the line of a plane's iso
+    // curve or of the circle of a sweep's
+    let bs = match c.kind() {
+        CurveKind::BSpline(bs) => bs,
+        CurveKind::Line(l) => l.base(),
+        CurveKind::Ellipse(e) => e.base(),
+        _ => return Err(harness("output curve is not a B-spline kind")),
     };
     o.extend([
         f64::from(bs.knot_type() as i32),

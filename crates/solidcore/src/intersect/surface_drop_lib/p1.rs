@@ -21,7 +21,7 @@
 //! | [`stack_look`]                               | `sm_StackLook` (static)                          |
 //! | [`fix_boundary_curves`]                      | `sm_FixBoundaryCurves` (static)                  |
 //! | [`remove_duplicate_drop_point_solutions`]    | `sm_RemoveDuplicateDropPointSolutions` (static)  |
-//! | [`Surface::drop_and_trim_curve`], [`DropAndTrim`], [`DropFailRecord`] | `SmSurface::DropAndTrimCurve` |
+//! | [`Surface::drop_and_trim_curve`], [`Surface::drop_and_trim_curve_in`], [`DropAndTrim`], [`DropFailRecord`] | `SmSurface::DropAndTrimCurve` |
 //! | [`Surface::drop_iso_curve`], [`IsoDrop`]     | `SmSurface::DropIsoCurve`                        |
 //!
 //! Deviations:
@@ -52,22 +52,30 @@
 //! - **`DropAndTrimCurve`.** The record's `pUVCurvesArg` (the caller's output array)
 //!   has no handle; it stays `None`. The surface and curve handles the record keeps
 //!   come with the record ([`DropFailRecord`]).
-//! - **Unported callees.** `SmSurfaceDropCurve` (`SetCurveIsOnSurface`, `DoTrace`;
-//!   `intersect.surface_drop_curve`) return [`SolidError::Unported`].
+//! - **`DropAndTrimCurve` UV curves.** `rUVCurves` (`SmBSplineCurve*`) holds each
+//!   traced UV curve as the object `DoTrace` made (an `SmLine` stays a line, keeping
+//!   its overrides), so [`DropAndTrim::uv_curves`] are [`Curve`]s of the B-spline
+//!   kinds; a traced curve of another kind (a null `SM_CAST_PTR(SmBSplineCurve, ...)`
+//!   upstream, added to `rUVCurves` as a null pointer) is `SM_ERR_NULL_POINTER`.
+//!   The surface cache `DoTrace` checks out is the caller's when it passes one
+//!   ([`Surface::drop_and_trim_curve_in`]), else built fresh
+//!   ([`tracer_surface_cache`]).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, `Dump`, `Draw`,
 //!   `my_AssertAndDrawDropCurve` (graphics) and the `SM_ASSERT`s.
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::point_set::PointContainment;
-use crate::geom::solution_array::{SolutionArray, SolutionObject};
+use crate::geom::solution_array::{ObjectKind, SolutionArray, SolutionObject};
 use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_drop_curve::SurfaceDropCurve;
+use crate::intersect::surface_tracer::tracer_surface_cache;
 use crate::kernel::Kernel;
 use crate::math::{max2, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -78,6 +86,7 @@ use crate::surface::surface::p2::{
 };
 use crate::surface::surface::p4::is_point_on_normal as is_point_on_normal_p4;
 use crate::surface::surface::Surface;
+use crate::surface::surface_cache::p1::SurfaceCache;
 
 /// `SM_BIG_ULONG` (`SmMath.h`): the unset `m_eDropDerivRtn`.
 pub const BIG_ULONG: i32 = 99_999_999;
@@ -96,6 +105,7 @@ const OP_SEAM: &str = "intersect::surface_drop_lib::DropPt::check_seam_jump";
 const OP_POP: &str = "intersect::surface_drop_lib::pop_stack";
 const OP_LOOK: &str = "intersect::surface_drop_lib::stack_look";
 const OP_FIX_CURVES: &str = "intersect::surface_drop_lib::fix_boundary_curves";
+const OP_TRIM: &str = "intersect::surface_drop_lib::drop_and_trim_curve";
 
 /// `SM_DEG2RAD(a)` = `a * (SM_PI / 180.0)`.
 fn deg_to_rad(a: f64) -> f64 {
@@ -920,33 +930,83 @@ pub struct DropAndTrim {
     pub max_drop_to_surf: f64,
     /// `rdMaxApproxDev`: the largest deviation from a surface normal line.
     pub max_approx_dev: f64,
-    /// `rUVCurves`: one UV trim curve per piece of the curve over the surface.
-    pub uv_curves: Vec<BSplineCurve>,
+    /// `rUVCurves`: one UV trim curve per piece of the curve over the surface, each
+    /// of a B-spline kind (`SmBSplineCurve` or a subclass such as `SmLine`).
+    pub uv_curves: Vec<Curve>,
+}
+
+/// The object handle of the surface cache `DoTrace` runs on (its solves keep no
+/// objects).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TraceCacheObj;
+
+impl SolutionObject for TraceCacheObj {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Surface
+    }
 }
 
 /// The outputs of `SmSurfaceDropCurve::DoTrace` used by `DropAndTrimCurve`.
 struct Trace {
-    uv_curves: Vec<BSplineCurve>,
+    uv_curves: Vec<Curve>,
     max_drop_dists: Vec<f64>,
     deviations: Vec<f64>,
 }
 
 /// `SmSurfaceDropCurve sDrop(this, domain, curve, interval);
-/// sDrop.SetCurveIsOnSurface(on_surface); sDrop.DoTrace(ctx, tol, NULL, NULL, ...)`.
-fn drop_curve_trace(
-    _k: &Kernel,
-    _surface: &Surface,
-    _uv_domain: &Extent2d,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _curve_is_on_surface: bool,
-    _approx_tol_3d: Option<f64>,
+/// sDrop.SetCurveIsOnSurface(on_surface); sDrop.DoTrace(ctx, tol, NULL, NULL, ...)`
+/// on the surface's cache (`smsurf_GetSurfaceCache` inside `DoTrace`).
+///
+/// `cache` is the surface's cache when the caller holds it (upstream's
+/// `smsurf_GetSurfaceCache` hands every caller the one cache of the surface); `None`
+/// builds one.
+#[allow(clippy::too_many_arguments)]
+fn drop_curve_trace<C: SolutionObject>(
+    k: &Kernel,
+    surface: &Surface,
+    cache: Option<&mut SurfaceCache<C>>,
+    uv_domain: &Extent2d,
+    curve: &Curve,
+    interval: &Extent1d,
+    curve_is_on_surface: bool,
+    approx_tol_3d: Option<f64>,
 ) -> Result<Trace> {
-    // UNPORTED(intersect.surface_drop_curve): SmSurfaceDropCurve::DoTrace
-    Err(SolidError::unported(
-        "SmSurfaceDropCurve::DoTrace",
-        "intersect.surface_drop_curve",
-    ))
+    // prepare the SurfaceDropCurve operation object
+    let mut drop = SurfaceDropCurve::new(k, surface, uv_domain, curve, interval)?;
+    drop.set_curve_is_on_surface(curve_is_on_surface);
+
+    // get and checkout surface cache (NER)
+    let out = if let Some(cache) = cache {
+        drop.drop_trace(k, cache, approx_tol_3d, None)?
+    } else {
+        let mut cache = tracer_surface_cache::<TraceCacheObj>(k, &drop.base)?;
+        drop.drop_trace(k, &mut cache, approx_tol_3d, None)?
+    };
+    Ok(Trace {
+        uv_curves: out.uv_curves,
+        max_drop_dists: out.max_drop_dists,
+        deviations: out.deviations,
+    })
+}
+
+/// `SM_CAST_PTR(SmBSplineCurve, pCurve) != NULL`: the curve is of a B-spline kind
+/// (`SmBSplineCurve` or a subclass: line, ellipse, hyperbola, parabola).
+const fn is_bspline_kind(curve: &Curve) -> bool {
+    match curve.kind() {
+        CurveKind::BSpline(_)
+        | CurveKind::Line(_)
+        | CurveKind::Ellipse(_)
+        | CurveKind::Hyperbola(_)
+        | CurveKind::Parabola(_) => true,
+        CurveKind::Hermite(_)
+        | CurveKind::Conic(_)
+        | CurveKind::Projected(_)
+        | CurveKind::Iso(_)
+        | CurveKind::Offset(_)
+        | CurveKind::CrvInVolume(_)
+        | CurveKind::CrvOnSurf(_)
+        | CurveKind::Composite(_) => false,
+    }
 }
 
 /// The outputs of [`Surface::drop_iso_curve`].
@@ -982,11 +1042,46 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the trace ([`SolidError::Unported`] until
-    /// `intersect.surface_drop_curve` is ported).
+    /// Those of the drop curve trace (`SmSurfaceDropCurve::DoTrace`, which defers
+    /// non-plane `SmSurface::DropCurve` to `intersect.surface_drop_lib_p3`);
+    /// `SM_ERR_NULL_POINTER` for a traced UV curve that is not a B-spline kind.
     pub fn drop_and_trim_curve<O: SolutionObject>(
         &self,
         k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        keep_all_drop_curves: bool,
+        curve_is_on_surface: bool,
+        record: Option<DropFailRecord<'_, O>>,
+    ) -> Result<DropAndTrim> {
+        self.drop_and_trim_curve_in::<O, TraceCacheObj>(
+            k,
+            None,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol_3d,
+            keep_all_drop_curves,
+            curve_is_on_surface,
+            record,
+        )
+    }
+
+    /// [`Surface::drop_and_trim_curve`] with the trace on `cache`, this surface's
+    /// cache when the caller holds it (upstream's `smsurf_GetSurfaceCache` inside
+    /// `DoTrace` hands every caller the one cache of the surface, with whatever tree
+    /// its holder set); `None` builds one.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::drop_and_trim_curve`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn drop_and_trim_curve_in<O: SolutionObject, C: SolutionObject>(
+        &self,
+        k: &Kernel,
+        cache: Option<&mut SurfaceCache<C>>,
         uv_domain: &Extent2d,
         curve: &Curve,
         interval: &Extent1d,
@@ -1009,6 +1104,7 @@ impl Surface {
         let trace = drop_curve_trace(
             k,
             self,
+            cache,
             uv_domain,
             curve,
             interval,
@@ -1020,7 +1116,7 @@ impl Surface {
             },
         )?;
 
-        for ((bsc, &max_drop), &dev) in trace
+        for ((uv, &max_drop), &dev) in trace
             .uv_curves
             .into_iter()
             .zip(&trace.max_drop_dists)
@@ -1030,7 +1126,11 @@ impl Surface {
             if !keep_all_drop_curves && max_drop > approx_tol_3d {
                 continue;
             }
-            out.uv_curves.push(bsc);
+            // SM_CAST_PTR(SmBSplineCurve, sUVCurves[ii]): a null cast is not usable
+            if !is_bspline_kind(&uv) {
+                return Err(SolidError::null_pointer(OP_TRIM));
+            }
+            out.uv_curves.push(uv);
             out.max_drop_to_surf = max2(out.max_drop_to_surf, max_drop);
             out.max_approx_dev = max2(out.max_approx_dev, dev);
         }
@@ -1395,11 +1495,22 @@ mod tests {
     }
 
     #[test]
-    fn drop_and_trim_is_unported() {
-        let s = plane();
+    fn drop_and_trim_iso_line() {
+        // the flat bilinear patch P(u, v) = (u, v, 0) and the u-iso line v = 0.3
+        let w =
+            |x: f64, y: f64| crate::nurbs::math::CPoint::new(x, y, 0.0, crate::nurbs::math::NOW);
+        let net = vec![
+            vec![w(0.0, 0.0), w(0.0, 1.0)],
+            vec![w(1.0, 0.0), w(1.0, 1.0)],
+        ];
+        let kn = vec![0.0, 0.0, 1.0, 1.0];
+        let n = crate::nurbs::srf_basic::Surface::new(net, 1, 1, kn.clone(), kn).unwrap();
+        let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
+            n, false,
+        ));
         let c = Curve::from(crate::curve::line::Line::from_points(
-            Vec3::new(0.0, 0.5, 0.0),
-            Vec3::new(1.0, 0.5, 0.0),
+            Vec3::new(0.0, 0.3, 0.0),
+            Vec3::new(1.0, 0.3, 0.0),
             3,
         ));
         let r = s.drop_and_trim_curve::<crate::topology::ObjectHandle>(
@@ -1409,9 +1520,28 @@ mod tests {
             &Extent1d::from_min_max(0.0, 1.0),
             1e-6,
             true,
-            false,
+            true,
             None,
         );
-        assert!(matches!(r, Err(SolidError::Unported { .. })));
+        let r = r.expect("drop and trim");
+        assert_eq!(r.uv_curves.len(), 1);
+        assert!(r.max_drop_to_surf < 1e-9);
+        assert!(r.max_approx_dev < 1e-9);
+        let uv = &r.uv_curves[0];
+        let ivl = uv.natural_interval();
+        let a = uv
+            .evaluate_point(&Kernel::default(), ivl.min())
+            .expect("start");
+        let b = uv
+            .evaluate_point(&Kernel::default(), ivl.max())
+            .expect("end");
+        assert!(
+            (a.x - 0.0).abs() < 1e-9 && (a.y - 0.3).abs() < 1e-9,
+            "{a:?}"
+        );
+        assert!(
+            (b.x - 1.0).abs() < 1e-9 && (b.y - 0.3).abs() < 1e-9,
+            "{b:?}"
+        );
     }
 }

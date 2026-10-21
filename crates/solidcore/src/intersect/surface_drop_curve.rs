@@ -1015,7 +1015,7 @@ impl<'s> SurfaceDropCurve<'s> {
 
         // Add TargetSurface natural boundary curves to sIsoCurves array
         let iso = cache.iso_boundary_curves(k, &uv_domain, cci_tol / 3.0)?;
-        let mut iso_curves: Vec<Curve> = iso.curves.iter().cloned().map(Curve::from).collect();
+        let mut iso_curves: Vec<Curve> = iso.curves.to_vec();
 
         // add every Surface U internal continuity boundary to sIsoCurves array
         let u_conts: Vec<ContinuityType> = cache.u_continuities().to_vec();

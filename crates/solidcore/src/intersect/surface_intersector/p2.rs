@@ -26,7 +26,10 @@
 //!   (`StepBackFromSingularity` steps off the current point).
 //! - **Virtuals.** `ComputePointValues`, `FlushCurve`, `ComputeSingularityPoint` and
 //!   `ComputePointValuesDelta` are virtual upstream; the `SmSurfaceIntersector` bodies
-//!   are ported (the derived intersectors are other units). The recursive call of
+//!   are ported (the derived intersectors are other units), except that
+//!   `ComputePointValues` calls the `SmAdvSurfaceIntersector` override of
+//!   `ComputeSingularityPoint` on an intersector made by
+//!   `AdvSurfaceIntersector::new` (its `advanced` flag). The recursive call of
 //!   `ComputePointValues` passes no previous point, so it recurses at most once.
 //! - **Loop bound.** The gap-function walk of
 //!   `ClassifyBoundaryStartPointIntersection` grows its step by 5 per sample and
@@ -324,8 +327,8 @@ impl SurfaceIntersector<'_> {
                 // Intersect Curves
                 let ivl1 = bsc1.natural_interval();
                 let ivl2 = bsc2.natural_interval();
-                let crv1 = Curve::from(bsc1.clone());
-                let crv2 = Curve::from(bsc2);
+                let crv1 = bsc1.clone();
+                let crv2 = bsc2;
                 let opts = CurveIntersectOptions {
                     skip_global_coincidence_check: false,
                     handles: [
@@ -347,7 +350,7 @@ impl SurfaceIntersector<'_> {
                     let start0 = sol.start.parameters.first().copied().unwrap_or(0.0);
                     if sol.solution_type == SolutionType::SingleValue {
                         // single point intersection - output a degenerate curve
-                        let solution_point = bsc1.evaluate_point(start0)?;
+                        let solution_point = bsc1.evaluate_point(k, start0)?;
                         let degenerate = BSplineCurve::create_degenerate_curve(3, solution_point)?;
                         out.curves_3d.push(Curve::from(degenerate));
                         out.curve_types.push(TsectCurveType::Touching);
@@ -368,7 +371,9 @@ impl SurfaceIntersector<'_> {
                         if trim_ivl1.length() > EFF_ZERO {
                             // copy and trim the Surf1->NaturalBoundaryCurve (status
                             // ignored; may snap the interval to knots)
-                            let mut bsc = bsc1.clone();
+                            // (`new SmBSplineCurve(*pBSC1)`: a plain B-spline copy)
+                            let mut bsc =
+                                crate::surface::surface_cache::p1::copy_as_bspline(&bsc1)?;
                             ignored(bsc.trim(k, &mut trim_ivl1, TrimMode::Notify))?;
 
                             // get SurfacePoints for each interval endPoint
@@ -427,7 +432,7 @@ impl SurfaceIntersector<'_> {
                             };
 
                             // output the curve
-                            out.curves_3d.push(Curve::from(bsc));
+                            out.curves_3d.push(bsc);
                             out.curve_types.push(ty);
                             out.deviations
                                 .push(max2(sol.start.solution_value, sol.end.solution_value));
@@ -601,7 +606,21 @@ impl SurfaceIntersector<'_> {
                 } else {
                     // probably on an intersection singularity: its type and curve
                     // direction (tangent and coincident points are not traced)
-                    compute_singularity_point_base(uv_values, point, previous)?;
+                    // (virtual: the SmAdvSurfaceIntersector override on an advanced
+                    // intersector; any failure is SM_ERR)
+                    if self.advanced {
+                        match self.adv_compute_singularity_point(
+                            uv_values,
+                            point,
+                            previous.map(TsectPnt::crv_deriv),
+                        ) {
+                            Ok(()) => {}
+                            Err(e) if e.is_unported() => return Err(e),
+                            Err(_) => return Err(SolidError::sm_err(OP_SING)),
+                        }
+                    } else {
+                        compute_singularity_point_base(uv_values, point, previous)?;
+                    }
                     if point.point_type == IntersectionPointType::TangentPoint
                         || point.point_type == IntersectionPointType::Coincidence
                     {
@@ -1734,7 +1753,7 @@ mod tests {
     }
 
     #[test]
-    fn plane_boundary_test_needs_plane_iso_curves() {
+    fn plane_boundary_test_of_perpendicular_planes_is_unknown() {
         let k = &Kernel::default();
         let (a, b) = two_planes();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -1745,6 +1764,8 @@ mod tests {
         let mut out = TsectCurves::default();
         let bbox = Extent3d::from_bounds(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
         let r = si.do_boundary_plane_test(&k, &mut p1, &mut p2, 1e-3, &bbox, &mut out);
-        assert!(matches!(r, Err(e) if e.is_unported()));
+        // (the bounding planes of a plane go through `SmPlane::CreateIsoParametricCurve`,
+        // surface.plane_p1, ported): no pair of boundary planes has opposite normals
+        assert_eq!(r.unwrap(), BoundaryPlaneTestResult::Unknown);
     }
 }

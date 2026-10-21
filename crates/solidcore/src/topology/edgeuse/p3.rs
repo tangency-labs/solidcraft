@@ -572,7 +572,7 @@ pub fn create_uv_trim_curve(
                 if let Some(out) = r {
                     max_dist_to_surf = out.max_drop_to_surf;
                     max_drop_approx_dev = out.max_approx_dev;
-                    uv_curves = out.uv_curves.into_iter().map(Curve::from).collect();
+                    uv_curves = out.uv_curves;
                 }
                 fail.brep = brep_handle(b, eu)?;
             }

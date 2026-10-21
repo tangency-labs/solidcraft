@@ -102,6 +102,8 @@ enum
 const double REJECTED = -2.0;
 // Record of an op whose surface of revolution could not be made.
 const double NO_SURFACE = -3.0;
+// Trim curve entry for a NULL curve (in place of `GetType()` and the curve data).
+const double NULL_CURVE = -4.0;
 
 struct Bad : std::runtime_error
 {
@@ -807,8 +809,18 @@ void run(Rd& rd, std::vector<double>& o)
             o.push_back(md);
             o.push_back(mv);
             o.push_back((double)uvs.GetSize());
+            // per curve: its GetType() then its data; a NULL entry (a failed SM_CAST_PTR
+            // upstream) is the sentinel NULL_CURVE
             for (ULONG i = 0; i < uvs.GetSize(); i++)
+            {
+                if (uvs[i] == NULL)
+                {
+                    o.push_back(NULL_CURVE);
+                    continue;
+                }
+                o.push_back((double)uvs[i]->GetType());
                 put_curve(o, uvs[i]);
+            }
         }
         for (ULONG i = 0; i < uvs.GetSize(); i++)
             delete uvs[i];

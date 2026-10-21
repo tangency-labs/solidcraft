@@ -211,7 +211,7 @@ fn drop_and_trim_curve(
         .drop_and_trim_curve::<ObjectHandle>(k, domain, curve, interval, tol, true, true, None)?;
     Ok(DropAndTrim {
         dist_to_surface: r.max_drop_to_surf,
-        uv_curves: r.uv_curves.into_iter().map(Curve::from).collect(),
+        uv_curves: r.uv_curves,
     })
 }
 
@@ -1567,13 +1567,13 @@ mod tests {
     }
 
     #[test]
-    fn leading_point_defers_on_classification() {
+    fn leading_point_on_coincident_line_becomes_range() {
         let k = Kernel::default();
         let mut sols = SolutionArray::new();
         let mut s = range(0.2, 0.2);
         s.solution_type = SolutionType::SingleValue;
         sols.add(&s);
-        let e = global_curve_intersect_combine_solutions(
+        global_curve_intersect_combine_solutions(
             &k,
             &plane(),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
@@ -1583,8 +1583,14 @@ mod tests {
             &CombineContext::default(),
             &mut sols,
         )
-        .unwrap_err();
-        assert!(e.is_unported());
+        .unwrap();
+        // the line lies on the surface: its drop (an iso line) replaces the point
+        // by the whole coincident range
+        assert_eq!(sols.len(), 1);
+        let r = sols.get_at(0).unwrap();
+        assert_eq!(r.solution_type, SolutionType::RangeOfValues);
+        assert_eq!(r.start.parameters[..3], [0.0, 0.0, 0.5]);
+        assert_eq!(r.end.parameters[..3], [1.0, 1.0, 0.5]);
     }
 
     #[test]

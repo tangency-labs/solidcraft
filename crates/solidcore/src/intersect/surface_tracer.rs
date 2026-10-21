@@ -625,7 +625,7 @@ pub trait SurfaceTrace<'s> {
     fn find_solutions_on_boundary_curve(
         &self,
         k: &Kernel,
-        boundary: &BSplineCurve,
+        boundary: &Curve,
         interval: &Extent1d,
         side: usize,
         param: SurfParamType,
@@ -1729,7 +1729,7 @@ where
             if curve_is_silhouette {
                 // get near mid-Pnt
                 let test_param = bsc_ivl.evaluate(0.45678);
-                let test_pnt = new_bsc.evaluate_point(test_param)?;
+                let test_pnt = new_bsc.evaluate_point(k, test_param)?;
 
                 // If we already have this curve then skip it.
                 if t.is_point_on_curve(k, test_pnt, &out.curves_3d)? {
@@ -1737,7 +1737,8 @@ where
                 }
 
                 // Add a copy of this solution curve to r3DCurves.
-                let result = Curve::from(new_bsc.clone());
+                // (`new SmBSplineCurve(*pNewBSC)`: a plain B-spline copy)
+                let result = crate::surface::surface_cache::p1::copy_as_bspline(new_bsc)?;
                 let result_ivl = result.natural_interval();
                 out.curves_3d.push(result.clone());
 

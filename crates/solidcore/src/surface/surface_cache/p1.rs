@@ -86,11 +86,10 @@
 //!   those return [`SolidError::Unported`]. `EvaluateNormal` is
 //!   [`Surface::evaluate_normal`] (`surface::surface::p7`, with the plane and
 //!   curve-bounded overrides). An `SmPlane` is an
-//!   `SmBSplineSurface` upstream: the cast gives its B-spline part, and its
-//!   `CreateIsoParametricCurve` (an `SmLine`, which the cache cannot hold as a
-//!   [`BSplineCurve`] without losing the line's overrides) and the inherited
-//!   `CalculateBoundingBox` (which dispatches back to the plane) return
-//!   [`SolidError::Unported`] (`surface.plane_p1`). Where upstream
+//!   `SmBSplineSurface` upstream: the cast gives its B-spline part. The iso curves
+//!   (`CreateIsoParametricCurve`, virtual: an `SmLine` for a plane, an `SmCircle` in
+//!   the sweep direction of a surface of revolution) are held as [`Curve`], so the
+//!   derived classes' overrides stay in effect. Where upstream
 //!   casts with `SM_CAST_PTR(SmBSplineSurface, ...)` and `NER`s, a non-B-spline surface
 //!   gives `SM_ERR_NULL_POINTER`. `PointClassify` is the base class body (`SM_ERR`); the
 //!   trimmed surface cache overrides belong to `surface.trim_srf_cache`.
@@ -117,7 +116,7 @@
 //!   `GetBoundingPlane`, `GetBrep`, `GetMemoryUsed`, `AssertValid`, the `Dump` and
 //!   `Draw` functions (other units or debug output).
 
-use crate::curve::curve::p2::{approximate_length, Curve, CurveKind};
+use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -133,7 +132,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
-    BSplineSurface, BoundingBoxRequest, BoundingBoxes, IsoCurveOptions, SurfParamType,
+    BSplineSurface, BoundingBoxRequest, BoundingBoxes, SurfParamType,
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::math::NOW;
@@ -186,19 +185,6 @@ pub(super) fn invalid(operation: &'static str, reason: &'static str) -> SolidErr
     SolidError::InvalidInput { operation, reason }
 }
 
-/// `SmPlane::CreateIsoParametricCurve` (virtual, reached through an `SmSurface` or
-/// an `SmBSplineSurface` pointer): not wired into the cache.
-const fn plane_iso_unported() -> SolidError {
-    // UNPORTED(surface.surface_cache_p1): SmPlane::CreateIsoParametricCurve. Ported as
-    // Plane::create_iso_parametric_curve (surface.plane_p1), but it makes an SmLine and
-    // this cache holds its iso curves as BSplineCurve, which would drop the SmLine
-    // overrides (evaluation, length); wiring it needs Curve storage here.
-    SolidError::unported(
-        "SmPlane::CreateIsoParametricCurve",
-        "surface.surface_cache_p1",
-    )
-}
-
 /// `SM_CAST_PTR(SmBSplineSurface, surface)` for callers that run only non-virtual
 /// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
 /// reach a virtual member deal with planes first.
@@ -215,6 +201,23 @@ pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => None,
     }
+}
+
+/// `new SmBSplineCurve(*pCurve)` for an `SmBSplineCurve*` that may point at an `SmLine` or
+/// `SmCircle` (the iso curves of a plane or a sweep): the copy constructor of the base
+/// class makes a plain B-spline curve, dropping the derived class.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a curve that is not of a B-spline kind.
+pub fn copy_as_bspline(curve: &Curve) -> Result<Curve> {
+    // (an SmLine makes its NURB when the copy constructor asks for it)
+    if let CurveKind::Line(l) = curve.kind() {
+        return Ok(Curve::from(l.base_with_nurb()?.into_owned()));
+    }
+    bspline_curve_of(curve)
+        .map(|b| Curve::from(b.clone()))
+        .ok_or(SolidError::null_pointer(OP_COPY))
 }
 
 /// `SM_CAST_PTR(SmBSplineCurve, curve)`: the B-spline (base) of the B-spline kinds.
@@ -236,61 +239,34 @@ const fn bspline_curve_of(curve: &Curve) -> Option<&BSplineCurve> {
     }
 }
 
-/// `SmSurface::CreateIsoParametricCurve(ctx, param, iso, tol, curve, domain)`: the
-/// B-spline override (the 3D tolerance is not used by it); other kinds run the base
-/// class body.
+/// `SmSurface::CreateIsoParametricCurve(ctx, param, iso, tol, curve, domain)`, the
+/// virtual: the B-spline, plane (an `SmLine`) and surface of revolution (an
+/// `SmCircle` in the sweep direction) overrides, the base class body for the other
+/// kinds. The curve is held as a [`Curve`] so the derived classes' overrides
+/// (evaluation, length, degeneracy) stay in effect; the 3D tolerance is `0.0` as
+/// upstream's callers pass (the overrides do not use it).
 fn create_iso_parametric_curve(
     k: &Kernel,
     surface: &Surface,
     param: SurfParamType,
     iso: f64,
     domain: Option<Extent2d>,
-) -> Result<BSplineCurve> {
+) -> Result<Curve> {
+    let r = surface.create_iso_parametric_curve(k, param, iso, 0.0, domain.as_ref(), false)?;
     match surface.kind() {
-        SurfaceKind::BSpline(b) => bspline_iso_curve(k, b, param, iso, domain),
-        SurfaceKind::Plane(_) => Err(plane_iso_unported()),
-        // UNPORTED(surface.surface_cache_p1): SmSurfOfRevolution::CreateIsoParametricCurve.
-        // Ported as SurfOfRevolution::create_iso_parametric_curve
-        // (surface.surf_of_revolution_p1), but it makes an SmCircle in the sweep
-        // direction and this cache holds its iso curves as BSplineCurve, which would drop
-        // the SmEllipse overrides; wiring it needs Curve storage here.
-        SurfaceKind::Cone(_)
-        | SurfaceKind::Sphere(_)
-        | SurfaceKind::Torus(_)
-        | SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
-            "SmSurfOfRevolution::CreateIsoParametricCurve",
-            "surface.surface_cache_p1",
-        )),
-        // the SmSurface body (surface.surface_p5); tolerance 0.0 as upstream's callers
+        // the SmSurface body (surface.surface_p5) makes a B-spline
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::SrfInVolume(_) => {
-            let r =
-                surface.create_iso_parametric_curve(k, param, iso, 0.0, domain.as_ref(), false)?;
-            match r.curve.into_kind() {
-                CurveKind::BSpline(b) => Ok(b),
-                _ => Err(SolidError::sm_err(
-                    "surface::surface_cache::p1::create_iso_parametric_curve",
-                )),
-            }
+        | SurfaceKind::SrfInVolume(_)
+            if !matches!(r.curve.kind(), CurveKind::BSpline(_)) =>
+        {
+            Err(SolidError::sm_err(
+                "surface::surface_cache::p1::create_iso_parametric_curve",
+            ))
         }
+        _ => Ok(r.curve),
     }
-}
-
-/// `SmBSplineSurface::CreateIsoParametricCurve` without UV curve.
-fn bspline_iso_curve(
-    k: &Kernel,
-    bss: &BSplineSurface,
-    param: SurfParamType,
-    iso: f64,
-    domain: Option<Extent2d>,
-) -> Result<BSplineCurve> {
-    let opts = IsoCurveOptions {
-        domain,
-        uv_iso_curve: false,
-    };
-    Ok(bss.create_iso_parametric_curve(k, param, iso, opts)?.curve)
 }
 
 /// `SmSurface::CalculateBoundingBox(domain, ...)`: the B-spline override; other kinds
@@ -636,15 +612,13 @@ impl PatchBoundaryBoundingPlanes {
         k: &Kernel,
         surface: &Surface,
         index: usize,
-    ) -> Result<BSplineCurve> {
+    ) -> Result<Curve> {
         let (spt, param) = self.iso_of(index);
-        let bss = bspline_of(surface).ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
-        if matches!(surface.kind(), SurfaceKind::Plane(_)) {
-            // the cast succeeds; the virtual call reaches the SmPlane override
-            return Err(plane_iso_unported());
-        }
-        // make the curve (3D Tol SM_BIG_DOUBLE: not used)
-        bspline_iso_curve(k, bss, spt, param, None)
+        // SM_CAST_PTR(SmBSplineSurface, ..) and NER: the B-spline kinds
+        bspline_of(surface).ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
+        // make the curve through the virtual (the SmPlane and SmSurfOfRevolution
+        // overrides; 3D Tol SM_BIG_DOUBLE: not used by any of them)
+        create_iso_parametric_curve(k, surface, spt, param, None)
     }
 
     /// The UV end points of boundary `index` (`GetBoundaryUVEndPoints`).
@@ -678,6 +652,12 @@ impl PatchBoundaryBoundingPlanes {
 
         // local
         let bs = bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?;
+        // (the canonical form asks for the NURB through the virtual GetOrCreateGwNurbPointer,
+        // which makes a plane's)
+        let bs = match surface.kind() {
+            SurfaceKind::Plane(p) => p.base_for_query(),
+            _ => std::borrow::Cow::Borrowed(bs),
+        };
 
         // for every boundary
         for ii in 0..4 {
@@ -695,11 +675,11 @@ impl PatchBoundaryBoundingPlanes {
 
             // eval 3D boundary curve beg, mid, and end pts
             let domain = bsp.natural_interval();
-            let p1 = bsp.evaluate_point(domain.evaluate(0.0))?;
-            let p12 = bsp.evaluate_point(domain.evaluate(0.25))?;
-            let p2 = bsp.evaluate_point(domain.evaluate(0.5))?;
-            let p23 = bsp.evaluate_point(domain.evaluate(0.75))?;
-            let p3 = bsp.evaluate_point(domain.evaluate(1.0))?;
+            let p1 = bsp.evaluate_point(k, domain.evaluate(0.0))?;
+            let p12 = bsp.evaluate_point(k, domain.evaluate(0.25))?;
+            let p2 = bsp.evaluate_point(k, domain.evaluate(0.5))?;
+            let p23 = bsp.evaluate_point(k, domain.evaluate(0.75))?;
+            let p3 = bsp.evaluate_point(k, domain.evaluate(1.0))?;
 
             // compute plane from those 3 points
             let plane = compute_plane_from_3_points(p1, p2, p3, tolerance)?;
@@ -721,7 +701,7 @@ impl PatchBoundaryBoundingPlanes {
                 let surf_normal = evaluate_normal(k, surface, corner, from_left, from_left)?;
 
                 let rel_curve_loc = if ii == 0 || ii == 3 { 0.0 } else { 1.0 };
-                let evals = bsp.evaluate(domain.evaluate(rel_curve_loc), 1, from_left, false)?;
+                let evals = bsp.evaluate(k, domain.evaluate(rel_curve_loc), 1, from_left, false)?;
                 let curve_direction = evals
                     .get(1)
                     .copied()
@@ -737,7 +717,7 @@ impl PatchBoundaryBoundingPlanes {
             }
 
             // test: Is boundary curve control polygon on computed plane
-            let on_plane = bsp.is_on_plane(plane_base, plane_normal, tolerance, None)?;
+            let on_plane = bsp.is_on_plane(k, plane_base, plane_normal, tolerance, None)?;
 
             // low work - this curve not planar - go to next boundary curve
             if !on_plane.on_plane {
@@ -746,7 +726,7 @@ impl PatchBoundaryBoundingPlanes {
 
             // test: does surface lie completely on one side of the bounding plane
             let (is_separating, invert_normal) =
-                check_bounding_plane_separating_halfspace(bs, plane_base, plane_normal)?;
+                check_bounding_plane_separating_halfspace(&bs, plane_base, plane_normal)?;
 
             // low work - surface xsects bounding plane
             if !is_separating {
@@ -1392,7 +1372,7 @@ pub struct IsoBoundaryCurves {
     /// `rbCurvesAreCached`: the curves are (now) held by the cache.
     pub cached: bool,
     /// `rIsoCurves`: minimum u, minimum v, maximum u, maximum v iso curves.
-    pub curves: [BSplineCurve; 4],
+    pub curves: [Curve; 4],
 }
 
 /// The Bezier decomposition of a surface (`SmSurfaceCache`). `O` is the caller's
@@ -1431,7 +1411,7 @@ pub struct SurfaceCache<O> {
     /// `m_dTrimSubdivisionFactor`.
     pub trim_subdivision_factor: f64,
     /// `m_apIsoBoundaryCurves`: the cached natural boundary iso curves.
-    iso_boundary_curves: Option<[BSplineCurve; 4]>,
+    iso_boundary_curves: Option<[Curve; 4]>,
     /// `m_sSubdivisionSurfaces`: construction surfaces with their handles.
     subdivision_surfaces: Vec<(O, Surface)>,
     /// Names the halves of a split subdivision surface (see
@@ -2458,7 +2438,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
                     // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
                     // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
-                    // receives the owning B-rep
+                    // receives the owning B-rep (justified: findings.md "stubs naming green units")
                     return Err(SolidError::unported(
                         "SmTol::GetZoneTol3d(const SmObject*)",
                         "geom.tol",
@@ -2758,8 +2738,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let top_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_top.y, d)?;
 
         // 3D Udir and Vdir IsoParamCurve lengths
-        let len = |c: &BSplineCurve, ivl: &Extent1d| -> Result<f64> {
-            Ok(approximate_length(k, c, ivl, 8, false)?.0)
+        let len = |c: &Curve, ivl: &Extent1d| -> Result<f64> {
+            Ok(c.approximate_length(k, ivl, 8, false)?.0)
         };
         let bot_v_size = len(&bot_u, &v_domain)?;
         let bot_u_size = len(&bot_v, &u_domain)?;
@@ -2886,6 +2866,25 @@ where
 mod tests {
     use super::*;
     use crate::geom::extent3d::Extent3d;
+
+    #[test]
+    fn plane_boundary_planes() {
+        use crate::surface::plane::Plane;
+        let k = Kernel::default();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 10.0, 6.0);
+        let surface = Surface::from(Plane::new(
+            Vec3::new(-5.0, -3.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &dom,
+        ));
+        let mut bp = PatchBoundaryBoundingPlanes::new(dom);
+        // the iso curve of a plane is its SmLine
+        let c = bp.create_boundary_curve_for_index(&k, &surface, 0).unwrap();
+        assert!(matches!(c.kind(), CurveKind::Line(_)));
+        bp.compute_bounding_planes(&k, &surface).unwrap();
+    }
 
     #[test]
     fn cull_keeps_first_and_last() {

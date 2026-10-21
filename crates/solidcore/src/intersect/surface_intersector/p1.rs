@@ -586,6 +586,10 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_points: Vec<TsectId>,
     /// `m_vThroughPoints`.
     pub(crate) through_points: Vec<TsectId>,
+    /// The object is an `SmAdvSurfaceIntersector`: the virtual
+    /// `ComputeSingularityPoint` that `ComputePointValues` calls is that class's
+    /// override, not the basic `SM_ERR` one.
+    pub(crate) advanced: bool,
 }
 
 fn bad_id() -> SolidError {
@@ -688,6 +692,7 @@ impl<'s> SurfaceIntersector<'s> {
             curve_points: Vec::new(),
             start_points: Vec::new(),
             through_points: Vec::new(),
+            advanced: false,
         })
     }
 

@@ -47,6 +47,10 @@
 //! - **Points.** `ComputeSingularityPoint` takes intersection point ids of the
 //!   base's arena ([`AdvSurfaceIntersector::compute_singularity_point`]) or a
 //!   detached point ([`AdvSurfaceIntersector::compute_singularity_point_on`]).
+//!   Its body reads only base members, so it lives on [`SurfaceIntersector`]
+//!   (`adv_compute_singularity_point`), where the base's `ComputePointValues`
+//!   calls it for an intersector made by [`AdvSurfaceIntersector::new`] (the
+//!   virtual dispatch).
 //!   Its unused UV argument is kept. The fixed array of eight singular directions
 //!   is kept: a ninth direction (upstream writes past the array) is
 //!   [`SolidError::InvalidInput`].
@@ -270,7 +274,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         uv_domain2: &Extent2d,
         from_fillet_intersector: bool,
     ) -> Result<Self> {
-        let base = SurfaceIntersector::new(
+        let mut base = SurfaceIntersector::new(
             k,
             surface1,
             uv_domain1,
@@ -278,6 +282,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             uv_domain2,
             from_fillet_intersector,
         )?;
+        // the virtual ComputeSingularityPoint is this class's override
+        base.advanced = true;
 
         // global solver members, as SmSurfaceIntersector's constructor sets them
         let mut solver = GlobalSolver::new();
@@ -435,459 +441,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     #[allow(clippy::too_many_lines)] // one upstream function
     pub fn compute_singularity_point_on(
         &self,
-        _uv_values: [Point2; 2],
+        uv_values: [Point2; 2],
         point: &mut TsectPnt,
         prev_crv_deriv: Option<Vec3>,
     ) -> Result<()> {
-        let curve_trace_direction = self.base.curve_trace_direction;
-        let ang_tol_rad = self.base.this_ang_tol_rad;
-
-        // init curve direction when possible - NULL when given a start point
-        if let Some(d) = prev_crv_deriv {
-            *point.crv_deriv_mut() = d;
-        }
-
-        // The last node of m_vCurvePoints (point may be on that list itself).
-        let last_node = self.base.curve_points().last().copied();
-        let last_node_deriv = match last_node {
-            Some(id) => Some(self.base.point(id)?.crv_deriv()),
-            None => None,
-        };
-
-        // classify surface shape at given points
-        let surf1_type = compute_surface_point_type(
-            point.srf_norm(SrfIndex::First),
-            point.srf_duu(SrfIndex::First),
-            point.srf_dvv(SrfIndex::First),
-            None,
-            false,
-        );
-        let surf2_type = compute_surface_point_type(
-            point.srf_norm(SrfIndex::Second),
-            point.srf_duu(SrfIndex::Second),
-            point.srf_dvv(SrfIndex::Second),
-            None,
-            false,
-        );
-
-        // get planar surface index (if any)
-        let planar = if surf1_type == LocalSurfaceType::Planar {
-            Some(SrfIndex::First)
-        } else if surf2_type == LocalSurfaceType::Planar {
-            Some(SrfIndex::Second)
-        } else {
-            None
-        };
-
-        // locals for multiple intersection directions for singular points
-        let mut sing_dir_count = 0_usize;
-        let mut sing_directions = [Vec3::UNDEF; MAX_SING_DIRS];
-
-        // some cases project the previous point's CurveDir() to the current point's
-        // tangency plane (in a scratch copy)
-        let mut prev: Option<Vec3> = None;
-        if let Some(prev_deriv) = prev_crv_deriv.or(last_node_deriv) {
-            // project pPrev CrvDeriv() vector into rTsectPnt tangency plane
-            let end_pt = point.crv_pos() + prev_deriv;
-            let pt_on_plane =
-                point_project_to_plane(end_pt, point.crv_pos(), point.srf_norm(SrfIndex::First));
-            let dir = pt_on_plane - point.crv_pos();
-
-            // when projection worked - update the pPrev->CrvDeriv direction to that
-            prev = Some(dir.unitize().unwrap_or(prev_deriv));
-        }
-
-        // Process planar case -
-        if let Some(srf) = planar {
-            // get other surface index
-            let other = match srf {
-                SrfIndex::First => SrfIndex::Second,
-                SrfIndex::Second => SrfIndex::First,
-            };
-
-            // get otherSurf curvature properties at point
-            let geom = evaluate_geometric(point.srf_eval_matrix_mut(other))?;
-            let prin_k1 = geom.principle_curvature1;
-            let prin_k2 = geom.principle_curvature2;
-            let mut prin_kv1 = geom.principle_curvature_vector1;
-            let mut prin_kv2 = geom.principle_curvature_vector2;
-
-            // If the normals do not agree then reverse the curvatures
-            let mut opposite_normals = false;
-            if point.srf_norm(other).dot(point.srf_norm(srf)) < EFF_ZERO {
-                opposite_normals = true;
-                prin_kv1 = -prin_kv1;
-                prin_kv2 = -prin_kv2;
-            }
-
-            if prin_k1.abs() < EFF_ZERO_SQRT && prin_k2.abs() > EFF_ZERO_SQRT {
-                // planar surfacePoint is kissing a cylindrical surfacePoint in 1st
-                // principal curvature direction
-                point.point_type = IntersectionPointType::TangentCurve;
-                *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                align_with_previous(point, prev, ang_tol_rad);
-                return Ok(());
-            } else if prin_k2.abs() < EFF_ZERO_SQRT && prin_k1.abs() > EFF_ZERO_SQRT {
-                // ... in 2nd principal curvature direction
-                point.point_type = IntersectionPointType::TangentCurve;
-                *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                align_with_previous(point, prev, ang_tol_rad);
-                return Ok(());
-            } else if prin_k1 * prin_k2 < 0.0 {
-                // planar surfacePoint is intersecting a saddle surfacePoint
-                point.point_type = IntersectionPointType::Singularity;
-
-                // evaluate the hyperbola K1*x^2 + K2*y^2 = 1 at a large Y value
-                let y = 10000.0;
-                let mut tmp = (1.0 - prin_k1 * y * y) / prin_k2;
-                if tmp < 0.0 {
-                    tmp = 0.0;
-                }
-                let x = sqrt(tmp);
-
-                let mut asymp_dir1 = y * prin_kv1 + x * prin_kv2;
-                let mut asymp_dir_in1 = y * prin_kv1 - x * prin_kv2;
-
-                // If the normals oppose then switch directions
-                if opposite_normals {
-                    core::mem::swap(&mut asymp_dir1, &mut asymp_dir_in1);
-                }
-
-                // unitize the assymptotic directions
-                asymp_dir1 = asymp_dir1.unitize_or_z();
-                asymp_dir_in1 = asymp_dir_in1.unitize_or_z();
-
-                // the other start directions are in the negative assymptotic directions
-                let asymp_dir2 = -asymp_dir1;
-                let asymp_dir_in2 = -asymp_dir_in1;
-
-                // Reverse vectors if tracing backwards
-                sing_dir_count = 4;
-                sing_directions[0] = asymp_dir1 * curve_trace_direction;
-                sing_directions[1] = asymp_dir2 * curve_trace_direction;
-                sing_directions[2] = asymp_dir_in1 * curve_trace_direction;
-                sing_directions[3] = asymp_dir_in2 * curve_trace_direction;
-            } else {
-                // plane is kissing a hill or bowl (or a plane)
-                point.point_type = IntersectionPointType::TangentPoint;
-                return Ok(());
-            }
-        } else {
-            // No planar points branch
-
-            // Dupin indicatrex curves for 1st surface
-            let normal0 = point.srf_norm(SrfIndex::First);
-            let d1 = self.make_dupin(point.srf_eval_matrix_mut(SrfIndex::First), normal0)?;
-            let (prin_k1, prin_k2, prin_kv1, prin_kv2) =
-                (d1.prin_k1, d1.prin_k2, d1.prin_k1_vec, d1.prin_k2_vec);
-
-            // Compute values of second surface based upon the normal of the first
-            let normal0 = point.srf_norm(SrfIndex::First);
-            let mut d2 = self.make_dupin(point.srf_eval_matrix_mut(SrfIndex::Second), normal0)?;
-            let (prin_k1_2, prin_k2_2, prin_kv1_2, prin_kv2_2) =
-                (d2.prin_k1, d2.prin_k2, d2.prin_k1_vec, d2.prin_k2_vec);
-
-            // if Surf1 has an Umbilical (Spherical) surfacePoint
-            let scale = EFF_ZERO * (1.0 + prin_k1.abs());
-            if (prin_k1 - prin_k2).abs() < scale {
-                // if Surf2->k1 = Surf1->k1
-                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
-                    // and Surf2  k2 is the same - coincident surfacePoints
-                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                        point.point_type = IntersectionPointType::Coincidence;
-                        return Ok(());
-                    }
-                    // only tangent in k1 direction
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv1_2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-
-                // else if Surf2->k2 = Surf1->k2
-                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                    // only tangent in k2 direction
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv2_2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-            }
-
-            // if Surf2 has an Umbilical (Spherical) surfacePoint
-            let scale = EFF_ZERO * (1.0 + prin_k1_2.abs());
-            if (prin_k1_2 - prin_k2_2).abs() < scale {
-                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
-                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                        point.point_type = IntersectionPointType::Coincidence;
-                        return Ok(());
-                    }
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-
-                // if Surf1->k2 == Surf2->k1 singular Point is TANGENT_CURVE
-                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-            }
-
-            // when surf1->k1_Direction = surf2->k1_Direction
-            let cross = prin_kv1.cross(prin_kv1_2);
-            if cross.length() < EFF_ZERO_SQRT * 100.0 {
-                // when surf1->k1 == surf2->k1
-                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
-                    // and surf1->k2 == surf2->k2
-                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                        self.pick_matching_direction(
-                            point,
-                            prev,
-                            [prin_kv1, -prin_kv1, prin_kv2, -prin_kv2],
-                            (prin_k1, prin_k2, prin_kv1, prin_kv2),
-                        )?;
-                        return Ok(());
-                    }
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-
-                // when surf1->k2 == surf2->k2 while surf1->k1 != surf2->k1
-                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-            }
-
-            // when surf1->k1_Direction = +/- surf2->k2_Direction
-            let cross2 = prin_kv1.cross(prin_kv2_2);
-            if cross2.length() < EFF_ZERO_SQRT * 100.0 {
-                // when surf1->k1 == surf2->k2
-                if (prin_k1 - prin_k2_2).abs() < EFF_ZERO_SQRT {
-                    // and when surf1->k2 == surf2->k1
-                    if (prin_k2 - prin_k1_2).abs() < EFF_ZERO_SQRT {
-                        self.pick_matching_direction(
-                            point,
-                            prev,
-                            [prin_kv1, -prin_kv1, prin_kv2, -prin_kv2],
-                            (prin_k1, prin_k2, prin_kv1, prin_kv2),
-                        )?;
-                        return Ok(());
-                    }
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-
-                // when surf1->k2 == surf2->k1 while surf1->k1 != surf2->k2
-                if (prin_k2 - prin_k1_2).abs() < EFF_ZERO_SQRT {
-                    point.point_type = IntersectionPointType::TangentCurve;
-                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
-                    align_with_previous(point, prev, ang_tol_rad);
-                    return Ok(());
-                }
-            }
-
-            // intersect the properly oriented Dupin indicatrix curves
-
-            // angle between surface's natural coordinate systems
-            let angle_rad = point
-                .srf_norm(SrfIndex::First)
-                .ccw_angle_between(prin_kv1, prin_kv1_2)?;
-
-            // Rotate curves from surface 2 into position on surface 1
-            for c in d2.above.iter_mut().chain(d2.below.iter_mut()) {
-                c.transform_2d(angle_rad, Point2::new(0.0, 0.0));
-            }
-
-            // for every surf1->AboveCurves - intersect with surf2->AboveCurves, then
-            // the same for the BelowCurves
-            for (curves1, curves2) in [(&d1.above, &d2.above), (&d1.below, &d2.below)] {
-                for c1 in curves1 {
-                    for c2 in curves2 {
-                        // intersect the dupin indicatrix curves
-                        let sols = c1.intersect_conic(c2, EFF_ZERO_SQRT * 100.0)?;
-
-                        // for every dupin indicatrix curve/curve xSect solution
-                        for sol in &sols {
-                            // xSect Point in Surface1 natural coordinate system
-                            let p1 = c1.evaluate_point(sol.param).unitize()?;
-
-                            // 3D direction for vector = [sP1 - NaturalOrigin] = sP1
-                            let sing_dir = (p1.x * prin_kv1 + p1.y * prin_kv2).unitize()?;
-
-                            // add unique sSingDir vector to aSingDirections
-                            add_sing_dir(sing_dir, &mut sing_dir_count, &mut sing_directions)?;
-                        }
-                    }
-                }
-            }
-        }
-
-        let dirs = sing_directions;
-        let dir = |i: usize| dirs.get(i).copied().unwrap_or(Vec3::UNDEF);
-
-        // no singular directions branch
-        if sing_dir_count == 0 {
-            point.point_type = IntersectionPointType::TangentPoint;
-            return Ok(());
-        }
-
-        // when number of singular directions is 2
-        if sing_dir_count == 2 {
-            point.point_type = IntersectionPointType::TangentCurve;
-
-            // set sing direct = 1st singDirection found
-            *point.crv_deriv_mut() = dir(0);
-
-            // when there is a PreviousPoint - select best matching direction
-            if let Some(p) = prev {
-                let angle_min = angle(p, dir(0))?;
-                let angle_min2 = angle(p, dir(1))?;
-                if angle_min2 < angle_min {
-                    *point.crv_deriv_mut() = dir(1);
-                }
-            }
-
-            align_with_previous(point, prev, ang_tol_rad);
-            return Ok(());
-        }
-
-        // 3 or more singular directions branch
-        if sing_dir_count > 2 {
-            point.point_type = IntersectionPointType::Singularity;
-
-            let used = dirs.get(..sing_dir_count).unwrap_or(&[]);
-
-            if last_node.is_none() {
-                // starting a curve: seek a singularity direction inside the domains
-
-                // drop SingDirectons into Surf1 and Surf2 parameter space
-                let sing_uv_surf1 = drop_vectors(
-                    point.srf_du(SrfIndex::First),
-                    point.srf_dv(SrfIndex::First),
-                    used,
-                )?;
-                let sing_uv_surf2 = drop_vectors(
-                    point.srf_du(SrfIndex::Second),
-                    point.srf_dv(SrfIndex::Second),
-                    used,
-                )?;
-
-                // init output 3DCurveDirection = 1st SingDirection Vector
-                *point.crv_deriv_mut() = dir(0);
-
-                // for every SingDirection vector - find those directions which point
-                // inside surf1 and surf2
-                let mut inside: Vec<usize> = Vec::new();
-                for (ii, (uv1, uv2)) in sing_uv_surf1.iter().zip(&sing_uv_surf2).enumerate() {
-                    let delta1 = point.uv_pos(SrfIndex::First) + EFF_ZERO_SQRT * *uv1;
-                    if self.base.uv_domains[0].contains_point(delta1, EFF_ZERO_SQRT / 100_000.0) {
-                        let delta2 = point.uv_pos(SrfIndex::Second) + EFF_ZERO_SQRT * *uv2;
-                        if self.base.uv_domains[1].contains_point(delta2, EFF_ZERO_SQRT / 100_000.0)
-                        {
-                            // found a singular direction inside both domains
-                            inside.push(ii);
-                        }
-                    }
-                }
-
-                // Decide which of the aSingDirections to use.
-                if let Some(p) = prev {
-                    if let Some((&first, rest)) = inside.split_first() {
-                        // Find the singDirection closest to Prev->3DCurve_Direction.
-                        let mut angle_min = angle(p, dir(first))?;
-                        for &ii in rest {
-                            let angle_test = angle(p, dir(ii))?;
-                            if angle_test < angle_min {
-                                *point.crv_deriv_mut() = dir(ii);
-                                angle_min = angle_test;
-                            }
-                        }
-                    } else {
-                        // None points inside both domains.  Just use the prev direction.
-                        *point.crv_deriv_mut() = p;
-                    }
-                } else if let Some(&first) = inside.first() {
-                    // one inside direction, or several: use the first one
-                    *point.crv_deriv_mut() = dir(first);
-                }
-                // else: no direction was inside both; leave it as it is
-            } else {
-                // continuing the curve: the direction closest to the last one
-                let p = prev.unwrap_or(Vec3::UNDEF);
-                *point.crv_deriv_mut() = dir(0);
-                let mut angle_min = angle(p, dir(0))?;
-                for kk in 1..sing_dir_count {
-                    // direction test
-                    let angle_test = angle(p, dir(kk))?;
-                    if angle_test < angle_min {
-                        angle_min = angle_test;
-                        *point.crv_deriv_mut() = dir(kk);
-                    }
-
-                    // neg direction test
-                    let angle_test = angle(p, -dir(kk))?;
-                    if angle_test < angle_min {
-                        angle_min = angle_test;
-                        *point.crv_deriv_mut() = -dir(kk);
-                    }
-                }
-                // (a minimum angle above 20 degrees is only reported upstream)
-            }
-
-            return Ok(());
-        }
-
-        // a single singular direction is not a valid result
-        Err(SolidError::sm_err(OP_SING))
-    }
-
-    /// The singularity/coincidence case of matching principal curvatures and
-    /// directions: with a previous direction the closest of `dirs`
-    /// (`SM_IP_SINGULARITY`), else the direction of the smaller curvature
-    /// (`SM_IP_COINCIDENCE`).
-    fn pick_matching_direction(
-        &self,
-        point: &mut TsectPnt,
-        prev: Option<Vec3>,
-        dirs: [Vec3; 4],
-        (prin_k1, prin_k2, prin_kv1, prin_kv2): (f64, f64, Vec3, Vec3),
-    ) -> Result<()> {
-        let [d0, d1, d2, d3] = dirs;
-        *point.crv_deriv_mut() = d0;
-
-        // when there is a prevPoint or a LastNode of m_vCurvePoints
-        if let Some(p) = prev {
-            // select the direction most like the previous point direction
-            let mut angle_min = angle(p, d0)?;
-            for d in [d1, d2, d3] {
-                let angle_test = angle(p, d)?;
-                if angle_test < angle_min {
-                    angle_min = angle_test;
-                    *point.crv_deriv_mut() = d;
-                }
-            }
-            point.point_type = IntersectionPointType::Singularity;
-        } else {
-            // select the direction with the smallest radius of curvature
-            *point.crv_deriv_mut() = if prin_k2.abs() < prin_k1.abs() {
-                prin_kv2 * self.base.curve_trace_direction
-            } else {
-                prin_kv1 * self.base.curve_trace_direction
-            };
-            point.point_type = IntersectionPointType::Coincidence;
-        }
-        Ok(())
+        self.base
+            .adv_compute_singularity_point(uv_values, point, prev_crv_deriv)
     }
 
     /// `MakeDupin`: the Dupin indicatrix curves of the surface point evaluated in
@@ -906,122 +465,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         surface_eval: &mut [[Vec3; 3]; 3],
         reference_normal: Vec3,
     ) -> Result<Dupin> {
-        let geom = evaluate_geometric(surface_eval)?;
-        let mut out = Dupin {
-            above: Vec::new(),
-            below: Vec::new(),
-            prin_k1_vec: geom.principle_curvature_vector1,
-            prin_k2_vec: geom.principle_curvature_vector2,
-            prin_k1: geom.principle_curvature1,
-            prin_k2: geom.principle_curvature2,
-            efg: geom.efg_of_first_fund_form,
-            lmn: geom.lmn_of_second_fund_form,
-        };
-
-        // negate curvatures when surface normal is opposite reference normal
-        if reference_normal.dot(surface_eval[2][2]) < 0.0 {
-            out.prin_k1 = -out.prin_k1;
-            out.prin_k2 = -out.prin_k2;
-        }
-
-        // no work - surfacePoint is planar
-        if out.prin_k1.abs() < EFF_ZERO && out.prin_k2.abs() < EFF_ZERO {
-            return Ok(out);
-        }
-
-        // treat a curvature 1000 times smaller than the other as zero (a cylinder)
-        if out.prin_k1.abs() < out.prin_k2.abs() / 1000.00 {
-            out.prin_k1 = 0.0;
-        }
-        if out.prin_k2.abs() < out.prin_k1.abs() / 1000.00 {
-            out.prin_k2 = 0.0;
-        }
-        let (k1, k2) = (out.prin_k1, out.prin_k2);
-
-        if k1.abs() < EFF_ZERO || k2.abs() < EFF_ZERO {
-            // We have a parabolic point - create two parallel lines
-            let mut prin_k = k1;
-            // 90 degree rotation because curves are parallel to the local Y axis.
-            let mut angle_rad = PI / 2.0;
-            if prin_k.abs() < EFF_ZERO {
-                prin_k = k2;
-                angle_rad = 0.0;
-            }
-
-            // two lines leaving this point in opposite directions
-            let a = 1.0 / sqrt(prin_k.abs());
-            let mut line1 = Conic::new(ConicType::Line, a, 0.0);
-            line1.transform_2d(angle_rad, Point2::new(0.0, 0.0));
-            let mut line2 = Conic::new(ConicType::Line, a, 0.0);
-            line2.transform_2d(PI + angle_rad, Point2::new(0.0, 0.0));
-
-            if prin_k > 0.0 {
-                out.above.push(line1);
-                out.above.push(line2);
-            } else {
-                out.below.push(line1);
-                out.below.push(line2);
-            }
-            return Ok(out);
-        } else if k1 * k2 > 0.0 {
-            // We have an ellipse
-            let ellipse = Conic::new(
-                ConicType::Ellipse,
-                1.0 / sqrt(k1.abs()),
-                1.0 / sqrt(k2.abs()),
-            );
-            if k1 > 0.0 {
-                out.above.push(ellipse);
-            } else {
-                out.below.push(ellipse);
-            }
-        } else if k1 * k2 < 0.0 {
-            // We have a hyperbolic point
-            let mut push = |c: Conic, k: f64| {
-                if k > 0.0 {
-                    out.above.push(c);
-                } else {
-                    out.below.push(c);
-                }
-            };
-
-            // First create hyperbola on right side
-            let hyp = Conic::new(
-                ConicType::Hyperbola,
-                1.0 / sqrt(k1.abs()),
-                1.0 / sqrt(k2.abs()),
-            );
-            push(hyp, k1);
-
-            // Now do left side hyperbola
-            let mut hyp = Conic::new(
-                ConicType::Hyperbola,
-                1.0 / sqrt(k1.abs()),
-                1.0 / sqrt(k2.abs()),
-            );
-            hyp.transform_2d(PI, Point2::new(0.0, 0.0));
-            push(hyp, k1);
-
-            // Now do top hyperbola
-            let mut hyp = Conic::new(
-                ConicType::Hyperbola,
-                1.0 / sqrt(k2.abs()),
-                1.0 / sqrt(k1.abs()),
-            );
-            hyp.transform_2d(PI / 2.0, Point2::new(0.0, 0.0));
-            push(hyp, k2);
-
-            // Now do bottom hyperbola
-            let mut hyp = Conic::new(
-                ConicType::Hyperbola,
-                1.0 / sqrt(k2.abs()),
-                1.0 / sqrt(k2.abs()),
-            );
-            hyp.transform_2d(PI + PI / 2.0, Point2::new(0.0, 0.0));
-            push(hyp, k2);
-        }
-
-        Ok(out)
+        make_dupin(surface_eval, reference_normal)
     }
 
     // ---- interior curves -------------------------------------------------------------------
@@ -1541,6 +985,593 @@ fn flush_curve(
         deviations,
     };
     r
+}
+
+/// `MakeDupin` (see [`AdvSurfaceIntersector::make_dupin`]; it reads no member).
+fn make_dupin(surface_eval: &mut [[Vec3; 3]; 3], reference_normal: Vec3) -> Result<Dupin> {
+    let geom = evaluate_geometric(surface_eval)?;
+    let mut out = Dupin {
+        above: Vec::new(),
+        below: Vec::new(),
+        prin_k1_vec: geom.principle_curvature_vector1,
+        prin_k2_vec: geom.principle_curvature_vector2,
+        prin_k1: geom.principle_curvature1,
+        prin_k2: geom.principle_curvature2,
+        efg: geom.efg_of_first_fund_form,
+        lmn: geom.lmn_of_second_fund_form,
+    };
+
+    // negate curvatures when surface normal is opposite reference normal
+    if reference_normal.dot(surface_eval[2][2]) < 0.0 {
+        out.prin_k1 = -out.prin_k1;
+        out.prin_k2 = -out.prin_k2;
+    }
+
+    // no work - surfacePoint is planar
+    if out.prin_k1.abs() < EFF_ZERO && out.prin_k2.abs() < EFF_ZERO {
+        return Ok(out);
+    }
+
+    // treat a curvature 1000 times smaller than the other as zero (a cylinder)
+    if out.prin_k1.abs() < out.prin_k2.abs() / 1000.00 {
+        out.prin_k1 = 0.0;
+    }
+    if out.prin_k2.abs() < out.prin_k1.abs() / 1000.00 {
+        out.prin_k2 = 0.0;
+    }
+    let (k1, k2) = (out.prin_k1, out.prin_k2);
+
+    if k1.abs() < EFF_ZERO || k2.abs() < EFF_ZERO {
+        // We have a parabolic point - create two parallel lines
+        let mut prin_k = k1;
+        // 90 degree rotation because curves are parallel to the local Y axis.
+        let mut angle_rad = PI / 2.0;
+        if prin_k.abs() < EFF_ZERO {
+            prin_k = k2;
+            angle_rad = 0.0;
+        }
+
+        // two lines leaving this point in opposite directions
+        let a = 1.0 / sqrt(prin_k.abs());
+        let mut line1 = Conic::new(ConicType::Line, a, 0.0);
+        line1.transform_2d(angle_rad, Point2::new(0.0, 0.0));
+        let mut line2 = Conic::new(ConicType::Line, a, 0.0);
+        line2.transform_2d(PI + angle_rad, Point2::new(0.0, 0.0));
+
+        if prin_k > 0.0 {
+            out.above.push(line1);
+            out.above.push(line2);
+        } else {
+            out.below.push(line1);
+            out.below.push(line2);
+        }
+        return Ok(out);
+    } else if k1 * k2 > 0.0 {
+        // We have an ellipse
+        let ellipse = Conic::new(
+            ConicType::Ellipse,
+            1.0 / sqrt(k1.abs()),
+            1.0 / sqrt(k2.abs()),
+        );
+        if k1 > 0.0 {
+            out.above.push(ellipse);
+        } else {
+            out.below.push(ellipse);
+        }
+    } else if k1 * k2 < 0.0 {
+        // We have a hyperbolic point
+        let mut push = |c: Conic, k: f64| {
+            if k > 0.0 {
+                out.above.push(c);
+            } else {
+                out.below.push(c);
+            }
+        };
+
+        // First create hyperbola on right side
+        let hyp = Conic::new(
+            ConicType::Hyperbola,
+            1.0 / sqrt(k1.abs()),
+            1.0 / sqrt(k2.abs()),
+        );
+        push(hyp, k1);
+
+        // Now do left side hyperbola
+        let mut hyp = Conic::new(
+            ConicType::Hyperbola,
+            1.0 / sqrt(k1.abs()),
+            1.0 / sqrt(k2.abs()),
+        );
+        hyp.transform_2d(PI, Point2::new(0.0, 0.0));
+        push(hyp, k1);
+
+        // Now do top hyperbola
+        let mut hyp = Conic::new(
+            ConicType::Hyperbola,
+            1.0 / sqrt(k2.abs()),
+            1.0 / sqrt(k1.abs()),
+        );
+        hyp.transform_2d(PI / 2.0, Point2::new(0.0, 0.0));
+        push(hyp, k2);
+
+        // Now do bottom hyperbola
+        let mut hyp = Conic::new(
+            ConicType::Hyperbola,
+            1.0 / sqrt(k2.abs()),
+            1.0 / sqrt(k2.abs()),
+        );
+        hyp.transform_2d(PI + PI / 2.0, Point2::new(0.0, 0.0));
+        push(hyp, k2);
+    }
+
+    Ok(out)
+}
+
+/// `SmAdvSurfaceIntersector::ComputeSingularityPoint` on the base intersector's
+/// state (it reads no member of the derived class), so that the base's
+/// `ComputePointValues` reaches the override on an `SmAdvSurfaceIntersector`.
+impl SurfaceIntersector<'_> {
+    /// See [`AdvSurfaceIntersector::compute_singularity_point_on`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`AdvSurfaceIntersector::compute_singularity_point_on`].
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub(crate) fn adv_compute_singularity_point(
+        &self,
+        _uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+        prev_crv_deriv: Option<Vec3>,
+    ) -> Result<()> {
+        let curve_trace_direction = self.curve_trace_direction;
+        let ang_tol_rad = self.this_ang_tol_rad;
+
+        // init curve direction when possible - NULL when given a start point
+        if let Some(d) = prev_crv_deriv {
+            *point.crv_deriv_mut() = d;
+        }
+
+        // The last node of m_vCurvePoints (point may be on that list itself).
+        let last_node = self.curve_points().last().copied();
+        let last_node_deriv = match last_node {
+            Some(id) => Some(self.point(id)?.crv_deriv()),
+            None => None,
+        };
+
+        // classify surface shape at given points
+        let surf1_type = compute_surface_point_type(
+            point.srf_norm(SrfIndex::First),
+            point.srf_duu(SrfIndex::First),
+            point.srf_dvv(SrfIndex::First),
+            None,
+            false,
+        );
+        let surf2_type = compute_surface_point_type(
+            point.srf_norm(SrfIndex::Second),
+            point.srf_duu(SrfIndex::Second),
+            point.srf_dvv(SrfIndex::Second),
+            None,
+            false,
+        );
+
+        // get planar surface index (if any)
+        let planar = if surf1_type == LocalSurfaceType::Planar {
+            Some(SrfIndex::First)
+        } else if surf2_type == LocalSurfaceType::Planar {
+            Some(SrfIndex::Second)
+        } else {
+            None
+        };
+
+        // locals for multiple intersection directions for singular points
+        let mut sing_dir_count = 0_usize;
+        let mut sing_directions = [Vec3::UNDEF; MAX_SING_DIRS];
+
+        // some cases project the previous point's CurveDir() to the current point's
+        // tangency plane (in a scratch copy)
+        let mut prev: Option<Vec3> = None;
+        if let Some(prev_deriv) = prev_crv_deriv.or(last_node_deriv) {
+            // project pPrev CrvDeriv() vector into rTsectPnt tangency plane
+            let end_pt = point.crv_pos() + prev_deriv;
+            let pt_on_plane =
+                point_project_to_plane(end_pt, point.crv_pos(), point.srf_norm(SrfIndex::First));
+            let dir = pt_on_plane - point.crv_pos();
+
+            // when projection worked - update the pPrev->CrvDeriv direction to that
+            prev = Some(dir.unitize().unwrap_or(prev_deriv));
+        }
+
+        // Process planar case -
+        if let Some(srf) = planar {
+            // get other surface index
+            let other = match srf {
+                SrfIndex::First => SrfIndex::Second,
+                SrfIndex::Second => SrfIndex::First,
+            };
+
+            // get otherSurf curvature properties at point
+            let geom = evaluate_geometric(point.srf_eval_matrix_mut(other))?;
+            let prin_k1 = geom.principle_curvature1;
+            let prin_k2 = geom.principle_curvature2;
+            let mut prin_kv1 = geom.principle_curvature_vector1;
+            let mut prin_kv2 = geom.principle_curvature_vector2;
+
+            // If the normals do not agree then reverse the curvatures
+            let mut opposite_normals = false;
+            if point.srf_norm(other).dot(point.srf_norm(srf)) < EFF_ZERO {
+                opposite_normals = true;
+                prin_kv1 = -prin_kv1;
+                prin_kv2 = -prin_kv2;
+            }
+
+            if prin_k1.abs() < EFF_ZERO_SQRT && prin_k2.abs() > EFF_ZERO_SQRT {
+                // planar surfacePoint is kissing a cylindrical surfacePoint in 1st
+                // principal curvature direction
+                point.point_type = IntersectionPointType::TangentCurve;
+                *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
+                align_with_previous(point, prev, ang_tol_rad);
+                return Ok(());
+            } else if prin_k2.abs() < EFF_ZERO_SQRT && prin_k1.abs() > EFF_ZERO_SQRT {
+                // ... in 2nd principal curvature direction
+                point.point_type = IntersectionPointType::TangentCurve;
+                *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
+                align_with_previous(point, prev, ang_tol_rad);
+                return Ok(());
+            } else if prin_k1 * prin_k2 < 0.0 {
+                // planar surfacePoint is intersecting a saddle surfacePoint
+                point.point_type = IntersectionPointType::Singularity;
+
+                // evaluate the hyperbola K1*x^2 + K2*y^2 = 1 at a large Y value
+                let y = 10000.0;
+                let mut tmp = (1.0 - prin_k1 * y * y) / prin_k2;
+                if tmp < 0.0 {
+                    tmp = 0.0;
+                }
+                let x = sqrt(tmp);
+
+                let mut asymp_dir1 = y * prin_kv1 + x * prin_kv2;
+                let mut asymp_dir_in1 = y * prin_kv1 - x * prin_kv2;
+
+                // If the normals oppose then switch directions
+                if opposite_normals {
+                    core::mem::swap(&mut asymp_dir1, &mut asymp_dir_in1);
+                }
+
+                // unitize the assymptotic directions
+                asymp_dir1 = asymp_dir1.unitize_or_z();
+                asymp_dir_in1 = asymp_dir_in1.unitize_or_z();
+
+                // the other start directions are in the negative assymptotic directions
+                let asymp_dir2 = -asymp_dir1;
+                let asymp_dir_in2 = -asymp_dir_in1;
+
+                // Reverse vectors if tracing backwards
+                sing_dir_count = 4;
+                sing_directions[0] = asymp_dir1 * curve_trace_direction;
+                sing_directions[1] = asymp_dir2 * curve_trace_direction;
+                sing_directions[2] = asymp_dir_in1 * curve_trace_direction;
+                sing_directions[3] = asymp_dir_in2 * curve_trace_direction;
+            } else {
+                // plane is kissing a hill or bowl (or a plane)
+                point.point_type = IntersectionPointType::TangentPoint;
+                return Ok(());
+            }
+        } else {
+            // No planar points branch
+
+            // Dupin indicatrex curves for 1st surface
+            let normal0 = point.srf_norm(SrfIndex::First);
+            let d1 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::First), normal0)?;
+            let (prin_k1, prin_k2, prin_kv1, prin_kv2) =
+                (d1.prin_k1, d1.prin_k2, d1.prin_k1_vec, d1.prin_k2_vec);
+
+            // Compute values of second surface based upon the normal of the first
+            let normal0 = point.srf_norm(SrfIndex::First);
+            let mut d2 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::Second), normal0)?;
+            let (prin_k1_2, prin_k2_2, prin_kv1_2, prin_kv2_2) =
+                (d2.prin_k1, d2.prin_k2, d2.prin_k1_vec, d2.prin_k2_vec);
+
+            // if Surf1 has an Umbilical (Spherical) surfacePoint
+            let scale = EFF_ZERO * (1.0 + prin_k1.abs());
+            if (prin_k1 - prin_k2).abs() < scale {
+                // if Surf2->k1 = Surf1->k1
+                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
+                    // and Surf2  k2 is the same - coincident surfacePoints
+                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                        point.point_type = IntersectionPointType::Coincidence;
+                        return Ok(());
+                    }
+                    // only tangent in k1 direction
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv1_2 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+
+                // else if Surf2->k2 = Surf1->k2
+                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                    // only tangent in k2 direction
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv2_2 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+            }
+
+            // if Surf2 has an Umbilical (Spherical) surfacePoint
+            let scale = EFF_ZERO * (1.0 + prin_k1_2.abs());
+            if (prin_k1_2 - prin_k2_2).abs() < scale {
+                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
+                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                        point.point_type = IntersectionPointType::Coincidence;
+                        return Ok(());
+                    }
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+
+                // if Surf1->k2 == Surf2->k1 singular Point is TANGENT_CURVE
+                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+            }
+
+            // when surf1->k1_Direction = surf2->k1_Direction
+            let cross = prin_kv1.cross(prin_kv1_2);
+            if cross.length() < EFF_ZERO_SQRT * 100.0 {
+                // when surf1->k1 == surf2->k1
+                if (prin_k1 - prin_k1_2).abs() < EFF_ZERO_SQRT {
+                    // and surf1->k2 == surf2->k2
+                    if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                        self.pick_matching_direction(
+                            point,
+                            prev,
+                            [prin_kv1, -prin_kv1, prin_kv2, -prin_kv2],
+                            (prin_k1, prin_k2, prin_kv1, prin_kv2),
+                        )?;
+                        return Ok(());
+                    }
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+
+                // when surf1->k2 == surf2->k2 while surf1->k1 != surf2->k1
+                if (prin_k2 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+            }
+
+            // when surf1->k1_Direction = +/- surf2->k2_Direction
+            let cross2 = prin_kv1.cross(prin_kv2_2);
+            if cross2.length() < EFF_ZERO_SQRT * 100.0 {
+                // when surf1->k1 == surf2->k2
+                if (prin_k1 - prin_k2_2).abs() < EFF_ZERO_SQRT {
+                    // and when surf1->k2 == surf2->k1
+                    if (prin_k2 - prin_k1_2).abs() < EFF_ZERO_SQRT {
+                        self.pick_matching_direction(
+                            point,
+                            prev,
+                            [prin_kv1, -prin_kv1, prin_kv2, -prin_kv2],
+                            (prin_k1, prin_k2, prin_kv1, prin_kv2),
+                        )?;
+                        return Ok(());
+                    }
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv1 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+
+                // when surf1->k2 == surf2->k1 while surf1->k1 != surf2->k2
+                if (prin_k2 - prin_k1_2).abs() < EFF_ZERO_SQRT {
+                    point.point_type = IntersectionPointType::TangentCurve;
+                    *point.crv_deriv_mut() = prin_kv2 * curve_trace_direction;
+                    align_with_previous(point, prev, ang_tol_rad);
+                    return Ok(());
+                }
+            }
+
+            // intersect the properly oriented Dupin indicatrix curves
+
+            // angle between surface's natural coordinate systems
+            let angle_rad = point
+                .srf_norm(SrfIndex::First)
+                .ccw_angle_between(prin_kv1, prin_kv1_2)?;
+
+            // Rotate curves from surface 2 into position on surface 1
+            for c in d2.above.iter_mut().chain(d2.below.iter_mut()) {
+                c.transform_2d(angle_rad, Point2::new(0.0, 0.0));
+            }
+
+            // for every surf1->AboveCurves - intersect with surf2->AboveCurves, then
+            // the same for the BelowCurves
+            for (curves1, curves2) in [(&d1.above, &d2.above), (&d1.below, &d2.below)] {
+                for c1 in curves1 {
+                    for c2 in curves2 {
+                        // intersect the dupin indicatrix curves
+                        let sols = c1.intersect_conic(c2, EFF_ZERO_SQRT * 100.0)?;
+
+                        // for every dupin indicatrix curve/curve xSect solution
+                        for sol in &sols {
+                            // xSect Point in Surface1 natural coordinate system
+                            let p1 = c1.evaluate_point(sol.param).unitize()?;
+
+                            // 3D direction for vector = [sP1 - NaturalOrigin] = sP1
+                            let sing_dir = (p1.x * prin_kv1 + p1.y * prin_kv2).unitize()?;
+
+                            // add unique sSingDir vector to aSingDirections
+                            add_sing_dir(sing_dir, &mut sing_dir_count, &mut sing_directions)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        let dirs = sing_directions;
+        let dir = |i: usize| dirs.get(i).copied().unwrap_or(Vec3::UNDEF);
+
+        // no singular directions branch
+        if sing_dir_count == 0 {
+            point.point_type = IntersectionPointType::TangentPoint;
+            return Ok(());
+        }
+
+        // when number of singular directions is 2
+        if sing_dir_count == 2 {
+            point.point_type = IntersectionPointType::TangentCurve;
+
+            // set sing direct = 1st singDirection found
+            *point.crv_deriv_mut() = dir(0);
+
+            // when there is a PreviousPoint - select best matching direction
+            if let Some(p) = prev {
+                let angle_min = angle(p, dir(0))?;
+                let angle_min2 = angle(p, dir(1))?;
+                if angle_min2 < angle_min {
+                    *point.crv_deriv_mut() = dir(1);
+                }
+            }
+
+            align_with_previous(point, prev, ang_tol_rad);
+            return Ok(());
+        }
+
+        // 3 or more singular directions branch
+        if sing_dir_count > 2 {
+            point.point_type = IntersectionPointType::Singularity;
+
+            let used = dirs.get(..sing_dir_count).unwrap_or(&[]);
+
+            if last_node.is_none() {
+                // starting a curve: seek a singularity direction inside the domains
+
+                // drop SingDirectons into Surf1 and Surf2 parameter space
+                let sing_uv_surf1 = drop_vectors(
+                    point.srf_du(SrfIndex::First),
+                    point.srf_dv(SrfIndex::First),
+                    used,
+                )?;
+                let sing_uv_surf2 = drop_vectors(
+                    point.srf_du(SrfIndex::Second),
+                    point.srf_dv(SrfIndex::Second),
+                    used,
+                )?;
+
+                // init output 3DCurveDirection = 1st SingDirection Vector
+                *point.crv_deriv_mut() = dir(0);
+
+                // for every SingDirection vector - find those directions which point
+                // inside surf1 and surf2
+                let mut inside: Vec<usize> = Vec::new();
+                for (ii, (uv1, uv2)) in sing_uv_surf1.iter().zip(&sing_uv_surf2).enumerate() {
+                    let delta1 = point.uv_pos(SrfIndex::First) + EFF_ZERO_SQRT * *uv1;
+                    if self.uv_domains[0].contains_point(delta1, EFF_ZERO_SQRT / 100_000.0) {
+                        let delta2 = point.uv_pos(SrfIndex::Second) + EFF_ZERO_SQRT * *uv2;
+                        if self.uv_domains[1].contains_point(delta2, EFF_ZERO_SQRT / 100_000.0) {
+                            // found a singular direction inside both domains
+                            inside.push(ii);
+                        }
+                    }
+                }
+
+                // Decide which of the aSingDirections to use.
+                if let Some(p) = prev {
+                    if let Some((&first, rest)) = inside.split_first() {
+                        // Find the singDirection closest to Prev->3DCurve_Direction.
+                        let mut angle_min = angle(p, dir(first))?;
+                        for &ii in rest {
+                            let angle_test = angle(p, dir(ii))?;
+                            if angle_test < angle_min {
+                                *point.crv_deriv_mut() = dir(ii);
+                                angle_min = angle_test;
+                            }
+                        }
+                    } else {
+                        // None points inside both domains.  Just use the prev direction.
+                        *point.crv_deriv_mut() = p;
+                    }
+                } else if let Some(&first) = inside.first() {
+                    // one inside direction, or several: use the first one
+                    *point.crv_deriv_mut() = dir(first);
+                }
+                // else: no direction was inside both; leave it as it is
+            } else {
+                // continuing the curve: the direction closest to the last one
+                let p = prev.unwrap_or(Vec3::UNDEF);
+                *point.crv_deriv_mut() = dir(0);
+                let mut angle_min = angle(p, dir(0))?;
+                for kk in 1..sing_dir_count {
+                    // direction test
+                    let angle_test = angle(p, dir(kk))?;
+                    if angle_test < angle_min {
+                        angle_min = angle_test;
+                        *point.crv_deriv_mut() = dir(kk);
+                    }
+
+                    // neg direction test
+                    let angle_test = angle(p, -dir(kk))?;
+                    if angle_test < angle_min {
+                        angle_min = angle_test;
+                        *point.crv_deriv_mut() = -dir(kk);
+                    }
+                }
+                // (a minimum angle above 20 degrees is only reported upstream)
+            }
+
+            return Ok(());
+        }
+
+        // a single singular direction is not a valid result
+        Err(SolidError::sm_err(OP_SING))
+    }
+
+    /// The singularity/coincidence case of matching principal curvatures and
+    /// directions: with a previous direction the closest of `dirs`
+    /// (`SM_IP_SINGULARITY`), else the direction of the smaller curvature
+    /// (`SM_IP_COINCIDENCE`).
+    fn pick_matching_direction(
+        &self,
+        point: &mut TsectPnt,
+        prev: Option<Vec3>,
+        dirs: [Vec3; 4],
+        (prin_k1, prin_k2, prin_kv1, prin_kv2): (f64, f64, Vec3, Vec3),
+    ) -> Result<()> {
+        let [d0, d1, d2, d3] = dirs;
+        *point.crv_deriv_mut() = d0;
+
+        // when there is a prevPoint or a LastNode of m_vCurvePoints
+        if let Some(p) = prev {
+            // select the direction most like the previous point direction
+            let mut angle_min = angle(p, d0)?;
+            for d in [d1, d2, d3] {
+                let angle_test = angle(p, d)?;
+                if angle_test < angle_min {
+                    angle_min = angle_test;
+                    *point.crv_deriv_mut() = d;
+                }
+            }
+            point.point_type = IntersectionPointType::Singularity;
+        } else {
+            // select the direction with the smallest radius of curvature
+            *point.crv_deriv_mut() = if prin_k2.abs() < prin_k1.abs() {
+                prin_kv2 * self.curve_trace_direction
+            } else {
+                prin_kv1 * self.curve_trace_direction
+            };
+            point.point_type = IntersectionPointType::Coincidence;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

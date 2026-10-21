@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::global_solver::{Branch, GlobalSolver};
@@ -392,7 +393,9 @@ fn put_point(o: &mut Vec<f64>, p: &TracePoint) {
     put_uv(o, p.curve_uv[0]);
     put_uv(o, p.curve_uv[1]);
     let s = &p.surface;
-    for v in [s[0][0], s[1][0], s[0][1], s[1][1], s[2][0], s[0][2], s[2][2]] {
+    for v in [
+        s[0][0], s[1][0], s[0][1], s[1][1], s[2][0], s[0][2], s[2][2],
+    ] {
         put_vec(o, v);
     }
 }
@@ -544,7 +547,7 @@ fn run_op(
         OpIn::Boundary { curve, interval } => {
             let c = rust_curve(curve)?;
             let ivl = Extent1d::from_min_max(interval[0], interval[1]);
-            match st(sil.find_solutions_on_boundary_curve(k, &c, &ivl))? {
+            match st(sil.find_solutions_on_boundary_curve(k, &Curve::from(c), &ivl))? {
                 Ok(sols) => {
                     o.push(0.0);
                     o.push(sols.as_slice().len() as f64);
@@ -687,7 +690,14 @@ fn gen_random_bspline(rng: &mut Rng, scale: f64) -> SurfData {
 
 /// A surface given by a height function `z(x, y)` sampled on a `n1 x m1` net of degree
 /// `p x q` over `[-1, 1]^2`, times `scale`.
-fn height_surface(n1: usize, m1: usize, p: usize, q: usize, scale: f64, z: impl Fn(f64, f64) -> f64) -> SurfData {
+fn height_surface(
+    n1: usize,
+    m1: usize,
+    p: usize,
+    q: usize,
+    scale: f64,
+    z: impl Fn(f64, f64) -> f64,
+) -> SurfData {
     let net = (0..n1)
         .map(|i| {
             (0..m1)
@@ -744,7 +754,9 @@ fn gen_bspline(rng: &mut Rng, scale: f64) -> SurfData {
         // parabolic cylinder: zero Gaussian curvature
         2 => height_surface(4, 3, 2, 2, scale, |x, _| 0.5 * x * x),
         // monkey-saddle-like wave: curvature sign changes
-        3 => height_surface(6, 6, 3, 3, scale, |x, y| 0.3 * (x * x * x - 3.0 * x * y * y)),
+        3 => height_surface(6, 6, 3, 3, scale, |x, y| {
+            0.3 * (x * x * x - 3.0 * x * y * y)
+        }),
         4 => quarter_cylinder(scale),
         _ => gen_random_bspline(rng, scale),
     }

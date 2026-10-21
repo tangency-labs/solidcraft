@@ -27,7 +27,10 @@
 //! | `FixCurves`    | `sm_FixBoundaryCurves(poly, dom, tx, ty, change = FALSE)` | `change poly` |
 //! | `Dups`         | `sm_RemoveDuplicateDropPointSolutions` (`m_vStart = (u, v)`, value = index) | `count (index u v)*` |
 //! | `Iso`          | `DropIsoCurve`                                            | `status [ok max_drop max_dev has [curve]]` |
-//! | `Trim`         | `DropAndTrimCurve(.., keep, on_surface, NULL)` (natural domain / interval when not given) | `status [max_drop max_dev n curves]` |
+//! | `Trim`         | `DropAndTrimCurve(.., keep, on_surface, NULL)` (natural domain / interval when not given) | `status [max_drop max_dev n (type curve)*]` |
+//!
+//! In `Trim`, each curve is its `GetType()` followed by its data, or the single value
+//! [`NULL_CURVE`] for a `NULL` entry.
 //!
 //! A surface of revolution whose `CreateCanonical` fails makes the record
 //! [[`NO_SURFACE`]]. [`run`] accepts only finite inputs of magnitude at most
@@ -65,6 +68,8 @@ pub const NOW: f64 = -f64::MAX;
 pub const REJECTED: f64 = -2.0;
 /// The record of an op whose surface of revolution could not be made.
 pub const NO_SURFACE: f64 = -3.0;
+/// The `Trim` entry of a `NULL` curve (in place of its type and data).
+pub const NULL_CURVE: f64 = -4.0;
 /// Longest file path.
 pub const MAX_PATH: usize = 4096;
 /// Values per drop point.

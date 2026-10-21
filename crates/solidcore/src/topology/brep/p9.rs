@@ -2224,7 +2224,7 @@ pub fn drop_edge_curve(
         None,
     )?;
     Ok(EdgeCurveDrop {
-        uv_curves: dropped.uv_curves.into_iter().map(Curve::from).collect(),
+        uv_curves: dropped.uv_curves,
         max_drop_to_surf: dropped.max_drop_to_surf,
         max_approx_dev: dropped.max_approx_dev,
     })

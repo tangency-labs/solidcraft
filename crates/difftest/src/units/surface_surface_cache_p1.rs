@@ -182,8 +182,13 @@ fn no_face() -> i64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "p", rename_all = "snake_case")]
 enum ProgIn {
-    Find { class: u8, stack: Vec<usize> },
-    Region { node: usize },
+    Find {
+        class: u8,
+        stack: Vec<usize>,
+    },
+    Region {
+        node: usize,
+    },
     Mark,
     Set {
         node: usize,
@@ -192,7 +197,9 @@ enum ProgIn {
         face: i64,
     },
     Dump,
-    FirstPatch { node: usize },
+    FirstPatch {
+        node: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,7 +304,10 @@ struct Inputs {
 fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
     let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
     text.split_whitespace()
-        .map(|t| t.parse::<f64>().map_err(|e| harness(format!("{path}: {e}"))))
+        .map(|t| {
+            t.parse::<f64>()
+                .map_err(|e| harness(format!("{path}: {e}")))
+        })
         .collect()
 }
 
@@ -314,7 +324,10 @@ fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
 pub(crate) fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let v = numbers(path)?;
     let mut it = v.into_iter();
-    let mut num = || it.next().ok_or_else(|| harness(format!("{path}: truncated")));
+    let mut num = || {
+        it.next()
+            .ok_or_else(|| harness(format!("{path}: truncated")))
+    };
     let n = int(path, num()?)?;
     let m = int(path, num()?)?;
     let p = int(path, num()?)?;
@@ -330,8 +343,12 @@ pub(crate) fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
         }
         net.push(row);
     }
-    let u = (0..n + p + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2).map(|_| num()).collect::<Result<Vec<_>, _>>()?;
+    let u = (0..n + p + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
+    let v = (0..m + q + 2)
+        .map(|_| num())
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(InlineSrf { net, p, q, u, v })
 }
 
@@ -343,9 +360,15 @@ pub(crate) fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
 }
 
 pub(crate) fn shape(s: &InlineSrf) -> Result<(usize, usize), HarnessError> {
-    let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+    let n = s
+        .net
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net"))?;
     let cols = s.net.first().map_or(0, Vec::len);
-    let m = cols.checked_sub(1).ok_or_else(|| harness("empty net row"))?;
+    let m = cols
+        .checked_sub(1)
+        .ok_or_else(|| harness("empty net row"))?;
     if s.net.iter().any(|r| r.len() != cols) {
         return Err(harness("net rows differ in length"));
     }
@@ -361,8 +384,15 @@ pub(crate) fn flag(b: bool) -> f64 {
 pub(crate) fn push_srf(o: &mut Vec<f64>, s: &InlineSrf) -> Result<(), HarnessError> {
     let (n, m) = shape(s)?;
     o.extend(
-        [n, m, s.p, s.q, s.u.len().saturating_sub(1), s.v.len().saturating_sub(1)]
-            .map(|x| x as f64),
+        [
+            n,
+            m,
+            s.p,
+            s.q,
+            s.u.len().saturating_sub(1),
+            s.v.len().saturating_sub(1),
+        ]
+        .map(|x| x as f64),
     );
     for row in &s.net {
         for p in row {
@@ -559,8 +589,12 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
 }
 
 fn to_output(flat: &[f64]) -> Output {
-    let (status, rest) = flat.split_first().map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
-    Output::new().values("status", vec![status]).values("out", rest.to_vec())
+    let (status, rest) = flat
+        .split_first()
+        .map_or((f64::NAN, &[][..]), |(s, r)| (*s, r));
+    Output::new()
+        .values("status", vec![status])
+        .values("out", rest.to_vec())
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -575,7 +609,11 @@ pub(crate) fn surface_of(s: &InlineSrf) -> Result<NlSurface, HarnessError> {
     let net = s
         .net
         .iter()
-        .map(|r| r.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+        .map(|r| {
+            r.iter()
+                .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                .collect()
+        })
         .collect();
     NlSurface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("surface input: {e}")))
@@ -706,6 +744,18 @@ fn dump_curve(o: &mut Vec<f64>, c: &BSplineCurve) {
         }
         o.extend_from_slice(cur.knots());
     }
+}
+
+/// An iso curve as the shim dumps it: the NURB of its `SmBSplineCurve` part (the base of
+/// the `SmLine` of a plane or of the `SmCircle` of a sweep).
+fn dump_iso_curve(o: &mut Vec<f64>, c: &SmCurve) -> Result<(), HarnessError> {
+    match c.kind() {
+        CurveKind::BSpline(b) => dump_curve(o, b),
+        CurveKind::Line(l) => dump_curve(o, l.base()),
+        CurveKind::Ellipse(e) => dump_curve(o, e.base()),
+        _ => return Err(harness("iso curve is not a B-spline kind")),
+    }
+    Ok(())
 }
 
 fn dump_curve_list(o: &mut Vec<f64>, l: Option<&Vec<SmCurve>>) -> Result<(), HarnessError> {
@@ -870,7 +920,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             match bp.create_boundary_curve_for_index(&k, &surface, *index) {
                 Ok(c) => {
                     o.push(0.0);
-                    dump_curve(&mut o, &c);
+                    dump_iso_curve(&mut o, &c)?;
                 }
                 Err(e) if e.is_unported() => return Ok(Err(e)),
                 Err(e) => o.push(status(&e)),
@@ -984,7 +1034,8 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                     o.push(copies.curves_3d.as_ref().map_or(0.0, |v| v.len() as f64));
                     o.push(copies.curves_uv.as_ref().map_or(0.0, |v| v.len() as f64));
                 }
-                match cache.has_cached_curves(alt_type(q.ty), q.approx, q.angle, &key, q.w3, q.wuv) {
+                match cache.has_cached_curves(alt_type(q.ty), q.approx, q.angle, &key, q.w3, q.wuv)
+                {
                     Ok(Some(c)) => {
                         o.push(1.0);
                         dump_curve_list(&mut o, c.curves_3d.as_ref())?;
@@ -1102,7 +1153,9 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         face,
                     } => {
                         let t = cache.tree_mut().ok_or_else(|| harness("no tree"))?;
-                        let n = t.node_mut(NodeId(*node)).map_err(|e| harness(e.to_string()))?;
+                        let n = t
+                            .node_mut(NodeId(*node))
+                            .map_err(|e| harness(e.to_string()))?;
                         if let NodeData::Surface(a) = &mut n.data {
                             a.is_marked = *marked;
                             a.node_class = class_of(*class)?;
@@ -1125,7 +1178,11 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         match cache.first_bezier_patch(NodeId(*node)) {
                             Ok(None) => o.push(0.0),
                             Ok(Some(p)) => {
-                                o.push(if own.is_some_and(|q| std::ptr::eq(p, q)) { 1.0 } else { 2.0 });
+                                o.push(if own.is_some_and(|q| std::ptr::eq(p, q)) {
+                                    1.0
+                                } else {
+                                    2.0
+                                });
                             }
                             Err(e) => return Err(harness(format!("first patch: {e}"))),
                         }
@@ -1147,8 +1204,14 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         }
         OpIn::Cont { u, v, dom } => {
             let mut cache = cache_of(need()?, None);
-            let uc = u.iter().map(|&c| continuity_of(c)).collect::<Result<Vec<_>, _>>()?;
-            let vc = v.iter().map(|&c| continuity_of(c)).collect::<Result<Vec<_>, _>>()?;
+            let uc = u
+                .iter()
+                .map(|&c| continuity_of(c))
+                .collect::<Result<Vec<_>, _>>()?;
+            let vc = v
+                .iter()
+                .map(|&c| continuity_of(c))
+                .collect::<Result<Vec<_>, _>>()?;
             cache.set_continuities(uc, vc);
             cache.surface_continuity(&dom_of(*dom)).map(|c| {
                 o.push(f64::from(c as i32));
@@ -1163,7 +1226,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         o.push(0.0);
                         o.push(flag(r.cached));
                         for c in &r.curves {
-                            dump_curve(&mut o, c);
+                            dump_iso_curve(&mut o, c)?;
                         }
                     }
                     Err(e) if e.is_unported() => return Ok(Err(e)),
@@ -1207,7 +1270,9 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             o.push(st(cache.implant_poly_edge(0, NodeId(0))));
             push_dom(&mut o, &cache.uv_domain());
             o.push(1.0);
-            o.push(flag(cache.patch_boundary_bounding_planes().are_planes_computed()));
+            o.push(flag(
+                cache.patch_boundary_bounding_planes().are_planes_computed(),
+            ));
             Ok(o)
         }
         OpIn::Face => {
@@ -1225,9 +1290,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let run = rust_op(i)?;
     let is_subdiv = matches!(i.op, OpIn::Subdiv { .. });
     Ok(match run {
-        Ok(o) if is_subdiv => Output::new()
-            .values("status", vec![0.0])
-            .values("out", o),
+        Ok(o) if is_subdiv => Output::new().values("status", vec![0.0]).values("out", o),
         Ok(o) => to_output(&o),
         Err(e) => Output::unported(&e).unwrap_or_else(|| to_output(&[status(&e)])),
     })
@@ -1278,7 +1341,11 @@ pub(crate) fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
     let n = p + rng.below(3) as usize;
     let m = q + rng.below(3) as usize;
     let kind = rng.below(5);
-    let amp = if kind == 1 { 0.0 } else { rng.uniform(0.0, 1.0) };
+    let amp = if kind == 1 {
+        0.0
+    } else {
+        rng.uniform(0.0, 1.0)
+    };
     let rational = rng.chance(0.15);
     let net = (0..=n)
         .map(|i| {
@@ -1329,7 +1396,11 @@ pub(crate) fn gen_srf(rng: &mut Rng, max_deg: usize) -> InlineSrf {
 pub(crate) fn gen_bss(rng: &mut Rng, s: InlineSrf) -> BssIn {
     BssIn {
         oob: rng.chance(0.1),
-        form: if rng.chance(0.85) { 11 } else { rng.below(10) as u8 },
+        form: if rng.chance(0.85) {
+            11
+        } else {
+            rng.below(10) as u8
+        },
         srf: SrfIn::Inline(s),
     }
 }
@@ -1338,7 +1409,14 @@ pub(crate) fn gen_curve(rng: &mut Rng) -> CrvIn {
     let p = 1 + rng.below(3) as usize;
     let n = p + rng.below(3) as usize;
     let cpts = (0..=n)
-        .map(|i| [i as f64, rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), NOW])
+        .map(|i| {
+            [
+                i as f64,
+                rng.uniform(-1.0, 1.0),
+                rng.uniform(-1.0, 1.0),
+                NOW,
+            ]
+        })
         .collect();
     CrvIn {
         dim: 3,
@@ -1372,11 +1450,7 @@ pub(crate) fn gen_sub_dom(rng: &mut Rng, d: [f64; 4]) -> [f64; 4] {
 }
 
 pub(crate) fn gvec(rng: &mut Rng, s: f64) -> [f64; 3] {
-    [
-        rng.uniform(-s, s),
-        rng.uniform(-s, s),
-        rng.uniform(-s, s),
-    ]
+    [rng.uniform(-s, s), rng.uniform(-s, s), rng.uniform(-s, s)]
 }
 
 pub(crate) fn gen_key(rng: &mut Rng) -> KeyIn {
@@ -1393,7 +1467,11 @@ pub(crate) fn gen_key(rng: &mut Rng) -> KeyIn {
 pub(crate) fn perturb_key(rng: &mut Rng, k: &KeyIn) -> KeyIn {
     let mut q = k.clone();
     match rng.below(6) {
-        0 => q.vec = q.vec.map(|v| [v[0] + rng.uniform(-1e-12, 1e-12), v[1], v[2]]),
+        0 => {
+            q.vec = q
+                .vec
+                .map(|v| [v[0] + rng.uniform(-1e-12, 1e-12), v[1], v[2]]);
+        }
         1 => q.b = None,
         2 => q.l = q.l.map(|l| l + 1),
         3 => q.d = q.d.map(|d| d + rng.uniform(-2e-12, 2e-12)),
@@ -1438,7 +1516,11 @@ fn gen_tree(rng: &mut Rng, dom: [f64; 4], polar: bool) -> Vec<NodeIn> {
         node.c2 = n + 1;
         node.split = split;
         node.aux = aux;
-        let f = if rng.chance(0.7) { 0.5 } else { rng.uniform(0.2, 0.8) };
+        let f = if rng.chance(0.7) {
+            0.5
+        } else {
+            rng.uniform(0.2, 0.8)
+        };
         let (d1, d2) = if split == 0 {
             let m = d[0] + f * (d[2] - d[0]);
             ([d[0], d[1], m, d[3]], [m, d[1], d[2], d[3]])
@@ -1492,7 +1574,9 @@ fn gen_prog(rng: &mut Rng, t: &[NodeIn]) -> Vec<ProgIn> {
                 stack: if rng.chance(0.6) {
                     vec![0]
                 } else {
-                    (0..=rng.below(3)).map(|_| rng.below(n as u64) as usize).collect()
+                    (0..=rng.below(3))
+                        .map(|_| rng.below(n as u64) as usize)
+                        .collect()
                 },
             },
             1 | 2 => ProgIn::Region {
@@ -1601,7 +1685,12 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             c: if rng.chance(0.15) {
                 [[1.0, 1.0, 1.0]; 4]
             } else {
-                [gvec(rng, 3.0), gvec(rng, 3.0), gvec(rng, 3.0), gvec(rng, 3.0)]
+                [
+                    gvec(rng, 3.0),
+                    gvec(rng, 3.0),
+                    gvec(rng, 3.0),
+                    gvec(rng, 3.0),
+                ]
             },
         },
         7 => OpIn::SizeSurf {
@@ -1674,7 +1763,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let cache = gen_sub_dom(rng, d);
             let calls = (0..=rng.below(4))
                 .map(|_| {
-                    let dd = if rng.chance(0.6) { cache } else { gen_sub_dom(rng, d) };
+                    let dd = if rng.chance(0.6) {
+                        cache
+                    } else {
+                        gen_sub_dom(rng, d)
+                    };
                     (dd, *rng.choose(&[0.001, 0.01, 0.0005]).unwrap_or(&0.001))
                 })
                 .collect();
@@ -1684,7 +1777,9 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let sub = gen_sub_dom(rng, d);
             let tree = gen_tree(rng, sub, true);
             let n = tree.len();
-            let nodes = (0..=rng.below(4)).map(|_| rng.below(n as u64) as usize).collect();
+            let nodes = (0..=rng.below(4))
+                .map(|_| rng.below(n as u64) as usize)
+                .collect();
             OpIn::Polar { tree, nodes }
         }
         _ => match rng.below(3) {
@@ -1695,7 +1790,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             _ => OpIn::Misc {
                 dom: gen_sub_dom(rng, d),
                 test: rng.chance(0.5),
-                uv: [rng.uniform(d[0] - 0.5, d[2] + 0.5), rng.uniform(d[1] - 0.5, d[3] + 0.5)],
+                uv: [
+                    rng.uniform(d[0] - 0.5, d[2] + 0.5),
+                    rng.uniform(d[1] - 0.5, d[3] + 0.5),
+                ],
             },
         },
     };
@@ -1771,8 +1869,19 @@ mod tests {
             println!("{k:?}: {v}");
         }
         for op in [
-            "Plane3", "Halfspace", "BPlanes", "SizeCorners", "SizeSurf", "Corners", "Alt",
-            "TreeTop", "Subdiv", "Cont", "Iso", "Misc", "Cull",
+            "Plane3",
+            "Halfspace",
+            "BPlanes",
+            "SizeCorners",
+            "SizeSurf",
+            "Corners",
+            "Alt",
+            "TreeTop",
+            "Subdiv",
+            "Cont",
+            "Iso",
+            "Misc",
+            "Cull",
         ] {
             assert!(
                 tally.keys().any(|(n, k)| n == op && k == "status:0"),

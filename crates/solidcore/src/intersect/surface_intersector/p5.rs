@@ -18,12 +18,10 @@
 //!   override finds the interior loops. It is therefore ported on
 //!   [`AdvSurfaceIntersector`] (on a plain `SmSurfaceIntersector` the base
 //!   `LocalSolve` stores node-only solutions whose box and domain values are never
-//!   set, a case no caller reaches). `TraceCurve` is part 4's, whose
-//!   `ComputePointValues` calls the basic `ComputeSingularityPoint`, not the advanced
-//!   override (DISPATCH GAP: a traced point with parallel normals is `SM_ERR` here;
-//!   upstream classifies it). No such point is reachable yet: every start point
-//!   comes through `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`) or
-//!   `SmSurface::LocalSurfaceIntersect` (`surface.surface_p11`).
+//!   set, a case no caller reaches). `ComputePointValues` (part 2, called by
+//!   `FindBoundaryStartPoints` and part 4's `TraceCurve`) reaches the advanced
+//!   `ComputeSingularityPoint` override through the base's `advanced` flag, which
+//!   [`AdvSurfaceIntersector::new`] sets.
 //! - **Surface caches.** Rust surfaces keep no cache, so the caller hands the caches
 //!   in ([`intersection_surface_caches`] builds them as `smsurf_GetSurfaceCache` /
 //!   `GetTree` would; [`AdvSurfaceIntersector::do_intersection`] does both). One

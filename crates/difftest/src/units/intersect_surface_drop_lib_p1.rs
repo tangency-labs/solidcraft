@@ -15,23 +15,25 @@
 //! on both sides (the Rust side applies the same predicate with its own evaluations).
 //!
 //! Deferred cases: `TestSpanAccuracy` spans that reach `smsurf_IsPointOnNormal`
+//! (`surface.surface_p3`), `DropAndTrimCurve`s whose trace reaches unported code
+//! (an `SmCrvOnSurf` over a plane or surface of revolution, `curve.crv_on_surf`;
+//! non-plane `SmSurface::DropCurve`, `intersect.surface_drop_lib_p3`; the classification
+//! `ReSet` / `ConnectIntervals` stubs, `intersect.curve_class_p2`), and surface
+//! evaluations of kinds whose evaluators are not ported yet.
+//!
 //! Curves and surfaces may be upstream `.dat` files (database version 30), read on the
 //! C++ side by `SmBSplineCurve::ReadFromFile` / `SmBSplineSurface::ReadFromFile` and on
 //! the Rust side by the same steps (`read_file_db`, then `ReadFromDB`); a `Trim` case
 //! without a domain or interval uses the natural ones, as upstream's `prog_test` does.
 //!
-//! Deferred cases: `TestSpanAccuracy` spans that reach `smsurf_IsPointOnNormal`
-//! (`surface.surface_p3`), every `DropAndTrimCurve` (`SmSurfaceDropCurve::DoTrace`,
-//! `intersect.surface_drop_curve`), and surface evaluations of kinds whose evaluators are
-//! not ported yet.
-//!
-//! At least [`MIN_GENERATED`] generated cases run.
+//! At least [`MIN_GENERATED`] generated cases run, then [`TRIM_CASES`] fixed-seed
+//! `DropAndTrimCurve` cases (`trim0000` ..).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
-use solidcore::curve::curve::Curve;
+use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
@@ -60,12 +62,18 @@ use solidcore::topology::ObjectHandle;
 use solidcore::SolidError;
 use solidcore_ffi::units::intersect_surface_drop_lib_p1 as ffi;
 
-use crate::case::CaseContext;
+use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+
+/// `DropAndTrimCurve` cases appended after the generated ones ([`trim_cases`]).
+pub const TRIM_CASES: u64 = 400;
+
+/// First seed of the [`trim_cases`] (seed `TRIM_SEED + i` for case `trim{i:04}`).
+const TRIM_SEED: u64 = 0x5d1b_7a1c_0000_0000;
 
 /// `intersect.surface_drop_lib_p1` runner.
 pub struct Runner;
@@ -657,6 +665,19 @@ fn put_curve(o: &mut Vec<f64>, c: &BSplineCurve) -> solidcore::Result<()> {
     Ok(())
 }
 
+/// `put_curve` of a traced UV curve (`SmBSplineCurve*` upstream, an `SmLine` with its
+/// NURB made by `GetOrCreateGwNurbPointer`); `None` for a curve of no B-spline kind.
+fn put_uv_curve(o: &mut Vec<f64>, c: &Curve) -> Option<solidcore::Result<()>> {
+    Some(match c.kind() {
+        CurveKind::BSpline(b) => put_curve(o, b),
+        CurveKind::Line(l) => l.base_with_nurb().and_then(|b| put_curve(o, &b)),
+        CurveKind::Ellipse(e) => put_curve(o, e.base()),
+        CurveKind::Hyperbola(h) => put_curve(o, h.base()),
+        CurveKind::Parabola(p) => put_curve(o, p.base()),
+        _ => return None,
+    })
+}
+
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
     match e {
@@ -978,7 +999,10 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                         r.uv_curves.len() as f64,
                     ]);
                     for cv in &r.uv_curves {
-                        st(put_curve(o, cv))?.map_err(|_| harness("trim curve data"))?;
+                        // the curve's GetType() (an SmLine or an SmBSplineCurve), then its data
+                        o.push(cv.type_code() as f64);
+                        let put = put_uv_curve(o, cv).ok_or_else(|| harness("trim curve kind"))?;
+                        st(put)?.map_err(|_| harness("trim curve data"))?;
                     }
                 }
                 Err(code) => o.push(code),
@@ -1649,7 +1673,123 @@ fn gen_iso(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     })
 }
 
+/// A `DropAndTrimCurve` case: a line across a plane, the curve of an iso drop case
+/// (iso lines and parallel circles, some offset, on planes, B-spline surfaces and
+/// surfaces of revolution), or a curve near a surface.
 fn gen_trim(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
+    match rng.below(10) {
+        0..=1 => gen_trim_plane_line(rng, k),
+        2..=3 => gen_trim_bspline_iso_line(rng, k),
+        4..=7 => {
+            let Some(Inputs::Iso {
+                surface,
+                curve,
+                domain,
+                interval,
+                tol,
+                ..
+            }) = gen_iso(rng, k)
+            else {
+                return None;
+            };
+            Some(Inputs::Trim {
+                surface,
+                curve,
+                domain: Some(domain),
+                interval: Some(interval),
+                tol: pick(rng, &[tol, 1.0e-6, 0.0, 1.0e-12], tol),
+                keep_all: rng.chance(0.5),
+                on_surface: rng.chance(0.5),
+            })
+        }
+        _ => {
+            let s = gen_scale(rng);
+            let surface = gen_surface(rng, s);
+            let (srf, nat) = surface_with_domain(k, &surface)?;
+            let domain = gen_domain(rng, nat);
+            let curve = gen_curve_near(k, rng, &srf, domain, s)?;
+            let c = rust_curve(k, &curve).ok()?;
+            let ivl = c.natural_interval();
+            Some(Inputs::Trim {
+                surface,
+                curve,
+                domain: Some(domain),
+                interval: Some([ivl.min(), ivl.max()]),
+                tol: pick(rng, &[1.0e-6, 1.0e-3, 0.0], 1.0e-6) * s,
+                keep_all: rng.chance(0.5),
+                on_surface: rng.chance(0.5),
+            })
+        }
+    }
+}
+
+/// A line along an iso line of a B-spline surface that is linear across it (a
+/// bilinear patch either way, a rational cylinder along v), over the whole domain or
+/// part of it, possibly offset along the normal.
+fn gen_trim_bspline_iso_line(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
+    let s = gen_scale(rng);
+    let surface = gen_bspline_surface(rng, s);
+    let SurfIn::Bspline { p, q, .. } = &surface else {
+        return None;
+    };
+    let along_u = *p == 1 && (*q != 1 || rng.chance(0.5));
+    if !along_u && *q != 1 {
+        return None;
+    }
+    let (srf, nat) = surface_with_domain(k, &surface)?;
+    let domain = if rng.chance(0.7) {
+        nat
+    } else {
+        gen_domain(rng, nat)
+    };
+    let (a, bb) = if rng.chance(0.6) {
+        (0.0, 1.0)
+    } else {
+        (rng.uniform(0.0, 0.4), rng.uniform(0.6, 1.0))
+    };
+    let iso = rng.uniform(0.0, 1.0);
+    let at = |f: f64| {
+        if along_u {
+            [
+                domain[0] + f * (domain[2] - domain[0]),
+                domain[1] + iso * (domain[3] - domain[1]),
+            ]
+        } else {
+            [
+                domain[0] + iso * (domain[2] - domain[0]),
+                domain[1] + f * (domain[3] - domain[1]),
+            ]
+        }
+    };
+    let (ua, ub) = (at(a), at(bb));
+    let pa = arr3(srf.evaluate_point(k, Point2::new(ua[0], ua[1])).ok()?);
+    let pb = arr3(srf.evaluate_point(k, Point2::new(ub[0], ub[1])).ok()?);
+    let nrm = arr3(
+        srf.evaluate_normal(k, 
+            Point2::new(ua[0], ua[1]),
+            solidcore::nurbs::knots::Side::Left,
+            solidcore::nurbs::knots::Side::Left,
+        )
+        .ok()?,
+    );
+    let off = scale3(nrm, pick(rng, &[0.0, 0.0, 1.0e-9, 1.0e-4], 0.0) * s);
+    let (pa, pb) = (add3(pa, off), add3(pb, off));
+    if sub3(pa, pb).iter().all(|c| c.abs() < 1.0e-12 * s) {
+        return None;
+    }
+    Some(Inputs::Trim {
+        surface,
+        curve: CurveIn::Line { a: pa, b: pb },
+        domain: Some(domain),
+        interval: Some(if rng.chance(0.8) { [0.0, 1.0] } else { [0.1, 0.9] }),
+        tol: pick(rng, &[1.0e-6, 1.0e-3, 0.0, 1.0e-12], 1.0e-6) * s,
+        keep_all: rng.chance(0.5),
+        on_surface: rng.chance(0.5),
+    })
+}
+
+/// A line across the middle of a plane.
+fn gen_trim_plane_line(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
     let s = 1.0;
     let surface = gen_plane(rng, s);
     let (srf, nat) = surface_with_domain(k, &surface)?;
@@ -1672,6 +1812,31 @@ fn gen_trim(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
         keep_all: rng.chance(0.5),
         on_surface: rng.chance(0.5),
     })
+}
+
+/// The fixed-seed `DropAndTrimCurve` cases ([`gen_trim`]), appended after the generated
+/// cases so that adding them leaves every generated case's inputs unchanged. Case `i`
+/// takes the first trim input of seed `TRIM_SEED + i` that the shim accepts.
+fn trim_cases(unit: &str) -> Vec<Case> {
+    let k = Kernel::default();
+    let mut out = Vec::new();
+    for i in 0..TRIM_CASES {
+        let seed = TRIM_SEED + i;
+        let mut rng = Rng::new(seed);
+        let got = (0..64).find_map(|_| {
+            gen_trim(&mut rng, &k).filter(|t| ffi::encode(&ffi_op(t)).is_ok())
+        });
+        let Some(inputs) = got.and_then(|t| serde_json::to_value(t).ok()) else {
+            continue;
+        };
+        out.push(Case {
+            unit: unit.to_string(),
+            name: format!("trim{i:04}"),
+            source: CaseSource::Generated { seed },
+            inputs,
+        });
+    }
+    out
 }
 
 fn gen_inputs(rng: &mut Rng) -> Inputs {
@@ -1709,7 +1874,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             79..=83 => Some(gen_fix_curves(rng)),
             84..=87 => Some(gen_dups(rng)),
             88..=98 => gen_iso(rng, &k),
-            _ => gen_trim(rng, &k),
+            _ => gen_trim_plane_line(rng, &k),
         };
         if let Some(i) = got {
             if ffi::encode(&ffi_op(&i)).is_ok() {
@@ -1729,7 +1894,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        cases.extend(trim_cases(self.id()));
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
