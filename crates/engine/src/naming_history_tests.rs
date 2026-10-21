@@ -623,3 +623,34 @@ fn one_fillet_over_stacked_boxes_rounds_the_upper_box_s_edge_even_when_saved_nam
     s.refresh();
     check(&s, "saved by an older build");
 }
+
+/// A shell opened by a point pick on a bar's end face keeps opening that face when a parameter
+/// edit moves the bar so the stored point no longer lies on it (it now lies on the bottom face).
+/// The point is moved onto the named face clear of its edges: the face's nearest point to the old
+/// pick is on the edge it shares with the bottom face, where a pick finds both faces (#2531).
+#[test]
+fn a_shell_point_pick_moved_off_its_face_reopens_only_that_face() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "100 mm", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "Y0", "expression": "5 mm", "unit": "mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 5], "p1": [100, 25]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["origin", "l1.start"], "mode": "vertical"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "l1.start"], "type": "vertical", "value": "Y0"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "L"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l4"], "type": "length", "value": "20 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": "20 mm", "operation": "new", "body_name": "Bar"}));
+    run(&mut s, "solid.shell", json!({"faces": [[100, 15, 10]], "thickness": "2 mm", "direction": "inside", "body": "Bar", "name": "Shell"}));
+    change(&mut s, "L", "150 mm");
+    change(&mut s, "Y0", "15 mm");
+    assert_eq!(error(&s, "Shell"), None);
+    let state = s.model.state();
+    let bar = state.body("Bar").expect("the shelled bar");
+    let volume = solidcraft_kernel::measure(&bar.body).expect("measure").volume;
+    // 150 x 20 x 20 open at x = 150 only: 60000 - 148 * 16 * 16.
+    assert!((volume - 22112.0).abs() < 1e-3, "{volume}");
+    assert_eq!(bar.body.face_count(), 11);
+    assert!(solid_at(&s, [100.0, 16.0, 10.0]), "the bottom face stays closed");
+    assert!(!solid_at(&s, [149.0, 25.0, 10.0]), "the end at x = 150 is open");
+}
