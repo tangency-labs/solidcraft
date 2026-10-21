@@ -11878,7 +11878,7 @@ request solver metadata, and corner names/type are queried only on error.
 with `PreEdit`, the face, null and null forwarded as separate arguments.
 `SM_NO_GET_BREP(face)` expands to a null object (`SmTypes.h:659`), not `GetBrep()`.
 
-Current UNPORTED audit for #244 (main 862746f4 integrated; 34 symbols / 13 owners):
+Current UNPORTED audit for #244 (main e5f3e441 integrated; 33 symbols / 12 owners):
 
 - `blend.fillet_corner_p1` (`todo`): `SmFilletCorner::GetFilletSolvers`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner`, `SmFilletCorner::AdjustTopology`, `SmFilletCorner::CalcCornerEdgeGeom`, `SmFilletCorner::CalcCornerVertGeom`, `SmFilletCorner::CheckAndFixDegeneracy`, `SmFilletCorner::InsertIntersectionTopology`, `SmFilletCorner::ReInitializeCornerEdges`.
 - `blend.fillet_corner_p2` (`todo`): `SmFilletConvexNxNCorner::AdjustTopology`, `SmFilletNx1ClosedCorner::AdjustTangentCorner`.
@@ -11892,7 +11892,7 @@ Current UNPORTED audit for #244 (main 862746f4 integrated; 34 symbols / 13 owner
 - `blend.fillet_standard_solver_p2` (`todo`): `SmSurfaceSurfaceFS::CalcFilletGeom`.
 - `blend.fillet_solver_p5` (`todo`): `SmFilletSolver::TestRollOver`.
 - `heal.stitch_p2`: none since it became `partial` on main (#205). `SmStitch::DoStitching` is the required adapter `ExecutiveAccess::do_stitching`, documented as delegating to `heal::stitch::p2::Stitch::do_stitching`.
-- `topology.brep_p2` (`todo`): `SmBrep::SetTolerance`.
+- `topology.brep_p2`: none since it became `partial` on main (#149). `SmBrep::SetTolerance` is the required adapter `ExecutiveAccess::set_brep_tolerance`, delegating to `topology::brep::p2::set_tolerance`, and its status is ignored (`void` upstream).
 - `topology.brep_p3` (`todo`): `SmBrep::MergeBrep`, `SmBrep::OrientTrimmedSurfaces`.
 - `topology.brep_p4` (`todo`): `SmBrep::StitchFaces`.
 
@@ -11990,7 +11990,7 @@ Coverage still establishes zero successful geometric/topological comparisons.
   `GetFilletSolverOfEdgeuse` lookup. It has not been executed or established as
   an upstream defect, so no WR id is reserved. The scripted tangent regression
   now returns repeated first-solver entries; it is not a port of that algorithm.
-- Extended ownership audit: the tags now cover **34 distinct symbols / 13 owners**,
+- Extended ownership audit: the tags now cover **33 distinct symbols / 12 owners**,
   all `todo` in the merged plan; the complete list above includes all new tags.
   Added GetFilletSolvers; added seven derived symbols and two new owners; removed
   no dependency owners. Required-but-owned-elsewhere corner accessors are also
@@ -12048,8 +12048,8 @@ The Opus re-check of 612c6631 is CLEAN. Its runner-error nit is folded in:
 corner or solver; future fixtures must dispatch real derived objects to their
 actual owners. Explicit UNPORTED tags sit on each runner stub body, and the
 complete override-owner tags remain discoverable at the required trait methods.
-The audit counts 34 distinct upstream symbols / 13 owners, including required
-virtual-dispatch targets, not 34 independently implemented stub bodies.
+The audit counts 33 distinct upstream symbols / 12 owners, including required
+virtual-dispatch targets, not 33 independently implemented stub bodies.
 
 Merged origin/main 46ddc4ff (#179 blend.fillet_intersector), preserving both
 `fillet_executive` and `fillet_intersector` exports in the sorted blend module list.
@@ -12116,7 +12116,7 @@ other topology accessors do; no passing native fixture reaches these adapters.
 Scripted tests override them only to exercise p3 continuation order. A concrete
 executive p1/p2 object adapter is still needed for geometric integration; this
 change does not claim a new geometric pass. The current UNPORTED inventory is
-34 symbols across 13 owners; all remaining tagged callees are still unported.
+33 symbols across 12 owners; all remaining tagged callees are still unported.
 Final integrated-tree checks pending.
 
 ## blend.fillet_executive_p2 (`SmFilletExecutive.cpp` part 2: `SetFilletParameters`, `SurfaceSurfaceFillet`, `DoSurfaceFilleting`, `SetFilletBrepEdgeMap`, smooth edge sequences, `SmTemporaryRadiusChange`, the linear and elliptical fillet-law constructors; PR #267, 2026-10-20; partial, no disagreements)
@@ -12128,7 +12128,13 @@ Final integrated-tree checks pending.
   - `CollectTangentEdgeSequence` with two or more solvers before `CreateFilletCorners` reads garbage from `m_vVertexCornerMap`. The shim runs `CreateFilletCorners` first, as `CreateFilletBrep` does.
 - **Adapter.** Calls into partial units are required `ExecutiveAccess` methods: the `blend.fillet_solver_p1` surface-generator records and `SetFilletSurfaceGenerator`, `GetEdgeuse`, and `blend.fillet_standard_solver_p1`'s constant-radius constructor. `GetSetBackDist` is an inline read of `m_dSetBackDist`. The constant-distance, variable-radius and surface/surface solver constructors stay `UNPORTED(blend.fillet_standard_solver_p2)`.
 - **Duplicate enums on main.** `FilletSolverType` and `FilletSurfaceGeneratorType` exist both in `blend::fillet_solver::p1` and in `blend::fillet_standard_solver::p1` (#168's co-port), as distinct types. p2 takes the latter, as `FilletLaw` does, and maps them onto `fillet_solver::p1::FilletSurfaceGenerator`. A later dedup should re-export one of them.
-- **Not wired.** `blend::fillet_geom::p2`'s `UNPORTED(blend.fillet_executive_p2)` `SmTemporaryRadiusChange::SetUp` receives a base `FilletSolver`. Reaching the variable-radius law from it needs #260's `FilletSolverKind`, so the stub stays until that lands.
+- **Not wired (re-checked 2026-10-21, after #330 landed this unit's `9443be3f`).** `blend::fillet_geom::p2`'s `UNPORTED(blend.fillet_executive_p2)` `SmTemporaryRadiusChange::SetUp` (`temporary_radius_change`, three call sites, upstream `SmFilletGeom.cpp:1980`, `:2006`, `:2228`) stays a back-edge into this now-partial unit. Wiring it needs four things that don't exist on main yet:
+  1. **Type.** fillet geom p2 holds the #192 base `FilletSolver` (`solvers: &[FilletSolver]`), which cannot say whether it is a variable-radius solver. `SetUp` starts with `SM_CAST_PTR(SmVariableRadiusFS, pFS)` and swaps that solver's law, so this needs the `FilletSolverKind` (or an equivalent variable-radius slot on the solver) proposed on #260. #168's `VariableRadiusFs` embeds a co-ported `FilletSolverData`, not #192's `FilletSolver`.
+  2. **Scope and mutability.** Upstream's change is an RAII object whose scope covers `RailEdgeuseIntersect`; it reverts at scope end. The Rust call sites call the stub, then `rail_edgeuse_intersect`, separately. The first site only has `&` access to the solver table, while the law swap needs `&mut`. Each site has to become a `with_temporary_radius_change`-style scope around the intersection.
+  3. **API shape.** This unit's `TemporaryRadiusChange` is generic over `ExecutiveAccess<O>`; fillet geom p2 uses concrete ids and `FilletBrep`, so it needs a concrete-id entry point (or an adapter) over the same `set_up` / `revert`.
+  4. **Law evaluation.** `SetUp` evaluates the law (`SmFilletLaw::Evaluate`), which is still executive p1's on main, so even a full wiring would only move this deferral to `blend.fillet_executive_p1`.
+
+  Estimated size once (1) exists: about 150 lines across fillet geom p2's three sites and a concrete-id entry point, plus a regression. Item (1) itself is cross-unit (solver table type) and belongs with the #260 solver-base decision.
 
 ## curve.curve_p8 (`SmCurve::GlobalCurveIntersect`): Rust runs for minutes where C++ returns at once on a 1e300 control point (found by `offset.offset_geometry_creation`'s fuzz, 2026-10-20)
 

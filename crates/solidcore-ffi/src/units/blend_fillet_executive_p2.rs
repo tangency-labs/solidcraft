@@ -7,7 +7,9 @@
 //! A box block is `P[3] l w h` (`SmApiCreateBox`); its edges are `SmBrep::GetEdges`
 //! order, which is the order of unit `heal.stitch_p2`'s export of the same box. Every
 //! output starts with the status (`0` = `SM_SUCCESS`, else the `SmStatus`; `-2` =
-//! upstream would dereference null, refused before the call).
+//! upstream would dereference null, refused before the call; `-4 n_edges` = the box has
+//! fewer than [`BOX_EDGES`] edges, which `SmApiCreateBox` gives where the sides
+//! collapse at the origin's scale, and no op runs).
 //!
 //! | [`Op`]        | parameters | outputs |
 //! |---------------|------------|---------|

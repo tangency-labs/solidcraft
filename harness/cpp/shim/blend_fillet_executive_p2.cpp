@@ -6,7 +6,8 @@
 //
 // sc_blend_fillet_executive_p2_eval(op, in, n_in, out, cap, out_len); every op writes
 // `status` first (0 = SM_SUCCESS, else the SmStatus; -2 = upstream would dereference
-// null, the input is refused before the call). Layouts (in -> out):
+// null, the input is refused before the call; -4 n_edges = the box has fewer than 12
+// edges, no op runs). Layouts (in -> out):
 //   0 LAW_LINEAR   start end has_map min max
 //                  -> 0 map_min map_max start end arc_length
 //   1 LAW_ELLIPTIC start end outer span start_deriv end_deriv has_map min max
@@ -55,6 +56,10 @@ enum : int32_t
 };
 
 const double ST_NULL_DEREF = -2.0;
+// The box has fewer than 12 edges (SmApiCreateBox at a coordinate scale where its
+// sides collapse): outside the harness domain, reported as `-4 n_edges`.
+const double ST_BOX_EDGES = -4.0;
+const int64_t BOX_EDGES = 12;
 
 struct Rd
 {
@@ -154,6 +159,18 @@ SmBrep* make_box(Rd& rd)
     return box;
 }
 
+// Writes `-4 n_edges` and returns true when `box` does not have 12 edges.
+bool short_box(SmBrep* box, std::vector<double>& o)
+{
+    SmTArray<SmEdge*> all;
+    box->GetEdges(all);
+    if ((int64_t)all.GetSize() == BOX_EDGES)
+        return false;
+    o.push_back(ST_BOX_EDGES);
+    o.push_back((double)all.GetSize());
+    return true;
+}
+
 // The box's first k edges as constant-radius solvers (linear cross section, radius 1).
 SmStatus load_solvers(Executive& ex, SmBrep* box, int64_t k)
 {
@@ -211,6 +228,11 @@ void op_set_params(Rd& rd, std::vector<double>& o)
     if (!box)
     {
         o.push_back((double)SM_ERR);
+        return;
+    }
+    if (short_box(box, o))
+    {
+        delete box;
         return;
     }
     SmTArray<SmEdge*> all;
@@ -333,6 +355,11 @@ void op_exec(Rd& rd, std::vector<double>& o)
         o.push_back((double)SM_ERR);
         return;
     }
+    if (short_box(box, o))
+    {
+        delete box;
+        return;
+    }
     {
         Executive ex(*box->GetContext(), box);
         SmStatus s = SM_SUCCESS;
@@ -379,6 +406,11 @@ void op_temp_radius(Rd& rd, std::vector<double>& o)
     if (!box)
     {
         o.push_back((double)SM_ERR);
+        return;
+    }
+    if (short_box(box, o))
+    {
+        delete box;
         return;
     }
     SmLinearFilletLaw* law = new (*box->GetContext()) SmLinearFilletLaw(a, b);

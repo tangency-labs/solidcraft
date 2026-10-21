@@ -10,7 +10,8 @@
 //! (the executive constructor belongs to `blend.fillet_executive_p1`). Their output is
 //! one float array (`out`): the status, then the switches, solver count and error code
 //! (`SetFilletParameters`) or the sequence and list lengths. `-2` in the status slot
-//! (upstream would dereference null) is a guard: an error on both sides. An elliptical
+//! (upstream would dereference null) and `-4` (a box with fewer than 12 edges) are
+//! guards: an error on both sides. An elliptical
 //! law whose interpolation failed (no such input is known) would have a null curve
 //! upstream and an error here: also an error on both sides.
 //!
@@ -56,6 +57,9 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 
 /// "Upstream would dereference null" in a status slot.
 const NULL_DEREF: f64 = -2.0;
+
+/// The box has fewer than 12 edges (`-4 n_edges`): no op runs on either side.
+const SHORT_BOX: f64 = -4.0;
 
 /// `SmPlane_TYPE`; `SmLine_TYPE`: the geometry of an `SmApiCreateBox` box, which the
 /// export carries exactly.
@@ -225,6 +229,7 @@ fn record(i: &Inputs) -> (Op, Vec<f64>) {
 fn values_output(o: Vec<f64>) -> Output {
     match o.first() {
         Some(&s) if s == NULL_DEREF => Output::err("null_deref"),
+        Some(&s) if s == SHORT_BOX => Output::err("box_edge_count"),
         _ => Output::new().values("out", o),
     }
 }
@@ -561,6 +566,22 @@ impl ExecutiveAccess<Handle> for Access {
     fn delete_brep(&mut self, _: Handle) -> SolidResult<()> {
         missing()
     }
+    fn set_brep_tolerance(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        update_only_if_larger: bool,
+        cascade_to_boundaries: bool,
+    ) -> SolidResult<()> {
+        solidcore::topology::brep::p2::set_tolerance(
+            k,
+            self.brep_mut(brep)?,
+            tolerance,
+            update_only_if_larger,
+            cascade_to_boundaries,
+        )
+    }
     fn tolerance(&self, k: &Kernel, brep: Handle, approx: bool) -> SolidResult<f64> {
         let tolerance = self.brep(brep)?.tolerance();
         Ok(if approx {
@@ -653,16 +674,17 @@ impl ExecutiveAccess<Handle> for Access {
     }
 }
 
-/// The p2 module's error operation (`SM_ERR_NULL_POINTER` raised there marks a null
-/// dereference upstream, `-2`).
-const OP_P2: &str = "blend::fillet_executive::p2";
+/// The prefix of the p2 module's null-object operations (`SM_ERR_NULL_POINTER` raised
+/// there, `blend::fillet_executive::p2: <what>`, marks a null dereference upstream,
+/// `-2`).
+const OP_P2: &str = "blend::fillet_executive::p2: ";
 
 /// The `SmStatus` of a Rust error.
 fn status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream {
             operation, code, ..
-        } if *code == SM_ERR_NULL_POINTER && *operation == OP_P2 => NULL_DEREF,
+        } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -9.0,
     }
@@ -754,6 +776,10 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
         ))));
     };
     let (b, types) = super::topology_brep_p1::import(&ex, graph_at)?;
+    if b.edges().len() != ffi::BOX_EDGES {
+        // The shim reports the same box as `-4 n_edges`.
+        return Ok(Err(Output::err("box_edge_count")));
+    }
     if types
         .face_surface_types
         .iter()
@@ -764,9 +790,6 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
             .any(|&t| t >= 0 && t != BOX_CURVE)
     {
         return Err(harness("box geometry is not planes and lines"));
-    }
-    if b.edges().len() != ffi::BOX_EDGES {
-        return Err(harness("box without 12 edges"));
     }
     Ok(Ok(Access {
         breps: vec![b],

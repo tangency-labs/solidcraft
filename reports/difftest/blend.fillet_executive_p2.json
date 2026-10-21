@@ -2168,6 +2168,15 @@
       "values_compared": 0
     },
     {
+      "both_errored": true,
+      "max_rel_err": 0.0,
+      "name": "set_params_short_box_regression",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/blend.fillet_executive_p2/constructed.json#258",
+      "values_compared": 0
+    },
+    {
       "max_rel_err": 0.0,
       "name": "gen0000",
       "outcome": "pass",
@@ -2296,11 +2305,11 @@
       "values_compared": 6
     }
   ],
-  "cases_both_errored": 2,
+  "cases_both_errored": 3,
   "cases_deferred": 25,
   "cases_failed": 0,
-  "cases_passed": 249,
-  "cases_total": 274,
+  "cases_passed": 250,
+  "cases_total": 275,
   "deferred_by_unit": {
     "blend.fillet_executive_p1": 22,
     "blend.fillet_standard_solver_p2": 2,
