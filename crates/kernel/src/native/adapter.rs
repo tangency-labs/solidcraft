@@ -94,18 +94,19 @@ fn working_tolerance(body: &Body) -> f64 {
     crate::fill::face_tolerance(body)
 }
 
-/// The record of `body`'s solid, with each face's pcurves from `pcurves` (the face, then the
-/// tolerance), for its wires and edges in `face.boundaries()` order.
-pub(super) fn encode(body: &Body, pcurves: impl Fn(&mt::Face, f64) -> Result<Vec<Vec<b::Curve2>>>) -> Result<b::Brep> {
+/// The record of `body`'s solid. Each face's pcurves come from the records written for it
+/// (`brep::pcurve`, the routine every backend shares), within the body's working tolerance.
+pub(super) fn encode(body: &Body) -> Result<b::Brep> {
     let solid = &body.solid;
     let tolerance = working_tolerance(body);
     let shells = solid.boundaries();
     let regions = regions(body)?;
 
-    // Faces in truck's order; edges and vertices in first appearance.
+    // Faces in truck's order; edges and vertices in first appearance, each edge's curve record
+    // and interval written when it first appears.
     let mut face_index = HashMap::new();
     let mut edge_index = HashMap::new();
-    let mut edges: Vec<mt::Edge> = Vec::new();
+    let mut edges: Vec<(mt::Edge, b::Curve, [f64; 2])> = Vec::new();
     let mut uses: Vec<Vec<b::EdgeUseRef>> = Vec::new();
     let mut faces = Vec::new();
     let mut shell_records = Vec::new();
@@ -124,23 +125,29 @@ pub(super) fn encode(body: &Body, pcurves: impl Fn(&mt::Face, f64) -> Result<Vec
                 for k in 0..n {
                     let position = if face.orientation() { k } else { n - 1 - k };
                     let e = wire.get(position).ok_or_else(|| invalid("wire position"))?;
-                    let i = *edge_index.entry(e.id()).or_insert_with(|| {
-                        edges.push(e.absolute_clone());
-                        uses.push(Vec::new());
-                        edges.len() - 1
-                    });
+                    let i = match edge_index.get(&e.id()) {
+                        Some(i) => *i,
+                        None => {
+                            let curve = e.curve();
+                            let (t0, t1) = curve.try_range_tuple().ok_or_else(|| invalid("unbounded edge curve"))?;
+                            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1]));
+                            uses.push(Vec::new());
+                            edge_index.insert(e.id(), edges.len() - 1);
+                            edges.len() - 1
+                        }
+                    };
                     let at = b::EdgeUseRef { face: index(fi)?, r#loop: index(li)?, position: index(position)?, upper: !e.orientation() };
                     uses.get_mut(i).ok_or_else(|| invalid("edge use"))?.push(at);
                 }
             }
-            faces.push(face_record(face, wires, &edge_index, &pcurves, tolerance)?);
+            faces.push(face_record(face, wires, &edge_index, &edges, tolerance)?);
         }
         shell_records.push(b::Shell::Faces { faces: oriented, wires: Vec::new() });
     }
     let mut vertex_index = HashMap::new();
     let mut vertices = Vec::new();
     let mut edge_records = Vec::with_capacity(edges.len());
-    for (e, uses) in edges.iter().zip(uses) {
+    for ((e, curve, interval), uses) in edges.into_iter().zip(uses) {
         if uses.len() > 2 {
             return Err(unsupported("the radial order of an edge with more than two uses"));
         }
@@ -151,15 +158,7 @@ pub(super) fn encode(body: &Body, pcurves: impl Fn(&mt::Face, f64) -> Result<Vec
             })
         };
         let ends = [vertex(e.absolute_front()), vertex(e.absolute_back())];
-        let curve = e.curve();
-        let (t0, t1) = curve.try_range_tuple().ok_or_else(|| invalid("unbounded edge curve"))?;
-        edge_records.push(b::Edge {
-            curve: save_curve(&curve, 0)?,
-            interval: [t0, t1],
-            vertices: [index(ends[0])?, index(ends[1])?],
-            tolerance,
-            uses,
-        });
+        edge_records.push(b::Edge { curve, interval, vertices: [index(ends[0])?, index(ends[1])?], tolerance, uses });
     }
     let result = b::Brep { version: b::VERSION, tolerance, regions, shells: shell_records, faces, edges: edge_records, vertices };
     result.validate().map_err(invalid)?;
@@ -167,38 +166,64 @@ pub(super) fn encode(body: &Body, pcurves: impl Fn(&mt::Face, f64) -> Result<Vec
     Ok(result)
 }
 
-/// A face's record: its surface, its loops as truck holds them and their pcurves, and the
-/// domain around the pcurves.
+/// A face's record: its surface, its loops as truck holds them (relative to the surface) and
+/// their pcurves from the surface and edge records, and the domain around the pcurves.
 fn face_record(
     face: &mt::Face,
     wires: &[mt::Wire],
     edge_index: &HashMap<mt::EdgeID, usize>,
-    pcurves: &impl Fn(&mt::Face, f64) -> Result<Vec<Vec<b::Curve2>>>,
+    edges: &[(mt::Edge, b::Curve, [f64; 2])],
     tolerance: f64,
 ) -> Result<b::Face> {
     let surface = save_surface(&face.surface(), 0)?;
-    // `pcurves` lists the oriented wires: a reversed face's run backwards.
-    let mut curves = pcurves(face, tolerance)?;
-    if !face.orientation() {
-        curves.iter_mut().for_each(|w| w.reverse());
-    }
-    if curves.len() != wires.len() || curves.iter().zip(wires).any(|(c, w)| c.len() != w.len()) {
-        return Err(invalid("pcurves do not match the face's wires"));
-    }
-    let mut loops = Vec::with_capacity(wires.len());
-    for (wire, curves) in wires.iter().zip(curves) {
-        let edges = wire
+    let mut uses = Vec::with_capacity(wires.len());
+    for wire in wires {
+        let l = wire
             .edge_iter()
-            .zip(curves)
-            .map(|(e, pcurve)| {
-                let i = edge_index.get(&e.id()).ok_or_else(|| invalid("edge index"))?;
-                Ok(b::OrientedEdge { edge: index(*i)?, forward: e.orientation(), pcurve })
+            .map(|e| {
+                let i = *edge_index.get(&e.id()).ok_or_else(|| invalid("edge index"))?;
+                let (_, curve, interval) = edges.get(i).ok_or_else(|| invalid("edge index"))?;
+                Ok(b::pcurve::EdgeUse { edge: index(i)?, curve, interval: *interval, forward: e.orientation() })
             })
-            .collect::<Result<_>>()?;
-        loops.push(b::Loop::Edges { edges });
+            .collect::<Result<Vec<_>>>()?;
+        uses.push(l);
     }
+    let curves = b::pcurve::pcurves(&surface, &uses, tolerance).map_err(pcurve_error)?;
+    let loops = uses
+        .iter()
+        .zip(curves)
+        .map(|(l, pcs)| b::Loop::Edges {
+            edges: l.iter().zip(pcs).map(|(u, pcurve)| b::OrientedEdge { edge: u.edge, forward: u.forward, pcurve }).collect(),
+        })
+        .collect::<Vec<_>>();
     let domain = domain(&surface, &loops)?;
     Ok(b::Face { surface, domain, loops })
+}
+
+/// `face`'s record on its own, its edges numbered in first appearance: what [`encode`] writes
+/// for it, pcurves included.
+#[cfg(test)]
+pub(super) fn face_alone(face: &mt::Face, tolerance: f64) -> Result<b::Face> {
+    let wires = face.absolute_boundaries();
+    let (mut edge_index, mut edges) = (HashMap::new(), Vec::new());
+    for e in wires.iter().flat_map(|w| w.edge_iter()) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = edge_index.entry(e.id()) {
+            let curve = e.curve();
+            let (t0, t1) = curve.try_range_tuple().ok_or_else(|| invalid("unbounded edge curve"))?;
+            edges.push((e.absolute_clone(), save_curve(&curve, 0)?, [t0, t1]));
+            slot.insert(edges.len() - 1);
+        }
+    }
+    face_record(face, wires, &edge_index, &edges, tolerance)
+}
+
+/// The kernel's error for the pcurve routine's.
+fn pcurve_error(e: b::pcurve::Error) -> crate::KernelError {
+    match e {
+        b::pcurve::Error::Invalid(m) => crate::KernelError::Invalid(m),
+        b::pcurve::Error::Failed(m) => crate::KernelError::Failed(m),
+        b::pcurve::Error::TooLarge(m) => crate::KernelError::TooLarge(m),
+    }
 }
 
 /// The rectangle around a face's pcurves (their control polygons, which hold them), clamped to

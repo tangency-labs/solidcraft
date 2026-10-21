@@ -113,7 +113,9 @@ Analytic frames store an origin and orthonormal x and y axes; z = x × y.
 | `surface_intersection` {surfaces, leader, tolerance} | the intersection of two surface records, traced from `leader` (a polyline or spline near it) to within `tolerance` mm; t is the leader's | the leader's |
 
 A `surface_intersection` is the procedural curve itself, not a fit: another
-kernel traces it again.
+kernel traces it again. Its point at t is the point of both surfaces in the plane
+through the leader's point at t, normal to the leader there (truck's `subs`
+converges to it within 10⁻⁶ mm).
 
 ### Surfaces
 
@@ -157,6 +159,14 @@ within 10⁻⁹ of the interval's magnitude (at least 1), room for a linear rema
 rounding. A seam edge has two uses on one face, each with its own pcurve, a
 period apart. On a periodic surface a loop's pcurves are unwrapped, so each one
 starts where the one before it ends.
+
+Pcurves are SolidCraft's own, never a kernel's internal parameter space:
+`brep::pcurve::pcurves` computes them from a face's surface record and each
+use's curve record and interval, for every backend. It is exact in closed form
+for lines, polylines and whole splines on planes, circles about the axis of a
+cylinder, cone, sphere or torus (v fixed, u the circle's angle plus a constant)
+and lines along a cylinder's or cone's ruling (u fixed, v linear), each checked
+by lifting it; everything else is a cubic B-spline fitted within the tolerance.
 
 ## Validation and trust
 
@@ -242,7 +252,7 @@ It writes every curve and surface as truck holds it: lines, B-spline and NURBS
 coefficients, the three points of a plane, a revolution's profile, axis, matrix
 and orientation, and an intersection's two surfaces, leader and tolerance. An
 edge's interval is its truck curve's parameter range. Pcurves come from
-`native::pcurve`, exact on planes and fitted elsewhere; a face's domain is the
+`brep::pcurve` on the records just written; a face's domain is the
 box around its pcurves' control points, clamped to the surface's natural domain
 and at most one turn in a periodic direction. Every tolerance is the body's face
 tolerance, 10⁻⁶ of its size and at least 10⁻⁵ mm, how far later operations take

@@ -8,7 +8,6 @@ use std::sync::Arc;
 mod adapter;
 mod binary;
 mod metadata;
-mod pcurve;
 mod preview;
 pub use preview::native_preview_mesh;
 
@@ -69,7 +68,7 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
             return Err(invalid("mesh bodies are source blobs, not B-rep"));
         }
         let runtime = Runtime { size: body.size, coarse_missing: body.coarse_missing.map(|(tol, n)| (tol, n as u64)) };
-        let saved = SavedBody { solid: adapter::encode(body, pcurve::pcurves)?, metadata: metadata::encode(body)?, runtime };
+        let saved = SavedBody { solid: adapter::encode(body)?, metadata: metadata::encode(body)?, runtime };
         // Structural validation does not invoke another geometric reconstruction.
         validate_topology(&saved)?;
         let value = serde_json::to_value(saved).map_err(invalid)?;
@@ -336,6 +335,18 @@ mod tests {
         equal(&body, &restored);
     }
 
+    /// A face's pcurves as the adapter writes them: its loops relative to its surface.
+    fn pcurves_of(face: &truck_modeling::Face, tol: f64) -> Result<Vec<Vec<solidcraft_geom::brep::Curve2>>> {
+        let record = adapter::face_alone(face, tol)?;
+        Ok(record
+            .loops
+            .into_iter()
+            .map(|l| match l {
+                solidcraft_geom::brep::Loop::Edges { edges } => edges.into_iter().map(|e| e.pcurve).collect(),
+                solidcraft_geom::brep::Loop::Vertex { .. } => Vec::new(),
+            })
+            .collect())
+    }
     /// Every pcurve of every face of `body` validates as the schema validator does, spans its
     /// curve's range, lifts onto the surface within `tol` (64 samples and every span midpoint),
     /// and each wire closes in (u, v): consecutive uses meet, or meet across a pole (the gap
@@ -349,8 +360,8 @@ mod tests {
         let mut winding = Vec::new();
         for (f, face) in faces.iter().enumerate() {
             let surface = face.surface();
-            let all = pcurve::pcurves(face, tol).unwrap_or_else(|e| panic!("face {f}: {e}"));
-            let wires = face.boundaries();
+            let all = pcurves_of(face, tol).unwrap_or_else(|e| panic!("face {f}: {e}"));
+            let wires = face.absolute_boundaries().clone();
             assert_eq!(all.len(), wires.len());
             let lift = |uv: [f64; 2]| surface.subs(uv[0], uv[1]);
             let mut areas = Vec::new();
@@ -362,7 +373,7 @@ mod tests {
                         let [a, b] = pc.interval().unwrap();
                         (0..16)
                             .map(move |k| if e.orientation() { a + (b - a) * k as f64 / 16. } else { b - (b - a) * k as f64 / 16. })
-                            .map(|t| pcurve::eval(pc, t).unwrap())
+                            .map(|t| pc.eval(t).unwrap())
                     })
                     .collect();
                 areas.push(
@@ -395,11 +406,14 @@ mod tests {
                     let mut ts: Vec<f64> = (0..=64).map(|k| t0 + (t1 - t0) * k as f64 / 64.).collect();
                     ts.extend(knots.windows(2).filter(|k| k[0] < k[1]).map(|k| 0.5 * (k[0] + k[1])));
                     for t in ts {
-                        let uv = pcurve::eval(pc, t).unwrap_or_else(|| panic!("{at}: eval at {t}"));
+                        let uv = pc.eval(t).unwrap_or_else(|| panic!("{at}: eval at {t}"));
+                        // Truck's intersection points are its Newton iterate, within 1e-6 mm of
+                        // the intersection the pcurve follows.
+                        let slack = if matches!(curve, truck_modeling::Curve::IntersectionCurve(_)) { 1e-6 } else { 0. };
                         let d = lift(uv).distance(curve.subs(t));
-                        assert!(d <= tol, "{at}: lift error {d} at {t}");
+                        assert!(d <= tol + slack, "{at}: lift error {d} at {t}");
                     }
-                    let (a, b) = (pcurve::eval(pc, t0).unwrap(), pcurve::eval(pc, t1).unwrap());
+                    let (a, b) = (pc.eval(t0).unwrap(), pc.eval(t1).unwrap());
                     ends.push(if edge.orientation() { (a, b) } else { (b, a) });
                 }
                 let mut wraps = false;
@@ -431,12 +445,12 @@ mod tests {
                     winding.push((f, w));
                 }
             }
-            // The outer loop (the most area) turns counter-clockwise in (u, v) for a face along
-            // its surface's normal, clockwise against it; holes the other way.
+            // Loops are relative to the surface: the outer loop (the most area) turns
+            // counter-clockwise in (u, v), holes clockwise, whichever side the face uses.
             if !winding.iter().any(|(wf, _)| *wf == f) {
                 let outer = (0..areas.len()).max_by(|a, b| areas[*a].abs().total_cmp(&areas[*b].abs())).unwrap();
                 for (w, area) in areas.iter().enumerate() {
-                    assert_eq!(*area > 0., (w == outer) == face.orientation(), "face {f} wire {w}: turns the wrong way ({area})");
+                    assert_eq!(*area > 0., w == outer, "face {f} wire {w}: turns the wrong way ({area})");
                 }
             }
         }
@@ -451,7 +465,7 @@ mod tests {
         // Bit for bit: each line's pcurve ends lift to the line's own ends.
         for face in cube.solid.face_iter() {
             let surface = face.surface();
-            for (pcs, wire) in pcurve::pcurves(face, 1e-9).unwrap().iter().zip(face.boundaries()) {
+            for (pcs, wire) in pcurves_of(face, 1e-9).unwrap().iter().zip(face.absolute_boundaries().clone()) {
                 for (pc, edge) in pcs.iter().zip(wire.edge_iter()) {
                     let solidcraft_geom::brep::Curve2::Spline { points, .. } = pc else { panic!("a line is a degree-1 spline") };
                     let curve = edge.curve();
@@ -464,7 +478,7 @@ mod tests {
         // Arcs (rational) on the cylinder's caps.
         let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 5., 40.).unwrap();
         for face in cyl.solid.face_iter().filter(|f| matches!(f.surface(), truck_modeling::Surface::Plane(_))) {
-            assert!(pcurve::pcurves(face, 1e-9).unwrap().iter().flatten().all(|c| matches!(c, solidcraft_geom::brep::Curve2::RationalSpline { .. })));
+            assert!(pcurves_of(face, 1e-9).unwrap().iter().flatten().all(|c| matches!(c, solidcraft_geom::brep::Curve2::RationalSpline { .. })));
         }
     }
 
@@ -503,19 +517,9 @@ mod tests {
     fn pcurves_fit_curved_faces_within_tolerance() {
         for (name, body) in curved_bodies() {
             for tol in [1e-3, 1e-5, 1e-6] {
-                // Truck places intersection curves on their surfaces to about 1e-6 mm only.
-                if name == "cut" && tol < 1e-5 {
-                    let face = body.solid.face_iter().find(|f| {
-                        f.edge_iter().any(|e| matches!(e.curve(), truck_modeling::Curve::IntersectionCurve(_)))
-                            && !matches!(f.surface(), truck_modeling::Surface::Plane(_))
-                    });
-                    let error = pcurve::pcurves(face.unwrap(), tol).unwrap_err().to_string();
-                    assert!(error.contains("off the surface"), "{error}");
-                    continue;
-                }
                 let start = std::time::Instant::now();
                 for face in body.solid.face_iter() {
-                    pcurve::pcurves(face, tol).unwrap();
+                    pcurves_of(face, tol).unwrap();
                 }
                 let took = start.elapsed();
                 let winding = check_pcurves(&body, tol);
@@ -566,7 +570,7 @@ mod tests {
         use solidcraft_geom::brep::Curve2;
         for (name, face) in seam_faces() {
             for bad in [0., -1., f64::NAN, f64::INFINITY] {
-                assert!(pcurve::pcurves(&face, bad).is_err());
+                assert!(pcurves_of(&face, bad).is_err());
             }
             for tol in [1e-3, 1e-6] {
                 // A face round the surface without a seam: each loop closes a period apart.
@@ -575,10 +579,10 @@ mod tests {
                     continue;
                 }
                 assert!(check_faces(std::slice::from_ref(&face), tol).is_empty(), "{name}");
-                let wire = &pcurve::pcurves(&face, tol).unwrap()[0];
+                let wire = &pcurves_of(&face, tol).unwrap()[0];
                 let at = |c: &Curve2, f: f64| {
                     let [a, b] = c.interval().unwrap();
-                    pcurve::eval(c, a + (b - a) * f).unwrap()
+                    c.eval(a + (b - a) * f).unwrap()
                 };
                 // The seam's two uses: the same curve on either side of the period.
                 let (first, second) = if name == "seam cylinder" { (&wire[0], &wire[2]) } else { (&wire[0], &wire[1]) };
@@ -623,17 +627,17 @@ mod tests {
         for (f, face) in faces.iter().enumerate() {
             let (ox, oy) = ((f % 4) as f64 * W, (f / 4) as f64 * W + 30.);
             let surface = face.surface();
-            let wires = pcurve::pcurves(face, tol).unwrap();
+            let wires = pcurves_of(face, tol).unwrap();
             let lines: Vec<Vec<(usize, bool, Vec<[f64; 2]>)>> = wires
                 .iter()
-                .zip(face.boundaries())
+                .zip(face.absolute_boundaries().clone())
                 .map(|(pcs, wire)| {
                     pcs.iter()
                         .zip(wire.edge_iter())
                         .enumerate()
                         .map(|(i, (c, e))| {
                             let [a, b] = c.interval().unwrap();
-                            (i, e.orientation(), (0..=64).map(|k| pcurve::eval(c, a + (b - a) * k as f64 / 64.).unwrap()).collect())
+                            (i, e.orientation(), (0..=64).map(|k| c.eval(a + (b - a) * k as f64 / 64.).unwrap()).collect())
                         })
                         .collect()
                 })
