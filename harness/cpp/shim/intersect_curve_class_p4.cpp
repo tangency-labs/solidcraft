@@ -870,6 +870,13 @@ int32_t run(Rd& rd, std::vector<double>& o)
                 loops[(ULONG)i] = l;
             }
             bool with_props = rd.flag();
+            // GetPointClassifiesConnectedTo reads GetAt(0) unchecked: an empty classification
+            // (e.g. after a squeeze) reaches it with loops whose first loop's face has a
+            // surface, and a curve. (Refused even for a degenerate curve, which returns
+            // before it.)
+            if (n > 0 && cc.GetSize() == 0 && loops[0]->GetFace() != NULL
+                && loops[0]->GetFace()->GetSurface() != NULL && cc.GetCurve() != NULL)
+                return SC_ERR_ARG;
             // the face props seeds (`field idx value`, as the heal.face_props shim), applied to
             // the props passed: a preset at SM_PROPSTAGE_2a or later skips SetProps_Stage2
             int64_t n_seeds = rd.idx();

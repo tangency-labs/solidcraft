@@ -50,8 +50,7 @@
 //!   The intersector's `GetOtherMate` /
 //!   `RemoveRelationship` are reached through [`Mates`] (ported in
 //!   `boolean.topology_intersector_p1` / `_p2`; [`NoMates`] for no intersector maps). The
-//!   `SmCurveClassification` constructor is part 4's ([`CurveClassification::with_curve`];
-//!   it defers on `ReSet`, `intersect.curve_class_p2`). `ExtractGeometry` calls part 5 and
+//!   `SmCurveClassification` constructor is part 4's ([`CurveClassification::with_curve`]). `ExtractGeometry` calls part 5 and
 //!   currently reaches part 6's `Homogenize` dependency. The code
 //!   after a stub is ported in full. The callees of `topology.proto_topology_p2` are
 //!   its methods on [`ProtoTopologyManager`].

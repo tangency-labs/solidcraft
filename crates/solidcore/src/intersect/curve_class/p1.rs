@@ -1908,7 +1908,7 @@ fn vertex_edges<O: ClassObject>(geometry: &impl ClassGeometry<O>, vertex: O) -> 
         .into_iter()
         .map(|e| {
             geometry
-                .topology_handle(EntityRef::Edge(e))
+                .topology_handle_in(b, EntityRef::Edge(e))
                 .ok_or(SolidError::invalid_input(UPSTREAM, "edge without handle"))
         })
         .collect()

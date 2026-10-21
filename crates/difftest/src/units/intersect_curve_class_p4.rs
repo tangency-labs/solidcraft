@@ -31,11 +31,12 @@
 //! (`GetPointClassifiesConnectedTo`, `intersect.curve_class_p7`, after the seam sampling of a
 //! closed face), `SetProps_Stage2` of a closed face (`SmFace::HasSeamProblem`,
 //! `topology.face_p4`), the edge ends of `GetIvlBound_EdgeuseObj` (`SmEdge::GetCurve` in
-//! `PointClassification::curve_object`, then `GetMinUV`, `intersect.curve_class_p2`), the
-//! constructor (`ReSet`, `intersect.curve_class_p2`) and every squeeze of a non-empty
-//! classification (`ConnectIntervals`, `intersect.curve_class_p2`). Generated scripts are
-//! filtered by the shim's run-time checks (scripts it rejects as undefined upstream are
-//! dropped).
+//! `PointClassification::curve_object`). The constructor's `ReSet`, `ConnectIntervals` and
+//! `GetMinUV` / `GetMaxUV` are part 2's (wired when `intersect.curve_class_p2` was merged
+//! with `boolean.topology_intersector_p3`). Generated scripts are filtered by the shim's
+//! run-time checks (scripts it rejects as undefined upstream are dropped), among them
+//! `GetLoopCrossings` on an empty classification (a squeeze can empty it), which reads
+//! `GetAt(0)` unchecked.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

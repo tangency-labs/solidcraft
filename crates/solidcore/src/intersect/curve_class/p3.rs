@@ -145,7 +145,7 @@ pub(super) fn edge_vertices<O: ClassObject>(
     let handle = |v: Option<VertexId>| {
         let v = v.ok_or_else(|| SolidError::null_pointer(OP_NEAR_VERTEX))?;
         geometry
-            .topology_handle(EntityRef::Vertex(v))
+            .topology_handle_in(b, EntityRef::Vertex(v))
             .ok_or_else(|| SolidError::invalid_input(OP_NEAR_VERTEX, "vertex without handle"))
     };
     Ok((handle(v1)?, handle(v2)?))

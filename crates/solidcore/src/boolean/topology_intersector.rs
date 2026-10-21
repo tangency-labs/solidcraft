@@ -11,9 +11,14 @@
 
 pub mod p1;
 pub mod p2;
+pub mod p3;
 
 pub use p1::{
     EdgeFaceIntersect, ExistingSsi, FaceFaceCoincidence, FaceFaceIntersect, ImprintFace,
     IntersectionResults, IntersectionTable, IntersectorBrep, MateMap, Reason, Relations,
     SplitTwoEdges, TopologyIntersector, VertexFaceIntersect,
+};
+pub use p3::{
+    CoincidentSurfacesMerge, CurveClassesMerge, CurveOnSurfaces, CurveOnSurfacesMerge,
+    IntersectorBrepP3,
 };

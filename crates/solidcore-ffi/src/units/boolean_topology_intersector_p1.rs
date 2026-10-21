@@ -494,6 +494,19 @@ fn brep_blocks(rd: &mut Reader<'_>, paths: [&str; 2]) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Validates the two B-rep blocks at the start of `input` (for the
+/// `boolean.topology_intersector_p3` wrapper, whose shim builds the same blocks) and
+/// returns their length.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed block or a missing `.smb` file.
+pub fn blocks_len(paths: [&str; 2], input: &[f64]) -> Result<usize, FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    brep_blocks(&mut rd, paths)?;
+    Ok(rd.at)
+}
+
 /// The entity counts of an export block (`0 validate_only counts[10] ...`), in the
 /// shim's order: regions, shells, face uses, faces, loop uses, loops, edge uses, edges,
 /// vertex uses, vertices.

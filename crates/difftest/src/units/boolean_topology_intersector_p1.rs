@@ -117,12 +117,12 @@ pub struct Runner;
 /// Generated cases at least.
 pub(super) const MIN_GENERATED: usize = 800;
 
-fn harness(msg: impl Into<String>) -> HarnessError {
+pub(super) fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
 /// "Upstream would dereference null" in an output slot.
-const NULL_DEREF: f64 = -2.0;
+pub(super) const NULL_DEREF: f64 = -2.0;
 
 /// `SmTopoTypes.h` codes of `GetMappedBrepObjects`' type argument.
 const VERTEX_TYPE: i64 = 16021;
@@ -440,7 +440,7 @@ pub(super) struct Inputs {
 
 // ---- encoding ---------------------------------------------------------------------------
 
-fn flag(b: bool) -> f64 {
+pub(super) fn flag(b: bool) -> f64 {
     f64::from(u8::from(b))
 }
 
@@ -515,7 +515,7 @@ fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
 }
 
 /// The `.smb` path of a B-rep input ("" when it is not a file).
-fn path_of(b: Option<&BrepIn>) -> Result<String, HarnessError> {
+pub(super) fn path_of(b: Option<&BrepIn>) -> Result<String, HarnessError> {
     match b {
         Some(BrepIn::File { file, .. }) => {
             let p = crate::fixtures::upstream_test_file(&crate::case::repo_root(), file)?;
@@ -525,7 +525,7 @@ fn path_of(b: Option<&BrepIn>) -> Result<String, HarnessError> {
     }
 }
 
-fn brep_block(v: &mut Vec<f64>, b: &BrepIn) -> Result<(), HarnessError> {
+pub(super) fn brep_block(v: &mut Vec<f64>, b: &BrepIn) -> Result<(), HarnessError> {
     match b {
         BrepIn::File { rebuild, .. } => {
             v.push(0.0);
@@ -577,7 +577,7 @@ fn export(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 }
 
 /// A build failure as an operation error.
-fn build_failure(export: &[f64]) -> Output {
+pub(super) fn build_failure(export: &[f64]) -> Output {
     Output::err(format!(
         "brep_build_{}_status_{}",
         if export.first() == Some(&-3.0) {
@@ -601,18 +601,18 @@ pub(super) const K_CURVE: u8 = 5;
 pub(super) const K_BREP: u8 = 6;
 /// A curve copy made by the port (never named by an input; `-1 -3 -1` in outputs, as
 /// the shim's table copies).
-const K_EXTRA: u8 = 7;
+pub(super) const K_EXTRA: u8 = 7;
 pub(super) const K_NULL: i64 = 8;
 /// The intersector itself (the manager's `pTI`).
-const K_TI: u8 = 9;
-const K_EDGEUSE: u8 = 10;
-const K_LOOP: u8 = 11;
+pub(super) const K_TI: u8 = 9;
+pub(super) const K_EDGEUSE: u8 = 10;
+pub(super) const K_LOOP: u8 = 11;
 /// A vertex use, by the index of its id (Rust side only: the classification's own
 /// identities, never exported by the shim).
-const K_VERTEXUSE: u8 = 12;
+pub(super) const K_VERTEXUSE: u8 = 12;
 /// The UV trim curve stored on an edge use (or its mate), by the edge use's index
 /// (Rust side only, resolved by `ClassGeometry::curve`).
-const K_TRIM_CURVE: u8 = 13;
+pub(super) const K_TRIM_CURVE: u8 = 13;
 /// A region (classification results).
 const K_REGION: u8 = 14;
 
@@ -658,7 +658,7 @@ pub(crate) const fn hd(b: i8, kind: u8, i: u32) -> H {
 }
 
 /// A curve handle carrying the curve's natural interval.
-fn curve_h(b: i8, kind: u8, i: u32, c: &SmCurve) -> H {
+pub(super) fn curve_h(b: i8, kind: u8, i: u32, c: &SmCurve) -> H {
     let ivl = c.natural_interval();
     H {
         b,
@@ -706,13 +706,13 @@ impl SolutionObject for H {
     }
 }
 
-const TI_HANDLE: H = hd(-1, K_TI, 0);
+pub(super) const TI_HANDLE: H = hd(-1, K_TI, 0);
 
 pub(crate) const fn brep_h(b: i8) -> H {
     hd(b, K_BREP, b as u32)
 }
 
-fn put_h(o: &mut Vec<f64>, h: Option<H>) {
+pub(super) fn put_h(o: &mut Vec<f64>, h: Option<H>) {
     match h {
         None => o.extend([-1.0, f64::from(K_NULL as u8), -1.0]),
         Some(h)
@@ -724,14 +724,14 @@ fn put_h(o: &mut Vec<f64>, h: Option<H>) {
     }
 }
 
-fn h_to_triple(h: Option<H>) -> Hin {
+pub(super) fn h_to_triple(h: Option<H>) -> Hin {
     match h {
         None => [-1, K_NULL, -1],
         Some(h) => [i64::from(h.b), i64::from(h.kind), i64::from(h.i)],
     }
 }
 
-fn triple_to_h(t: Hin) -> Option<H> {
+pub(super) fn triple_to_h(t: Hin) -> Option<H> {
     if t[1] == K_NULL {
         return None;
     }
@@ -778,7 +778,7 @@ fn vertexuse_ref(vu: VertexuseId) -> ObjectRef {
 /// The two B-reps, the registered curves (kind 5) and the port's curve copies (kind
 /// 7).
 pub(crate) struct Two {
-    breps: [Option<Brep>; 2],
+    pub(super) breps: [Option<Brep>; 2],
     curves: Vec<SmCurve>,
     extra: Vec<SmCurve>,
     env: [NotifyEnv; 2],
@@ -791,13 +791,13 @@ fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input("difftest::boolean_topology_intersector_p1::Two", reason)
 }
 
-const fn vid(h: H) -> VertexId {
+pub(super) const fn vid(h: H) -> VertexId {
     VertexId::from_index(h.i)
 }
-const fn eid(h: H) -> EdgeId {
+pub(super) const fn eid(h: H) -> EdgeId {
     EdgeId::from_index(h.i)
 }
-const fn fid(h: H) -> FaceId {
+pub(super) const fn fid(h: H) -> FaceId {
     FaceId::from_index(h.i)
 }
 
@@ -828,11 +828,11 @@ impl Two {
         Ok(())
     }
 
-    fn brep(&self, h: H) -> Option<&Brep> {
+    pub(super) fn brep(&self, h: H) -> Option<&Brep> {
         self.breps.get(usize::try_from(h.b).ok()?)?.as_ref()
     }
 
-    fn brep_mut(&mut self, h: H) -> Option<&mut Brep> {
+    pub(super) fn brep_mut(&mut self, h: H) -> Option<&mut Brep> {
         self.breps.get_mut(usize::try_from(h.b).ok()?)?.as_mut()
     }
 
@@ -848,7 +848,7 @@ impl Two {
 
     /// The edge's curve handle (`ProtoBrep::edge_curve`'s shape).
     #[allow(clippy::option_option)]
-    fn edge_curve_h(&self, e: H) -> Option<Option<H>> {
+    pub(super) fn edge_curve_h(&self, e: H) -> Option<Option<H>> {
         let b = self.brep(e)?;
         let edge = b.edge(eid(e)).ok()?;
         Some(
@@ -860,7 +860,7 @@ impl Two {
 
     /// The face's surface handle (`ProtoBrep::face_surface`'s shape).
     #[allow(clippy::option_option)]
-    fn face_surface_h(&self, f: H) -> Option<Option<H>> {
+    pub(super) fn face_surface_h(&self, f: H) -> Option<Option<H>> {
         let b = self.brep(f)?;
         let face = b.face(fid(f)).ok()?;
         Some(face.surface.as_ref().map(|_| hd(f.b, K_FACE_SURFACE, f.i)))
@@ -883,7 +883,7 @@ impl Two {
             .collect()
     }
 
-    fn entity_h(b: i8, e: EntityRef) -> Option<H> {
+    pub(super) fn entity_h(b: i8, e: EntityRef) -> Option<H> {
         match e {
             EntityRef::Vertex(v) => Some(hd(b, K_VERTEX, v.index())),
             EntityRef::Edge(x) => Some(hd(b, K_EDGE, x.index())),
@@ -965,6 +965,31 @@ impl ClassGeometry<H> for Two {
             K_VERTEX | K_EDGE | K_FACE => self.topology_tolerance(o),
             _ => None,
         }
+    }
+    // The topology hooks of `intersect.curve_class_p1` / `_p4` (added for unit
+    // `boolean.topology_intersector_p3`, whose merges reach
+    // `sm_MakeConsistentClassifications`): a handle's B-rep entity, and back.
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        let b = self.brep(o)?;
+        let e = match o.kind {
+            K_VERTEX => EntityRef::Vertex(vid(o)),
+            K_EDGE => EntityRef::Edge(eid(o)),
+            K_FACE => EntityRef::Face(fid(o)),
+            K_LOOP => EntityRef::Loop(LoopId::from_index(o.i)),
+            K_EDGEUSE => EntityRef::Edgeuse(EdgeuseId::from_index(o.i)),
+            _ => return None,
+        };
+        Some((b, e))
+    }
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<H> {
+        // the B-rep by identity (a reference this adapter handed out), not by address order
+        let b = (0..2i8).find(|&b| {
+            self.breps
+                .get(usize::from(b.unsigned_abs()))
+                .and_then(Option::as_ref)
+                .is_some_and(|x| std::ptr::eq(x, brep))
+        })?;
+        Self::entity_h(b, entity)
     }
 }
 
@@ -2136,7 +2161,13 @@ fn resolve_prefix(
 /// Resolves every op of `ops` against the imported B-reps; `Err(name)` names the
 /// first op that cannot be run.
 #[allow(clippy::too_many_lines)]
-fn resolve(k: &Kernel, ops: &[OpIn], c: &Counts, two: &Two, start: Start) -> Result<Vec<ROp>, String> {
+fn resolve(
+    k: &Kernel,
+    ops: &[OpIn],
+    c: &Counts,
+    two: &Two,
+    start: Start,
+) -> Result<Vec<ROp>, String> {
     let i_ctor = start.ctor;
     let mut approx = start.approx;
     let mut out = Vec::new();

@@ -334,6 +334,14 @@ pub trait ClassGeometry<O> {
         let _ = entity;
         None
     }
+    /// The handle of entity `entity` of `brep`, a B-rep that
+    /// [`ClassGeometry::topology_entity`] returned. An adapter over several B-reps
+    /// implements this to tell them apart; the default is
+    /// [`ClassGeometry::topology_handle`].
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<O> {
+        let _ = brep;
+        self.topology_handle(entity)
+    }
     /// The owner of an intermediate owner on a curve's owner chain (`GetOwner` of a
     /// generating curve or an edgeuse), for `SmCurve::GetEdge`
     /// ([`Curve::edge`]); `None` (the default) ends the chain.

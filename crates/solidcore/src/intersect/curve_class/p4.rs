@@ -240,14 +240,15 @@ fn entity_of<'g, O: ClassObject, G: ClassGeometry<O>>(
         .ok_or_else(|| SolidError::invalid_input(op, "unresolved topology handle"))
 }
 
-/// The handle of B-rep entity `e` ([`ClassGeometry::topology_handle`]).
+/// The handle of entity `e` of B-rep `b` ([`ClassGeometry::topology_handle_in`]).
 fn handle_of<O: ClassObject, G: ClassGeometry<O>>(
     geometry: &G,
+    b: &Brep,
     e: EntityRef,
     op: &'static str,
 ) -> Result<O> {
     geometry
-        .topology_handle(e)
+        .topology_handle_in(b, e)
         .ok_or_else(|| SolidError::invalid_input(op, "topology entity without handle"))
 }
 
@@ -331,7 +332,7 @@ fn loop_face<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, lp: O) -> Result
         return Err(wrong_kind(OP_CROSS, "handle is not a loop"));
     };
     loopuse::loop_face(b, l)?
-        .map(|f| handle_of(geometry, EntityRef::Face(f), OP_CROSS))
+        .map(|f| handle_of(geometry, b, EntityRef::Face(f), OP_CROSS))
         .transpose()
 }
 
@@ -343,7 +344,7 @@ fn face_upward_faceuse<O: ClassObject, G: ClassGeometry<O>>(
 ) -> Result<Option<O>> {
     let (b, f) = face_id(geometry, face, op)?;
     face_p2::upward_faceuse(b, f)?
-        .map(|fu| handle_of(geometry, EntityRef::Faceuse(fu), op))
+        .map(|fu| handle_of(geometry, b, EntityRef::Faceuse(fu), op))
         .transpose()
 }
 
@@ -378,7 +379,7 @@ fn edge_edgeuses<O: ClassObject, G: ClassGeometry<O>>(
     let connected = connected_entity(geometry, faceuse, op)?;
     topo_edge::edgeuses(b, e, None, connected)?
         .into_iter()
-        .map(|eu| handle_of(geometry, EntityRef::Edgeuse(eu), op))
+        .map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), op))
         .collect()
 }
 
@@ -398,7 +399,7 @@ fn edge_interval<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, edge: O) -> 
 fn edgeuse_edge<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, edgeuse: O) -> Result<O> {
     let (b, eu) = edgeuse_id(geometry, edgeuse, OP_CROSS)?;
     let e = eu1::edge(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-    handle_of(geometry, EntityRef::Edge(e), OP_CROSS)
+    handle_of(geometry, b, EntityRef::Edge(e), OP_CROSS)
 }
 
 /// `SmEdgeuse::GetOrientation` (unit `topology.edgeuse_p1`).
@@ -477,7 +478,7 @@ fn vertex_vertexuses_of_face<O: ClassObject, G: ClassGeometry<O>>(
     let connected = connected_entity(geometry, faceuse, OP_CROSS)?;
     topo_vertex::vertexuses_of_face(b, v, face, connected)?
         .into_iter()
-        .map(|vu| handle_of(geometry, EntityRef::Vertexuse(vu), OP_CROSS))
+        .map(|vu| handle_of(geometry, b, EntityRef::Vertexuse(vu), OP_CROSS))
         .collect()
 }
 
@@ -502,7 +503,7 @@ fn vertexuse_compute_uv_sector<O: ClassObject, G: ClassGeometry<O>>(
     let mut scratch = b.clone();
     let io = topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io;
     let eu_handle = |eu: Option<EdgeuseId>| -> Result<Option<O>> {
-        eu.map(|eu| handle_of(geometry, EntityRef::Edgeuse(eu), OP_CROSS))
+        eu.map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), OP_CROSS))
             .transpose()
     };
     Ok(UvSectorIo {

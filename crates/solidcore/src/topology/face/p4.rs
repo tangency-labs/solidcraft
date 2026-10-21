@@ -1329,6 +1329,9 @@ impl<M: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithSeam<'_, M, O
     fn topology_handle(&self, entity: EntityRef) -> Option<O> {
         self.inner.topology_handle(entity)
     }
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<O> {
+        self.inner.topology_handle_in(brep, entity)
+    }
     fn owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
         self.inner.owner_of(owner)
     }
