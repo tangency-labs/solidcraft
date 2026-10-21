@@ -12,7 +12,7 @@
 //!
 //! The surface overloads (plane, cylinder, cone, torus) are compared in full. Every B-rep
 //! entry point is deferred on the Rust side once its inputs pass validation
-//! (`SmPrimitiveCreation`, units `primitive.primitive_creation_p1..p3`, and the pyramid's
+//! (new targets first reach `SmBrep::SmBrep`, `topology.brep_p3`, and the pyramid's
 //! `SmBrep::CreatePlanarFaceWith3DCurves`, `topology.brep_p8`); its validation (box,
 //! sphere, cylinder, cone, cylindrical box, pole-free sphere, pyramid) and the pyramid's
 //! base edges are compared. `SmApiCreateBlendPrimitive` takes a B-rep with faces and
@@ -353,7 +353,9 @@ fn finish<T>(r: solidcore::Result<T>, put: impl Fn(&mut Vec<f64>, &T)) -> Output
             put(&mut o, &v);
             Output::new().values("rec", o)
         }
-        Err(e) => Output::unported(&e).unwrap_or_else(|| Output::new().values("rec", vec![status(&e)])),
+        Err(e) => {
+            Output::unported(&e).unwrap_or_else(|| Output::new().values("rec", vec![status(&e)]))
+        }
     }
 }
 
@@ -380,7 +382,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let a = |n: usize| i.arg(n);
     if i.op != OpName::Swung && i.args.len() != i.op.ffi().arity() {
-        return Err(HarnessError::new(format!("{:?}: wrong argument count", i.op)));
+        return Err(HarnessError::new(format!(
+            "{:?}: wrong argument count",
+            i.op
+        )));
     }
     Ok(match i.op {
         OpName::PlaneSurface => finish(
@@ -399,8 +404,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             api::create_torus_surface(&k, i.point(0)?, a(3)?, a(4)?),
             put_torus,
         ),
-        OpName::PlaneBrep => brep_out(api::create_plane(i.point(0)?, a(3)?, a(4)?)),
-        OpName::PlanarCircle => brep_out(api::create_planar_circle(i.point(0)?, a(3)?)),
+        OpName::PlaneBrep => brep_out(api::create_plane(&k, i.point(0)?, a(3)?, a(4)?)),
+        OpName::PlanarCircle => brep_out(api::create_planar_circle(&k, i.point(0)?, a(3)?)),
         OpName::Box => brep_out(api::create_box(i.point(0)?, a(3)?, a(4)?, a(5)?)),
         OpName::Sphere => brep_out(api::create_sphere(i.point(0)?, a(3)?)),
         OpName::Cylinder => brep_out(api::create_cylinder(i.point(0)?, a(3)?, a(4)?)),
@@ -415,12 +420,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             a(6)?,
             a(7)?,
         )),
-        OpName::PartialSphere => brep_out(api::create_partial_sphere(
-            i.point(0)?,
-            a(3)?,
-            a(4)?,
-            a(5)?,
-        )),
+        OpName::PartialSphere => {
+            brep_out(api::create_partial_sphere(i.point(0)?, a(3)?, a(4)?, a(5)?))
+        }
         OpName::SphereNoPole => brep_out(api::create_sphere_no_pole(i.point(0)?, a(3)?)),
         OpName::PartialCone => brep_out(api::create_partial_cone(
             i.point(0)?,
@@ -611,7 +613,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 1 => a0 + 1.0e-12,
                 _ => angle(rng),
             };
-            mk(OpName::CylindricalBox, with_origin(rng, &[len, ri, ro, a0, a1]))
+            mk(
+                OpName::CylindricalBox,
+                with_origin(rng, &[len, ri, ro, a0, a1]),
+            )
         }
         32 | 33 => {
             // Pyramid: the base edges are made (and compared) before the deferral.

@@ -791,10 +791,12 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **What happens:** Uninitialised reads, out-of-bounds table reads.
 - **Trigger:** `SmCircle(P0, P1, P2)` with three collinear points.
 - **How found:** read during porting.
-- **Confirmed:** no.
+- **Confirmed:** the circle failed-solve precondition is confirmed by the compiled native preflight in PR #213; the undefined constructor execution and the other subcases have not been run.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput`.
 - **Fuzz sweep trigger (2026-10-20):** `SmPolarConversion::ReadFromDB` (`SmEllipse.cpp:1488`) accepts an exactness table shorter than `angles - 1` (here empty, `curve.ellipse_p1` fuzz `fuzz00284`: `/build/read_db/record/exact emptied`); `ConvertToNURBSParameter` then reads `m_vExactConversion[ii-1]` past the array (`SmEllipse.cpp:555`). SIGSEGV in the C++ reference run: change **Confirmed:** to yes and add **[PSIRT]** to the title (reachable from a crafted file). Also refine the `ConvertTo2D` bullet: the quadratic is at `SmEllipse.cpp:1732`; with one root only `dThetaYRad` (`:1735`) reads the uninitialised `adSols[1]`, and it is unused; only a zero-root solve makes the used `adSols[0]` uninitialised (fuzz `fuzz01889`, `/build/read_db/record/head/11 = -1e-300`, degenerate radius).
+
+- **PR #213 witness:** `cylindrical_full_span_preflight` in `fixtures/primitive.primitive_creation_p1/primitives.json` (length 2, inner radius 1, outer radius 3, angles 0..360, identity frame). The shim calls the same three-point-circle solve before `CreateCylindricalBox`; a non-success result rejects the fixture before `SmCircle` reads the unset radius. This is a rejected fixture, not a parity pass or a claim that the constructor fails gracefully.
 
 #### UB-58. `SmCompositeCurve::GetKnots` reads past its array, and loops forever with an interval
 - **Location:** `SmCompositeCurve.cpp:524` (`lLastIndex = rKnots.GetSize()`), `:569` (`for(ii=rKnots.GetSize()-1; ii>=0; ii--)` on an unsigned `ULONG`), `SmCompositeCurve::GetKnots` (def. `:505`).
@@ -984,7 +986,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **How found:** crash in the C++ reference run (`sweep.api_surfaces` probe case).
 - **Confirmed:** yes.
 - **Severity:** crash/UB.
-- **Rust port:** `create_skin_from_faces` is a stub until `primitive.primitive_creation_p3` lands; `BSplineSurface::create_skinned_surface` returns `InvalidInput` for no cross sections. The harness passes at least one face.
+- **Rust port:** `primitive.primitive_creation_p3` (PR #233) implements `CreateSkinFromFaces`; its `BSplineSurface::create_skinned_surface` call returns `InvalidInput` for no cross sections. The p3 native shim and checked FFI reject that exact case before C++; a direct probe of the linked reference reconfirmed SIGSEGV. The legacy API remains blocked earlier at B-rep construction.
 
 #### UB-80. `SmSurfOfExtrusion::EvaluateSTEP` lets order 5 overrun `sm_CrvDerivs`
 - **Location:** `SmSurfOfExtrusion.cpp:920`-`922` (`EvaluateSTEP`, def. `:897`: `lMaxDeriv = 5; // 5: MAXDER in NLib`), `:959` (`m_pGenCurve->EvaluateSTEP(dU, lHighestUDeriv, ..)`); `SmNurbsCrv.cpp:1281` `sm_CrvDerivs` (see UB-33).
@@ -3535,6 +3537,44 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes for the release build: the sweep-only boundary solve returns U `158.85355268828013`; the assertion conflict and sentinel initialization were confirmed by source inspection. Debug builds were not run.
 - **Severity:** docs / debug assertion.
 - **Rust port:** Matches release C++ rather than enforcing the assertion; derivative orders remain bounded to 3.
+
+
+#### `ST_curxcdr` G1 fallback reads a third point of a two-point line (primitive.primitive_creation_p1, PR #213)
+
+- **Location:** `source/SMLib/src/NL_CrvAdv.cpp:999-1006,1077-1084`.
+- **Trigger:** a two-control-point line whose endpoint difference cannot be
+  normalized by `N_VectorNormalize`, then G1 extension at the affected end.
+  Finite coordinates around `1e300` overflow the computed vector magnitude.
+  The fallback reads `Pw[2]` at the start or `Pw[n-2]` (index -1) at the end.
+- **Found by:** the primitive path helper's 1,000-case FFI fuzz run (cases 427,
+  670, 689 and 919), initially reporting history-dependent garbage extension
+  intervals instead of Rust's checked error/unchanged curve.
+- **Confirmation:** the linked native `N_VectorNormalize` fails for those exact
+  two points; source inspection then proves the next read is out of bounds.
+  The revised shim prevents that read by preflighting only extension stages
+  actually selected by the upstream join and closed/periodic decisions. Huge
+  single lines that are not extended remain accepted. Rejected cases are
+  excluded from parity. The Rust NLib port already bounds its fallback lookup.
+
+## CreateLinearSweep: negative full-circle distance does not terminate (PR #213 review, 2026-10-19)
+
+- Location: `source/SMLib/src/SmPrimitiveCreation.cpp:1290-1360`, the full-circle
+  analytic-cylinder branch at `SmCone::AdjustSTEPUVDomain`, before face construction.
+- Trigger: one unit circular B-spline or analytic SmCircle in XY, sweep direction +Z, distance -1,
+  with or without end caps. Positive and zero distances finish; negative line,
+  skew-line and open-arc sweeps also finish.
+- Found by new PR #213 review fixtures `linear_circle_cap{0,1}_distance-1`; the analytic generator family adds two further rejected witnesses.
+  Confirmed by the native shim running the included upstream implementation:
+  both isolated cases exceeded the 10/5-second limits; the combined run ran
+  for over a minute without completing. An interrupted GDB run locates the loop
+  in `N_CreateEllipticalArcAngTypeTol` via `SmEllipse::MakeNurb`,
+  `SmCone::CreateIsoParametricCurve`, `SmSurfOfRevolution::RebuildPolarConverter`,
+  `Reparameterize` and `SmCone::AdjustSTEPUVDomain`. Rust reaches its face-construction
+  dependency, so these are rejected native fixtures, not parity comparisons.
+- The shim preflight repeats the upstream full-circle angular/tolerance and
+  axis-parallel tests and rejects only negative-distance inputs selecting that
+  cylinder branch. No kernel tolerance is changed and negative line/open-arc
+  fixtures remain accepted.
 
 #### UB-188. `BooleanTrees` trusts executed leaf indices and binary operand pointers
 

@@ -112,7 +112,10 @@ fn bad(m: &str) -> FfiError {
 }
 
 fn bounded(xs: &[f64], what: &str) -> Result<(), FfiError> {
-    if xs.iter().all(|x| x.is_finite() && x.abs() <= MAX_KERNEL_COORD) {
+    if xs
+        .iter()
+        .all(|x| x.is_finite() && x.abs() <= MAX_KERNEL_COORD)
+    {
         Ok(())
     } else {
         Err(bad(what))
@@ -179,7 +182,9 @@ pub fn guard(op: Op, args: &[f64], arcs: Option<(&[Arc], &[Arc])>) -> Result<(),
             if valid {
                 let sweep = a1 - a0;
                 let theta = sweep.to_radians();
-                if !origin.iter().all(|x| x.is_finite() && x.abs() <= MAX_KERNEL_COORD)
+                if !origin
+                    .iter()
+                    .all(|x| x.is_finite() && x.abs() <= MAX_KERNEL_COORD)
                     || ri * theta < MIN_ARC_CHORD
                     || ri * theta * theta / 8.0 < MIN_ARC_SAGITTA
                     || 360.0 - sweep < MIN_FULL_TURN_GAP
@@ -201,12 +206,15 @@ pub fn guard(op: Op, args: &[f64], arcs: Option<(&[Arc], &[Arc])>) -> Result<(),
             if let Some((xy, xz)) = arcs {
                 for c in xy.iter().chain(xz) {
                     bounded(&c.center, "swung: arc out of bounds")?;
-                    bounded(&[c.radius, c.start_deg, c.end_deg], "swung: arc out of bounds")?;
+                    bounded(
+                        &[c.radius, c.start_deg, c.end_deg],
+                        "swung: arc out of bounds",
+                    )?;
                 }
             }
         }
-        Op::CylinderSurface | Op::ConeSurface | Op::Box | Op::Cylinder
-        | Op::Cone | Op::Pyramid => {}
+        Op::CylinderSurface | Op::ConeSurface | Op::Box | Op::Cylinder | Op::Cone | Op::Pyramid => {
+        }
     }
     Ok(())
 }
@@ -279,7 +287,9 @@ impl Op {
             | Self::Box
             | Self::Cone
             | Self::PartialSphere => 6,
-            Self::PlaneSurface | Self::PlaneBrep | Self::Cylinder | Self::Torus | Self::Pyramid => 5,
+            Self::PlaneSurface | Self::PlaneBrep | Self::Cylinder | Self::Torus | Self::Pyramid => {
+                5
+            }
             Self::PlanarCircle | Self::Sphere | Self::SphereNoPole => 4,
             Self::CylindricalBox | Self::PartialCone | Self::ConeEllipticEnds => 8,
             Self::PartialCylinder | Self::PartialTorus => 7,

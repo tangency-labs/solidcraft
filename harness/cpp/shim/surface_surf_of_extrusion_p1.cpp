@@ -80,6 +80,7 @@ enum : int32_t
     GK_ELLIPSE = 3,
     GK_HYPERBOLA = 4,
     GK_PARABOLA = 5,
+    GK_LAZY_LINE = 6,
 };
 
 // Construction modes.
@@ -388,6 +389,12 @@ SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
         SmLine* l = new (ctx) SmLine(a, b, 3, &ctx);
         l->GetOrCreateGwNurbPointer();
         return l;
+    }
+    case GK_LAZY_LINE:
+    {
+        SmPoint3d a = rd.vec();
+        SmPoint3d b = rd.vec();
+        return new (ctx) SmLine(a, b, 3, &ctx);
     }
     case GK_CIRCLE:
     {

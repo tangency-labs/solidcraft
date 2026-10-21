@@ -595,8 +595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_start_effzero",
@@ -711,8 +711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "box_l_above_effzero",
@@ -723,8 +723,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_r_above_effzero",
@@ -735,8 +735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cylinder_h_above_effzero",
@@ -747,8 +747,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_rt_above_effzero",
@@ -759,8 +759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_len_above_effzero",
@@ -779,8 +779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_start_above_effzero",
@@ -887,8 +887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "box_l_huge",
@@ -899,8 +899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cylinder_h_huge",
@@ -911,8 +911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_rt_huge",
@@ -923,8 +923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_len_huge",
@@ -935,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_outside_huge",
@@ -1283,8 +1283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_start_tiny",
@@ -1451,8 +1451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_start_negzero",
@@ -1719,8 +1719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_top_zero",
@@ -1731,8 +1731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_negative",
@@ -1743,8 +1743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_almost_full_turn",
@@ -1755,8 +1755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_start_360_short",
@@ -1767,8 +1767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_small_sweep",
@@ -1779,8 +1779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_r_6e9",
@@ -1791,8 +1791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_no_pole_r_3e8",
@@ -1803,8 +1803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_no_pole_r_3e-4",
@@ -3667,8 +3667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_r10",
@@ -3703,8 +3703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "torus_minor0",
@@ -3715,8 +3715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "partial_sphere_r0",
@@ -3727,8 +3727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "partial_cone_h0",
@@ -3739,8 +3739,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "partial_torus_minor0",
@@ -3759,8 +3759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_elliptic_ends_zero_radii",
@@ -3779,8 +3779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_no_pole_inside_out",
@@ -3791,8 +3791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "box_5_10_20",
@@ -3859,8 +3859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cyl_box_valid",
@@ -3871,8 +3871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_5_10_20",
@@ -3947,8 +3947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "torus_10_5",
@@ -3959,8 +3959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_brep_10_15",
@@ -3971,8 +3971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "plane_brep_zero",
@@ -3999,8 +3999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "planar_circle_10",
@@ -4011,8 +4011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "planar_circle_0",
@@ -4023,8 +4023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "swung_arcs",
@@ -4035,8 +4035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "swung_empty",
@@ -4047,8 +4047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "planar_circles_5_8_a",
@@ -4059,8 +4059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere_surfaces_test",
@@ -4071,8 +4071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "torus_surfaces_test",
@@ -4083,8 +4083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "box_far_origin",
@@ -4095,8 +4095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cylinder_intersectors",
@@ -4115,8 +4115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone_brep_copy",
@@ -4127,8 +4127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "cylinder_brep_copy",
@@ -4139,8 +4139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "torus_brep_copy",
@@ -4223,8 +4223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -4299,8 +4299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0012",
@@ -4311,8 +4311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -4331,8 +4331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0015",
@@ -4399,8 +4399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0023",
@@ -4419,8 +4419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -4447,8 +4447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0028",
@@ -4459,8 +4459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0029",
@@ -4487,8 +4487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0032",
@@ -4515,8 +4515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0035",
@@ -4587,8 +4587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0043",
@@ -4599,8 +4599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0044",
@@ -4619,8 +4619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0046",
@@ -4651,8 +4651,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0049",
@@ -4663,8 +4663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -4683,8 +4683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0052",
@@ -4707,8 +4707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -4735,8 +4735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0057",
@@ -4795,8 +4795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0064",
@@ -4815,8 +4815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0066",
@@ -4835,8 +4835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0068",
@@ -4855,8 +4855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -4867,8 +4867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0071",
@@ -4879,8 +4879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -4891,8 +4891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0073",
@@ -4903,8 +4903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -4955,8 +4955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0080",
@@ -4983,8 +4983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -5035,8 +5035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0089",
@@ -5047,8 +5047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0090",
@@ -5099,8 +5099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0096",
@@ -5127,8 +5127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0099",
@@ -5139,8 +5139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -5159,8 +5159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -5171,8 +5171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -5207,8 +5207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0107",
@@ -5227,8 +5227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0109",
@@ -5279,8 +5279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0115",
@@ -5395,8 +5395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0129",
@@ -5519,8 +5519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0144",
@@ -5555,8 +5555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0148",
@@ -5583,8 +5583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0151",
@@ -5595,8 +5595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0152",
@@ -5607,8 +5607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0153",
@@ -5619,8 +5619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0154",
@@ -5655,8 +5655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0158",
@@ -5691,8 +5691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0162",
@@ -5719,8 +5719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0165",
@@ -5763,8 +5763,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0170",
@@ -5799,8 +5799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0174",
@@ -5819,8 +5819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0176",
@@ -5831,8 +5831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0177",
@@ -5843,8 +5843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0178",
@@ -5855,8 +5855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0179",
@@ -5875,8 +5875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0181",
@@ -5895,8 +5895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0183",
@@ -5923,8 +5923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0186",
@@ -5935,8 +5935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0187",
@@ -5947,8 +5947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0188",
@@ -5967,8 +5967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0190",
@@ -6003,8 +6003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0194",
@@ -6015,8 +6015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0195",
@@ -6035,8 +6035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -6071,8 +6071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0201",
@@ -6083,8 +6083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0202",
@@ -6095,8 +6095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0203",
@@ -6115,8 +6115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0205",
@@ -6167,8 +6167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -6203,8 +6203,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0215",
@@ -6239,8 +6239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0219",
@@ -6251,8 +6251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0220",
@@ -6319,8 +6319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0228",
@@ -6339,8 +6339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0230",
@@ -6375,8 +6375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0234",
@@ -6403,8 +6403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0237",
@@ -6415,8 +6415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0238",
@@ -6443,8 +6443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0241",
@@ -6463,8 +6463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0243",
@@ -6475,8 +6475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0244",
@@ -6495,8 +6495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0246",
@@ -6539,8 +6539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0251",
@@ -6559,8 +6559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0253",
@@ -6571,8 +6571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0254",
@@ -6583,8 +6583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0255",
@@ -6611,8 +6611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0258",
@@ -6623,8 +6623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0259",
@@ -6635,8 +6635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0260",
@@ -6647,8 +6647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0261",
@@ -6659,8 +6659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0262",
@@ -6695,8 +6695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0266",
@@ -6707,8 +6707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0267",
@@ -6767,8 +6767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0274",
@@ -6779,8 +6779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0275",
@@ -6791,8 +6791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0276",
@@ -6843,8 +6843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0282",
@@ -6855,8 +6855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0283",
@@ -6875,8 +6875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0285",
@@ -6907,8 +6907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0288",
@@ -6927,8 +6927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0290",
@@ -6971,8 +6971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0295",
@@ -6999,8 +6999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -7075,8 +7075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0307",
@@ -7131,8 +7131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0313",
@@ -7143,8 +7143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0314",
@@ -7163,8 +7163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0316",
@@ -7175,8 +7175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0317",
@@ -7243,8 +7243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0325",
@@ -7263,8 +7263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0327",
@@ -7275,8 +7275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0328",
@@ -7287,8 +7287,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0329",
@@ -7359,8 +7359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0337",
@@ -7395,8 +7395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0341",
@@ -7407,8 +7407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0342",
@@ -7491,8 +7491,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0352",
@@ -7503,8 +7503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCylindricalBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0353",
@@ -7531,8 +7531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0356",
@@ -7559,8 +7559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0359",
@@ -7579,8 +7579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0361",
@@ -7607,8 +7607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0364",
@@ -7619,8 +7619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0365",
@@ -7655,8 +7655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0369",
@@ -7727,8 +7727,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0377",
@@ -7771,8 +7771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0382",
@@ -7851,8 +7851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0391",
@@ -7871,8 +7871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0393",
@@ -7883,8 +7883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0394",
@@ -7911,8 +7911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0397",
@@ -8067,8 +8067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0416",
@@ -8079,8 +8079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0417",
@@ -8099,8 +8099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0419",
@@ -8111,8 +8111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0420",
@@ -8139,8 +8139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0423",
@@ -8151,8 +8151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0424",
@@ -8163,8 +8163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0425",
@@ -8199,8 +8199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0429",
@@ -8227,8 +8227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0432",
@@ -8271,8 +8271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0437",
@@ -8283,8 +8283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0438",
@@ -8303,8 +8303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0440",
@@ -8339,8 +8339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0444",
@@ -8423,8 +8423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0454",
@@ -8459,8 +8459,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0458",
@@ -8471,8 +8471,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0459",
@@ -8483,8 +8483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0460",
@@ -8495,8 +8495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0461",
@@ -8507,8 +8507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0462",
@@ -8519,8 +8519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0463",
@@ -8539,8 +8539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0465",
@@ -8551,8 +8551,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0466",
@@ -8571,8 +8571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0468",
@@ -8603,8 +8603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0471",
@@ -8639,8 +8639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0475",
@@ -8659,8 +8659,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0477",
@@ -8671,8 +8671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0478",
@@ -8683,8 +8683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0479",
@@ -8703,8 +8703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0481",
@@ -8807,8 +8807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0493",
@@ -8827,8 +8827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0495",
@@ -8847,8 +8847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0497",
@@ -8867,8 +8867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0499",
@@ -8943,8 +8943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0508",
@@ -9059,8 +9059,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0521",
@@ -9071,8 +9071,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0522",
@@ -9091,8 +9091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0524",
@@ -9111,8 +9111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0526",
@@ -9139,8 +9139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0529",
@@ -9151,8 +9151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0530",
@@ -9171,8 +9171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0532",
@@ -9183,8 +9183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0533",
@@ -9195,8 +9195,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0534",
@@ -9263,8 +9263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0542",
@@ -9371,8 +9371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0555",
@@ -9391,8 +9391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0557",
@@ -9411,8 +9411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0559",
@@ -9439,8 +9439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0562",
@@ -9499,8 +9499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0569",
@@ -9511,8 +9511,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0570",
@@ -9531,8 +9531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0572",
@@ -9559,8 +9559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0575",
@@ -9583,8 +9583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0577",
@@ -9627,8 +9627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0582",
@@ -9655,8 +9655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0585",
@@ -9667,8 +9667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0586",
@@ -9679,8 +9679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0587",
@@ -9691,8 +9691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0588",
@@ -9703,8 +9703,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0589",
@@ -9715,8 +9715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0590",
@@ -9783,8 +9783,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0598",
@@ -9795,8 +9795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0599",
@@ -9807,8 +9807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0600",
@@ -9859,8 +9859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0606",
@@ -9871,8 +9871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0607",
@@ -9883,8 +9883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0608",
@@ -9943,8 +9943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0615",
@@ -9971,8 +9971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0618",
@@ -9999,8 +9999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -10051,8 +10051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0627",
@@ -10099,8 +10099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0632",
@@ -10143,8 +10143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0637",
@@ -10187,8 +10187,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0642",
@@ -10199,8 +10199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0643",
@@ -10291,8 +10291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0654",
@@ -10327,8 +10327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0658",
@@ -10347,8 +10347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0660",
@@ -10383,8 +10383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0664",
@@ -10451,8 +10451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0672",
@@ -10487,8 +10487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0676",
@@ -10527,8 +10527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0680",
@@ -10547,8 +10547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0682",
@@ -10567,8 +10567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0684",
@@ -10611,8 +10611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0689",
@@ -10623,8 +10623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0690",
@@ -10667,8 +10667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0695",
@@ -10711,8 +10711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0700",
@@ -10731,8 +10731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0702",
@@ -10767,8 +10767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0706",
@@ -10787,8 +10787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0708",
@@ -10807,8 +10807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0710",
@@ -10819,8 +10819,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0711",
@@ -10847,8 +10847,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0714",
@@ -10867,8 +10867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0716",
@@ -10943,8 +10943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0724",
@@ -10955,8 +10955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0725",
@@ -11035,8 +11035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0734",
@@ -11087,8 +11087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0740",
@@ -11131,8 +11131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0745",
@@ -11171,8 +11171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0749",
@@ -11207,8 +11207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0753",
@@ -11219,8 +11219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0754",
@@ -11239,8 +11239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0756",
@@ -11267,8 +11267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0759",
@@ -11335,8 +11335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0767",
@@ -11355,8 +11355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0769",
@@ -11455,8 +11455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0781",
@@ -11467,8 +11467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0782",
@@ -11535,8 +11535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0790",
@@ -11571,8 +11571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0794",
@@ -11583,8 +11583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0795",
@@ -11627,8 +11627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0800",
@@ -11647,8 +11647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0802",
@@ -11675,8 +11675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0805",
@@ -11923,8 +11923,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0835",
@@ -11935,8 +11935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0836",
@@ -11947,8 +11947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0837",
@@ -12007,8 +12007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0844",
@@ -12075,8 +12075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0852",
@@ -12087,8 +12087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0853",
@@ -12115,8 +12115,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0856",
@@ -12151,8 +12151,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0860",
@@ -12283,8 +12283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0876",
@@ -12311,8 +12311,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0879",
@@ -12323,8 +12323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0880",
@@ -12343,8 +12343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0882",
@@ -12363,8 +12363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0884",
@@ -12375,8 +12375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0885",
@@ -12427,8 +12427,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0891",
@@ -12447,8 +12447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0893",
@@ -12467,8 +12467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0895",
@@ -12487,8 +12487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0897",
@@ -12559,8 +12559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0905",
@@ -12595,8 +12595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0909",
@@ -12615,8 +12615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0911",
@@ -12643,8 +12643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0914",
@@ -12671,8 +12671,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0917",
@@ -12691,8 +12691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0919",
@@ -12743,8 +12743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0925",
@@ -12779,8 +12779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0929",
@@ -12831,8 +12831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0935",
@@ -12859,8 +12859,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0938",
@@ -12871,8 +12871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0939",
@@ -12883,8 +12883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0940",
@@ -12963,8 +12963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0949",
@@ -12991,8 +12991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0952",
@@ -13011,8 +13011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0954",
@@ -13039,8 +13039,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0957",
@@ -13051,8 +13051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0958",
@@ -13063,8 +13063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0959",
@@ -13111,8 +13111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0964",
@@ -13123,8 +13123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0965",
@@ -13135,8 +13135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0966",
@@ -13171,8 +13171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0970",
@@ -13199,8 +13199,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0973",
@@ -13227,8 +13227,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0976",
@@ -13239,8 +13239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0977",
@@ -13251,8 +13251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0978",
@@ -13299,8 +13299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0983",
@@ -13335,8 +13335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0987",
@@ -13347,8 +13347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0988",
@@ -13359,8 +13359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0989",
@@ -13379,8 +13379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0991",
@@ -13423,8 +13423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0996",
@@ -13519,8 +13519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1007",
@@ -13547,8 +13547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1010",
@@ -13575,8 +13575,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1013",
@@ -13587,8 +13587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1014",
@@ -13663,8 +13663,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1023",
@@ -13731,8 +13731,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1031",
@@ -13775,8 +13775,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1036",
@@ -13823,8 +13823,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1041",
@@ -13835,8 +13835,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1042",
@@ -13895,8 +13895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1049",
@@ -13987,8 +13987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1060",
@@ -14031,8 +14031,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1065",
@@ -14083,8 +14083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1071",
@@ -14127,8 +14127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1076",
@@ -14167,8 +14167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1080",
@@ -14211,8 +14211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1085",
@@ -14283,8 +14283,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1093",
@@ -14295,8 +14295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1094",
@@ -14331,8 +14331,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1098",
@@ -14343,8 +14343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1099",
@@ -14387,8 +14387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1104",
@@ -14443,8 +14443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1110",
@@ -14503,8 +14503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1117",
@@ -14515,8 +14515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1118",
@@ -14527,8 +14527,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1119",
@@ -14539,8 +14539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1120",
@@ -14559,8 +14559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1122",
@@ -14579,8 +14579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1124",
@@ -14603,8 +14603,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1126",
@@ -14615,8 +14615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1127",
@@ -14667,8 +14667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1133",
@@ -14735,8 +14735,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1141",
@@ -14799,8 +14799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1148",
@@ -14851,8 +14851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1154",
@@ -14879,8 +14879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1157",
@@ -14899,8 +14899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1159",
@@ -14935,8 +14935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1163",
@@ -14955,8 +14955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1165",
@@ -14967,8 +14967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1166",
@@ -14995,8 +14995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1169",
@@ -15111,8 +15111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1183",
@@ -15123,8 +15123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1184",
@@ -15159,8 +15159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1188",
@@ -15171,8 +15171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1189",
@@ -15207,8 +15207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1193",
@@ -15251,8 +15251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1198",
@@ -15299,8 +15299,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1203",
@@ -15327,8 +15327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1206",
@@ -15363,8 +15363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1210",
@@ -15495,8 +15495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1225",
@@ -15507,8 +15507,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1226",
@@ -15559,8 +15559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1232",
@@ -15599,8 +15599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1236",
@@ -15611,8 +15611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1237",
@@ -15655,8 +15655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1242",
@@ -15667,8 +15667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1243",
@@ -15695,8 +15695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1246",
@@ -15751,8 +15751,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1252",
@@ -15899,8 +15899,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCircle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1270",
@@ -15967,8 +15967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1278",
@@ -15995,8 +15995,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1281",
@@ -16007,8 +16007,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1282",
@@ -16051,8 +16051,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1287",
@@ -16123,8 +16123,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1295",
@@ -16167,8 +16167,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1300",
@@ -16235,8 +16235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1308",
@@ -16271,8 +16271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1312",
@@ -16291,8 +16291,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1314",
@@ -16343,8 +16343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1320",
@@ -16371,8 +16371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1323",
@@ -16407,8 +16407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSwungPrimitive",
-        "unit": "primitive.primitive_creation_p3"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1327",
@@ -16443,8 +16443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1331",
@@ -16455,8 +16455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1332",
@@ -16503,8 +16503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1337",
@@ -16543,8 +16543,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1341",
@@ -16587,8 +16587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1346",
@@ -16599,8 +16599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1347",
@@ -16611,8 +16611,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1348",
@@ -16623,8 +16623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1349",
@@ -16795,8 +16795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1370",
@@ -16815,8 +16815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1372",
@@ -16843,8 +16843,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1375",
@@ -16863,8 +16863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1377",
@@ -16891,8 +16891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1380",
@@ -16927,8 +16927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1384",
@@ -16955,8 +16955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1387",
@@ -16991,8 +16991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1391",
@@ -17011,8 +17011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1393",
@@ -17063,8 +17063,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1398",
@@ -17119,8 +17119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1404",
@@ -17131,8 +17131,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1405",
@@ -17183,8 +17183,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateConeEllipticEnds",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1411",
@@ -17219,8 +17219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1415",
@@ -17247,8 +17247,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1418",
@@ -17319,8 +17319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1426",
@@ -17383,8 +17383,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1433",
@@ -17403,8 +17403,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphereNoPole",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1435",
@@ -17415,8 +17415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1436",
@@ -17435,8 +17435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateRectangle",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1438",
@@ -17447,8 +17447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1439",
@@ -17519,8 +17519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateTorus",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1447",
@@ -17547,8 +17547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1450",
@@ -17595,8 +17595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1455",
@@ -17635,8 +17635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1459",
@@ -17647,8 +17647,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1460",
@@ -17675,8 +17675,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1463",
@@ -17687,8 +17687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1464",
@@ -17771,8 +17771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1474",
@@ -17855,8 +17855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateCone",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1484",
@@ -17963,8 +17963,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1497",
@@ -17983,8 +17983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateSphere",
-        "unit": "primitive.primitive_creation_p2"
+        "symbol": "SmBrep::SmBrep",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen1499",
@@ -18000,9 +18000,7 @@
   "cases_passed": 1445,
   "cases_total": 1981,
   "deferred_by_unit": {
-    "primitive.primitive_creation_p1": 136,
-    "primitive.primitive_creation_p2": 282,
-    "primitive.primitive_creation_p3": 31,
+    "topology.brep_p3": 449,
     "topology.brep_p8": 87
   },
   "max_rel_err": 0.0,

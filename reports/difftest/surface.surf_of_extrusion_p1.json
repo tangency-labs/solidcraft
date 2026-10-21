@@ -683,6 +683,54 @@
     },
     {
       "max_rel_err": 0.0,
+      "name": "lazy_line_canonical",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#0 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 89
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "lazy_line_copy",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#1 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 91
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "lazy_line_adjust",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#2 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "lazy_line_reparam",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#3 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 90
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "lazy_line_finite_swapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#4 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 89
+    },
+    {
+      "max_rel_err": 0.0,
+      "name": "lazy_line_infinite_swapped",
+      "outcome": "pass",
+      "pass": true,
+      "source": "fixture:fixtures/surface.surf_of_extrusion_p1/lazy_line.json#5 (upstream source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb))",
+      "values_compared": 89
+    },
+    {
+      "max_rel_err": 0.0,
       "name": "review2_par_inv_f0.0009_d0.29_t0.2901_oob1",
       "outcome": "pass",
       "pass": true,
@@ -16445,8 +16493,8 @@
   "cases_both_errored": 0,
   "cases_deferred": 0,
   "cases_failed": 0,
-  "cases_passed": 2055,
-  "cases_total": 2055,
+  "cases_passed": 2061,
+  "cases_total": 2061,
   "deferred_by_unit": {},
   "max_rel_err": 0.0,
   "pass": true,

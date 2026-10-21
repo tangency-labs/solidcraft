@@ -9,7 +9,7 @@
 //! | [`delete_topological_vertex`] | `SmBrep::DeleteTopologicalVertex` |
 //! | [`find_and_set_infinite_region`] | `SmBrep::FindAndSetInfiniteRegion` |
 //! | [`glue_vertices`] | `SmBrep::GlueVertices` |
-//! | [`make_edge_in_face`] | `SmBrep::MakeEdgeInFace` |
+//! | [`make_edge_in_face`], [`make_edge_in_face_with_uv_curve`] | `SmBrep::MakeEdgeInFace` |
 //! | [`make_manifold`] | `SmBrep::MakeManifold` |
 //! | [`remove_topological_edges_and_vertices`] | `SmBrep::RemoveTopologicalEdgesAndVertices` |
 //! | [`remove_faces`] | `SmBrep::RemoveFaces` |
@@ -1194,6 +1194,37 @@ pub fn make_edge_in_face(
     max_gap_3d: f64,
     output: &mut EdgeInFace,
 ) -> Result<()> {
+    make_edge_in_face_with_uv_curve(
+        b,
+        editing_enabled,
+        face,
+        start,
+        end,
+        curve,
+        uv_curve.map(Curve::from),
+        interval,
+        orientation,
+        max_gap_3d,
+        output,
+    )
+}
+
+/// [`make_edge_in_face`] accepting a polymorphic UV trim, including the native
+/// `SmBSplineCurve`-derived line and conic kinds, without replacing their geometry.
+/// Editing checks and output lifetime are identical to the original entry point.
+pub fn make_edge_in_face_with_uv_curve(
+    b: &mut Brep,
+    editing_enabled: bool,
+    face: Option<FaceId>,
+    start: Option<VertexId>,
+    end: Option<VertexId>,
+    curve: Curve,
+    uv_curve: Option<Curve>,
+    interval: Extent1d,
+    orientation: OrientType,
+    max_gap_3d: f64,
+    output: &mut EdgeInFace,
+) -> Result<()> {
     make_edge_with_backend(
         &mut ArenaFaceEdge(b),
         editing_enabled,
@@ -1312,7 +1343,7 @@ impl FaceEdgeBackend for ArenaFaceEdge<'_> {
     type Face = FaceId;
     type Vertex = VertexId;
     type Curve = Curve;
-    type UvCurve = BSplineCurve;
+    type UvCurve = Curve;
     type Vertexuse = VertexuseId;
     type Output = EdgeInFace;
     fn validate_face(&self, f: FaceId) -> Result<()> {
@@ -1326,7 +1357,7 @@ impl FaceEdgeBackend for ArenaFaceEdge<'_> {
         f: FaceId,
         v: Option<VertexId>,
         c: &Curve,
-        uv: Option<&BSplineCurve>,
+        uv: Option<&Curve>,
         start: f64,
         end: f64,
         orientation: OrientType,
@@ -1341,7 +1372,7 @@ impl FaceEdgeBackend for ArenaFaceEdge<'_> {
         first: VertexuseId,
         last: VertexuseId,
         c: Curve,
-        uv: Option<BSplineCurve>,
+        uv: Option<Curve>,
         interval: Extent1d,
         orientation: OrientType,
         gap: f64,
@@ -1367,7 +1398,7 @@ fn find_vertex_sector(
     _f: FaceId,
     _v: Option<VertexId>,
     _curve: &Curve,
-    _uv: Option<&BSplineCurve>,
+    _uv: Option<&Curve>,
     _start: f64,
     _end: f64,
     _orientation: OrientType,
@@ -1384,7 +1415,7 @@ fn make_edge_in_face_with_vu(
     _first: VertexuseId,
     _last: VertexuseId,
     _curve: Curve,
-    _uv: Option<BSplineCurve>,
+    _uv: Option<Curve>,
     _interval: Extent1d,
     _orientation: OrientType,
     _max_gap_3d: f64,

@@ -26,8 +26,8 @@ use serde_json::Value;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hyperbola::Hyperbola;
-use solidcore::curve::parabola::Parabola;
 use solidcore::curve::line::Line;
+use solidcore::curve::parabola::Parabola;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -77,6 +77,10 @@ pub(crate) struct InlineCrv {
 pub(crate) enum GenIn {
     BSpline(InlineCrv),
     Line {
+        a: [f64; 3],
+        b: [f64; 3],
+    },
+    LazyLine {
         a: [f64; 3],
         b: [f64; 3],
     },
@@ -240,6 +244,7 @@ pub(crate) fn ffi_gen(g: &GenIn) -> Result<ffi::Gen, HarnessError> {
             knots: c.u.clone(),
         }),
         GenIn::Line { a, b } => ffi::Gen::Line { a: *a, b: *b },
+        GenIn::LazyLine { a, b } => ffi::Gen::LazyLine { a: *a, b: *b },
         GenIn::Circle { c, x, y, d, r } => ffi::Gen::Circle {
             c: *c,
             x: *x,
@@ -365,9 +370,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 /// Splits a record into `build`, `status` and `out`.
 fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
-    let (b, rest) = flat
-        .split_first()
-        .ok_or_else(|| harness("empty record"))?;
+    let (b, rest) = flat.split_first().ok_or_else(|| harness("empty record"))?;
     let out = Output::new().values("build", vec![*b]);
     if *b != 0.0 {
         if !rest.is_empty() {
@@ -440,9 +443,11 @@ pub(crate) fn rust_gen(k: &Kernel, g: &GenIn) -> Result<Curve, HarnessError> {
         }
         GenIn::Line { a, b } => {
             let mut l = Line::from_points(v3(*a), v3(*b), 3);
-            l.make_nurb().map_err(|e| harness(format!("line nurb: {e}")))?;
+            l.make_nurb()
+                .map_err(|e| harness(format!("line nurb: {e}")))?;
             Curve::from(l)
         }
+        GenIn::LazyLine { a, b } => Curve::from(Line::from_points(v3(*a), v3(*b), 3)),
         GenIn::Circle { c, x, y, d, r } => {
             let [d0, d1] = *d;
             let e = Ellipse::new_circle(
@@ -560,7 +565,11 @@ pub(crate) fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-pub(crate) fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &SurfOfExtrusion) -> solidcore::Result<()> {
+pub(crate) fn put_state(
+    k: &Kernel,
+    o: &mut Vec<f64>,
+    s: &SurfOfExtrusion,
+) -> solidcore::Result<()> {
     o.extend([
         flag(s.is_kind_of(SURF_OF_EXTRUSION_TYPE)?),
         flag(s.is_kind_of(B_SPLINE_SURFACE_TYPE)?),
@@ -757,11 +766,7 @@ fn rust_op(
                 Some(&mut types),
             )
             .map(|r| {
-                o.extend([
-                    0.0,
-                    flag(r.needs_more_intersections),
-                    curves.len() as f64,
-                ]);
+                o.extend([0.0, flag(r.needs_more_intersections), curves.len() as f64]);
                 for c in &curves {
                     put_curve(o, Some(c));
                 }
@@ -922,14 +927,28 @@ pub(crate) fn gen_generator(rng: &mut Rng, f: &Frame, planar: bool, size: f64) -
         7 | 8 => {
             let o1 = off(rng);
             GenIn::Line {
-                a: in_frame(f, rng.uniform(-2.0, 0.0) * size, rng.uniform(-1.0, 1.0) * size, o1),
-                b: in_frame(f, rng.uniform(0.5, 3.0) * size, rng.uniform(-1.0, 1.0) * size, o1),
+                a: in_frame(
+                    f,
+                    rng.uniform(-2.0, 0.0) * size,
+                    rng.uniform(-1.0, 1.0) * size,
+                    o1,
+                ),
+                b: in_frame(
+                    f,
+                    rng.uniform(0.5, 3.0) * size,
+                    rng.uniform(-1.0, 1.0) * size,
+                    o1,
+                ),
             }
         }
         9 | 10 => {
             let (o, x, y, _) = f;
             let d0 = rng.uniform(-180.0, 90.0);
-            let len = if rng.chance(0.25) { 360.0 } else { rng.uniform(30.0, 270.0) };
+            let len = if rng.chance(0.25) {
+                360.0
+            } else {
+                rng.uniform(30.0, 270.0)
+            };
             GenIn::Circle {
                 c: add(*o, *x, rng.uniform(-1.0, 1.0) * size),
                 x: *x,
@@ -983,7 +1002,7 @@ fn gen_step_ivl(g: &GenIn) -> [f64; 2] {
             c.u.first().copied().unwrap_or(0.0),
             c.u.last().copied().unwrap_or(1.0),
         ],
-        GenIn::Line { .. } => [0.0, 1.0],
+        GenIn::Line { .. } | GenIn::LazyLine { .. } => [0.0, 1.0],
         GenIn::Circle { d, .. }
         | GenIn::Ellipse { d, .. }
         | GenIn::Hyperbola { d, .. }
@@ -1266,12 +1285,10 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             let size = 1.0;
             let f = frame(rng, size);
             let other = gen_generator(rng, &f, true, size);
-            let ev = built
-                .as_ref()
-                .map_or([0.0, 0.0, 1.0], |b| {
-                    let e = b.extrusion_vector();
-                    [e.x, e.y, e.z]
-                });
+            let ev = built.as_ref().map_or([0.0, 0.0, 1.0], |b| {
+                let e = b.extrusion_vector();
+                [e.x, e.y, e.z]
+            });
             let vec = match rng.below(4) {
                 0 => scale(ev, 2.0),
                 1 => scale(ev, -0.5),
@@ -1415,9 +1432,14 @@ mod tests {
             }
         }
         eprintln!("{orient:?} seams {seams}");
-        for o in ["Linear", "Perpendicular", "Independent", "Coplanar", "NotPlanar"] {
+        for o in [
+            "Linear",
+            "Perpendicular",
+            "Independent",
+            "Coplanar",
+            "NotPlanar",
+        ] {
             assert!(orient.contains_key(o), "{o} never built");
         }
     }
-
 }

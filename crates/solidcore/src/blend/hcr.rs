@@ -11,7 +11,7 @@
 //! | [`Hcr::from_scene`]                          | `ConstructorInit` after the scene B-rep is built |
 //! | `Drop` (implicit)                            | `SmHCR::~SmHCR`                           |
 //! | [`Hcr::set_hcr_for_silhouettes`]             | `SetHCRForSilhouettes`                    |
-//! | [`Hcr::scene_brep`]                          | `GetSceneBrep`                            |
+//! | [`Hcr::scene_brep`], [`Hcr::scene_brep_mut`] | `GetSceneBrep`                            |
 //! | [`Hcr::silhouette_edges`]                    | `GetSilhouetteEdges`                      |
 //! | [`Hcr::compute_curve_visibility`]            | `ComputeCurveVisibility`                  |
 //! | [`Hcr::compute_global_visibility`]           | `ComputeGlobalVisibility`                 |
@@ -568,6 +568,11 @@ impl Hcr {
     #[must_use]
     pub const fn scene_brep(&self) -> &Brep {
         &self.scene
+    }
+    /// The owned scene, for topology services that require a mutable source borrow.
+    /// Edits must preserve the identities referenced by this HCR session.
+    pub const fn scene_brep_mut(&mut self) -> &mut Brep {
+        &mut self.scene
     }
     /// The view vector in the scene (`m_vViewVector`, always `(0, 0, 1)`).
     #[must_use]

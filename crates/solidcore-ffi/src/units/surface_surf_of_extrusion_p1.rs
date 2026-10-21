@@ -85,6 +85,13 @@ pub enum Gen {
         /// End point.
         b: [f64; 3],
     },
+    /// `SmLine(a, b, 3)` with its NURB left lazy.
+    LazyLine {
+        /// Start point.
+        a: [f64; 3],
+        /// End point.
+        b: [f64; 3],
+    },
     /// `SmCircle(c, x, y, [d0, d1], r, 3)`.
     Circle {
         /// Centre.
@@ -475,7 +482,7 @@ fn push_gen(o: &mut Vec<f64>, g: &Gen) -> Result<(), FfiError> {
             }
             o.extend_from_slice(&c.knots);
         }
-        Gen::Line { a, b } => {
+        Gen::Line { a, b } | Gen::LazyLine { a, b } => {
             finite(a, "line")?;
             finite(b, "line")?;
             let [ax, ay, az] = *a;
@@ -483,7 +490,11 @@ fn push_gen(o: &mut Vec<f64>, g: &Gen) -> Result<(), FfiError> {
             if len([bx - ax, by - ay, bz - az]) <= 0.0 {
                 return Err(bad("line: degenerate"));
             }
-            o.push(1.0);
+            o.push(if matches!(g, Gen::LazyLine { .. }) {
+                6.0
+            } else {
+                1.0
+            });
             o.extend_from_slice(a);
             o.extend_from_slice(b);
         }

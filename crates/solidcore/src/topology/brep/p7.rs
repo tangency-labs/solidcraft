@@ -8,7 +8,7 @@
 //! |----------------------------------------------|----------------------------------------------|
 //! | [`read_from_file`]                           | `SmBrep::ReadFromFile`                       |
 //! | [`make_face`], [`MakeFaceOptions`], [`NewFace`] | `SmBrep::MakeFace`                        |
-//! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
+//! | [`make_face_with_curves`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
 //! | [`copy_faces`]                               | `SmBrep::CopyFaces`                          |
 //! | [`merge_self_intersection_curves`], [`SelfIntersectionCurve`] | `SmBrep::MergeSelfIntersectionCurves` |
@@ -31,7 +31,9 @@
 //!   use lists and back links.
 //! - **Curves and surfaces are values.** `MakeFaceWithCurves` consumes its curves and
 //!   surface (upstream: "all inputs are consumed"), so "two copies, never two references"
-//!   holds by construction; `MakeFace` takes the surface by value (`None` is a null
+//!   holds by construction. `make_face_with_curve_owners` exposes curve-slot owners
+//!   for callers that read the consumed curves' native owner pointers; discarded
+//!   curves retain `None`, and completed slots survive a later failure. `MakeFace` takes the surface by value (`None` is a null
 //!   pointer). `CopyFaces` copies from one B-rep into another one: upstream also allows
 //!   the destination to be the source B-rep, which a shared and a mutable borrow cannot
 //!   express (copy within one B-rep through a clone).
@@ -771,7 +773,7 @@ pub fn make_face_with_curves(
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
-    make_face_with_curves_impl(
+    make_face_with_curve_owners(
         k,
         b,
         region,
@@ -781,70 +783,21 @@ pub fn make_face_with_curves(
         orientation,
         crv_on_surf,
         this_face,
-        &mut ed::NotifyState::from_env(env),
+        &mut Vec::new(),
+        env,
     )
 }
 
-/// [`make_face_with_curves`] using caller-owned notification stores and the actual
-/// kernel context. Geometry and construction order are identical to the legacy
-/// entrypoint, including its incomplete topology barriers. `this_face` still
-/// identifies the new face as the surface's owner; `stores.key_of` names entities
-/// for topology notifications.
-pub fn make_face_with_curves_with_kernel_context(
-    k: &mut Kernel,
-    b: &mut Brep,
-    region: Option<RegionId>,
-    input: FaceCurvesInput,
-    surface: Surface,
-    uv_domain: &Extent2d,
-    orientation: OrientType,
-    crv_on_surf: Option<bool>,
-    this_face: &dyn Fn(FaceId) -> ObjectRef,
-    stores: &mut ed::NotificationStores<'_>,
-) -> Result<NewFace> {
-    make_face_with_curves_with_state(
-        k,
-        b,
-        region,
-        input,
-        surface,
-        uv_domain,
-        orientation,
-        crv_on_surf,
-        this_face,
-        &mut ed::NotifyState::from_kernel_stores(stores),
-    )
-}
-
-pub(crate) fn make_face_with_curves_with_state(
-    k: &mut Kernel,
-    b: &mut Brep,
-    region: Option<RegionId>,
-    input: FaceCurvesInput,
-    surface: Surface,
-    uv_domain: &Extent2d,
-    orientation: OrientType,
-    crv_on_surf: Option<bool>,
-    this_face: &dyn Fn(FaceId) -> ObjectRef,
-    state: &mut ed::NotifyState<'_>,
-) -> Result<NewFace> {
-    make_face_with_curves_impl(
-        k,
-        b,
-        region,
-        input,
-        surface,
-        uv_domain,
-        orientation,
-        crv_on_surf,
-        this_face,
-        state,
-    )
-}
-
+/// [`make_face_with_curves`] retaining each input curve slot's owning edge.
+/// Degenerate and coincident curves discarded by construction have no owner;
+/// output slots preserve their original input positions. Completed owners remain
+/// in `curve_owners` if a later construction step fails.
+///
+/// # Errors
+/// As [`make_face_with_curves`].
 #[allow(clippy::too_many_lines)] // one upstream routine
-fn make_face_with_curves_impl(
-    k: &mut Kernel,
+pub fn make_face_with_curve_owners(
+    k: &Kernel,
     b: &mut Brep,
     region: Option<RegionId>,
     input: FaceCurvesInput,
@@ -853,8 +806,10 @@ fn make_face_with_curves_impl(
     orientation: OrientType,
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
-    state: &mut ed::NotifyState<'_>,
+    curve_owners: &mut Vec<Option<EdgeId>>,
+    env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
+    curve_owners.clear();
     let FaceCurvesInput {
         loops,
         curves_3d,
@@ -1054,6 +1009,7 @@ fn make_face_with_curves_impl(
         let mut vertices: Vec<VertexId> = Vec::new();
         for jj in 0..n {
             let slot = curve_total + jj;
+            curve_owners.push(None);
             let Some(curve) = curves_3d.get_mut(slot).and_then(Option::take) else {
                 degenerate += 1;
                 continue;
@@ -1158,11 +1114,17 @@ fn make_face_with_curves_impl(
                 }
                 let e = make_wire_edge(b, region, start_vertex, end_vertex, curve, ivl, orient)?;
                 edges.push(e);
+                if let Some(owner) = curve_owners.get_mut(slot) {
+                    *owner = Some(e);
+                }
                 edge_orients.push(l_orient);
             } else {
                 let (e, v) =
                     make_wire_edge_vertex(b, region, start_vertex, curve, ivl, orient, end_pt)?;
                 edges.push(e);
+                if let Some(owner) = curve_owners.get_mut(slot) {
+                    *owner = Some(e);
+                }
                 edge_orients.push(l_orient);
                 vertices.push(v);
             }
@@ -1826,6 +1788,48 @@ mod tests {
 
     fn dom() -> Extent2d {
         Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0))
+    }
+
+    #[test]
+    fn curve_owner_slots_retain_discarded_inputs_before_a_later_failure() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let region = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        b.set_infinite_region(Some(region));
+        let mut owners = vec![Some(EdgeId::from_index(99))];
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let result = make_face_with_curve_owners(
+            &k,
+            &mut b,
+            Some(region),
+            FaceCurvesInput {
+                loops: vec![3],
+                curves_3d: Some(vec![None, None, None]),
+                orientations: vec![OrientType::Same; 3],
+                ..FaceCurvesInput::default()
+            },
+            plane(),
+            &dom(),
+            OrientType::Same,
+            None,
+            &face_ref,
+            &mut owners,
+            &mut env,
+        );
+        assert!(result.is_err());
+        assert_eq!(owners, vec![None, None, None]);
     }
 
     #[test]

@@ -359,11 +359,11 @@ fn rust_call(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 // The output record reads each resulting operand (its counts and
                 // IsManifoldSolid, topology.brep_p2), and the Rust operands are empty
                 // stand-ins: the box and sphere constructors stop at
-                // SmPrimitiveCreation, so stand-ins are never inspected for a fake value.
-                // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::CreateBox / CreateSphere
+                // SmBrep::SmBrep, so stand-ins are never inspected for a fake value.
+                // UNPORTED(topology.brep_p3): SmBrep::SmBrep
                 Ok(()) => Ok(Output::deferred(
-                    "primitive.primitive_creation_p1",
-                    "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
+                    "topology.brep_p3",
+                    "SmBrep::SmBrep (stand-in operands)",
                 )),
                 Err(error) => Ok(err_output(&error)),
             }

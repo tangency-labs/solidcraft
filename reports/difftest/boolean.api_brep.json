@@ -11,8 +11,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmPrimitiveCreation::CreateBox / CreateSphere (stand-in operands)",
-        "unit": "primitive.primitive_creation_p1"
+        "symbol": "SmBrep::SmBrep (stand-in operands)",
+        "unit": "topology.brep_p3"
       },
       "max_rel_err": 0.0,
       "name": "merge_p3_defined_null_leaf_result",
@@ -2848,8 +2848,8 @@
   "cases_passed": 151,
   "cases_total": 287,
   "deferred_by_unit": {
-    "primitive.primitive_creation_p1": 115,
-    "topology.brep_p3": 21
+    "query.brep": 114,
+    "topology.brep_p3": 22
   },
   "max_rel_err": 0.0,
   "pass": true,
