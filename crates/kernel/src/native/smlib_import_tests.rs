@@ -125,3 +125,38 @@ fn a_cone_apex_comes_back_measuring_as_it_went() {
     assert!((m1.area - m0.area).abs() < 1e-5 * m0.area, "area {} -> {}", m0.area, m1.area);
     assert!((m1.volume - m0.volume).abs() < 1e-5 * m0.volume, "volume {} -> {}", m0.volume, m1.volume);
 }
+
+/// A revolved cap's dome comes back from SMLib as a rational spline closed around the axis,
+/// bounded by its rim, its seam both ways and the pole; a ball centred on the dome near the seam
+/// cuts a hole in it. Opened at the pole the outer loop spans v in [-1, 0] while the hole
+/// projects into [0, 1]: the mesh covered the hole as well (+1694 mm³) until the hole is moved
+/// a period to lie inside the outer loop (tangency-labs/solidcore#433).
+#[test]
+fn a_hole_in_a_dome_by_its_seam_measures_as_smlib_cuts_it() {
+    use solidcraft_smlib::sweeps::Curve;
+    let a0 = 6.9f64.atan2(26.0);
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], 0.0, a[1]], end: [b[0], 0.0, b[1]] };
+    let profile = [
+        line([0., 0.], [7., 0.]),
+        line([7., 0.], [7., 20.]),
+        line([7., 20.], [26., 39.]),
+        Curve::Arc { center: [0., 0., 32.1], axis: [0., -1., 0.], reference: [1., 0., 0.], radius: 26.9, start: a0, end: PI / 2.0 },
+        line([0., 59.], [0., 0.]),
+    ];
+    // Turned about -z, as the engine revolves the sketch (its normal is -y): the dome's v runs
+    // clockwise seen from above, which puts the hole at v near 1.
+    let revolved = solidcraft_smlib::Brep::revolve(&profile, [0.; 3], [0., 0., -1.], std::f64::consts::TAU, true).unwrap();
+    let cap = super::smlib_body(&super::body_from_smlib(&revolved).unwrap()).unwrap();
+    let ball = super::smlib_body(&sphere(v(17.38629136, 4.658642729, 52.090595805), 4.0).unwrap()).unwrap();
+    let cut = cap.tagged(0).unwrap().boolean(&ball.tagged(1).unwrap(), solidcraft_smlib::BooleanOp::Subtract).unwrap().unwrap();
+    // The cap less the lens of two spheres, radii 4 and 26.9 at 26.9 apart.
+    let (big, small) = (26.9f64, 4.0f64);
+    let cap_volume = PI * (49.0 * 20.0 + (26f64.powi(3) - 343.0) / 3.0 + big * big * 20.0 - (big.powi(3) - 6.9f64.powi(3)) / 3.0);
+    let lens = PI * small.powi(2) * (8.0 * big * small - 3.0 * small * small) / (12.0 * big);
+    let exact = cap_volume - lens;
+    let got = cut.volume(1e-7).unwrap();
+    assert!((got - exact).abs() <= 1e-6 * exact, "SMLib volume {got}, exact {exact}");
+    let back = super::body_from_smlib(&cut).unwrap();
+    let m = crate::measure(&back).unwrap();
+    assert!((m.volume - exact).abs() <= 2e-4 * exact, "mesh volume {} ({}), exact {exact}", m.volume, m.measured_by);
+}

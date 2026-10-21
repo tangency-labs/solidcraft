@@ -332,13 +332,36 @@ fn region(cdt: &Cdt) -> Vec<bool> {
 /// out) and at least [`CLEARANCE`] of a side from the boundary in the metric `scale`.
 pub(crate) fn lattice(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]]], scale: [f64; 2]) -> Vec<[f64; 2]> {
     let mut out = Vec::new();
+    scan(bbox, step, polys, scale, &mut |q| {
+        out.push(q);
+        true
+    });
+    out
+}
+
+/// Whether the face has room for a seed of [`lattice`]: somewhere inside it lies a lattice point
+/// clear of its boundary. A face narrower than the side everywhere (a thin strip) has none.
+/// `true` too when the lattice is more than [`MAX_SEEDS`] points (or the box or step is not
+/// finite), which [`lattice`] does not look through.
+pub(crate) fn has_room(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]]], scale: [f64; 2]) -> bool {
+    let mut found = false;
+    let scanned = scan(bbox, step, polys, scale, &mut |_| {
+        found = true;
+        false
+    });
+    found || !scanned
+}
+
+/// Visit the points of [`lattice`] in turn until `visit` returns `false`. Returns whether the
+/// lattice was looked through (it is not when it is too large or ill-formed).
+fn scan(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]]], scale: [f64; 2], visit: &mut dyn FnMut([f64; 2]) -> bool) -> bool {
     if !step.iter().all(|s| s.is_finite() && *s > 0.0) || !bbox.iter().all(|(a, b)| a.is_finite() && b.is_finite() && b > a) {
-        return out;
+        return false;
     }
     let row = step[1] * 3f64.sqrt() * 0.5;
     let (rows, cols) = (((bbox[1].1 - bbox[1].0) / row).ceil(), ((bbox[0].1 - bbox[0].0) / step[0]).ceil());
     if !(rows * cols <= MAX_SEEDS as f64) {
-        return out;
+        return false;
     }
     let near = Clearance::new(polys, scale, CLEARANCE * step[0] * scale[0]);
     let mut xs: Vec<f64> = Vec::new();
@@ -358,12 +381,12 @@ pub(crate) fn lattice(bbox: [(f64, f64); 2], step: [f64; 2], polys: &[&[[f64; 2]
         let shift = if j % 2 == 1 { 0.5 * step[0] } else { 0.0 };
         for i in 0..=cols as usize {
             let u = bbox[0].0 + shift + step[0] * i as f64;
-            if u < bbox[0].1 && xs.partition_point(|x| *x < u) % 2 == 1 && !near.within([u, v]) {
-                out.push([u, v]);
+            if u < bbox[0].1 && xs.partition_point(|x| *x < u) % 2 == 1 && !near.within([u, v]) && !visit([u, v]) {
+                return true;
             }
         }
     }
-    out
+    true
 }
 
 /// Most lattice seeds of one face.

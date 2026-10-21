@@ -61,8 +61,10 @@ const PARALLEL_FACES: usize = 4;
 const PARALLEL_CURVES: usize = 2;
 const PARALLEL_EDGES: usize = 256;
 
-/// Most lines a curved face's grid gets in one direction.
-const MAX_LINES: usize = 1024;
+/// Most lines a curved face's grid gets in one direction: a turn's worth for each of the many
+/// turns a coil's or a thread's wall winds (the grid as a whole stays within
+/// [`grid::MAX_FACE_GRID`]).
+const MAX_LINES: usize = 8192;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
 /// Two boundary nodes this close together on the surface (mm) are one node. Far below any
@@ -603,6 +605,33 @@ fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
     }
 }
 
+/// Each loop is projected on its own, so along a closed direction a hole can come out a whole
+/// period away from the outer loop: a dome's outer loop opened at its pole spans v in [-1, 0]
+/// while the hole projects into [0, 1], outside it (tangency-labs/solidcore#433). Every other
+/// loop is moved by whole periods to the copy whose middle is nearest the outer loop's (the
+/// loop of largest area); a face that does not wind lies within one period, so that is the
+/// copy inside it.
+fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
+    let Some(outer) = loops.iter().map(|l| area2(&l.uv).abs()).enumerate().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i) else { return };
+    let middle = |l: &seam::Loop, d: usize| {
+        let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+        0.5 * (lo + hi)
+    };
+    for d in 0..2 {
+        let Some(per) = dom.period[d] else { continue };
+        let Some(centre) = loops.get(outer).map(|l| middle(l, d)) else { continue };
+        for (i, l) in loops.iter_mut().enumerate() {
+            let k = ((middle(l, d) - centre) / per).round();
+            if i == outer || !k.is_finite() || k == 0.0 {
+                continue;
+            }
+            for q in &mut l.uv {
+                q[d] -= k * per;
+            }
+        }
+    }
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 fn plan_face(
@@ -681,6 +710,7 @@ fn plan_face(
         for l in projected.iter_mut() {
             open_pole_to_pole(s, &dom, l);
         }
+        holes_beside_outer(&dom, &mut projected);
     }
     // Split poles.
     let mut fixed: Vec<Vec3> = Vec::new();
@@ -727,9 +757,10 @@ fn plan_face(
     // Constrained Delaunay in (u, v) scaled to millimetres: equilateral seeds of side `h`,
     // refined where triangles leave the surface, are too long or bend too much, then shaped by
     // Ruppert refinement.
+    let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| uvs.get(r.clone())).collect();
+    let step = [h / speed[0], h / speed[1]];
     let delaunay = || {
-        let polys: Vec<&[[f64; 2]]> = ranges.iter().filter_map(|r| uvs.get(r.clone())).collect();
-        let seeds = cdt::lattice(bbox, [h / speed[0], h / speed[1]], &polys, speed);
+        let seeds = cdt::lattice(bbox, step, &polys, speed);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
         let fill = cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: !matches!(s, EvalSurface::Plane { .. }), lenient: false };
@@ -741,7 +772,7 @@ fn plan_face(
     let (extra, triangles) = {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
-        thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
+        grid::thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
         let structured = match (ranges.len(), if seamed { None } else { grid::quad(&uvs) }) {
             (1, Some(q)) => {
                 // Interior lines: the boundary's own where opposite sides agree (refined where the
@@ -787,8 +818,16 @@ fn plan_face(
                 // the iso-line grid cut along its motorcycle traces and trimmed by its boundary,
                 // else Delaunay. A plane: the butterfly of a round face, else Delaunay (a plane
                 // is shaded the same by any triangles, and its Delaunay needs no refinement).
+                // A curved strip, straight and within a side across one parameter (its division
+                // there has no line inside) and with no room for a point of its own (a thread's
+                // root band, which runs out obliquely so it has no four corners), is its boundary
+                // nodes alone, refined where the surface leaves them: patches and grid lines
+                // across it would only crowd it (the butterfly's cuts run lengthwise through a
+                // long strip, seeded the whole way). A strip curved across (a fillet narrower
+                // than a side) keeps the layouts that follow its curvature.
                 let face = Region { s, uvs: &uvs, fixed: &fixed, ranges: &ranges, rules, h, speed, us: &us, vs: &vs };
-                let trimmed = if seamed {
+                let strip = !planar && (us.len() <= 2 || vs.len() <= 2) && !cdt::has_room(bbox, step, &polys, speed);
+                let trimmed = if seamed || strip {
                     None
                 } else if planar {
                     if ranges.len() == 1 { plan_pieces(&face) } else { None }
@@ -1078,24 +1117,6 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], triangles:
             side(a, b).is_none_or(|k| sides.get(&k).copied() == Some(1))
         })
     })
-}
-
-/// Keep at most `cap` grid points by taking every k-th line in both directions (ends kept).
-fn thin(us: &mut Vec<f64>, vs: &mut Vec<f64>, cap: usize) {
-    let total = us.len().saturating_mul(vs.len());
-    if total <= cap {
-        return;
-    }
-    let f = (total as f64 / cap.max(4) as f64).sqrt();
-    let pick = |d: &mut Vec<f64>| {
-        let n = ((d.len() as f64 / f).ceil() as usize).max(2);
-        if d.len() > n {
-            let len = d.len();
-            *d = (0..n).filter_map(|i| d.get(i * (len - 1) / (n - 1)).copied()).collect();
-        }
-    };
-    pick(us);
-    pick(vs);
 }
 
 #[cfg(test)]
