@@ -2,7 +2,7 @@
  "sources": [
   "tangency-labs/solidcraft#2969"
  ],
- "what": "a modelled M48x0.75 internal thread in a 48 mm hole (a workflow Fusion accepts)",
+ "what": "a modelled M48x0.75 internal thread in a 48 mm hole drawn at the thread's nominal size",
  "source": "analytic",
  "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. A 48 mm hole through a D54 x 3 disc, drawn at the thread's nominal size, takes a modelled M48x0.75: the hole is first filled to the tap drill (major - pitch = 47.25 mm, rho=23.625), then the groove is cut, the same thread as in a hole drilled at the tap drill. Whole length, both ends free (4 turns): V = pi 27^2 3 - pi 23.625^2 3 - 4 x V_turn(clipped at rho) = 6870.6631 - 5260.3515 - 4 x 17.37563 = 1540.8091 mm3. The thin lips a tap leaves at each end are below 0.2% of the volume. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
  "outcome": "solid",
