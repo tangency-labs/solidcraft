@@ -687,9 +687,39 @@ fn vertex_parameters_on_lines_conics_and_splines() {
     let p = [4.0 * t.cos(), t.sin(), 0.0];
     let m = map_edge(&ellipse, [4.0, 0.0, 0.0], p, true, false, false, tol).unwrap();
     assert!(m.interval[0].abs() < 1e-15 && (m.interval[1] - t).abs() < 1e-14, "{:?}", m.interval);
+    // A hyperbola edge: rational quadratic pieces on the STEP parameters of its ends, through
+    // the hyperbola's points; a parabola: one Bézier whose parameter is STEP's.
+    let (a, b) = (3.0, 2.0);
+    let hyperbola = Curve::Hyperbola { position, semi_axis: a, semi_imag_axis: b };
+    let at = |t: f64| [a * t.cosh(), b * t.sinh(), 0.0];
+    let m = map_edge(&hyperbola, at(1.5), at(-2.5), true, false, false, tol).unwrap();
+    assert_eq!(m.interval, [-2.5, 1.5]);
+    assert!(!m.with_step && m.sense_mismatch);
+    let c = CurveEval::new(&m.curve).unwrap();
+    for k in 0..=40 {
+        let p = c.point(-2.5 + 4.0 * f64::from(k) / 40.0).unwrap();
+        assert!(((p.x / a).powi(2) - (p.y / b).powi(2) - 1.0).abs() < 1e-12 && p.x > 0.0, "{p:?}");
+    }
+    for t in [-2.5, -0.5, 0.5, 1.5] {
+        assert!(c.point(t).unwrap().dist(v3(at(t))) < 1e-12, "{t}");
+    }
+    let parabola = Curve::Parabola { position, focal_dist: 0.5 };
+    let at = |t: f64| [0.5 * t * t, t, 0.0];
+    let m = map_edge(&parabola, at(-1.0), at(3.0), true, false, false, tol).unwrap();
+    assert_eq!(m.interval, [-1.0, 3.0]);
+    let c = CurveEval::new(&m.curve).unwrap();
+    for k in 0..=8 {
+        let t = -1.0 + 0.5 * f64::from(k);
+        assert!(c.point(t).unwrap().dist(v3(at(t))) < 1e-12, "{t}");
+    }
     // Unsupported curves.
-    let hyperbola = Curve::Hyperbola { position, semi_axis: 1.0, semi_imag_axis: 1.0 };
-    assert!(map_edge(&hyperbola, s, e, true, false, false, tol).unwrap_err().contains("not supported yet: HYPERBOLA"));
+    let offset = Curve::OffsetCurve3d {
+        basis: std::sync::Arc::new(line),
+        distance: 1.0,
+        self_intersect: crate::geom::Logical::False,
+        ref_direction: [0.0, 0.0, 1.0],
+    };
+    assert!(map_edge(&offset, s, e, true, false, false, tol).unwrap_err().contains("not supported yet: OFFSET_CURVE_3D"));
 }
 
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -862,6 +892,313 @@ fn corpus_solids_read_into_schema_4() {
         }
         for (m, n) in &notes {
             println!("    note in {n} solids: …{m}");
+        }
+    }
+}
+
+/// One STEP surface (entity #10 of `data`, after the common placements) sampled over a box of
+/// its own parameters: the mapped record passes through every sample, and its natural normal is
+/// STEP's (or its opposite where the mapping says so).
+#[track_caller]
+fn same_surface(data: &str, us: (f64, f64), vs: (f64, f64)) -> BSurface {
+    const BASE: &str = "#1=CARTESIAN_POINT('',(0.,0.,0.));#2=DIRECTION('',(0.,0.,1.));#3=DIRECTION('',(1.,0.,0.));\
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);#5=DIRECTION('',(0.,1.,0.));#6=AXIS1_PLACEMENT('',#1,#2);";
+    let ex = parse(&format!("{BASE}{data}\n"));
+    let s = crate::read::Reader::new(&ex, crate::read::Units::default()).surface(10).unwrap();
+    let n = 8;
+    let grid: Vec<(f64, f64)> = (0..=n)
+        .flat_map(|i| (0..=n).map(move |j| (us.0 + (us.1 - us.0) * i as f64 / n as f64, vs.0 + (vs.1 - vs.0) * j as f64 / n as f64)))
+        .collect();
+    let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new() };
+    let (record, reversed) = swept::map_surface(&s, &ext).unwrap();
+    record.natural();
+    let eval = SurfaceEval::new(&record).unwrap();
+    for &(u, v) in &grid {
+        let p = v3(s.point(u, v).unwrap());
+        let q = eval.project(p, None, f64::INFINITY).unwrap_or_else(|| panic!("{data}: no parameters at ({u}, {v})"));
+        let (at, su, sv) = eval.derivs(q[0], q[1]).unwrap();
+        assert!(at.dist(p) < 1e-8, "{data}: ({u}, {v}) {p:?} is {} off", at.dist(p));
+        let mine = su.cross(sv).normalized().unwrap();
+        let theirs = v3(s.normal(u, v).unwrap());
+        let agree = mine.dot(theirs) * if reversed { -1.0 } else { 1.0 };
+        assert!(agree > 0.999, "{data}: ({u}, {v}) normal {mine:?} vs {theirs:?} (reversed {reversed})");
+    }
+    record
+}
+
+#[test]
+fn swept_and_offset_surfaces_are_the_files_own() {
+    // Revolutions: a slanted line (a cone's frustum), a ball's half circle, an ellipse off the
+    // axis, a B-spline profile; a circle in a plane through the axis is the ring torus it is.
+    let line = "#7=CARTESIAN_POINT('',(5.,0.,0.));#8=DIRECTION('',(-2.,0.,4.));#9=VECTOR('',#8,4.47213595499958);#11=LINE('',#7,#9);";
+    let r = same_surface(&format!("{line}#10=SURFACE_OF_REVOLUTION('',#11,#6);"), (0.0, 6.0), (0.0, 1.0));
+    assert!(matches!(r, BSurface::PlacedRevolution { forward: false, .. }));
+    // A circle across the axis covers the ball twice, once each way round: its trims say which
+    // half the surface is.
+    for (half, vs) in [
+        ("(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(3.14159265358979))", (0.2, 3.0)),
+        ("(PARAMETER_VALUE(3.14159265358979)),(PARAMETER_VALUE(0.))", (3.3, 6.0)),
+    ] {
+        let ball = format!(
+            "#7=AXIS2_PLACEMENT_3D('',#1,#5,#2);#12=CIRCLE('',#7,5.);#11=TRIMMED_CURVE('',#12,{half},.T.,.PARAMETER.);#10=SURFACE_OF_REVOLUTION('',#11,#6);"
+        );
+        assert!(matches!(same_surface(&ball, (0.0, 6.0), vs), BSurface::PlacedRevolution { .. }));
+    }
+    let tilted =
+        "#7=CARTESIAN_POINT('',(10.,0.,1.));#8=AXIS2_PLACEMENT_3D('',#7,#5,#3);#11=ELLIPSE('',#8,3.,2.);#10=SURFACE_OF_REVOLUTION('',#11,#6);";
+    same_surface(tilted, (-1.0, 2.0), (-1.0, 1.5));
+    let spline = "#7=CARTESIAN_POINT('',(4.,0.,0.));#8=CARTESIAN_POINT('',(6.,0.,2.));#9=CARTESIAN_POINT('',(5.,0.,5.));\
+#11=B_SPLINE_CURVE_WITH_KNOTS('',2,(#7,#8,#9),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.);#10=SURFACE_OF_REVOLUTION('',#11,#6);";
+    same_surface(spline, (0.0, 6.0), (0.05, 0.95));
+    for axis in ["#5", "#12"] {
+        let torus = format!(
+            "#12=DIRECTION('',(0.,-1.,0.));#7=CARTESIAN_POINT('',(10.,0.,0.));#8=AXIS2_PLACEMENT_3D('',#7,{axis},#3);#11=CIRCLE('',#8,2.);#10=SURFACE_OF_REVOLUTION('',#11,#6);"
+        );
+        assert!(matches!(same_surface(&torus, (0.0, 6.0), (0.0, 6.0)), BSurface::Torus { .. }));
+    }
+    // Extrusions: an ellipse askew, a line (a plane strip), a B-spline, a parabola, a hyperbola;
+    // a circle along its axis either way is a cylinder.
+    let askew = "#7=ELLIPSE('',#4,9.,4.);#8=DIRECTION('',(0.5,0.25,1.));#9=VECTOR('',#8,2.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#7,#9);";
+    assert!(matches!(same_surface(askew, (-1.0, 1.0), (0.0, 5.0)), BSurface::RationalSpline { .. }));
+    let strip = "#7=VECTOR('',#3,2.);#8=LINE('',#1,#7);#9=VECTOR('',#5,1.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#8,#9);";
+    assert!(matches!(same_surface(strip, (-1.0, 3.0), (0.0, 5.0)), BSurface::Spline { .. }));
+    let spline = "#7=CARTESIAN_POINT('',(4.,0.,0.));#8=CARTESIAN_POINT('',(6.,1.,0.));#9=CARTESIAN_POINT('',(5.,3.,0.));\
+#11=B_SPLINE_CURVE_WITH_KNOTS('',2,(#7,#8,#9),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.);#12=VECTOR('',#2,3.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#11,#12);";
+    same_surface(spline, (0.05, 0.95), (-1.0, 1.0));
+    let parabola = "#7=PARABOLA('',#4,0.5);#8=VECTOR('',#2,1.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#7,#8);";
+    same_surface(parabola, (-2.0, 3.0), (0.0, 4.0));
+    let hyperbola = "#7=HYPERBOLA('',#4,3.,2.);#8=VECTOR('',#2,1.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#7,#8);";
+    same_surface(hyperbola, (-2.0, 1.5), (0.0, 4.0));
+    for (dir, reversed) in [("#2", false), ("#7", true)] {
+        let tube = format!("#7=DIRECTION('',(0.,0.,-1.));#8=CIRCLE('',#4,5.);#9=VECTOR('',{dir},3.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#8,#9);");
+        assert!(matches!(same_surface(&tube, (0.0, 6.0), (0.0, 2.0)), BSurface::Cylinder { radius: 5.0, .. }));
+        // Offset along STEP's normal: outward one way, inward the other.
+        let off = tube.replace("#10=SURFACE", "#11=SURFACE").replace("#10=", "#11=") + "#10=OFFSET_SURFACE('',#11,1.,.F.);";
+        let want = if reversed { 4.0 } else { 6.0 };
+        assert!(matches!(same_surface(&off, (0.0, 6.0), (0.0, 2.0)), BSurface::Cylinder { radius, .. } if (radius - want).abs() < 1e-12), "{dir}");
+    }
+    // Offsets of each analytic kind, nested ones too.
+    for (basis, d) in [
+        ("PLANE('',#4)", 2.0),
+        ("CYLINDRICAL_SURFACE('',#4,5.)", -2.0),
+        ("CONICAL_SURFACE('',#4,5.,0.3)", 1.5),
+        ("CONICAL_SURFACE('',#4,5.,-0.3)", -1.0),
+        ("SPHERICAL_SURFACE('',#4,5.)", 1.0),
+        ("TOROIDAL_SURFACE('',#4,10.,2.)", 1.0),
+    ] {
+        let one = format!("#11={basis};#10=OFFSET_SURFACE('',#11,{},.F.);", real(d));
+        same_surface(&one, (0.1, 2.0), (0.1, 1.2));
+        let two = format!("#12={basis};#11=OFFSET_SURFACE('',#12,{},.F.);#10=OFFSET_SURFACE('',#11,0.5,.U.);", real(d));
+        same_surface(&two, (0.1, 2.0), (0.1, 1.2));
+    }
+    // Refused: offsets that collapse or of other kinds, an extrusion in its profile's plane.
+    let ext = swept::Extent { points: vec![Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 1.0)], seam: Vec::new() };
+    for (data, why) in [
+        ("#11=CYLINDRICAL_SURFACE('',#4,5.);#10=OFFSET_SURFACE('',#11,-5.,.F.);", "collapses"),
+        ("#11=TOROIDAL_SURFACE('',#4,10.,2.);#10=OFFSET_SURFACE('',#11,9.,.F.);", "meets its axis"),
+        ("#11=CYLINDRICAL_SURFACE('',#4,5.);#12=OFFSET_SURFACE('',#11,-6.,.F.);#10=OFFSET_SURFACE('',#12,6.,.F.);", "collapses"),
+        ("#7=ELLIPSE('',#4,9.,4.);#8=VECTOR('',#3,1.);#10=SURFACE_OF_LINEAR_EXTRUSION('',#7,#8);", "profile's plane"),
+        (
+            "#7=ELLIPSE('',#4,9.,4.);#8=VECTOR('',#2,1.);#11=SURFACE_OF_LINEAR_EXTRUSION('',#7,#8);#10=OFFSET_SURFACE('',#11,1.,.F.);",
+            "not supported yet",
+        ),
+    ] {
+        let exch = parse(&format!(
+            "#1=CARTESIAN_POINT('',(0.,0.,0.));#2=DIRECTION('',(0.,0.,1.));#3=DIRECTION('',(1.,0.,0.));#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);{data}\n"
+        ));
+        let s = crate::read::Reader::new(&exch, crate::read::Units::default()).surface(10).unwrap();
+        let e = swept::map_surface(&s, &ext).unwrap_err();
+        assert!(e.contains(why), "{data}: {e}");
+    }
+}
+
+/// A frustum (radius 5 at z = 0 to radius 3 at z = 4) whose side is a SURFACE_OF_REVOLUTION of
+/// its slanted profile line, with the profile as a seam edge or without one, about +z or −z
+/// (STEP's normal ∂angle × ∂profile then points in, and the face says same_sense .F.).
+fn frustum(seam: bool, down: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let (pb, pt) = ([5.0, 0.0, 0.0], [3.0, 0.0, 4.0]);
+    let (vb, vt) = (w.vertex(pb), w.vertex(pt));
+    let kb = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let kt = w.circle([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let cb = w.add(format!("EDGE_CURVE('',#{vb},#{vb},#{kb},.T.)"));
+    let ct = w.add(format!("EDGE_CURVE('',#{vt},#{vt},#{kt},.T.)"));
+    let (o, d) = (w.pt(pb), w.dir([-2.0, 0.0, 4.0]));
+    let vec = w.add(format!("VECTOR('',#{d},{})", real(20f64.sqrt())));
+    let profile = w.add(format!("LINE('',#{o},#{vec})"));
+    let origin = w.pt([0.0; 3]);
+    let z = w.dir([0.0, 0.0, if down { -1.0 } else { 1.0 }]);
+    let axis = w.add(format!("AXIS1_PLACEMENT('',#{origin},#{z})"));
+    let surface = w.add(format!("SURFACE_OF_REVOLUTION('',#{profile},#{axis})"));
+    let bounds = if seam {
+        let s = w.add(format!("EDGE_CURVE('',#{vb},#{vt},#{profile},.T.)"));
+        let ring = [(cb, true), (s, true), (ct, false), (s, false)];
+        let oes: Vec<u64> = ring.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        vec![w.bound(&oes, true, true)]
+    } else {
+        let (x, y) = (w.oe(cb, true), w.oe(ct, false));
+        vec![w.bound(&[x], true, true), w.bound(&[y], false, true)]
+    };
+    let side = w.face(&bounds, surface, !down);
+    let x = w.oe(cb, false);
+    let bb = w.bound(&[x], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bb], plane, false);
+    let x = w.oe(ct, true);
+    let tb = w.bound(&[x], true, true);
+    let plane = w.plane([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[tb], plane, true);
+    let shell = closed_shell(&mut w, &[side, bottom, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('frustum',#{shell})"));
+    w.file(&[solid])
+}
+
+#[test]
+fn surfaces_of_revolution_read_as_placed_revolutions() {
+    for seam in [true, false] {
+        for down in [false, true] {
+            let s = one_solid(&frustum(seam, down));
+            assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2], "seam {seam} down {down}");
+            assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::PlacedRevolution { forward: false, .. })));
+            assert_eq!(s.notes.iter().any(|n| n.contains("seam edges added")), !seam, "{:?}", s.notes);
+            faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 3.0)]);
+        }
+    }
+
+    // A ball: a half circle (trimmed from the north pole to the south through +x) revolved,
+    // bounded by its seam meridian alone. STEP's normal there points in: same_sense .F.
+    let mut w = W::default();
+    let (vn, vs) = (w.vertex([0.0, 0.0, 5.0]), w.vertex([0.0, 0.0, -5.0]));
+    let k = w.circle([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], 5.0);
+    let half = w.add(format!("TRIMMED_CURVE('',#{k},(PARAMETER_VALUE(0.)),(PARAMETER_VALUE({})),.T.,.PARAMETER.)", real(PI)));
+    let e = w.add(format!("EDGE_CURVE('',#{vn},#{vs},#{k},.T.)"));
+    let (o1, o2) = (w.oe(e, true), w.oe(e, false));
+    let bound = w.bound(&[o1, o2], true, true);
+    let (origin, z) = (w.pt([0.0; 3]), w.dir([0.0, 0.0, 1.0]));
+    let axis = w.add(format!("AXIS1_PLACEMENT('',#{origin},#{z})"));
+    let surface = w.add(format!("SURFACE_OF_REVOLUTION('',#{half},#{axis})"));
+    let face = w.face(&[bound], surface, false);
+    let shell = closed_shell(&mut w, &[face]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ball',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
+    faces_away(&s.brep, 0, |_| [0.0; 3]);
+}
+
+#[test]
+fn surfaces_of_extrusion_read_as_splines_or_cylinders() {
+    // A half elliptic prism: the ellipse (6 by 3) from −y round +x to +y, extruded 5 up, cut
+    // by the plane x = 0.
+    let mut w = W::default();
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let v: Vec<(u64, V)> = [p(-3.0, 0.0), p(3.0, 0.0), p(-3.0, 5.0), p(3.0, 5.0)].iter().map(|q| (w.vertex(*q), *q)).collect();
+    let ellipse = |w: &mut W, z: f64| {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("ELLIPSE('',#{a},6.,3.)"))
+    };
+    let (eb, et) = (ellipse(&mut w, 0.0), ellipse(&mut w, 5.0));
+    let arc_b = w.add(format!("EDGE_CURVE('',#{},#{},#{eb},.T.)", v[0].0, v[1].0));
+    let arc_t = w.add(format!("EDGE_CURVE('',#{},#{},#{et},.T.)", v[2].0, v[3].0));
+    let up_m = w.line_edge(v[0], v[2], true, 1.0);
+    let up_p = w.line_edge(v[1], v[3], true, 1.0);
+    let low = w.line_edge(v[1], v[0], true, 1.0);
+    let high = w.line_edge(v[2], v[3], true, 1.0);
+    let z = w.dir([0.0, 0.0, 1.0]);
+    let vec = w.add(format!("VECTOR('',#{z},2.)"));
+    let surface = w.add(format!("SURFACE_OF_LINEAR_EXTRUSION('',#{eb},#{vec})"));
+    let face = |w: &mut W, ring: &[(u64, bool)], surface: u64, sense: bool| {
+        let oes: Vec<u64> = ring.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, sense)
+    };
+    let curved = face(&mut w, &[(arc_b, true), (up_p, true), (arc_t, false), (up_m, false)], surface, true);
+    let flat_plane = w.plane([0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let flat = face(&mut w, &[(low, true), (up_m, true), (high, true), (up_p, false)], flat_plane, true);
+    let bottom_plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = face(&mut w, &[(arc_b, false), (low, false)], bottom_plane, false);
+    let top_plane = w.plane([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = face(&mut w, &[(arc_t, true), (high, false)], top_plane, true);
+    let shell = closed_shell(&mut w, &[curved, flat, bottom, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('half',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 4, 6, 4]);
+    assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::RationalSpline { .. })));
+    faces_away(&s.brep, 0, |q| [q[0].clamp(0.5, 2.0), q[1].clamp(-1.0, 1.0), q[2].clamp(1.0, 4.0)]);
+
+    // A cylinder whose side is its bottom circle extruded up (or down, STEP's normal then
+    // pointing in), or a narrower cylinder offset out by 1.
+    for variant in ["up", "down", "offset"] {
+        let mut w = W::default();
+        let c = cylinder(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0]);
+        let side_face = side(&mut w, &c, true);
+        let bottom_bound = {
+            let ob = w.oe(c.circles[0], false);
+            w.bound(&[ob], true, true)
+        };
+        let bottom_plane = w.plane([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let bottom = w.face(&[bottom_bound], bottom_plane, false);
+        let top_bound = {
+            let ot = w.oe(c.circles[1], true);
+            w.bound(&[ot], true, true)
+        };
+        let top_plane = w.plane([1.0, 2.0, 10.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let top = w.face(&[top_bound], top_plane, true);
+        let k = w.circle([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+        let d = w.dir([0.0, 0.0, if variant == "down" { -1.0 } else { 1.0 }]);
+        let vec = w.add(format!("VECTOR('',#{d},1.)"));
+        let a = w.axis([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let narrow = w.add(format!("CYLINDRICAL_SURFACE('',#{a},4.)"));
+        let shell = closed_shell(&mut w, &[bottom, side_face, top]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+        let old = format!("#{}=CYLINDRICAL_SURFACE", c.surface);
+        let text = w.s.lines().map(|l| {
+            if l.starts_with(&old) {
+                match variant {
+                    "offset" => format!("#{}=OFFSET_SURFACE('',#{narrow},1.,.F.);", c.surface),
+                    _ => format!("#{}=SURFACE_OF_LINEAR_EXTRUSION('',#{k},#{vec});", c.surface),
+                }
+            } else if variant == "down" && l.starts_with(&format!("#{side_face}=")) {
+                l.replace(",.T.);", ",.F.);")
+            } else {
+                l.to_string()
+            }
+        });
+        w.s = text.collect::<Vec<_>>().join("\n") + "\n";
+        assert!(!w.s.contains(&old) && w.s.contains(if variant == "offset" { "OFFSET_SURFACE" } else { "LINEAR_EXTRUSION" }));
+        assert_eq!(w.s.contains(&format!("#{side_face}=ADVANCED_FACE('',(#{}),#{},.F.)", side_face - 1, c.surface)), variant == "down");
+        let s = one_solid(&w.file(&[solid]));
+        assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2], "{variant}");
+        assert!(s.brep.faces.iter().any(|f| matches!(f.surface, BSurface::Cylinder { radius, .. } if (radius - 5.0).abs() < 1e-12)), "{variant}");
+        faces_away(&s.brep, 0, |q| [1.0, 2.0, q[2].clamp(1.0, 9.0)]);
+    }
+}
+
+#[test]
+fn parabola_and_hyperbola_edges_bound_faces() {
+    for kind in ["PARABOLA('',#{a},0.5)", "HYPERBOLA('',#{a},1.,1.)"] {
+        let mut w = W::default();
+        let at = |t: f64| if kind.starts_with("PARABOLA") { [0.5 * t * t, t, 0.0] } else { [t.cosh(), t.sinh(), 0.0] };
+        let (p1, p2) = (at(-1.5), at(1.5));
+        let (v1, v2) = (w.vertex(p1), w.vertex(p2));
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let conic = w.add(kind.replace("{a}", &a.to_string()));
+        let e1 = w.add(format!("EDGE_CURVE('',#{v1},#{v2},#{conic},.T.)"));
+        let e2 = w.line_edge((v2, p2), (v1, p1), true, 1.0);
+        let (o1, o2) = (w.oe(e1, true), w.oe(e2, true));
+        let bound = w.bound(&[o1, o2], true, true);
+        let plane = w.plane([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let face = w.face(&[bound], plane, true);
+        let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+        let s = one_solid(&w.file(&[model]));
+        assert_eq!(counts(&s.brep), [1, 1, 1, 2, 2], "{kind}");
+        let e = s.brep.edges.iter().find(|e| !matches!(e.curve, BCurve::Line { .. })).unwrap();
+        assert_eq!(e.interval, [-1.5, 1.5]);
+        let c = CurveEval::new(&e.curve).unwrap();
+        for k in 0..=12 {
+            let p = c.point(-1.5 + 0.25 * f64::from(k)).unwrap();
+            let on = if kind.starts_with("PARABOLA") { p.y * p.y - 2.0 * p.x } else { p.x * p.x - p.y * p.y - 1.0 };
+            assert!(on.abs() < 1e-12, "{kind}: {p:?}");
         }
     }
 }
