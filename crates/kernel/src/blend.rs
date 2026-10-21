@@ -2376,19 +2376,50 @@ fn chamfer_sides_curved(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide,
     if !curved {
         return Err(e.unwrap_or_else(|| unsupported("these edges")));
     }
+    // The flat chamfer along the smooth chain of each of the edges nearest `pts`, a chain at a
+    // time: a free-form edge (a spline outline's rim), which the loop builder doesn't take.
+    let along_chains = |cur: &Body, pts: &[Vec3]| -> Result<Body> {
+        let mut cur = cur.clone();
+        let mut left = pts.to_vec();
+        for _ in 0..pts.len() {
+            let Some(p) = left.first().copied() else { break };
+            let size = cur.size();
+            let solid = cur.deep_copy();
+            let all = Body::unique_edges(&solid);
+            let id = nearest_edge_id(&cur, &all, p)?.ok_or_else(|| KernelError::Invalid(format!("no edge near {:?}", [p.x, p.y, p.z])))?;
+            let edge = all.iter().find(|e| e.id() == id).ok_or_else(|| KernelError::Failed("chamfer edge".into()))?;
+            let chain = smooth_chain(&solid, edge).unwrap_or_else(|| vec![id]);
+            let (made, rec) = guard("chamfer", || crate::curveblend::curve_chamfer_sides(&solid, &chain, size, d1, side, flip))?;
+            let mut rest = Vec::new();
+            for q in left.iter().skip(1) {
+                if nearest_edge_id(&cur, &all, *q)?.is_none_or(|x| !chain.contains(&x)) {
+                    rest.push(*q);
+                }
+            }
+            cur = record::after(record::rebuilt(made, &[&solid], &rec)?, &cur, &counts);
+            left = rest;
+        }
+        Ok(cur)
+    };
     // The loop chamfer of the edges nearest `pts`, all on one planar face's loop.
     let along_loop = |cur: &Body, pts: &[Vec3]| -> Result<Body> {
         let size = cur.size();
         let solid = cur.deep_copy();
         let ids = edge_ids(cur, &solid, pts)?;
-        match crate::loopblend::loop_chamfer_sides(&solid, &ids, size, d1, side, flip) {
-            Some(res) => {
-                let (made, rec) = guard("chamfer", || res)?;
-                Ok(record::after(record::rebuilt(made, &[&solid], &rec)?, cur, &counts))
-            }
-            None => Err(unsupported(
-                "a two-distance or distance-angle chamfer of a curved edge that is not on the boundary of a planar face (an equal-distance chamfer may work there)",
-            )),
+        match crate::loopblend::loop_chamfer_sides(&solid, &ids, size, d1, side, flip).map(|res| guard("chamfer", || res)) {
+            Some(Ok((made, rec))) => Ok(record::after(record::rebuilt(made, &[&solid], &rec)?, cur, &counts)),
+            Some(Err(e)) if size_refusal(&e) || matches!(e, KernelError::Invalid(_)) => Err(e),
+            // A loop the builder doesn't take (a free-form edge in it), or none: along the chains.
+            Some(Err(e)) => along_chains(cur, pts).map_err(|e2| if size_refusal(&e2) { e2 } else { unsupported(&format!("this chamfer along the edge ({e2}; {e})")) }),
+            None => along_chains(cur, pts).map_err(|e2| {
+                if size_refusal(&e2) {
+                    e2
+                } else {
+                    unsupported(&format!(
+                        "a two-distance or distance-angle chamfer of a curved edge that is not on the boundary of a planar face ({e2}; an equal-distance chamfer may work there)"
+                    ))
+                }
+            }),
         }
     };
     let (groups, rest) = loop_split(&cur, edges)?.unwrap_or_else(|| (Vec::new(), edges.to_vec()));
