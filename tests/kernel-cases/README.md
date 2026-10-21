@@ -10,7 +10,7 @@ cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli   # a
 cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>     # one case
 ```
 
-For the `smlib` column, build `solidcraft-cli` with `--features solidcraft-kernel/smlib` (after
+For the `smlib` column, build `solidcraft-cli` with `--features smlib` (after
 `scripts/fetch-smlib.sh`). The rig sets `SOLIDCRAFT_BOOLEANS=smlib` for those runs.
 
 ## Rules
@@ -46,8 +46,8 @@ Each case has:
   specification, never a user's file).
 - `expected.json`: the right answer, graded by `solidcraft-cli kernel-cases`.
 
-Each area also has `skipped.json`: every issue and PR looked at that did not become a case, with
-one line each saying why.
+Each area also has `skipped.json` (or several, `skipped-<part>.json`, where an area is triaged in
+parts): every issue and PR looked at that did not become a case, with one line each saying why.
 
 ```json
 [{"source": "tangency-labs/solidcraft#123", "why": "UI only: the selection highlight, no geometry"}]

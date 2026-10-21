@@ -24,6 +24,10 @@ default = ["raytrace-cpu"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 
+[features]
+# Link SMLib into the kernel, for the regression rig's smlib runs (tests/kernel-cases).
+smlib = ["solidcraft-engine/smlib"]
+
 [dependencies]
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }

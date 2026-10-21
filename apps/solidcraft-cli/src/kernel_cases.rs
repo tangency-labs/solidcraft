@@ -62,7 +62,13 @@ fn check_case(dir: &str) -> Value {
     };
     if kernel() == "smlib" && !solidcraft_engine::kernel::smlib_built() {
         out["status"] = json!("unsupported");
-        out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features solidcraft-kernel/smlib");
+        out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
+        return out;
+    }
+    let running = solidcraft_engine::kernel::boolean_kernel();
+    if kernel() != running {
+        out["status"] = json!("unsupported");
+        out["error"] = json!(format!("this build runs booleans on the {running} kernel, not {}", kernel()));
         return out;
     }
     let refused = want["outcome"].as_str() == Some("refused");

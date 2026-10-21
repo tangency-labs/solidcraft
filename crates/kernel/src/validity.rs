@@ -47,3 +47,11 @@ fn smlib_validity(_: &Body) -> Option<Result<(), String>> {
 pub fn smlib_built() -> bool {
     cfg!(feature = "smlib")
 }
+
+/// The kernel booleans run on in this process: `"default"` or `"smlib"`. The regression rig
+/// refuses to grade a kernel the process isn't running. The SMLib boolean switch
+/// (`SOLIDCRAFT_BOOLEANS=smlib`) answers here once it lands; until then this is always
+/// `"default"`.
+pub fn boolean_kernel() -> &'static str {
+    "default"
+}
