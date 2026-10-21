@@ -8554,7 +8554,7 @@
       "values_compared": 109
     },
     {
-      "max_rel_err": 2.198216228664531e-16,
+      "max_rel_err": 0.0,
       "name": "gen1036",
       "outcome": "pass",
       "pass": true,
@@ -10202,7 +10202,7 @@
       "values_compared": 100
     },
     {
-      "max_rel_err": 1.3354105449223296e-15,
+      "max_rel_err": 0.0,
       "name": "gen1242",
       "outcome": "pass",
       "pass": true,
@@ -10954,7 +10954,7 @@
       "values_compared": 26
     },
     {
-      "max_rel_err": 2.979074458350211e-16,
+      "max_rel_err": 0.0,
       "name": "gen1336",
       "outcome": "pass",
       "pass": true,
@@ -16914,7 +16914,7 @@
       "values_compared": 55
     },
     {
-      "max_rel_err": 1.7025919370142879e-15,
+      "max_rel_err": 0.0,
       "name": "gen2081",
       "outcome": "pass",
       "pass": true,
@@ -17930,7 +17930,7 @@
       "values_compared": 85
     },
     {
-      "max_rel_err": 3.18989893668177e-15,
+      "max_rel_err": 0.0,
       "name": "gen2208",
       "outcome": "pass",
       "pass": true,
@@ -20714,7 +20714,7 @@
       "values_compared": 93
     },
     {
-      "max_rel_err": 1.6658808949288423e-16,
+      "max_rel_err": 0.0,
       "name": "gen2556",
       "outcome": "pass",
       "pass": true,
@@ -24272,7 +24272,7 @@
   "cases_passed": 3033,
   "cases_total": 3033,
   "deferred_by_unit": {},
-  "max_rel_err": 3.18989893668177e-15,
+  "max_rel_err": 0.0,
   "pass": true,
   "rel_tol": 1e-9,
   "seeds": 16,

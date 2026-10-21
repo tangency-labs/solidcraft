@@ -2127,8 +2127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_Mouse",
@@ -2219,8 +2219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_Endcap",
@@ -2231,8 +2231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_Endcap_lim",
@@ -2327,8 +2327,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_box_with_large_fillet_lim",
@@ -2411,8 +2411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_cone",
@@ -2423,8 +2423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_cone_lim",
@@ -2599,8 +2599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_ellips_ts2",
@@ -2875,8 +2875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_sphere",
@@ -2887,8 +2887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_sphere_lim",
@@ -2971,8 +2971,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_extrude",
@@ -2983,8 +2983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_extrude_lim",
@@ -3067,8 +3067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_rev",
@@ -3079,8 +3079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_rev_lim",
@@ -3163,8 +3163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_sphere150",
@@ -3175,8 +3175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_surf_sphere150_lim",
@@ -3259,8 +3259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_torus",
@@ -3271,8 +3271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_torus_lim",
@@ -3355,8 +3355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_toruswvy",
@@ -3367,8 +3367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_toruswvy_lim",
@@ -3451,8 +3451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_vase_rev",
@@ -3463,8 +3463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "rayfire_vase_rev_lim",
@@ -5282,28 +5282,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_Mouse_102_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#44 (upstream upstream/TestFiles/pt_TestFiles/Mouse.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_Mouse_102_1_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#45 (upstream upstream/TestFiles/pt_TestFiles/Mouse.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -5642,28 +5634,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_box_with_large_fillet_102_2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#82 (upstream upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_box_with_large_fillet_102_2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#83 (upstream upstream/TestFiles/pt_TestFiles/box_with_large_fillet.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -6626,76 +6610,52 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_0_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#204 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_0_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#205 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#206 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_1_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#207 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#208 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_2_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#209 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7034,16 +6994,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_sphere150_104_0_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#252 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7054,16 +7010,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_sphere150_104_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#254 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7074,16 +7026,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_sphere150_104_2_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#256 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -7494,28 +7442,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_vase_rev_104_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#308 (upstream upstream/TestFiles/pt_TestFiles/vase_rev.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_vase_rev_104_1_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#309 (upstream upstream/TestFiles/pt_TestFiles/vase_rev.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -8526,28 +8466,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_unknown_orient",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#432 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_extrude_102_extrapolated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#433 (upstream upstream/TestFiles/pt_TestFiles/surf_extrude.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -8726,28 +8658,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_sphere150_104_unknown_orient",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#456 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sector_surf_sphere150_104_extrapolated",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.brep_p2/sector.json#457 (upstream upstream/TestFiles/pt_TestFiles/surf_sphere150.smb)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11471,8 +11395,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -11863,8 +11787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0100",
@@ -11883,8 +11807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0102",
@@ -11991,8 +11915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0114",
@@ -12231,8 +12155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0142",
@@ -12963,8 +12887,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0232",
@@ -13151,8 +13075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0254",
@@ -13695,8 +13619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0320",
@@ -13767,8 +13691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0328",
@@ -13871,8 +13795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0339",
@@ -13891,8 +13815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0341",
@@ -14091,8 +14015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0365",
@@ -14355,8 +14279,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -14391,16 +14315,16 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 179,
+  "cases_deferred": 160,
   "cases_failed": 0,
-  "cases_passed": 1530,
+  "cases_passed": 1549,
   "cases_total": 1709,
   "deferred_by_unit": {
-    "geom.tol": 38,
+    "geom.tol": 4,
     "intersect.surface_drop_lib_p3": 85,
     "surface.surface_cache_p1": 20,
     "topology.brep_p2": 1,
-    "topology.face_p2": 19,
+    "topology.face_p2": 34,
     "topology.face_p3": 16
   },
   "max_rel_err": 0.0,

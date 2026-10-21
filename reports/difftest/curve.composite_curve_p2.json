@@ -2799,7 +2799,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "generated:seed=13034075822364237156",
-      "values_compared": 1044
+      "values_compared": 1135
     },
     {
       "max_rel_err": 0.0,

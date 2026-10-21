@@ -54,7 +54,6 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::pseudo_box::PseudoBox;
-use crate::geom::tol::{zone_tol_3d, SmallTopoType};
 use crate::geom::tree::{
     AuxDataType, NodeClass, NodeData, NodeGeomType, NodeId, SplitDir, SurfaceAux, TreeNode,
 };
@@ -433,7 +432,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// those of `CalculateBoundingBox`, `sm_ComputeNetConstants`,
     /// `sm_ComputeSurfConstants`, `GetCorners` and `ComputeSizeTolerances`;
     /// `InvalidInput` where upstream reads through null or mistyped data;
-    /// [`SolidError::Unported`] from `SmTol::GetZoneTol3d` of an owned surface and the
+    /// [`SolidError::Unported`] from `SmTol::GetZoneTol3d` of a face-owned surface whose
+    /// face tolerance is not cached on it ([`Surface::owner_zone_tol_3d`]) and from the
     /// surface calls.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn test_against_tolerances(&mut self, k: &Kernel, node: NodeId) -> Result<ToleranceTest> {
@@ -469,18 +469,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let chord_height_squared = chord_tol * chord_tol;
         let ang_tol_deg = opts.ang_tol_rad * 180.0 / PI;
         // SmTol::GetZoneTol3d(m_cpSurface): GetFace() ? its tolerance : the system's
-        let zone_tol = if self.surface().face()?.is_some() {
-            // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
-            // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
-            // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
-            // receives the owning B-rep
-            return Err(SolidError::unported(
-                "SmTol::GetZoneTol3d(const SmObject*)",
-                "geom.tol",
-            ));
-        } else {
-            zone_tol_3d(k, SmallTopoType::NormalSize)
-        };
+        // (the face's tolerance as its B-rep cached it on the surface;
+        // UNPORTED(topology.face_p2): SmFace::GetTolerance for a bare face handle)
+        let zone_tol = crate::surface::surface::p1::zone_tol_3d(k, self.surface())?;
 
         // local tolerance state - a zero ChordHeight or Angle Tol value means to ignore the test
         {
@@ -524,6 +515,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     pseudo_guess: None,
                     polar_guess: None,
                     expand_by_zone_tol: true,
+                    expand_tolerance: None,
                 };
                 let boxes = calculate_bounding_box(k, node_surface, &node_domain, &req)?;
                 let bbox = boxes
@@ -955,6 +947,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     pseudo_guess: None,
                     polar_guess: None,
                     expand_by_zone_tol: true,
+                    expand_tolerance: None,
                 };
                 if let Some(boxes) = ignore(patch.calculate_bounding_box(k, &patch_domain, &req))? {
                     if let Some(b) = boxes.normal {

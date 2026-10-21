@@ -78,8 +78,12 @@
 //! - **`IntersectWithPlane`** (its body below the plane box ported by
 //!   `surface.plane_p2`) takes a bare [`Plane`], which has no owner: its pseudo box is
 //!   expanded by `SM_ZONE_TOL_3D` (upstream: the zone tolerance of the plane's face or
-//!   B-rep, `SmSurface::GetFace`, `NULL` for a plane without one). It takes a
-//!   [`Kernel`] for the curve operations.
+//!   B-rep, `SmSurface::GetFace`, `NULL` for a plane without one). Through
+//!   `Surface::global_surface_intersect` the plane's owner is passed
+//!   (`intersect_with_plane_owned`): a face-owned plane expands by the face tolerance
+//!   its B-rep cached on the surface, and returns [`SolidError::Unported`]
+//!   (`SmFace::GetTolerance`) without it. It takes a [`Kernel`] for the curve
+//!   operations.
 //! - **`sm_TestForIsoCircles`** returns its outputs in [`IsoCircles`]; the ones
 //!   upstream leaves unwritten (no non-degenerate iso curve, no second plane) are
 //!   `None`. With parallel iso planes `smgu_IntersectTwoPlanes` writes no line, so the
@@ -108,6 +112,7 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest as CurveBoxR
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, IsoCurveOptions, SurfParamType,
 };
+use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p2::{
     scale_step_angular_derivatives, SurfaceIntersection, TsectCurveType, SURF_OF_REVOLUTION_TYPE,
@@ -1430,11 +1435,35 @@ impl SurfOfRevolution {
     /// Those of the angle measures, the generator transform, property analysis and
     /// evaluation and of the iso curves (upstream `SER`); `SM_ERR_NULL_POINTER` without
     /// generator.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn intersect_with_plane(
         &self,
         k: &Kernel,
         plane: &Plane,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
+        self.intersect_with_plane_owned(
+            k,
+            plane,
+            PlaneOwner::NoFace,
+            other_uv_domain,
+            approx_tol_3d,
+        )
+    }
+
+    /// [`SurfOfRevolution::intersect_with_plane`] with the plane's owner: its box is
+    /// expanded by the tolerance of the plane's face (`GetFace()->GetTolerance()`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::intersect_with_plane`]; [`SolidError::Unported`]
+    /// (`SmFace::GetTolerance`) for a plane with a face whose tolerance is not cached.
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub(crate) fn intersect_with_plane_owned(
+        &self,
+        k: &Kernel,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
     ) -> Result<(bool, SurfaceIntersection)> {
@@ -1460,9 +1489,10 @@ impl SurfOfRevolution {
         }
 
         // get plane bounding box increased by tolerance (status ignored)
-        let mut plane_pbox = ignored(plane.bounding_boxes(k, &plane.natural_uv_domain(), false))?
-            .map(|(_, p)| p)
-            .unwrap_or_default();
+        let mut plane_pbox =
+            ignored(plane.bounding_boxes(k, &plane.natural_uv_domain(), plane_owner))?
+                .map(|(_, p)| p)
+                .unwrap_or_default();
         plane_pbox.expand_absolute(tol);
 
         let mut types: Vec<TsectCurveType> = Vec::new();

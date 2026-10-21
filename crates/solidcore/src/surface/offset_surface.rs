@@ -713,8 +713,9 @@ impl OffsetSurface {
     ///
     /// Those of the base surface's [`Surface::calculate_bounding_box`] and of
     /// [`Surface::base_calculate_bounding_box`] (an owned base reaches this offset's face
-    /// through its owner, so a face-owned B-spline-kind base's expanded box returns
-    /// `SmFace::GetTolerance`'s [`SolidError::Unported`], as upstream asks that face).
+    /// through its owner, so a face-owned B-spline-kind base's box is expanded by the
+    /// face tolerance passed down to it, [`Surface::owner_zone_tol_3d`], as upstream asks
+    /// that face; without it, `SmFace::GetTolerance`'s [`SolidError::Unported`]).
     pub fn calculate_bounding_box(
         &self,
         k: &Kernel,

@@ -952,7 +952,11 @@ impl Sphere {
         // Do a little bounding box computation to see if things really intersect.
         if plane.is_bounded() {
             // get min distance from sphereOrigin to planeBoundingBox
-            let (bbox, _) = plane.bounding_boxes(k, other_uv_domain, false)?;
+            let (bbox, _) = plane.bounding_boxes(
+                k,
+                other_uv_domain,
+                crate::surface::plane::p2::PlaneOwner::NoFace,
+            )?;
             let sph_point = Extent3d::from_points(sph_origin, sph_origin);
             let dist = bbox.min_distance(&sph_point);
 

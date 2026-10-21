@@ -224,6 +224,9 @@ pub(crate) fn model(brep: &Value) -> Result<Model, HarnessError> {
                 key: ObjectKey(i as u64),
             }));
         }
+        // the face's tolerance, as the face upstream answers GetTolerance with
+        b.sync_face_surface_tolerance(f)
+            .map_err(|e| harness(e.to_string()))?;
     }
     Ok(Model {
         path,

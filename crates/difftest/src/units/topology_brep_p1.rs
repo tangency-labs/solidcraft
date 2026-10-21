@@ -861,6 +861,9 @@ pub(crate) fn import(ex: &[f64], graph_at: usize) -> Result<(Brep, ImportTypes),
         {
             let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(id))));
         }
+        // the face's tolerance, as the face upstream answers GetTolerance with
+        b.sync_face_surface_tolerance(id)
+            .map_err(|e| harness(e.to_string()))?;
     }
     // the shared import leaves `m_pFU` unset: the face's upward (SAME) face use
     let ups: Vec<(FaceId, FaceuseId)> = b
@@ -1960,6 +1963,21 @@ fn run_rust_op(
             dir,
         } => {
             let id = |i: i64| (i >= 0).then(|| EdgeuseId::from_index(i as u32));
+            // a blend (flag != 0) samples both edge uses' face surfaces (DropPoint,
+            // normals, directional derivatives): an analytic surface the export hands
+            // over as its B-spline part takes other paths in C++ (e.g.
+            // SmSurfOfRevolution::DropPointFast), so those cases are not comparable
+            if *f != 0 {
+                if let (Some(e1), Some(e2)) = (id(*eu1), id(*eu2)) {
+                    let face = solidcore::topology::edgeuse::p1::face;
+                    let has_edges = b.edgeuse(e1)?.edge.is_some() && b.edgeuse(e2)?.edge.is_some();
+                    if let (true, Some(f1), Some(f2)) = (has_edges, face(b, e1)?, face(b, e2)?) {
+                        if let Some(d) = inexact(types, Some(&[f1, f2]), Some(&[])) {
+                            return Ok(Err(d));
+                        }
+                    }
+                }
+            }
             match bp1::create_edge_edge_blend(
                 k,
                 u64::from(*f),

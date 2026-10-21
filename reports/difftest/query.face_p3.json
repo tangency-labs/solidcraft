@@ -92,33 +92,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_Mouse_f2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#10 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_Mouse_f2_rebuild",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#11 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "internal_Mouse_f2",
@@ -129,8 +121,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Mouse_f2_t0",
@@ -141,8 +133,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Mouse_f2_t1",
@@ -181,8 +173,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Mouse_f3_t0",
@@ -193,8 +185,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Mouse_f3_t1",
@@ -205,8 +197,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "tight_Endcap_f0",
@@ -217,8 +209,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "tight_Endcap_f0_rebuild",
@@ -241,8 +233,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Endcap_f0_t0",
@@ -253,8 +245,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Endcap_f0_t1",
@@ -265,8 +257,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "tight_Endcap_f1",
@@ -277,8 +269,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "tight_Endcap_f1_rebuild",
@@ -301,8 +293,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Endcap_f1_t0",
@@ -313,8 +305,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_Endcap_f1_t1",
@@ -353,8 +345,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f0_t0",
@@ -365,8 +357,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f0_t1",
@@ -405,8 +397,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f1_t0",
@@ -417,8 +409,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f1_t1",
@@ -457,8 +449,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f2_t0",
@@ -469,8 +461,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f2_t1",
@@ -509,8 +501,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f3_t0",
@@ -521,8 +513,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f3_t1",
@@ -561,8 +553,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f4_t0",
@@ -573,8 +565,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f4_t1",
@@ -613,8 +605,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f5_t0",
@@ -625,8 +617,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f5_t1",
@@ -710,8 +702,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f7_t0",
@@ -722,8 +714,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_box_with_large_fillet_f7_t1",
@@ -807,8 +799,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_disk_f0_t0",
@@ -819,8 +811,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_disk_f0_t1",
@@ -830,33 +822,25 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_ellips_ts2_f0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#80 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_ellips_ts2_f0_rebuild",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#81 (upstream tests/SM_API_test/src/TestSmBrep.cpp:3023 SmApiFaceBoundingBox(face, TRUE) over the faces of upstream TestFiles)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "internal_ellips_ts2_f0",
@@ -867,8 +851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_ellips_ts2_f0_t0",
@@ -879,8 +863,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_ellips_ts2_f0_t1",
@@ -919,8 +903,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_plane_circ_f0_t0",
@@ -931,8 +915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_plane_circ_f0_t1",
@@ -971,8 +955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_plane_square_f0_t0",
@@ -983,8 +967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "bisector_plane_square_f0_t1",
@@ -1259,16 +1243,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_holed_box_top_flat",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#125 (upstream tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -1284,8 +1264,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_holed_box_top_flat",
@@ -1295,16 +1275,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_holed_box_top_flat_hole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#128 (upstream tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -1320,8 +1296,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_holed_box_top_flat_hole",
@@ -1331,16 +1307,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_holed_box_top_tilted",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#131 (upstream tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -1356,8 +1328,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_holed_box_top_tilted",
@@ -1367,16 +1339,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "tight_holed_box_top_tilted_hole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/cases.json#134 (upstream tests/SM_API_test/src/TestSmIntersectors.cpp:405 sm_CreateHoledBox top face (10-box, radius-2 hole))",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -1392,8 +1360,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "bisector_holed_box_top_tilted_hole",
@@ -1983,8 +1951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane0_0",
@@ -2015,8 +1983,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane0_1",
@@ -2047,8 +2015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane0_2",
@@ -2079,8 +2047,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane0_3",
@@ -2111,8 +2079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane1_0",
@@ -2143,8 +2111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane1_1",
@@ -2175,8 +2143,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane1_2",
@@ -2207,8 +2175,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane1_3",
@@ -2239,8 +2207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane2_0",
@@ -2271,8 +2239,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane2_1",
@@ -2303,8 +2271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane2_2",
@@ -2335,8 +2303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane2_3",
@@ -2367,8 +2335,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane3_0",
@@ -2399,8 +2367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane3_1",
@@ -2431,8 +2399,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane3_2",
@@ -2463,8 +2431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_plane3_3",
@@ -2495,8 +2463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs48_t0_m0",
@@ -2507,8 +2475,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs48_t0_m1",
@@ -2519,8 +2487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs48_t0_m2",
@@ -2531,8 +2499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs48_t0_m3",
@@ -2555,8 +2523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_tight_flatbs48",
@@ -2567,8 +2535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs54_t0_m0",
@@ -2579,8 +2547,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs54_t0_m1",
@@ -2591,8 +2559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs54_t0_m2",
@@ -2603,8 +2571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs54_t0_m3",
@@ -2627,8 +2595,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_tight_flatbs54",
@@ -2639,8 +2607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t0_m0",
@@ -2651,8 +2619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t0_m1",
@@ -2663,8 +2631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t0_m2",
@@ -2675,8 +2643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t0_m3",
@@ -2687,8 +2655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t1_m0",
@@ -2699,8 +2667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t1_m1",
@@ -2711,8 +2679,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t1_m2",
@@ -2723,8 +2691,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "adv_bis_flatbs60_t1_m3",
@@ -2747,8 +2715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_tight_flatbs60",
@@ -2758,57 +2726,41 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs0_[0, 0, 1, 1]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#70 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs0_[0.2, 0.3, 0.4, 0.9]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#71 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs0_[0, 0, 1e-06, 1e-06]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#72 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs0_[0.5, 0.5, 0.5000001, 1]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#73 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs1_[0, 0, 1, 1]",
@@ -2819,8 +2771,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs1_[0.2, 0.3, 0.4, 0.9]",
@@ -2830,28 +2782,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs1_[0, 0, 1e-06, 1e-06]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#76 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_tight_bs1_[0.5, 0.5, 0.5000001, 1]",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.face_p3/review_adversarial.json#77 (upstream review adversarial case (PR #132): source/SMLib/src/SmFace.cpp)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -3158,8 +3102,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b6_e3_m0_f1.0_c1_t0.25_0.75",
@@ -3241,8 +3185,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e2_m0_f1.0_c2_t0.5_0.0",
@@ -3453,8 +3397,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b6_e1_m0_f1e-09_c1_t1.0_0.0",
@@ -3494,8 +3438,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b6_e2_m0_f0.0_c2_t0.5_0.5",
@@ -4006,8 +3950,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e3_m0_f0.0_c0_t0.5_0.0",
@@ -4018,8 +3962,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e2_m0_f1e-09_c0_t0.5_0.5",
@@ -4291,8 +4235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e2_m0_f1.0_c1_t0.5_0.5",
@@ -5532,8 +5476,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e2_m0_f0.5_c0_t0.5_0.0",
@@ -5544,8 +5488,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e2_m0_f0.5_c2_t0.0_0.0",
@@ -5799,8 +5743,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e3_m1_f0.5_c1_t0.5_0.5",
@@ -6047,8 +5991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b6_e0_m0_f1e-09_c1_t0.0_0.5",
@@ -6172,8 +6116,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e0_m1_f0.5_c2_t1.0_1.0",
@@ -6318,8 +6262,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "adv_sec_b5_e3_m0_f0.5_c2_t1.0_0.0",
@@ -6400,8 +6344,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -6420,8 +6364,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0005",
@@ -6452,8 +6396,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0008",
@@ -6463,16 +6407,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0009",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422695479",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "both_errored": true,
@@ -6485,8 +6425,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0011",
@@ -6506,8 +6446,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0013",
@@ -6518,8 +6458,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0014",
@@ -6542,8 +6482,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0016",
@@ -6620,8 +6560,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -6632,8 +6572,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -6656,8 +6596,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0027",
@@ -6685,8 +6625,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0030",
@@ -6713,8 +6653,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0033",
@@ -6750,8 +6690,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0037",
@@ -6788,8 +6728,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0041",
@@ -6829,8 +6769,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0045",
@@ -6875,8 +6815,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0050",
@@ -6887,8 +6827,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0051",
@@ -6915,8 +6855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0054",
@@ -6927,8 +6867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0055",
@@ -6939,8 +6879,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0056",
@@ -6987,8 +6927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0061",
@@ -7072,8 +7012,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0069",
@@ -7084,8 +7024,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0070",
@@ -7108,8 +7048,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -7132,8 +7072,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0074",
@@ -7153,8 +7093,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -7174,8 +7114,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0078",
@@ -7195,8 +7135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0080",
@@ -7223,8 +7163,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0083",
@@ -7286,8 +7226,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0089",
@@ -7323,8 +7263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0093",
@@ -7344,8 +7284,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0095",
@@ -7356,8 +7296,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0096",
@@ -7377,8 +7317,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -7433,8 +7373,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0103",
@@ -7445,8 +7385,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0104",
@@ -7473,8 +7413,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0107",
@@ -7521,8 +7461,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0112",
@@ -7533,8 +7473,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0113",
@@ -7595,8 +7535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0119",
@@ -7615,8 +7555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0121",
@@ -7627,8 +7567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0122",
@@ -7676,8 +7616,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0127",
@@ -7729,8 +7669,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0133",
@@ -7741,8 +7681,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -7770,8 +7710,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0137",
@@ -7794,8 +7734,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0139",
@@ -7806,8 +7746,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -7818,8 +7758,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0141",
@@ -7889,8 +7829,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0148",
@@ -7925,8 +7865,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0152",
@@ -7965,8 +7905,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0156",
@@ -7977,8 +7917,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0157",
@@ -7997,8 +7937,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0159",
@@ -8029,8 +7969,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0162",
@@ -8049,8 +7989,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0164",
@@ -8212,8 +8152,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0181",
@@ -8241,8 +8181,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -8273,8 +8213,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0187",
@@ -8293,8 +8233,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0189",
@@ -8341,8 +8281,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0194",
@@ -8374,8 +8314,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -8386,8 +8326,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0198",
@@ -8435,8 +8375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0203",
@@ -8447,8 +8387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0204",
@@ -8513,8 +8453,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -8579,8 +8519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0217",
@@ -8591,8 +8531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0218",
@@ -8631,8 +8571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0222",
@@ -8651,8 +8591,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0224",
@@ -8675,8 +8615,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0226",
@@ -8687,8 +8627,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0227",
@@ -8699,8 +8639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0228",
@@ -8781,8 +8721,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0236",
@@ -8801,8 +8741,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0238",
@@ -8842,8 +8782,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0242",
@@ -8854,8 +8794,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0243",
@@ -8913,8 +8853,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0249",
@@ -8934,8 +8874,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0251",
@@ -8954,8 +8894,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0253",
@@ -9003,8 +8943,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0258",
@@ -9076,8 +9016,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -9088,8 +9028,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0266",
@@ -9130,8 +9070,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0270",
@@ -9159,8 +9099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0273",
@@ -9206,8 +9146,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0278",
@@ -9282,8 +9222,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0285",
@@ -9294,8 +9234,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0286",
@@ -9314,8 +9254,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0288",
@@ -9326,8 +9266,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0289",
@@ -9386,8 +9326,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0295",
@@ -9410,8 +9350,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0297",
@@ -9422,8 +9362,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0298",
@@ -9434,8 +9374,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0299",
@@ -9458,8 +9398,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0301",
@@ -9507,8 +9447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0306",
@@ -9527,8 +9467,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0308",
@@ -9563,8 +9503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0312",
@@ -9583,8 +9523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0314",
@@ -9643,8 +9583,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0320",
@@ -9679,8 +9619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0323",
@@ -9699,8 +9639,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0325",
@@ -9736,8 +9676,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0329",
@@ -9748,8 +9688,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0330",
@@ -9772,8 +9712,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0332",
@@ -9813,8 +9753,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0336",
@@ -9825,8 +9765,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0337",
@@ -9836,16 +9776,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0338",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422695808",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -9866,8 +9802,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0341",
@@ -9894,8 +9830,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0344",
@@ -9914,8 +9850,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0346",
@@ -9935,8 +9871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0348",
@@ -9959,8 +9895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0350",
@@ -9971,8 +9907,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0351",
@@ -10002,21 +9938,17 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0354",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422695824",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0355",
@@ -10027,8 +9959,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0356",
@@ -10046,16 +9978,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0358",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422695828",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
@@ -10100,8 +10028,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0363",
@@ -10112,8 +10040,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0364",
@@ -10148,8 +10076,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0367",
@@ -10176,8 +10104,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0370",
@@ -10188,8 +10116,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0371",
@@ -10262,8 +10190,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0378",
@@ -10274,8 +10202,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0379",
@@ -10286,8 +10214,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0380",
@@ -10298,8 +10226,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0381",
@@ -10310,8 +10238,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0382",
@@ -10330,8 +10258,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0384",
@@ -10342,8 +10270,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0385",
@@ -10354,8 +10282,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0386",
@@ -10394,8 +10322,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0390",
@@ -10438,8 +10366,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0394",
@@ -10458,8 +10386,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0396",
@@ -10494,8 +10422,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0400",
@@ -10559,8 +10487,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0406",
@@ -10587,8 +10515,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0409",
@@ -10607,8 +10535,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0411",
@@ -10678,8 +10606,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0418",
@@ -10698,8 +10626,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0420",
@@ -10718,8 +10646,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0422",
@@ -10730,8 +10658,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0423",
@@ -10792,8 +10720,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0429",
@@ -10804,8 +10732,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0430",
@@ -10816,8 +10744,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0431",
@@ -10828,8 +10756,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0432",
@@ -10840,8 +10768,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0433",
@@ -10852,8 +10780,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -10901,8 +10829,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0439",
@@ -10962,8 +10890,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0445",
@@ -10974,8 +10902,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0446",
@@ -11042,8 +10970,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0453",
@@ -11054,8 +10982,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0454",
@@ -11066,8 +10994,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0455",
@@ -11107,8 +11035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0459",
@@ -11127,8 +11055,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0461",
@@ -11151,8 +11079,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0463",
@@ -11163,8 +11091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0464",
@@ -11279,8 +11207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0476",
@@ -11291,8 +11219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0477",
@@ -11360,8 +11288,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0484",
@@ -11393,8 +11321,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0487",
@@ -11413,8 +11341,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0489",
@@ -11425,8 +11353,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0490",
@@ -11479,8 +11407,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0496",
@@ -11491,8 +11419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0497",
@@ -11503,8 +11431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0498",
@@ -11540,8 +11468,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0502",
@@ -11635,8 +11563,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0512",
@@ -11656,8 +11584,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0514",
@@ -11689,8 +11617,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0517",
@@ -11726,8 +11654,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0521",
@@ -11791,8 +11719,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0528",
@@ -11812,8 +11740,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0530",
@@ -11853,8 +11781,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0534",
@@ -11882,8 +11810,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0537",
@@ -11894,8 +11822,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0538",
@@ -11957,8 +11885,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0545",
@@ -12005,8 +11933,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0549",
@@ -12026,8 +11954,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0551",
@@ -12054,8 +11982,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0554",
@@ -12075,8 +12003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0556",
@@ -12095,8 +12023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0558",
@@ -12136,8 +12064,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0562",
@@ -12188,8 +12116,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0568",
@@ -12209,8 +12137,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0570",
@@ -12258,8 +12186,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0575",
@@ -12269,21 +12197,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0576",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422696046",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0577",
@@ -12294,8 +12218,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0578",
@@ -12306,8 +12230,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0579",
@@ -12327,8 +12251,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0581",
@@ -12351,8 +12275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::CreateUVTrimCurves",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0583",
@@ -12386,16 +12310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0586",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4634844329422696056",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -12424,8 +12344,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0590",
@@ -12436,8 +12356,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0591",
@@ -12448,8 +12368,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0592",
@@ -12468,8 +12388,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmCurveClassification::ReSet",
+        "unit": "intersect.curve_class_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0594",
@@ -12492,8 +12412,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0596",
@@ -12534,16 +12454,17 @@
     }
   ],
   "cases_both_errored": 235,
-  "cases_deferred": 676,
+  "cases_deferred": 656,
   "cases_failed": 0,
-  "cases_passed": 523,
+  "cases_passed": 543,
   "cases_total": 1199,
   "deferred_by_unit": {
-    "curve.crv_on_surf": 99,
-    "intersect.surface_drop_lib_p3": 215,
-    "query.face_p2": 2,
-    "topology.face_p2": 305,
-    "topology.face_p3": 55
+    "curve.crv_on_surf": 144,
+    "intersect.curve_class_p2": 75,
+    "intersect.surface_drop_lib_p3": 367,
+    "query.face_p2": 6,
+    "topology.face_p2": 1,
+    "topology.face_p3": 63
   },
   "max_rel_err": 0.0,
   "pass": true,

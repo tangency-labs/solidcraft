@@ -25,11 +25,13 @@
 //! Rust side reports [`SolidError::InvalidInput`] or fails the same guard), `-3` a call
 //! the shim skips because the Rust side defers it to an unported unit.
 //!
-//! Deferred: `SmFace::ComputeLoopOrientation` (`CheckFace` after its first loop check,
-//! `FixTrimLoopOrientation`, `FixTrimLoopOrder`) at its `sm_AreConnected` /
-//! `GetOrCreateUVTrimCurve` / `NormalizedEvaluate` calls (`topology.edgeuse_p3`),
-//! `SplitAtSeams` (`topology.face_p1` / `topology.face_p4`), `CreateUVTrimCurves` at the
-//! face-owned surface's `SmFace::GetTolerance` stub of `GetSingularities`
+//! `CheckFace`, `FixTrimLoopOrientation` and `FixTrimLoopOrder` run in full on both sides
+//! (`SmFace::ComputeLoopOrientation` is ported; it was skipped with `-3` while the Rust
+//! side still deferred it), guarded (`-2`) where a loop lacks its loop use, the face its
+//! surface or UV trim curves, or `CheckLoop` a loop's UV extremes.
+//!
+//! Deferred: `SplitAtSeams` (`topology.face_p1` / `topology.face_p4`), `CreateUVTrimCurves`
+//! at the face-owned surface's `SmFace::GetTolerance` stub of `GetSingularities`
 //! (`topology.face_p2`; it and `ClearUVTrimCurves` are compared, with every edge use's
 //! UV trim curve after the call), `SmEdgeuse::GetOrCreateUVTrimCurve`
 //! (`topology.edgeuse_p3`), and the vertex-use UV points some B-reps need
@@ -1573,6 +1575,20 @@ fn ok_loop_extremes(b: &Brep, l: LoopId) -> Result<bool, Fail> {
     Ok(true)
 }
 
+/// The shim's `tt_ok_face_loops`: every loop has its loop use, and a face with loops
+/// has a surface and UV trim curves everywhere.
+fn ok_face_loops(b: &Brep, f: FaceId) -> Result<bool, Fail> {
+    let loops = face_loops(b, f)?;
+    for &l in &loops {
+        if !ok_loop(b, l)? {
+            return Ok(false);
+        }
+    }
+    Ok(loops.is_empty()
+        || (b.face(f).map_err(|e| fail(&e))?.surface.is_some()
+            && tt::face_uv_curves_present(b, f).map_err(|e| fail(&e))?))
+}
+
 /// The surface of a loop's face (a copy), `None` without face or surface.
 fn loop_surface(b: &Brep, l: LoopId) -> Result<Option<Surface>, Fail> {
     let f = lu1::loop_face(b, l).map_err(|e| fail(&e))?;
@@ -1754,6 +1770,21 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
                     return Ok(o);
                 }
             }
+            // the shim's guards of the CheckLoop / ComputeLoopOrientation walk
+            let loops = face_loops(b, fc)?;
+            if !loops.is_empty() && tt::face_uv_curves_present(b, fc).map_err(|e| fail(&e))? {
+                let mut ok = b.face(fc).map_err(|e| fail(&e))?.surface.is_some();
+                for &l in &loops {
+                    if !ok || *skip {
+                        break;
+                    }
+                    ok = ok_loop_extremes(b, l)?;
+                }
+                if !ok {
+                    o.push(NULL_DEREF);
+                    return Ok(o);
+                }
+            }
             let mut a = AssertArray::new();
             let r = tt::check_face(k, b, fc, *tol, list.then_some(&mut a), *skip);
             o.push(status(&r)?);
@@ -1886,11 +1917,19 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> 
             put_uv_curves(&mut o, b);
         }
         OpIn::BOrient { f: face, .. } => {
+            if !ok_face_loops(b, fid(*face))? {
+                o.push(NULL_DEREF);
+                return Ok(o);
+            }
             let r = tt::fix_face_loop_orientations(k, b, fid(*face));
             o.push(status(&r)?);
             o.push(r.map_or(0.0, |n| n as f64));
         }
         OpIn::BOrder { f: face, .. } => {
+            if !ok_face_loops(b, fid(*face))? {
+                o.push(NULL_DEREF);
+                return Ok(o);
+            }
             let r = tt::fix_trim_loop_order(k, b, fid(*face));
             o.push(status(&r)?);
         }

@@ -82,28 +82,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#10 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#11 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -166,16 +158,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#19 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -190,28 +178,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#21 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#22 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -294,28 +274,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#33 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#34 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -378,16 +350,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#42 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -402,28 +370,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#44 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#45 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -506,28 +466,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#56 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#57 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -590,16 +542,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#65 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -614,28 +562,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#67 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#68 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -718,28 +658,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#79 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#80 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -802,16 +734,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#88 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -826,28 +754,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#90 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_huge_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#91 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -930,28 +850,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#102 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#103 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1014,16 +926,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#111 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -1038,28 +946,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#113 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#114 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1142,28 +1042,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#125 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#126 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1226,16 +1118,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#134 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -1250,28 +1138,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#136 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#137 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1354,28 +1234,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#148 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#149 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1438,16 +1310,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#157 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -1462,28 +1330,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#159 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#160 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1566,28 +1426,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#171 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#172 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1650,16 +1502,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#180 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -1674,28 +1522,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#182 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_plane_tilted_tiny_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#183 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1778,28 +1618,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#194 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#195 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1862,16 +1694,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#203 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -1886,28 +1714,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#205 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#206 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -1990,28 +1810,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#217 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#218 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2074,16 +1886,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#226 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2098,28 +1906,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#228 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#229 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2202,28 +2002,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#240 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#241 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2286,16 +2078,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#249 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2310,28 +2098,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#251 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#252 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2414,28 +2194,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#263 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#264 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2498,16 +2270,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#272 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2522,28 +2290,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#274 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_tiny_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#275 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2626,28 +2386,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#286 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#287 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2710,16 +2462,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#295 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2734,28 +2482,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#297 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#298 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2838,28 +2578,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#309 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#310 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -2922,16 +2654,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#318 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -2946,28 +2674,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#320 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#321 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3050,28 +2770,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#332 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#333 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3134,16 +2846,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#341 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -3158,28 +2866,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#343 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#344 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3262,28 +2962,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#355 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#356 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3346,16 +3038,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#364 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -3370,28 +3058,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#366 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_huge_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#367 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3474,28 +3154,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#378 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#379 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3558,16 +3230,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#387 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -3582,28 +3250,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#389 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#390 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3686,28 +3346,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#401 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#402 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3770,16 +3422,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#410 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -3794,28 +3442,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#412 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#413 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3898,28 +3538,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#424 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#425 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -3982,16 +3614,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#433 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -4006,28 +3634,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#435 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#436 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4110,28 +3730,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#447 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#448 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4194,16 +3806,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#456 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -4218,28 +3826,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#458 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_pinched_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#459 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4322,28 +3922,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#470 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#471 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4406,16 +3998,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#479 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -4430,28 +4018,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#481 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#482 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4534,28 +4114,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#493 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#494 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4618,16 +4190,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#502 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -4642,28 +4210,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#504 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#505 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4746,28 +4306,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#516 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#517 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4830,16 +4382,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#525 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -4854,28 +4402,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#527 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#528 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -4958,28 +4498,20 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#539 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#540 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -5042,16 +4574,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#548 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -5066,28 +4594,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#550 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_subdomain_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#551 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -5170,28 +4690,20 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#562 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#563 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5254,16 +4766,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#571 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -5278,28 +4786,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#573 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#574 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5382,28 +4882,20 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#585 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_init_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#586 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5466,16 +4958,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#594 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -5490,28 +4978,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#596 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu1_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#597 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5594,16 +5074,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#608 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5674,16 +5150,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#617 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -5698,28 +5170,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#619 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu2_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#620 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5802,16 +5266,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_gap1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#631 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -5882,16 +5342,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_sector",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#640 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -5906,28 +5362,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#642 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "adv_bss_sliver_vu3_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/adversarial.json#643 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -13778,16 +13226,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#797 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -13798,16 +13242,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#799 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -13858,28 +13298,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#805 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#806 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -13894,28 +13326,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#808 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#809 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -13958,16 +13382,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#815 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -13978,16 +13398,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#817 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14038,28 +13454,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#823 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#824 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14074,28 +13482,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#826 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face0_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#827 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14138,16 +13538,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#833 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14158,16 +13554,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#835 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14218,28 +13610,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#841 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#842 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14254,28 +13638,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#844 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#845 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14318,16 +13694,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#851 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14338,16 +13710,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#853 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14398,28 +13766,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#859 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#860 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14434,28 +13794,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#862 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face1_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#863 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14498,16 +13850,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#869 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14518,16 +13866,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#871 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14578,28 +13922,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#877 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#878 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14614,28 +13950,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#880 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#881 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14678,16 +14006,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#887 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14698,16 +14022,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#889 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14758,28 +14078,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#895 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#896 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14794,28 +14106,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#898 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face2_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#899 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14858,16 +14162,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#905 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -14878,16 +14178,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#907 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -14938,28 +14234,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#913 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#914 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -14974,28 +14262,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#916 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#917 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15038,16 +14318,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#923 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15058,16 +14334,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#925 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -15118,28 +14390,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#931 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#932 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -15154,28 +14418,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#934 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face3_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#935 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15218,16 +14474,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#941 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15238,16 +14490,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#943 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -15298,28 +14546,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#949 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#950 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -15334,28 +14574,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#952 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#953 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15398,16 +14630,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#959 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -15418,16 +14646,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#961 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -15478,28 +14702,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#967 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#968 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -15514,28 +14730,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#970 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "face4_vu3_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/constructed.json#971 (upstream tests/prog_test/src/smSurfaceTest.cpp:632)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -16080,16 +15288,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#63 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16100,16 +15304,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#65 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16160,28 +15360,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#71 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#72 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -16196,28 +15388,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#74 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#75 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16228,16 +15412,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#77 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16248,16 +15428,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#79 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16284,16 +15460,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#83 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16336,16 +15508,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#89 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16356,16 +15524,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#91 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16416,28 +15580,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#97 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#98 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
       "deferred": {
@@ -16452,28 +15608,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#100 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#101 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16484,16 +15632,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#103 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16504,16 +15648,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#105 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -16540,16 +15680,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#109 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16592,16 +15728,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#115 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -16644,16 +15776,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#121 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -16664,16 +15792,12 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#123 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -16700,88 +15824,60 @@
       "values_compared": 120
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#127 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#128 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#129 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#130 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#131 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#132 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#133 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -16792,16 +15888,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#135 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -16812,16 +15904,12 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#137 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -16848,16 +15936,12 @@
       "values_compared": 120
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#141 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -16900,16 +15984,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#147 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -16920,16 +16000,12 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#149 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -16956,88 +16032,60 @@
       "values_compared": 120
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#153 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#154 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#155 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#156 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#157 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#158 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#159 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -17048,16 +16096,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#161 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -17068,16 +16112,12 @@
       "values_compared": 122
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#163 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 122
     },
     {
       "max_rel_err": 0.0,
@@ -17104,16 +16144,12 @@
       "values_compared": 120
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#167 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -17156,16 +16192,12 @@
       "values_compared": 121
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#173 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 121
     },
     {
       "max_rel_err": 0.0,
@@ -17710,16 +16742,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#237 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17730,16 +16758,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#239 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -17766,88 +16790,60 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#243 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#244 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#245 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#246 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#247 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#248 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#249 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17858,16 +16854,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#251 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17878,16 +16870,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#253 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -17914,16 +16902,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#257 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17966,16 +16950,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#263 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -17986,16 +16966,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#265 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18022,88 +16998,60 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#269 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#270 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#271 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#272 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#273 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#274 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#275 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18114,16 +17062,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#277 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18134,16 +17078,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#279 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 10
     },
     {
       "max_rel_err": 0.0,
@@ -18170,16 +17110,12 @@
       "values_compared": 8
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#283 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18222,16 +17158,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#289 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 9
     },
     {
       "max_rel_err": 0.0,
@@ -18274,16 +17206,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#295 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18294,16 +17222,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#297 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "max_rel_err": 0.0,
@@ -18330,88 +17254,60 @@
       "values_compared": 88
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#301 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#302 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#303 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#304 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#305 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#306 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#307 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18422,16 +17318,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#309 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18442,16 +17334,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#311 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "max_rel_err": 0.0,
@@ -18478,16 +17366,12 @@
       "values_compared": 88
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#315 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18530,16 +17414,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#321 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18550,16 +17430,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#323 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "max_rel_err": 0.0,
@@ -18586,88 +17462,60 @@
       "values_compared": 88
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#327 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#328 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#329 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#330 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#331 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#332 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#333 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18678,16 +17526,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#335 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18698,16 +17542,12 @@
       "values_compared": 90
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#337 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 90
     },
     {
       "max_rel_err": 0.0,
@@ -18734,16 +17574,12 @@
       "values_compared": 88
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#341 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18786,16 +17622,12 @@
       "values_compared": 89
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#347 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 89
     },
     {
       "max_rel_err": 0.0,
@@ -18838,16 +17670,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#353 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18858,16 +17686,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#355 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -18894,88 +17718,60 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#359 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#360 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#361 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#362 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#363 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#364 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#365 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -18986,16 +17782,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#367 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19006,16 +17798,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#369 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -19042,16 +17830,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#373 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19094,16 +17878,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#379 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19114,16 +17894,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#381 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -19150,88 +17926,60 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#385 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#386 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#387 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#388 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#389 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#390 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#391 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19242,16 +17990,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#393 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19262,16 +18006,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#395 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 6
     },
     {
       "max_rel_err": 0.0,
@@ -19298,16 +18038,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#399 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19350,16 +18086,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#405 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 5
     },
     {
       "max_rel_err": 0.0,
@@ -19402,16 +18134,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#411 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19422,16 +18150,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#413 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -19458,88 +18182,60 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#417 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#418 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#419 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#420 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#421 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#422 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#423 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19550,16 +18246,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#425 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19570,16 +18262,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#427 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -19606,16 +18294,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu0_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#431 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19658,16 +18342,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#437 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19678,16 +18358,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#439 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -19714,88 +18390,60 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_uvpt1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#443 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_sector1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#444 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_uvpt0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#445 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_sector0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#446 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 21
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_seam",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#447 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_seam_nouv",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#448 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#449 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19806,16 +18454,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_init_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#451 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19826,16 +18470,12 @@
       "values_compared": 18
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_init_gap3_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#453 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 18
     },
     {
       "max_rel_err": 0.0,
@@ -19862,16 +18502,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vu5_init_pole",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#457 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -19914,16 +18550,12 @@
       "values_compared": 17
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_rebuild_vu2_gap1_11",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.vertexuse/upstream_files.json#463 (upstream tests/prog_test/src/smFeatureTest.cpp:63)",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -23497,14 +22129,10 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0007",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10388856500545030078",
       "values_compared": 0
     },
@@ -23549,16 +22177,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0013",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=10388856500545030084",
-      "values_compared": 0
+      "values_compared": 17
     },
     {
       "max_rel_err": 0.0,
@@ -23578,13 +22202,12 @@
     }
   ],
   "cases_both_errored": 343,
-  "cases_deferred": 436,
+  "cases_deferred": 92,
   "cases_failed": 0,
-  "cases_passed": 2250,
+  "cases_passed": 2594,
   "cases_total": 2686,
   "deferred_by_unit": {
-    "intersect.surface_drop_lib_p3": 92,
-    "topology.face_p2": 344
+    "intersect.surface_drop_lib_p3": 92
   },
   "max_rel_err": 0.0,
   "pass": true,

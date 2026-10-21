@@ -341,6 +341,10 @@ impl UnitDiff for Runner {
             {
                 let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(id))));
             }
+            // the face's tolerance, as the face upstream answers GetTolerance with
+            scene
+                .sync_face_surface_tolerance(id)
+                .map_err(|e| harness(e.to_string()))?;
         }
         let [x0, y0, z0, x1, y1, z1] = s.scene_box;
         let (lo, hi) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));

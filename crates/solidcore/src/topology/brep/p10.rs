@@ -734,6 +734,9 @@ fn build_faces(
 
         // Connect up face and faceuses and set FU fields
         rec.faceuse = Some(fu1); // FU1 is primary faceuse
+
+        // the surface reads the face's tolerance through GetFace()
+        b.sync_face_surface_tolerance(f)?;
         *b.faceuse_mut(fu1)? = Faceuse {
             face: Some(f),
             mate: Some(fu2),

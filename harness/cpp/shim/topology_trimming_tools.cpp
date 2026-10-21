@@ -845,6 +845,20 @@ bool tt_ok_loop_extremes(SmLoop* l)
     return true;
 }
 
+// Whether the loop walks of FixTrimLoopOrientation / FixTrimLoopOrder dereference
+// nothing null: every loop has its loop use, and a face with loops has a surface and UV
+// trim curves on every edge use (SmFace::ComputeLoopOrientation and the UV boxes of
+// FixTrimLoopOrder read them).
+bool tt_ok_face_loops(SmFace* f)
+{
+    SmTArray<SmLoop*> ls;
+    f->GetLoops(ls);
+    for (ULONG i = 0; i < ls.GetSize(); i++)
+        if (!tt_ok_loop(ls[i]))
+            return false;
+    return ls.GetSize() == 0 || (f->GetSurface() != nullptr && SmTrimmingTools::AreUVCurvesPresent(f));
+}
+
 // The pre-step of the repair and check ops: `k side` (k = -1: none) mirrors the UV trim
 // curve of the k-th edge use (modulo their count) of `l`'s first loop use across its face
 // surface's natural domain with SmTrimmingTools::MirrorCurve (only a plain B-spline curve;
@@ -999,30 +1013,25 @@ void tt_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back(TT_NULL_DEREF);
             break;
         }
-        // with UV curves on every loop, the Rust side reaches ComputeLoopOrientation
-        // (unported) unless CheckLoop fails first: run only CheckLoop's part then
+        // With UV curves on every loop CheckFace reaches CheckLoop of every loop (which
+        // reads each loop's UV extremes) and SmFace::ComputeLoopOrientation: guarded
+        // (TT_NULL_DEREF) where upstream would dereference a missing surface or extreme.
         bool all_uv = ls.GetSize() > 0 && SmTrimmingTools::AreUVCurvesPresent(f);
         SmAssertArray a;
-        if (ls.GetSize() == 0 || !all_uv)
+        if (all_uv)
         {
-            o.push_back(st(SmTrimmingTools::CheckFace(f, tol, want_list ? &a : NULL, SM_LEVEL_0, NULL,
-                                                      skip ? TRUE : FALSE)));
-            tt_put_reports(o, g, a);
-            break;
+            if (f->GetSurface() == nullptr)
+                ok = false;
+            for (ULONG i = 0; ok && !skip && i < ls.GetSize(); i++)
+                ok = tt_ok_loop_extremes(ls[i]);
+            if (!ok)
+            {
+                o.push_back(TT_NULL_DEREF);
+                break;
+            }
         }
-        if (skip || f->GetSurface() == nullptr || !tt_ok_loop_extremes(ls[0]))
-        {
-            o.push_back(TT_NOT_RUN);
-            break;
-        }
-        ULONG closure = 99;
-        SmStatus r = SmTrimmingTools::CheckLoop(f->GetSurface(), ls[0], tol, closure, want_list ? &a : NULL);
-        if (r == SM_SUCCESS)
-        {
-            o.push_back(TT_NOT_RUN);
-            break;
-        }
-        o.push_back(st(r));
+        o.push_back(st(SmTrimmingTools::CheckFace(f, tol, want_list ? &a : NULL, SM_LEVEL_0, NULL,
+                                                  skip ? TRUE : FALSE)));
         tt_put_reports(o, g, a);
         break;
     }
@@ -1154,14 +1163,12 @@ void tt_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     }
     case OP_B_ORIENT:
     {
-        // FixTrimLoopOrientation of the face: SmFace::ComputeLoopOrientation is
-        // unported, so only a face without loops is run
+        // FixTrimLoopOrientation of the face (SmFace::ComputeLoopOrientation of every
+        // loop): guarded like CheckFace's ComputeLoopOrientation
         SmFace* f = g.faces.at((size_t)rd.idx());
-        SmTArray<SmLoop*> ls;
-        f->GetLoops(ls);
-        if (ls.GetSize() != 0)
+        if (!tt_ok_face_loops(f))
         {
-            o.push_back(TT_NOT_RUN);
+            o.push_back(TT_NULL_DEREF);
             break;
         }
         ULONG n = 99;
@@ -1172,14 +1179,12 @@ void tt_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     }
     case OP_B_ORDER:
     {
-        // FixTrimLoopOrder: only its error for a face without loops is reached before
-        // the unported SmFace::ComputeLoopOrientation
+        // FixTrimLoopOrder (UV boxes of every loop's trim curves, then
+        // SmFace::ComputeLoopOrientation): guarded like FixTrimLoopOrientation
         SmFace* f = g.faces.at((size_t)rd.idx());
-        SmTArray<SmLoop*> ls;
-        f->GetLoops(ls);
-        if (ls.GetSize() != 0)
+        if (!tt_ok_face_loops(f))
         {
-            o.push_back(TT_NOT_RUN);
+            o.push_back(TT_NULL_DEREF);
             break;
         }
         SmBoolean made = UNSURE;

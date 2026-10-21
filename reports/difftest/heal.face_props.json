@@ -5896,8 +5896,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface (non-B-spline) in SmCrvOnSurf",
+        "unit": "curve.crv_on_surf"
       },
       "max_rel_err": 0.0,
       "name": "gen0662",
@@ -13085,7 +13085,7 @@
   "cases_passed": 1317,
   "cases_total": 1528,
   "deferred_by_unit": {
-    "topology.face_p2": 1,
+    "curve.crv_on_surf": 1,
     "topology.face_p4": 210
   },
   "max_rel_err": 0.0,

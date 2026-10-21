@@ -91,8 +91,10 @@
 //!   `Unitize` returns `TRUE`.
 //! - **Unported callees.** `ApproximateSize` of kinds other than B-splines needs
 //!   `SmIsoCurve` over any surface (the ported iso curve holds a B-spline), the zone
-//!   tolerance of a surface with a face needs `SmFace::GetTolerance`
-//!   (`topology.face_p2`): those calls return [`SolidError::Unported`]. Every tree build
+//!   tolerance of a surface with a face is the one its B-rep cached on it
+//!   ([`Surface::owner_zone_tol_3d`]) and needs `SmFace::GetTolerance`
+//!   (`topology.face_p2`) for a bare face handle without it: those calls return
+//!   [`SolidError::Unported`]. Every tree build
 //!   needs `SmSurface::CalculateContinuities` (`surface.surface_p6`), whose iso curves
 //!   exist for the B-spline, plane and revolution kinds.
 //!   [`map_to_2d_on_curve`] ports the UV-curve and the general 3D branch of
@@ -608,19 +610,17 @@ impl StepSurface {
 // ---- tolerances of surfaces (SmTol co-ports) ----------------------------------------------
 
 /// `SmTol::GetZoneTol3d(const SmObject*)` of a surface: its face's tolerance when it
-/// has a face, else the system zone tolerance.
+/// has a face (the tolerance the B-rep cached on the surface,
+/// [`Surface::owner_zone_tol_3d`]), else the system zone tolerance.
 ///
 /// # Errors
 ///
-/// Those of [`Surface::face`]; [`SolidError::Unported`]: `SmFace::GetTolerance`
-/// (`topology.face_p2`) for a surface with a face.
+/// Those of [`Surface::face_zone_tol_3d`]: [`SolidError::Unported`]
+/// (`SmFace::GetTolerance`, `topology.face_p2`) for a surface with a face whose
+/// tolerance was not cached on it.
 pub fn zone_tol_3d(k: &Kernel, surface: &Surface) -> Result<f64> {
-    match surface.face()? {
-        // UNPORTED(topology.face_p2): SmFace::GetTolerance
-        Some(_) => Err(SolidError::unported(
-            "SmFace::GetTolerance",
-            "topology.face_p2",
-        )),
+    match surface.face_zone_tol_3d()? {
+        Some(tol) => Ok(tol),
         None => Ok(kernel_zone_tol_3d(k, SmallTopoType::NormalSize)),
     }
 }
@@ -1048,12 +1048,19 @@ impl Surface {
         }
     }
 
-    /// Sets the owner and returns the previous one (`SetOwner`).
+    /// Sets the owner and returns the previous one (`SetOwner`). A different owner
+    /// drops the cached face tolerance ([`Surface::owner_zone_tol_3d`]): the B-rep
+    /// records the new face's ([`Surface::set_owner_zone_tol_3d`]).
     pub fn set_owner(&mut self, new_owner: Option<ObjectRef>) -> Option<ObjectRef> {
         // (notify when pNewOwner is NULL or a Face: the object layer's notify)
         let old = core::mem::replace(self.owner_mut(), new_owner);
-        // the bases this surface owns reach the face through it
-        self.update_owned_bases();
+        if old == new_owner {
+            // the bases this surface owns reach the face through it
+            self.update_owned_bases();
+        } else {
+            // (also passes the face down to the bases this surface owns)
+            self.set_owner_zone_tol_3d(None);
+        }
         old
     }
 
@@ -1541,7 +1548,8 @@ impl Surface {
     ///
     /// Those of the surface cache and of the polar box; [`SolidError::Unported`]:
     /// `SmFace::GetTolerance` (`topology.face_p2`) when a B-spline or plane with a
-    /// face expands its boxes.
+    /// face expands its boxes and the face's tolerance is not cached on the surface
+    /// ([`Surface::owner_zone_tol_3d`]).
     pub fn calculate_bounding_box(
         &self,
         k: &Kernel,
@@ -1556,15 +1564,14 @@ impl Surface {
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_) => {
                 // the B-spline override expands by its face's tolerance (GetFace()):
-                // the owner is held here, not by the B-spline
-                if expand_pos_boxes_by_zone_tol_3d && (want[0] || want[1]) && self.face()?.is_some()
-                {
-                    // UNPORTED(topology.face_p2): SmFace::GetTolerance
-                    return Err(SolidError::unported(
-                        "SmFace::GetTolerance",
-                        "topology.face_p2",
-                    ));
-                }
+                // the owner is held here, not by the B-spline, so the face's cached
+                // tolerance is passed down (the GetBrep() arm is reached only without
+                // a face, where a surface's GetBrep is null: SM_ZONE_TOL_3D)
+                let expand_tolerance = if expand_pos_boxes_by_zone_tol_3d && (want[0] || want[1]) {
+                    self.face_zone_tol_3d()?
+                } else {
+                    None
+                };
                 let req = crate::nurbs::b_spline_surface::BoundingBoxRequest {
                     normal: want[0],
                     pseudo: want[1],
@@ -1572,6 +1579,7 @@ impl Surface {
                     pseudo_guess: None,
                     polar_guess: None,
                     expand_by_zone_tol: expand_pos_boxes_by_zone_tol_3d,
+                    expand_tolerance,
                 };
                 let r = match self.kind() {
                     SurfaceKind::BSpline(s) => s.calculate_bounding_box(k, uv_domain, &req)?,

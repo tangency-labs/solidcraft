@@ -779,8 +779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op4",
@@ -791,8 +791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op5",
@@ -803,8 +803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op6",
@@ -875,8 +875,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op13",
@@ -935,8 +935,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind4_op19",
@@ -1003,8 +1003,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op4",
@@ -1015,8 +1015,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op5",
@@ -1027,8 +1027,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op6",
@@ -1099,8 +1099,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op13",
@@ -1159,8 +1159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "face_kind5_op19",
@@ -1219,8 +1219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op4",
@@ -1231,8 +1231,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op5",
@@ -1243,8 +1243,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op6",
@@ -1315,8 +1315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op13",
@@ -1371,8 +1371,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "face_kind6_op19",
@@ -1767,8 +1767,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_box10_op4",
@@ -1807,8 +1807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "upstream_box10_op13",
@@ -1999,8 +1999,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "rational_kind8_op19",
@@ -2223,8 +2223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "spherical_band_op19",
@@ -3599,8 +3599,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0004",
@@ -3715,8 +3715,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0017",
@@ -3759,8 +3759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0022",
@@ -3779,8 +3779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0024",
@@ -3791,8 +3791,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0025",
@@ -3951,8 +3951,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0042",
@@ -4219,8 +4219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0072",
@@ -4259,8 +4259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0076",
@@ -4415,8 +4415,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0094",
@@ -4455,8 +4455,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -4755,8 +4755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0134",
@@ -4807,8 +4807,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0140",
@@ -4851,8 +4851,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0145",
@@ -4871,8 +4871,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0147",
@@ -4895,8 +4895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0149",
@@ -5191,8 +5191,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0184",
@@ -5303,8 +5303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0197",
@@ -5367,8 +5367,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0204",
@@ -5431,8 +5431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0211",
@@ -5555,8 +5555,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0224",
@@ -5567,8 +5567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0225",
@@ -5891,8 +5891,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0263",
@@ -5911,8 +5911,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0265",
@@ -5991,8 +5991,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0274",
@@ -6011,8 +6011,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0276",
@@ -6103,8 +6103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0286",
@@ -6171,8 +6171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0293",
@@ -6343,8 +6343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0311",
@@ -6451,8 +6451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0324",
@@ -6519,8 +6519,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0331",
@@ -6539,8 +6539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0333",
@@ -6587,8 +6587,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0338",
@@ -6607,8 +6607,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0340",
@@ -6635,8 +6635,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0343",
@@ -6787,8 +6787,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0360",
@@ -6975,8 +6975,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0381",
@@ -7451,8 +7451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0434",
@@ -7499,8 +7499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0439",
@@ -7539,8 +7539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0443",
@@ -7579,8 +7579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0447",
@@ -7619,8 +7619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0451",
@@ -7631,8 +7631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0452",
@@ -7795,8 +7795,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0472",
@@ -7831,8 +7831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0476",
@@ -7883,8 +7883,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0482",
@@ -7895,8 +7895,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0483",
@@ -7915,8 +7915,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0485",
@@ -8023,8 +8023,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0497",
@@ -8035,8 +8035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0498",
@@ -8087,8 +8087,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0504",
@@ -8127,8 +8127,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0508",
@@ -8139,8 +8139,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0509",
@@ -8159,8 +8159,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0511",
@@ -8207,8 +8207,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0516",
@@ -8235,8 +8235,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0519",
@@ -8275,8 +8275,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0523",
@@ -8295,8 +8295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0525",
@@ -8343,8 +8343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0530",
@@ -8355,8 +8355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0531",
@@ -8431,8 +8431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0540",
@@ -8559,8 +8559,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0554",
@@ -8619,8 +8619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0561",
@@ -8759,8 +8759,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0577",
@@ -9043,8 +9043,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0609",
@@ -9111,8 +9111,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0617",
@@ -9147,8 +9147,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0621",
@@ -9179,8 +9179,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0624",
@@ -9219,8 +9219,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0628",
@@ -9295,8 +9295,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0636",
@@ -9347,8 +9347,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0642",
@@ -9387,8 +9387,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0646",
@@ -9411,8 +9411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0648",
@@ -9623,8 +9623,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0672",
@@ -9683,8 +9683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0678",
@@ -9695,8 +9695,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0679",
@@ -9779,8 +9779,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0688",
@@ -10035,8 +10035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0718",
@@ -10095,8 +10095,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0724",
@@ -10135,8 +10135,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0728",
@@ -10211,8 +10211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0737",
@@ -10259,8 +10259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0742",
@@ -10271,8 +10271,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0743",
@@ -10419,8 +10419,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0760",
@@ -10479,8 +10479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0767",
@@ -10643,8 +10643,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0786",
@@ -10655,8 +10655,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0787",
@@ -10667,8 +10667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0788",
@@ -10711,8 +10711,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0793",
@@ -10783,10 +10783,10 @@
     "curve.crv_on_surf": 10,
     "curve.curve_p2": 110,
     "curve.curve_p6": 31,
-    "geom.tol": 56,
-    "intersect.surface_drop_lib_p3": 28,
+    "geom.tol": 41,
+    "intersect.surface_drop_lib_p3": 38,
     "topology.edge": 1,
-    "topology.face_p2": 51
+    "topology.face_p2": 56
   },
   "max_rel_err": 0.0,
   "pass": true,

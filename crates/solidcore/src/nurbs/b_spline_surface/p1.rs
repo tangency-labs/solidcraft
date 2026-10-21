@@ -115,7 +115,8 @@
 //!   `SmSurface::EvaluateNormal` (`surface::surface::p7`); its zone tolerance expansion
 //!   reads `GetFace()`, and a bare B-spline has no owner (the owner is held by the
 //!   [`Surface`](crate::surface::surface::Surface) wrapper), so it uses
-//!   `SM_ZONE_TOL_3D`; `CreateOffsetSurface` uses the base `SmSurface` body and
+//!   `SM_ZONE_TOL_3D` unless the wrapper passes its face's cached tolerance as
+//!   [`BoundingBoxRequest::expand_tolerance`]; `CreateOffsetSurface` uses the base `SmSurface` body and
 //!   constructs an `OffsetSurface`, asking the copy for its singularities.
 //!   `STEPInversion` runs `GlobalPointSolve` and `IsClosed` on the owning surface
 //!   (including plane overrides) and calls the base `LocalPointSolve` and
@@ -379,6 +380,11 @@ pub struct BoundingBoxRequest<'a> {
     /// Expand the normal and pseudo boxes by the zone tolerance
     /// (`bExpandPosBoxesByZoneTol3d`, upstream default `TRUE`).
     pub expand_by_zone_tol: bool,
+    /// The zone tolerance of the owning face to expand by (`GetFace()->GetTolerance()`):
+    /// a bare B-spline has no owner, so the [`Surface`](crate::surface::surface::Surface)
+    /// wrapper holding it passes its face's cached tolerance here; `None` expands by
+    /// the ownerless `SM_ZONE_TOL_3D`.
+    pub expand_tolerance: Option<f64>,
 }
 
 /// The boxes of [`BSplineSurface::calculate_bounding_box`] (each present when asked).
@@ -499,11 +505,13 @@ fn evaluate_normal(k: &Kernel, srf: &BSplineSurface, uv: Point2) -> Result<Vec3>
 /// bare B-spline has no owner (the owner is held by the
 /// [`Surface`](crate::surface::surface::Surface) wrapper, whose
 /// [`calculate_bounding_box`](crate::surface::surface::Surface::calculate_bounding_box)
-/// handles a face owner before calling here): `SM_ZONE_TOL_3D`. Callers that hold a
-/// `Surface` with a face must check it first (as `Surface::calculate_bounding_box` and
-/// `Surface::is_planar` do); the patch boxes of surface caches are ownerless.
-const fn owner_zone_tolerance(_srf: &BSplineSurface) -> f64 {
-    crate::geom::tol::ZONE_TOL_3D
+/// passes a face owner's tolerance as [`BoundingBoxRequest::expand_tolerance`]):
+/// that tolerance when given, else `SM_ZONE_TOL_3D`. Callers that hold a `Surface` with
+/// a face must pass it (as `Surface::calculate_bounding_box` and `Surface::is_planar`
+/// do); the patch boxes of surface caches are ownerless.
+fn owner_zone_tolerance(req: &BoundingBoxRequest<'_>) -> f64 {
+    req.expand_tolerance
+        .unwrap_or(crate::geom::tol::ZONE_TOL_3D)
 }
 
 /// `SmSurface::IsDegenerateCurve` (the base body, on a copy of the B-spline as an
@@ -1415,11 +1423,11 @@ impl BSplineSurface {
         // When asked, expand the normal box by the zone tolerance
         if req.expand_by_zone_tol {
             if let Some(nb) = normal_box.as_mut() {
-                nb.expand_absolute(owner_zone_tolerance(self));
+                nb.expand_absolute(owner_zone_tolerance(req));
             }
             // When asked, expand the pPseudoBox box by the zone tolerance
             if let Some(pb) = pseudo_box.as_mut() {
-                pb.expand_absolute(owner_zone_tolerance(self));
+                pb.expand_absolute(owner_zone_tolerance(req));
             }
         }
 

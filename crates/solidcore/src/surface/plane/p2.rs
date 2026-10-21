@@ -29,8 +29,9 @@
 //!   tolerance of the plane's face ([`Surface::face`], `SmSurface::GetFace`), else
 //!   `SM_ZONE_TOL_3D`. A bare [`Plane`] has no owner (the owner lives on [`Surface`]), so
 //!   it uses `SM_ZONE_TOL_3D`; through [`Surface::global_surface_intersect`] a plane with
-//!   a face returns [`SolidError::Unported`] there (`SmFace::GetTolerance`, unit
-//!   `topology.face_p2`).
+//!   a face uses the face tolerance its B-rep cached on the surface
+//!   ([`Surface::owner_zone_tol_3d`]), and returns [`SolidError::Unported`] there
+//!   without it (`SmFace::GetTolerance`, unit `topology.face_p2`).
 //! - **NURB.** `IntersectWithPlane`'s parallel case tests whether both planes hold a
 //!   NURB (`m_pNurb`), as upstream; the boxes are computed on a NURB made on a copy
 //!   when the plane has none (upstream makes it in place, a `const_cast`). Because the
@@ -112,18 +113,45 @@ impl SolutionObject for CurveHandle {
     }
 }
 
-/// The tolerance of a plane's face (`GetFace()->GetTolerance()`, when `owned`: the
-/// plane has a face), else `SM_ZONE_TOL_3D` (the `bExpandPosBoxesByZoneTol3d`
-/// expansion of `CalculateBoundingBox`).
-fn zone_tolerance(owned: bool) -> Result<f64> {
-    if owned {
-        // UNPORTED(topology.face_p2): SmFace::GetTolerance
-        return Err(SolidError::unported(
+/// Whether a plane has a face (`SmSurface::GetFace`), and that face's tolerance as its
+/// B-rep cached it on the [`Surface`] ([`Surface::owner_zone_tol_3d`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PlaneOwner {
+    /// No face: the boxes expand by `SM_ZONE_TOL_3D`.
+    NoFace,
+    /// A face, with its cached tolerance (`None`: a bare face handle).
+    Face(Option<f64>),
+}
+
+impl PlaneOwner {
+    /// The owner state of a plane held by `surface`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::face`].
+    pub(crate) fn of(surface: &Surface) -> Result<Self> {
+        Ok(if surface.face()?.is_some() {
+            Self::Face(surface.owner_zone_tol_3d())
+        } else {
+            Self::NoFace
+        })
+    }
+}
+
+/// The tolerance of a plane's face (`GetFace()->GetTolerance()`, when the plane has a
+/// face), else `SM_ZONE_TOL_3D` (the `bExpandPosBoxesByZoneTol3d` expansion of
+/// `CalculateBoundingBox`).
+fn zone_tolerance(owner: PlaneOwner) -> Result<f64> {
+    match owner {
+        PlaneOwner::NoFace => Ok(ZONE_TOL_3D),
+        PlaneOwner::Face(Some(tol)) => Ok(tol),
+        // UNPORTED(topology.face_p2): SmFace::GetTolerance (a bare face handle without
+        // the tolerance its B-rep caches on the surface)
+        PlaneOwner::Face(None) => Err(SolidError::unported(
             "SmFace::GetTolerance",
             "topology.face_p2",
-        ));
+        )),
     }
-    Ok(ZONE_TOL_3D)
 }
 
 impl Plane {
@@ -480,7 +508,7 @@ impl Plane {
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
-        owned: bool,
+        owner: PlaneOwner,
     ) -> Result<(Extent3d, PseudoBox)> {
         let req = BoundingBoxRequest {
             normal: true,
@@ -494,8 +522,8 @@ impl Plane {
         let mut bbox = b.normal.ok_or(SolidError::null_pointer(OP_PP))?;
         let mut pbox = b.pseudo.ok_or(SolidError::null_pointer(OP_PP))?;
         // When asked, expand the normal and pseudo boxes by the zone tolerance
-        bbox.expand_absolute(zone_tolerance(owned)?);
-        pbox.expand_absolute(zone_tolerance(owned)?);
+        bbox.expand_absolute(zone_tolerance(owner)?);
+        pbox.expand_absolute(zone_tolerance(owner)?);
         Ok((bbox, pbox))
     }
 
@@ -528,11 +556,11 @@ impl Plane {
             other,
             other_uv_domain,
             approx_tol_3d,
-            [false, false],
+            [PlaneOwner::NoFace, PlaneOwner::NoFace],
         )
     }
 
-    /// [`Plane::intersect_with_plane`] with the planes' ownership (for the zone
+    /// [`Plane::intersect_with_plane`] with the planes' owners (for the zone
     /// tolerance).
     #[allow(clippy::too_many_lines)] // one upstream function
     pub(crate) fn intersect_with_plane_owned(
@@ -542,7 +570,7 @@ impl Plane {
         other: &Self,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
-        owned: [bool; 2],
+        owners: [PlaneOwner; 2],
     ) -> Result<(bool, SurfaceIntersection)> {
         // init output
         let mut out = SurfaceIntersection::default();
@@ -582,8 +610,8 @@ impl Plane {
             }
 
             // get plane1 and plane2 bounding and pseudo boxes
-            let (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owned[0])?;
-            let (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owned[1])?;
+            let (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owners[0])?;
+            let (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owners[1])?;
 
             // no work - when bounding or pseudo boxes are disjoint
             if bbox1.are_disjoint(&bbox2, 0.0) || pbox1.are_disjoint(&pbox2, None) {
@@ -667,7 +695,7 @@ impl Plane {
 
         // get size of bounded ThisPlane
         if this_bounded {
-            (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owned[0])?;
+            (bbox1, pbox1) = self.bounding_boxes(k, uv_domain, owners[0])?;
             let radius1 = bbox1.sphere_bound().radius;
             bbox1.expand_absolute(tol / 2.0);
             pbox1.expand_absolute(tol / 2.0);
@@ -676,7 +704,7 @@ impl Plane {
 
         // get size of bounded OtherPlane
         if other_bounded {
-            (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owned[1])?;
+            (bbox2, pbox2) = other.bounding_boxes(k, other_uv_domain, owners[1])?;
             let radius2 = bbox2.sphere_bound().radius;
             bbox2.expand_absolute(tol / 2.0);
             pbox2.expand_absolute(tol / 2.0);
@@ -1374,28 +1402,30 @@ pub(crate) fn global_surface_intersect(
     match other.kind() {
         // plane/plane special case intersection
         SurfaceKind::Plane(other_plane) => {
-            // (whether each plane has a face: SmSurface::GetFace)
-            let owned = [this.face()?.is_some(), other.face()?.is_some()];
+            // (whether each plane has a face: SmSurface::GetFace, and its tolerance)
+            let owners = [PlaneOwner::of(this)?, PlaneOwner::of(other)?];
             (need_nurb_intersection, out) = plane.intersect_with_plane_owned(
                 k,
                 uv_domain,
                 other_plane,
                 other_uv_domain,
                 approx_tol_3d,
-                owned,
+                owners,
             )?;
         }
         // cone/plane special case intersection (SmCone_TYPE and SmCylinder_TYPE):
         // SmCone::IntersectWithPlane, which hides the surface of revolution's; the
         // orders and the UV curves are swapped
         SurfaceKind::Cone(cone) => {
-            // the plane's boxes take its face's tolerance (taken as without owner
-            // there; see the module header)
-            if this.face()?.is_some() {
-                zone_tolerance(true)?;
-            }
-            let (need, mut x) =
-                cone.intersect_with_plane(k, other_uv_domain, plane, uv_domain, approx_tol_3d)?;
+            // the plane's boxes take its face's tolerance
+            let (need, mut x) = cone.intersect_with_plane_owned(
+                k,
+                other_uv_domain,
+                plane,
+                PlaneOwner::of(this)?,
+                uv_domain,
+                approx_tol_3d,
+            )?;
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, out) = (need, x);
         }
@@ -1403,12 +1433,14 @@ pub(crate) fn global_surface_intersect(
         // curves are swapped (the surface of revolution's edge flags and angle
         // tolerance are not used by it)
         SurfaceKind::SurfOfRevolution(rev) => {
-            // the plane's boxes take its face's tolerance (taken as without owner
-            // there; see the module header)
-            if this.face()?.is_some() {
-                zone_tolerance(true)?;
-            }
-            let (need, mut x) = rev.intersect_with_plane(k, plane, uv_domain, approx_tol_3d)?;
+            // the plane's boxes take its face's tolerance
+            let (need, mut x) = rev.intersect_with_plane_owned(
+                k,
+                plane,
+                PlaneOwner::of(this)?,
+                uv_domain,
+                approx_tol_3d,
+            )?;
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, out) = (need, x);
         }

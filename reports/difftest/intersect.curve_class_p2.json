@@ -1422,16 +1422,12 @@
       "values_compared": 880
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0013",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178184",
-      "values_compared": 0
+      "values_compared": 874
     },
     {
       "max_rel_err": 0.0,
@@ -1690,16 +1686,12 @@
       "values_compared": 154
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0045",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178216",
-      "values_compared": 0
+      "values_compared": 553
     },
     {
       "max_rel_err": 0.0,
@@ -2166,16 +2158,12 @@
       "values_compared": 302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0104",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178275",
-      "values_compared": 0
+      "values_compared": 1142
     },
     {
       "max_rel_err": 0.0,
@@ -2810,16 +2798,12 @@
       "values_compared": 585
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0184",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178355",
-      "values_compared": 0
+      "values_compared": 382
     },
     {
       "max_rel_err": 0.0,
@@ -3070,16 +3054,12 @@
       "values_compared": 476
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0215",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178386",
-      "values_compared": 0
+      "values_compared": 578
     },
     {
       "max_rel_err": 0.0,
@@ -3546,16 +3526,12 @@
       "values_compared": 286
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0274",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178445",
-      "values_compared": 0
+      "values_compared": 424
     },
     {
       "max_rel_err": 0.0,
@@ -3870,16 +3846,12 @@
       "values_compared": 817
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0314",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178485",
-      "values_compared": 0
+      "values_compared": 766
     },
     {
       "max_rel_err": 0.0,
@@ -4954,16 +4926,12 @@
       "values_compared": 787
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0449",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178620",
-      "values_compared": 0
+      "values_compared": 698
     },
     {
       "max_rel_err": 0.0,
@@ -5586,16 +5554,12 @@
       "values_compared": 130
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0527",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178698",
-      "values_compared": 0
+      "values_compared": 661
     },
     {
       "max_rel_err": 0.0,
@@ -5798,16 +5762,12 @@
       "values_compared": 211
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0553",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178724",
-      "values_compared": 0
+      "values_compared": 552
     },
     {
       "max_rel_err": 0.0,
@@ -6538,16 +6498,12 @@
       "values_compared": 1302
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0645",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178816",
-      "values_compared": 0
+      "values_compared": 159
     },
     {
       "max_rel_err": 0.0,
@@ -7014,16 +6970,12 @@
       "values_compared": 520
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0703",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178874",
-      "values_compared": 0
+      "values_compared": 266
     },
     {
       "max_rel_err": 0.0,
@@ -7318,16 +7270,12 @@
       "values_compared": 91
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0740",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178911",
-      "values_compared": 0
+      "values_compared": 973
     },
     {
       "max_rel_err": 0.0,
@@ -7870,16 +7818,12 @@
       "values_compared": 237
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0808",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178979",
-      "values_compared": 0
+      "values_compared": 244
     },
     {
       "max_rel_err": 0.0,
@@ -7906,16 +7850,12 @@
       "values_compared": 366
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0812",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632178983",
-      "values_compared": 0
+      "values_compared": 405
     },
     {
       "max_rel_err": 0.0,
@@ -9674,16 +9614,12 @@
       "values_compared": 534
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1030",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179201",
-      "values_compared": 0
+      "values_compared": 717
     },
     {
       "max_rel_err": 0.0,
@@ -10382,16 +10318,12 @@
       "values_compared": 548
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1118",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179289",
-      "values_compared": 0
+      "values_compared": 820
     },
     {
       "max_rel_err": 0.0,
@@ -10426,16 +10358,12 @@
       "values_compared": 817
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1123",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179294",
-      "values_compared": 0
+      "values_compared": 768
     },
     {
       "max_rel_err": 0.0,
@@ -10470,16 +10398,12 @@
       "values_compared": 210
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179299",
-      "values_compared": 0
+      "values_compared": 674
     },
     {
       "max_rel_err": 0.0,
@@ -10530,16 +10454,12 @@
       "values_compared": 715
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1135",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179306",
-      "values_compared": 0
+      "values_compared": 643
     },
     {
       "max_rel_err": 0.0,
@@ -10846,16 +10766,12 @@
       "values_compared": 739
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1174",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179345",
-      "values_compared": 0
+      "values_compared": 536
     },
     {
       "max_rel_err": 0.0,
@@ -11098,16 +11014,12 @@
       "values_compared": 184
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1205",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179376",
-      "values_compared": 0
+      "values_compared": 450
     },
     {
       "max_rel_err": 0.0,
@@ -11134,16 +11046,12 @@
       "values_compared": 154
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1209",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179380",
-      "values_compared": 0
+      "values_compared": 797
     },
     {
       "max_rel_err": 0.0,
@@ -11570,16 +11478,12 @@
       "values_compared": 956
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1263",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179434",
-      "values_compared": 0
+      "values_compared": 418
     },
     {
       "max_rel_err": 0.0,
@@ -12046,16 +11950,12 @@
       "values_compared": 289
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1322",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179493",
-      "values_compared": 0
+      "values_compared": 79
     },
     {
       "max_rel_err": 0.0,
@@ -12662,16 +12562,12 @@
       "values_compared": 532
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1398",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179569",
-      "values_compared": 0
+      "values_compared": 1130
     },
     {
       "max_rel_err": 0.0,
@@ -12990,16 +12886,12 @@
       "values_compared": 185
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen1438",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12816350387632179609",
-      "values_compared": 0
+      "values_compared": 238
     },
     {
       "max_rel_err": 0.0,
@@ -13547,12 +13439,12 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 44,
+  "cases_deferred": 17,
   "cases_failed": 0,
-  "cases_passed": 1627,
+  "cases_passed": 1654,
   "cases_total": 1671,
   "deferred_by_unit": {
-    "topology.face_p2": 44
+    "topology.face_p2": 17
   },
   "max_rel_err": 0.0,
   "pass": true,

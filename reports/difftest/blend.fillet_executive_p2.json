@@ -1932,8 +1932,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFilletExecutive::LoadFilletSolver",
+        "unit": "blend.fillet_executive_p1"
       },
       "max_rel_err": 0.0,
       "name": "set_params_per_edge_r1",
@@ -2311,9 +2311,8 @@
   "cases_passed": 250,
   "cases_total": 275,
   "deferred_by_unit": {
-    "blend.fillet_executive_p1": 22,
-    "blend.fillet_standard_solver_p2": 2,
-    "topology.face_p2": 1
+    "blend.fillet_executive_p1": 23,
+    "blend.fillet_standard_solver_p2": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

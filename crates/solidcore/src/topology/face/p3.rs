@@ -339,6 +339,8 @@ pub fn set_tolerance(
     if !update_only_if_larger || new_zone_tol_3d > face.tolerance {
         face.tolerance = new_zone_tol_3d;
     }
+    // the face's surface reads it through GetFace()
+    b.sync_face_surface_tolerance(f)?;
 
     // when asked - make sure Edge->VertexTols at least as big as thie EdgeTol
     if cascade_to_boundaries {
@@ -791,6 +793,8 @@ pub fn create_uv_trim_curves(
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
         rescue.restore(s);
     }
+    // the face's tolerance may have changed while the surface had no owner
+    b.sync_face_surface_tolerance(f)?;
     result
 }
 

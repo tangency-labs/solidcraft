@@ -339,8 +339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_tight_edges_faces",
@@ -351,8 +351,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_tight_box",
@@ -363,8 +363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_lock_then_query",
@@ -375,8 +375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_lock_tight_relock",
@@ -411,8 +411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_rebuilt_tight_edges_faces",
@@ -423,8 +423,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_rebuilt_tight_box",
@@ -435,8 +435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_rebuilt_lock_then_query",
@@ -447,8 +447,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "endcap_rebuilt_lock_tight_relock",
@@ -930,52 +930,36 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_tight_edges_faces",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#59 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_tight_box",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#60 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_lock_then_query",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#61 (upstream source/SMLib/inc/SmBrep.h:1640)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_lock_tight_relock",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#62 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1002,52 +986,36 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuilt_tight_edges_faces",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#66 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuilt_tight_box",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#67 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuilt_lock_then_query",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#68 (upstream source/SMLib/inc/SmBrep.h:1640)",
-      "values_compared": 0
+      "values_compared": 30
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_rebuilt_lock_tight_relock",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/box.json#69 (upstream source/SMLib/src/SmBrep.cpp:1009)",
-      "values_compared": 0
+      "values_compared": 25
     },
     {
       "max_rel_err": 0.0,
@@ -1835,8 +1803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "endcap_face_mid_bnd",
@@ -1854,16 +1822,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "endcap_face_mid_off_bnd",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#6 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -1875,8 +1839,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "endcap_face_corner_bnd",
@@ -1910,16 +1874,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "endcap_origin_bnd",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#12 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -2299,8 +2259,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "disk_face_mid_bnd",
@@ -2415,8 +2375,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_face_mid_bnd",
@@ -2434,16 +2394,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_face_mid_off_bnd",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#62 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -2455,8 +2411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_face_corner_bnd",
@@ -2490,16 +2446,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2_origin_bnd",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#68 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -2543,8 +2495,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_face_mid_bnd",
@@ -2579,8 +2531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_face_corner_bnd",
@@ -2615,8 +2567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_circ_origin_bnd",
@@ -2667,8 +2619,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_face_mid_bnd",
@@ -2735,8 +2687,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_origin_bnd",
@@ -3594,28 +3546,20 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vertex_off_tol0.0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#182 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square_vertex_off_tol1e-10",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/query.brep/classify.json#183 (upstream source/SMLib/src/SmBrep.cpp:24687)",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -3723,8 +3667,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_unit_on_face_bnd",
@@ -3811,8 +3755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_unit_face_point_bnd",
@@ -3923,8 +3867,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_moved_on_face_bnd",
@@ -4011,8 +3955,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_moved_face_point_bnd",
@@ -4123,8 +4067,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_tiny_on_face_bnd",
@@ -4147,8 +4091,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_tiny_near_face_in_bnd",
@@ -4211,8 +4155,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_tiny_face_point_bnd",
@@ -4323,8 +4267,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_large_on_face_bnd",
@@ -4411,8 +4355,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "box_large_face_point_bnd",
@@ -4595,8 +4539,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "plane_square_point_tiny_bnd",
@@ -5434,16 +5378,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0011",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904880589",
-      "values_compared": 0
+      "values_compared": 15
     },
     {
       "max_rel_err": 0.0,
@@ -5495,8 +5435,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0018",
@@ -6163,8 +6103,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0098",
@@ -6419,8 +6359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0128",
@@ -6631,8 +6571,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0154",
@@ -6906,16 +6846,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0186",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904880764",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "deferred": {
@@ -7327,8 +7263,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0237",
@@ -7543,8 +7479,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0263",
@@ -7595,8 +7531,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0269",
@@ -7819,8 +7755,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0295",
@@ -8083,8 +8019,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0327",
@@ -8183,8 +8119,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
+        "unit": "geom.tol"
       },
       "max_rel_err": 0.0,
       "name": "gen0339",
@@ -8210,16 +8146,12 @@
       "values_compared": 38
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0342",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904880920",
-      "values_compared": 0
+      "values_compared": 13
     },
     {
       "max_rel_err": 0.0,
@@ -8567,8 +8499,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0385",
@@ -8670,16 +8602,12 @@
       "values_compared": 15
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0397",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904880975",
-      "values_compared": 0
+      "values_compared": 37
     },
     {
       "max_rel_err": 0.0,
@@ -8755,8 +8683,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0407",
@@ -9586,16 +9514,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0508",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904881086",
-      "values_compared": 0
+      "values_compared": 8
     },
     {
       "max_rel_err": 0.0,
@@ -9738,16 +9662,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0526",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904881104",
-      "values_compared": 0
+      "values_compared": 42
     },
     {
       "max_rel_err": 0.0,
@@ -9935,8 +9855,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0549",
@@ -10115,8 +10035,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmSurface::DropCurve",
+        "unit": "intersect.surface_drop_lib_p3"
       },
       "max_rel_err": 0.0,
       "name": "gen0571",
@@ -10291,8 +10211,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmTol::GetZoneTol3d(const SmObject*)",
-        "unit": "geom.tol"
+        "symbol": "SmFace handle of a surface's face",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "gen0592",
@@ -10342,16 +10262,12 @@
       "values_compared": 34
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0598",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=7989681234904881176",
-      "values_compared": 0
+      "values_compared": 44
     },
     {
       "deferred": {
@@ -10367,17 +10283,18 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 247,
+  "cases_deferred": 226,
   "cases_failed": 0,
-  "cases_passed": 925,
+  "cases_passed": 946,
   "cases_total": 1172,
   "deferred_by_unit": {
-    "geom.tol": 74,
+    "geom.tol": 61,
     "harness:analytic-geometry-export": 20,
+    "intersect.surface_drop_lib_p3": 18,
     "surface.cone_p1": 49,
     "surface.sphere": 18,
     "surface.surf_of_extrusion_p2": 41,
-    "topology.face_p2": 45
+    "topology.face_p2": 19
   },
   "max_rel_err": 0.0,
   "pass": true,

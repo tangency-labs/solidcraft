@@ -2615,7 +2615,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#66 (upstream review adversarial)",
-      "values_compared": 2
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -3055,7 +3055,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#121 (upstream review adversarial)",
-      "values_compared": 2
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -3495,7 +3495,7 @@
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.cone_p1/review.json#176 (upstream review adversarial)",
-      "values_compared": 2
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,

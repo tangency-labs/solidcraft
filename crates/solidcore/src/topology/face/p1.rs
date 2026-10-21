@@ -915,6 +915,8 @@ pub fn set_surface(
     face.uv_domain = surface.natural_uv_domain();
     surface.set_owner(Some(this));
     face.surface = Some(surface);
+    // the surface reads the face's tolerance through GetFace()
+    b.sync_face_surface_tolerance(f)?;
     Ok(old)
 }
 
@@ -1393,6 +1395,9 @@ pub fn move_seam<O: LoopObject>(
     let zone_tol = crate::surface::surface::p1::zone_tol_3d(k, surface0)?;
     let mut surface = surface0.clone();
     *surface.owner_mut() = surface0.owner();
+    // the copy reaches the same face, so it carries the face tolerance cached on the
+    // original (a B-spline kind: no owned bases)
+    surface.set_owner_zone_tol_3d(surface0.owner_zone_tol_3d());
 
     let crosses_u = match props {
         Some(p) => names(p.bad_crossed_seam_dir, Sp::U),

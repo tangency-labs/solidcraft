@@ -315,8 +315,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f1_op9",
@@ -598,16 +598,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#69 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -694,16 +690,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Mouse.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#80 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -1471,8 +1463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "Endcap.smb_0_f1_op9",
@@ -1790,16 +1782,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#201 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -1898,16 +1886,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "Endcap.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#212 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -2723,8 +2707,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f1_op9",
@@ -3006,16 +2990,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#333 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3102,16 +3082,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "box_with_large_fillet.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#344 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -3855,8 +3831,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f1_op9",
@@ -4138,16 +4114,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#465 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4234,16 +4206,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "cone.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#476 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -4986,16 +4954,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#564 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -5270,16 +5234,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#597 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -5366,16 +5326,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "disk.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#608 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6119,8 +6075,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f1_op9",
@@ -6402,16 +6358,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#729 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -6498,16 +6450,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "ellips_ts2.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#740 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7250,16 +7198,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#828 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7534,16 +7478,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#861 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -7630,16 +7570,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_circ.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#872 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8382,16 +8318,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#960 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8666,16 +8598,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#993 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -8762,16 +8690,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "plane_square.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1004 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9515,8 +9439,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f1_op9",
@@ -9798,16 +9722,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1125 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -9894,16 +9814,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "sphere.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1136 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10646,16 +10562,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1224 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -10930,16 +10842,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1257 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -11026,16 +10934,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_extrude.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1268 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -11778,16 +11682,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1356 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12062,16 +11962,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1389 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12158,16 +12054,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_rev.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1400 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -12911,8 +12803,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f1_op9",
@@ -13194,16 +13086,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1521 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -13290,16 +13178,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "surf_sphere150.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1532 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -14043,8 +13927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f1_op9",
@@ -14326,16 +14210,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1653 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -14422,16 +14302,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "torus.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1664 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -15174,16 +15050,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f1_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1752 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -15458,16 +15330,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1785 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -15554,16 +15422,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "toruswvy.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1796 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -16307,8 +16171,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f1_op9",
@@ -16590,16 +16454,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f4_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1917 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -16686,16 +16546,12 @@
       "values_compared": 10
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "vase_rev.smb_0_f5_op9",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: systematic cases#1928 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17463,8 +17319,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p3_f0_0",
@@ -17483,8 +17339,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p3_f1_0",
@@ -17503,8 +17359,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p3_f2_0",
@@ -17523,8 +17379,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p3_f3_0",
@@ -17542,16 +17398,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p4_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2028 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17562,16 +17414,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p4_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2030 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17582,16 +17430,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p4_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2032 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17602,16 +17446,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p4_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2034 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17623,8 +17463,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p5_f0_0",
@@ -17643,8 +17483,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p5_f1_0",
@@ -17663,8 +17503,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p5_f2_0",
@@ -17683,8 +17523,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p5_f3_0",
@@ -17702,16 +17542,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p6_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2044 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17722,16 +17558,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p6_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2046 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17742,16 +17574,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p6_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2048 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17762,16 +17590,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_sphere.smb_p6_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2050 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17974,16 +17798,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p3_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2076 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -17994,16 +17814,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p3_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2078 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18014,16 +17830,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p3_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2080 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18034,16 +17846,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p3_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2082 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18054,16 +17862,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p4_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2084 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18074,16 +17878,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p4_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2086 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18094,16 +17894,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p4_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2088 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18114,16 +17910,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p4_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2090 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18135,8 +17927,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p5_f0_0",
@@ -18155,8 +17947,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p5_f1_0",
@@ -18175,8 +17967,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p5_f2_0",
@@ -18195,8 +17987,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p5_f3_0",
@@ -18214,16 +18006,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p6_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2100 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18234,16 +18022,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p6_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2102 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18254,16 +18038,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p6_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2104 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18274,16 +18054,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_torus.smb_p6_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2106 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18486,16 +18262,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p3_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2132 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18506,16 +18278,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p3_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2134 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18526,16 +18294,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p3_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2136 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18546,16 +18310,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p3_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2138 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18566,16 +18326,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p4_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2140 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18586,16 +18342,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p4_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2142 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18606,16 +18358,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p4_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2144 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18626,16 +18374,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p4_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2146 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18647,8 +18391,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p5_f0_0",
@@ -18667,8 +18411,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p5_f1_0",
@@ -18687,8 +18431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p5_f2_0",
@@ -18707,8 +18451,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p5_f3_0",
@@ -18726,16 +18470,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p6_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2156 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18746,16 +18486,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p6_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2158 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18766,16 +18502,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p6_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2160 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18786,16 +18518,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_cone.smb_p6_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2162 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -18998,16 +18726,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p3_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2188 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19018,16 +18742,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p3_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2190 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19038,16 +18758,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p3_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2192 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19058,16 +18774,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p3_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2194 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19078,16 +18790,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p4_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2196 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19098,16 +18806,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p4_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2198 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19118,16 +18822,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p4_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2200 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19138,16 +18838,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p4_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2202 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19158,16 +18854,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p5_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2204 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19178,16 +18870,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p5_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2206 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19198,16 +18886,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p5_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2208 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19218,16 +18902,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p5_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2210 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19238,16 +18918,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p6_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2212 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19258,16 +18934,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p6_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2214 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19278,16 +18950,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p6_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2216 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19298,16 +18966,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_surf_rev.smb_p6_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2218 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19510,16 +19174,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p3_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2244 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19530,16 +19190,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p3_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2246 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19550,16 +19206,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p3_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2248 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19570,16 +19222,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p3_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2250 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19590,16 +19238,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p4_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2252 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19610,16 +19254,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p4_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2254 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19630,16 +19270,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p4_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2256 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19650,16 +19286,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p4_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2258 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19671,8 +19303,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p5_f0_0",
@@ -19691,8 +19323,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p5_f1_0",
@@ -19711,8 +19343,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p5_f2_0",
@@ -19731,8 +19363,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::Notify",
+        "unit": "topology.face_p3"
       },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p5_f3_0",
@@ -19750,16 +19382,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p6_f0_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2268 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19770,16 +19398,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p6_f1_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2270 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19790,16 +19414,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p6_f2_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2272 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -19810,16 +19430,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "seam_vase_rev.smb_p6_f3_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:built-in: seam cases#2274 (upstream tests/prog_test (the pt_TestFiles B-reps))",
-      "values_compared": 0
+      "values_compared": 7
     },
     {
       "max_rel_err": 0.0,
@@ -20263,15 +19879,14 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 441,
+  "cases_deferred": 345,
   "cases_failed": 0,
-  "cases_passed": 1871,
+  "cases_passed": 1967,
   "cases_total": 2312,
   "deferred_by_unit": {
     "cpp-crash-guard:UB-137": 98,
     "intersect.surface_drop_lib_p3": 38,
-    "topology.face_p2": 125,
-    "topology.face_p3": 180
+    "topology.face_p3": 209
   },
   "max_rel_err": 0.0,
   "pass": true,

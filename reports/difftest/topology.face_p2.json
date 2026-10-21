@@ -469,8 +469,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "points_file_Mouse.smb_2",
@@ -616,8 +616,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "points_file_ellips_ts2.smb_0",
@@ -628,8 +628,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "points_file_ellips_ts2.smb_1",
@@ -640,8 +640,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "points_file_ellips_ts2.smb_2",
@@ -7794,76 +7794,52 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#942 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#943 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#944 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#945 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#946 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_box_with_large_fillet.smb_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#947 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "both_errored": true,
@@ -7920,28 +7896,20 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_disk.smb_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#954 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_disk.smb_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#955 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -7960,112 +7928,76 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_disk.smb_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#958 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_disk.smb_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#959 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#960 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 275
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#961 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 752
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#962 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 902
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#963 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 482
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#964 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 962
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_ellips_ts2.smb_5",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#965 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 1577
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_circ.smb_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#966 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -8076,16 +8008,12 @@
       "values_compared": 110
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_circ.smb_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#968 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -8096,16 +8024,12 @@
       "values_compared": 110
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_circ.smb_4",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#970 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -8116,52 +8040,36 @@
       "values_compared": 110
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_square.smb_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#972 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_square.smb_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#973 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_square.smb_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#974 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "fix_file_plane_square.smb_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#975 (upstream sm_FixUVTrimCurves on upstream B-reps)",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -9628,244 +9536,164 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1138 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1139 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1140 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1141 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_box_side_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1142 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_box_side_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1143 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_box_side_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1144 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_box_side_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1145 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_tilted_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1146 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_tilted_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1147 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_tilted_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1148 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_plane_tilted_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1149 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1150 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1151 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1152 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1153 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_sub_0",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1154 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_sub_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1155 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_sub_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1156 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "connected_bss_sub_3",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/topology.face_p2/upstream.json#1157 (upstream sm_AreConnected (called by SmFace::ComputeLoopOrientation))",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10045,8 +9873,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0003",
@@ -10122,8 +9950,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "gen0011",
@@ -10191,16 +10019,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00003",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -10246,8 +10070,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00009",
@@ -10321,8 +10145,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00017",
@@ -10492,16 +10316,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00036",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "deferred": {
@@ -10704,8 +10524,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00059",
@@ -10763,16 +10583,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00066",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -10969,16 +10785,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00088",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -11051,16 +10863,12 @@
       "values_compared": 16
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00097",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -11640,16 +11448,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00164",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 142
     },
     {
       "max_rel_err": 0.0,
@@ -11704,8 +11508,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00171",
@@ -11755,16 +11559,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00177",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -11846,21 +11646,17 @@
       "values_compared": 14
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00187",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00188",
@@ -12010,16 +11806,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00206",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -12222,16 +12014,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00230",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -12371,28 +12159,20 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00246",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00247",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -12797,8 +12577,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00293",
@@ -12922,8 +12702,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00308",
@@ -13132,8 +12912,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00331",
@@ -13303,8 +13083,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00350",
@@ -13725,16 +13505,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00399",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -13761,16 +13537,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00403",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14223,16 +13995,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00457",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -14276,16 +14044,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00462",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14405,16 +14169,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00477",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -14531,16 +14291,12 @@
       "values_compared": 60
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00492",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -14777,16 +14533,12 @@
       "values_compared": 19
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00520",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15079,16 +14831,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00554",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -15100,8 +14848,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00556",
@@ -15184,8 +14932,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00565",
@@ -15219,16 +14967,12 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00569",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "max_rel_err": 0.0,
@@ -15248,8 +14992,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00572",
@@ -15272,8 +15016,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00574",
@@ -15833,16 +15577,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00640",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -15874,16 +15614,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00644",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -15926,16 +15662,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00650",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 60
     },
     {
       "max_rel_err": 0.0,
@@ -15946,16 +15678,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00652",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 110
     },
     {
       "both_errored": true,
@@ -16251,16 +15979,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00687",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -16370,16 +16094,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00701",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "deferred": {
@@ -16394,21 +16114,17 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00703",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00704",
@@ -16470,8 +16186,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00711",
@@ -16507,8 +16223,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00715",
@@ -16981,16 +16697,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00768",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17021,16 +16733,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00772",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17091,16 +16799,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00780",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -17394,16 +17098,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00814",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17664,8 +17364,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00845",
@@ -17699,28 +17399,20 @@
       "values_compared": 4
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00849",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00850",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -17939,8 +17631,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00876",
@@ -17996,28 +17688,20 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00882",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00883",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 1245
     },
     {
       "max_rel_err": 0.0,
@@ -18088,16 +17772,12 @@
       "values_compared": 6
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00892",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -18177,8 +17857,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00902",
@@ -18213,8 +17893,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra00906",
@@ -18366,8 +18046,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra00924",
@@ -19004,16 +18684,12 @@
       "values_compared": 397
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra00999",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19024,16 +18700,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01001",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19069,8 +18741,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01006",
@@ -19149,16 +18821,12 @@
       "values_compared": 64
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01015",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -19237,16 +18905,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01025",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19588,16 +19252,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01064",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19678,16 +19338,12 @@
       "values_compared": 391
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01074",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -19801,8 +19457,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra01088",
@@ -20087,16 +19743,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01121",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -20151,16 +19803,12 @@
       "values_compared": 351
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01128",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -20312,8 +19960,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra01146",
@@ -20552,8 +20200,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01174",
@@ -20628,16 +20276,12 @@
       "values_compared": 9
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01183",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -20789,8 +20433,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmFace::PointClassify",
+        "unit": "query.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "extra01201",
@@ -20829,16 +20473,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01205",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 64
     },
     {
       "max_rel_err": 0.0,
@@ -20890,16 +20530,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01212",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -20964,16 +20600,12 @@
       "values_compared": 124
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01220",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -21150,8 +20782,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01240",
@@ -21186,8 +20818,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01244",
@@ -21330,8 +20962,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01261",
@@ -21389,16 +21021,12 @@
       "values_compared": 1
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01268",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -21457,16 +21085,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01275",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -21602,8 +21226,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
+        "symbol": "SmEdge::GetCurve",
+        "unit": "topology.edge"
       },
       "max_rel_err": 0.0,
       "name": "extra01292",
@@ -21816,16 +21440,12 @@
       "values_compared": 3
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01316",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -21970,16 +21590,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01334",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -22060,16 +21676,12 @@
       "values_compared": 44
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01344",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -22238,16 +21850,12 @@
       "values_compared": 11
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01364",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -22736,16 +22344,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01419",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 58
     },
     {
       "max_rel_err": 0.0,
@@ -22918,16 +22522,12 @@
       "values_compared": 0
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01440",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "max_rel_err": 0.0,
@@ -23066,16 +22666,12 @@
       "values_compared": 5
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01457",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "both_errored": true,
@@ -23159,16 +22755,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "extra01468",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=4207804418",
-      "values_compared": 0
+      "values_compared": 3
     },
     {
       "deferred": {
@@ -23448,18 +23040,17 @@
     }
   ],
   "cases_both_errored": 353,
-  "cases_deferred": 389,
+  "cases_deferred": 287,
   "cases_failed": 0,
-  "cases_passed": 2303,
+  "cases_passed": 2405,
   "cases_total": 2692,
   "deferred_by_unit": {
     "curve.crv_on_surf": 117,
     "intersect.curve_class_p2": 7,
     "intersect.surface_drop_lib_p3": 93,
     "query.face_p1": 18,
-    "query.face_p2": 14,
-    "topology.edge": 2,
-    "topology.face_p2": 138
+    "query.face_p2": 23,
+    "topology.edge": 29
   },
   "max_rel_err": 0.0,
   "pass": true,

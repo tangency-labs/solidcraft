@@ -426,6 +426,9 @@ impl Pool {
                         )));
                     }
                 }
+                // a new owner key drops the cached face tolerance: record it again
+                brep.sync_face_surface_tolerance(face)
+                    .map_err(|error| harness(&error))?;
             }
             breps.push(brep);
         }

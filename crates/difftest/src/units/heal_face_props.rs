@@ -463,7 +463,11 @@ pub(crate) fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), Harnes
         .map_err(e)?;
     b.shell_mut(shell).map_err(e)?.faces.push(face);
     let up = next_id!(b.faceuses(), FaceuseId);
-    let down = next_id!(b.faceuses(), FaceuseId);
+    // the down face use is the record after the up one (both ids are taken before either
+    // record is added, so they cannot both come from the arena's length)
+    let down = FaceuseId::from_index(
+        u32::try_from(b.faceuses().len() + 1).map_err(|_| harness("too many records"))?,
+    );
     for (mate, orientation) in [(down, OrientType::Same), (up, OrientType::Opposite)] {
         b.add_faceuse_record(Faceuse {
             shell: Some(shell),

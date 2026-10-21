@@ -46,6 +46,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BoundingBoxRequest, LocationType};
+use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::Revolved;
@@ -288,22 +289,39 @@ impl Cone {
         other_domain: &Extent2d,
         approx_tol: Option<f64>,
     ) -> Result<(bool, SurfaceIntersection)> {
+        self.intersect_with_plane_owned(
+            k,
+            domain,
+            plane,
+            PlaneOwner::NoFace,
+            other_domain,
+            approx_tol,
+        )
+    }
+
+    /// [`Cone::intersect_with_plane`] with the plane's owner: its box is expanded by the
+    /// tolerance of the plane's face (`GetFace()->GetTolerance()`), else by
+    /// `SM_ZONE_TOL_3D`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Cone::intersect_with_plane`]; [`SolidError::Unported`]
+    /// (`SmFace::GetTolerance`) for a plane with a face whose tolerance is not cached.
+    pub(crate) fn intersect_with_plane_owned(
+        &self,
+        k: &Kernel,
+        domain: &Extent2d,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
+        other_domain: &Extent2d,
+        approx_tol: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT, |t| approx_tol3d(k, t));
         let box1 = bbox(k, self, domain)?;
-        let mut box2 = plane
-            .base_with_nurb()?
-            .calculate_bounding_box(
-                k,
-                other_domain,
-                &BoundingBoxRequest {
-                    normal: true,
-                    expand_by_zone_tol: true,
-                    ..BoundingBoxRequest::default()
-                },
-            )?
-            .normal
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        // crPlane.CalculateBoundingBox: expanded by its face's tolerance (no face:
+        // SM_ZONE_TOL_3D)
+        let mut box2 = plane.bounding_boxes(k, other_domain, plane_owner)?.0;
         box2.expand_absolute(tol);
         if box1.are_disjoint(&box2, 0.0) {
             return Ok((false, out));

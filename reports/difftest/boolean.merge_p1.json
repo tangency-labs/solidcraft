@@ -522,16 +522,12 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "cleanup_plane_0_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#65 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -550,28 +546,20 @@
       "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "cleanup_plane_1_1",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#68 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "cleanup_plane_1_2",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/boolean.merge_p1/helpers.json#69 (upstream tests/prog_test/src/smTopoTest.cpp:4665)",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1538,16 +1526,12 @@
       "values_compared": 58
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0027",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314536",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -1630,16 +1614,12 @@
       "values_compared": 23
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0038",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314547",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -2010,16 +1990,12 @@
       "values_compared": 20
     },
     {
-      "deferred": {
-        "symbol": "SmFace::GetTolerance",
-        "unit": "topology.face_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0084",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=5645105664643314593",
-      "values_compared": 0
+      "values_compared": 49
     },
     {
       "max_rel_err": 0.0,
@@ -2111,16 +2087,15 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 31,
+  "cases_deferred": 25,
   "cases_failed": 0,
-  "cases_passed": 217,
+  "cases_passed": 223,
   "cases_total": 248,
   "deferred_by_unit": {
     "boolean.topology_intersector_p3": 4,
     "harness:analytic-geometry-export": 1,
     "intersect.surface_drop_lib_p3": 18,
-    "topology.brep_p5": 2,
-    "topology.face_p2": 6
+    "topology.brep_p5": 2
   },
   "max_rel_err": 0.0,
   "pass": true,

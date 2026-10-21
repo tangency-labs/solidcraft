@@ -937,11 +937,31 @@ impl Brep {
     }
 
     /// Appends a face record as is (no validation; the shell's face list is not
-    /// touched); the face joins the end of the B-rep's face list.
+    /// touched); the face joins the end of the B-rep's face list, and its surface
+    /// records the face's tolerance ([`Brep::sync_face_surface_tolerance`]).
     pub fn add_face_record(&mut self, face: Face) -> Result<FaceId> {
         let id = self.faces.insert(face)?;
         self.face_list.push(id);
+        self.sync_face_surface_tolerance(id)?;
         Ok(id)
+    }
+
+    /// Records the face's tolerance on its surface
+    /// ([`Surface::set_owner_zone_tol_3d`](crate::surface::surface::Surface::set_owner_zone_tol_3d)),
+    /// so the surface's `GetFace()->GetTolerance()` reads it: the B-rep invariant that a
+    /// face record's surface carries that record's `tolerance`. A surface reaching no
+    /// face records nothing. Called wherever a face's surface or tolerance changes.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id.
+    pub fn sync_face_surface_tolerance(&mut self, f: FaceId) -> Result<()> {
+        let face = self.face_mut(f)?;
+        let tol = face.tolerance;
+        if let Some(surface) = face.surface.as_mut() {
+            surface.set_owner_zone_tol_3d(Some(tol));
+        }
+        Ok(())
     }
 
     /// Appends a loop record as is (no validation; the face's loop list is not

@@ -279,6 +279,7 @@ fn surface_is_planar(k: &Kernel, b: &Brep, f: FaceId, s: &Surface, tol_3d: f64) 
             pseudo_guess: None,
             polar_guess: None,
             expand_by_zone_tol: false,
+            expand_tolerance: None,
         };
         let pseudo = ignored(bs.calculate_bounding_box(k, &s.natural_uv_domain(), &req))?
             .and_then(|r| r.pseudo)

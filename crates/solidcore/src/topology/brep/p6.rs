@@ -261,7 +261,8 @@ fn set_surface_owner(
     if let Some(surface) = brep.face_mut(face)?.surface.as_mut() {
         surface.set_owner(owner);
     }
-    Ok(())
+    // the surface reads the face's tolerance through GetFace() once it is owned again
+    brep.sync_face_surface_tolerance(face)
 }
 
 // `delete pShell` of an emptied shell: `~SmShell` notifies `SM_NO_DESTRUCTION`

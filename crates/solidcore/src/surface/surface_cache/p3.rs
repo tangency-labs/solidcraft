@@ -169,6 +169,7 @@ fn patch_boxes(
         pseudo_guess,
         polar_guess: None,
         expand_by_zone_tol: false,
+        expand_tolerance: None,
     };
     let boxes = bss.calculate_bounding_box(k, &bss.natural_uv_domain(), &req)?;
     let mut bbox = boxes.normal.ok_or_else(|| invalid(op, "no bounding box"))?;

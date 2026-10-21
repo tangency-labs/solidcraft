@@ -61,7 +61,8 @@
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's
-//!   surface (`SmFace::GetTolerance`, `topology.face_p2`), `GlobalPointSolve_1`
+//!   surface whose B-rep has not cached it on the surface ([`Surface::owner_zone_tol_3d`];
+//!   `SmFace::GetTolerance`, `topology.face_p2`), `GlobalPointSolve_1`
 //!   (`surface.surface_point_solve_p3`), the trim containment of a face's surface
 //!   (`SmFace::PointClassify`, `query.face_p2`) and the edge and face tolerances of owned
 //!   curves and surfaces (`topology.edge`, `topology.face_p2`).
@@ -1741,12 +1742,12 @@ pub fn classify_curve_surface_xsect_point(
         curve_tol = curve_radius / 1000.0;
     }
     if surface.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
-        // UNPORTED(topology.face_p2): SmFace::GetTolerance
-        let _ = surface_tol;
-        return Err(SolidError::unported(
-            "SmFace::GetTolerance",
-            "topology.face_p2",
-        ));
+        // pSurfaceOwner->GetTolerance(): the direct owner is the face, so the face the
+        // surface reaches; its tolerance as cached by the B-rep
+        surface_tol = surface.owner_zone_tol_3d().ok_or(
+            // UNPORTED(topology.face_p2): SmFace::GetTolerance (a bare face handle)
+            SolidError::unported("SmFace::GetTolerance", "topology.face_p2"),
+        )?;
     } else if !surface_line {
         surface_tol = surface_radius / 1000.0;
     }

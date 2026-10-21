@@ -10,7 +10,8 @@
 //! optional `face` (a one-face B-rep built with `SmBrepConstructor` as in unit
 //! `heal.face_props`: a plane or `SmSurfOfRevolution::CreateCanonical` surface, cylinder or
 //! sphere among them, with a vertex loop or edge loops of line edges; rebuilt record by record
-//! on the Rust side by `heal_face_props::rust_brep`) whose face, loops, edges, vertices and edge
+//! on the Rust side by `heal_face_props::rust_brep` plus its down face use's side,
+//! `heal_face_props::add_down_side`) whose face, loops, edges, vertices and edge
 //! uses join the pool after the objects, and `ops` on two default classifications `cc[0]`,
 //! `cc[1]`: the setters of unit `intersect.curve_class_p1` build them (intervals, boundary
 //! classifications on the face's edges and vertices, the classification curve, face and
@@ -775,7 +776,10 @@ fn build_pool(k: &Kernel, s: &Script) -> Result<Pool, HarnessError> {
         pool.handles.push(H::Obj(i, class_kind_of(obj_kind(o))));
     }
     if let Some(face) = &s.face {
-        let (b, f) = face_brep(k, face)?;
+        let (mut b, f) = face_brep(k, face)?;
+        // the down face use's loops, so that edge mates (an edge's end vertex, the end edge
+        // use of a vertex use's UV sector) exist as upstream
+        hfp::add_down_side(&mut b, f)?;
         for (e, _) in topology_entities(&b, f)? {
             pool.handles.push(H::Topo(e));
         }
