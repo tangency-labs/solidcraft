@@ -413,17 +413,14 @@ struct Model
         return true;
     }
 
-    // The vertex calculator of an unported unit (part 5): it reads corner and executive data
-    // the shim does not build.
-    static bool other_unit_vertex(SmFilletVertexType t) { return t == SM_FV_FILLET_X_FILLET; }
-
-    // The vertex calculators of parts 2 and 4 (ported, called by the dispatcher). Each asks
+    // The vertex calculators of parts 2, 4 and 5 (ported, called by the dispatcher). Each asks
     // the vertex's corner for its filleted vertex, which the shim's corners do not have, so
     // they run only on vertices without a corner, as in the shims of those units.
     static bool ported_unit_vertex(SmFilletVertexType t)
     {
         switch (t)
         {
+        case SM_FV_FILLET_X_FILLET:
         case SM_FV_RAIL_X_RAIL:
         case SM_FV_RAIL_X_EDGEUSE:
         case SM_FV_RAIL_X_EXTENDED_EDGEUSE:
@@ -434,9 +431,12 @@ struct Model
         }
     }
 
-    // The edge calculators of unported units (parts 5, 6), likewise. CalcRailRailInterpolation
-    // (part 2) runs: the shim's corners have no fillet edges, so its corner branch returns
-    // SM_ERR before it reads anything else of them.
+    // The edge calculators the dispatcher reaches with the edge's corner, which the shim's
+    // corners cannot serve: those of part 6 (unported) and CalcCrossSection,
+    // CalcFilletIntSideFace and CalcEdgeOnExtendedEdge (part 5, ported; its shim runs them only
+    // without a corner, and they read the corner's filleted vertex, type and patches).
+    // CalcRailRailInterpolation (part 2) runs: the shim's corners have no fillet edges, so its
+    // corner branch returns SM_ERR before it reads anything else of them.
     static bool other_unit_edge(SmFilletEdgeType t)
     {
         switch (t)
@@ -467,7 +467,7 @@ struct Model
         if (!as_mate && ported_unit_vertex(t))
             return v->GetFilletCorner() == NULL;
         if (!as_mate && t != SM_FV_MATE)
-            return !other_unit_vertex(t);
+            return true;
         if (seen.count(v) != 0)
             return false; // a cycle of mates recurses without end
         seen.insert(v);
@@ -512,8 +512,15 @@ struct Model
         SmFilletVertex* ve = (SmFilletVertex*)e->GetOtherVertex(vs);
         if (vs == NULL || ve == NULL)
             return false;
-        if (!vs->IsProcessed() || !ve->IsProcessed())
+        // an unprocessed end is computed by the vertex's CalcFilletIntFillet (part 5), which
+        // asks its corner for the filleted vertex: only on a vertex without a corner, as in
+        // that unit's shim (neither end processed returns SM_ERR first)
+        if (!vs->IsProcessed() && !ve->IsProcessed())
             return true;
+        if (!vs->IsProcessed())
+            return vs->GetFilletCorner() == NULL;
+        if (!ve->IsProcessed())
+            return ve->GetFilletCorner() == NULL;
         if (g1->GetFilletSolver() == NULL || g2->GetFilletSolver() == NULL)
             return false;
         if (g1->GetFilletSurface() == NULL || g2->GetFilletSurface() == NULL)

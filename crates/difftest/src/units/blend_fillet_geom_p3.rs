@@ -35,9 +35,7 @@ use solidcore::blend::fillet_geom::p1::{
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_geom::p3::new_solver_fillet_geom;
-use solidcore::blend::fillet_solver::p1::{
-    FilletSolver, FilletSolverOps, OffsetSurfaceSlot,
-};
+use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector2d::Point2;
@@ -1005,7 +1003,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .ok_or_else(|| harness("solver"))?;
             // the solver's own geometry (made by its constructor) is none of the model's
             if solver.solver().fillet_geoms.is_empty() {
-                solver.solver_mut().fillet_geoms.push(FilletGeomId(u32::MAX));
+                solver
+                    .solver_mut()
+                    .fillet_geoms
+                    .push(FilletGeomId(u32::MAX));
             }
             m.fb.re_calc_fillet_geom(
                 &k,
