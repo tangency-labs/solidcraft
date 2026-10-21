@@ -785,6 +785,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Primitive { cmd, fields, operation, at } => {
             for (k, v) in fields.iter_mut() {
+                if from_sketch && (*k == "diameter" || *k == "section_size") {
+                    continue;
+                }
                 enter |= expr_row(ui, k, v);
             }
             if *cmd == "solid.coil" {
