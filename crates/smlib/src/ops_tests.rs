@@ -240,3 +240,38 @@ fn boolean_history_through_tagged_operands() {
     // The 8 edges where the slot's walls and floor meet the top, front and back are new.
     assert_eq!(h.edges.iter().filter(|e| e.origins.is_empty()).count(), 8, "{h:?}");
 }
+
+/// `blend` gives each picked edge its own size: two parallel top edges of a 20 mm cube rounded at
+/// 2 and 3 lose (1 - pi/4) r^2 L each, chamfered r^2 L / 2 each; a chord of 2 sqrt 2 on a right
+/// angle is the round of radius 2.
+#[test]
+fn blends_take_a_size_per_edge() {
+    let c = cube(20.0);
+    let tops = [[10.0, 20.0, 20.0], [10.0, 0.0, 20.0]];
+    let q = 1.0 - std::f64::consts::FRAC_PI_4;
+    let r = c.blend(Blend::Round, &tops, &[2.0, 3.0], 0.1).unwrap();
+    shot(&r, "blend-round-2-3");
+    assert_close(volume(&r), 8000.0 - q * 13.0 * 20.0, 1e-6, "rounds 2 and 3");
+    let ch = c.blend(Blend::Chamfer, &tops, &[2.0, 3.0], 0.1).unwrap();
+    shot(&ch, "blend-chamfer-2-3");
+    assert_close(volume(&ch), 8000.0 - 0.5 * 13.0 * 20.0, 1e-6, "chamfers 2 and 3");
+    let chord = c.blend(Blend::Chord, &tops[..1], &[2.0 * 2f64.sqrt()], 0.1).unwrap();
+    assert_close(volume(&chord), 8000.0 - q * 4.0 * 20.0, 2e-6, "chord");
+    assert!(c.blend(Blend::Round, &tops, &[2.0], 0.1).is_err());
+}
+
+/// A radius running linearly from 3 to 1 along a cube edge: (1 - pi/4) L (r0² + r0 r1 + r1²) / 3
+/// taken away, whichever end is the start.
+#[test]
+fn a_variable_round_follows_its_law() {
+    let c = cube(20.0);
+    let q = 1.0 - std::f64::consts::FRAC_PI_4;
+    let knots = [0.0, 0.0, 1.0, 1.0];
+    let r = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[3.0, 1.0]).unwrap();
+    shot(&r, "variable-3-1");
+    assert_close(volume(&r), 8000.0 - q * 20.0 * 13.0 / 3.0, 1e-5, "linear law");
+    let back = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [20.0, 20.0, 20.0], 1, &knots, &[1.0, 3.0]).unwrap();
+    assert_close(volume(&back), volume(&r), 1e-7, "reversed");
+    assert!(c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.5, 1.0, 1.0], &[3.0, 1.0]).is_err());
+    assert!(matches!(c.fillet_variable([90.0, 90.0, 90.0], 0.1, [0.0; 3], 1, &knots, &[3.0, 1.0]), Err(Error::NoMatch { .. })));
+}

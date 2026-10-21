@@ -28,7 +28,7 @@ pub mod sweeps;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties};
-pub use ops::{BooleanOp, MAX_POINTS};
+pub use ops::{Blend, BooleanOp, MAX_POINTS};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
