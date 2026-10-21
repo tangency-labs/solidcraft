@@ -18,8 +18,10 @@ use std::sync::atomic::{AtomicI32, Ordering};
 mod check;
 mod ffi;
 pub mod history;
+mod measure;
 
 pub use check::{CheckLevel, CheckReport};
+pub use measure::{MEASURE_ACCURACY, MassProperties};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
