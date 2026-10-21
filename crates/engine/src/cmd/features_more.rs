@@ -52,20 +52,13 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let profile_mode = given("sketch");
     if profile_mode {
-        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"]
-            .into_iter()
-            .find(|k| given(k))
-        {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
             return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
         }
     } else if given("profiles") {
         return Err(bad(cmd, "`profiles` needs `sketch`"));
     }
-    let sketch = if profile_mode {
-        Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?))
-    } else {
-        None
-    };
+    let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
     let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
     let axis = axis_dir_param(p, cmd)?;

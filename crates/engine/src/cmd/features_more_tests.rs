@@ -1836,13 +1836,22 @@ fn a_sketch_coil_refuses_contradictory_parameters() {
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
-    for (k, v) in [("diameter", json!(40)), ("section_size", json!(2)), ("section", json!("square")), ("section_position", json!("outside")), ("start_angle", json!(0))] {
+    for (k, v) in [
+        ("diameter", json!(40)),
+        ("section_size", json!(2)),
+        ("section", json!("square")),
+        ("section_position", json!("outside")),
+        ("start_angle", json!(0)),
+    ] {
         let mut p = json!({"sketch": "Section", "revolutions": 3, "pitch": 8});
         p[k] = v;
         let e = s.execute("solid.coil", &p).unwrap_err().to_string();
         assert!(e.contains("does not apply with `sketch`"), "{k}: {e}");
     }
-    let e = s.execute("solid.coil", &json!({"profiles": "all", "diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 2})).unwrap_err().to_string();
+    let e = s
+        .execute("solid.coil", &json!({"profiles": "all", "diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 2}))
+        .unwrap_err()
+        .to_string();
     assert!(e.contains("`profiles` needs `sketch`"), "{e}");
     let e = s.execute("solid.coil", &json!({"sketch": "Nope", "revolutions": 3, "pitch": 8})).unwrap_err().to_string();
     assert!(e.contains("no sketch `Nope`"), "{e}");
