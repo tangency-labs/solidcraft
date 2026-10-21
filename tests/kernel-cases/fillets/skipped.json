@@ -1,0 +1,1150 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4160",
+  "why": "sketch fillet of two 3D-sketch curves refused (\"a must be a line\"): 3D sketch, not solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4157",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4145",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4140",
+  "why": "private design: only the picks are recorded and the failure depends on picking order or on edges moved by an earlier edit (no geometry to rebuild)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4137",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4133",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4097",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4083",
+  "why": "private design: only the picks are recorded and the failure depends on picking order or on edges moved by an earlier edit (no geometry to rebuild)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4079",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: both ends touch the same face\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4076",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4066",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 3.5 mm is too large for this chamfer: the result changes 1732 mm\u00b3 of the part, more than the chamfer can (at most 328 mm\u00b3)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4047",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4034",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4027",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3982",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3971",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3943",
+  "why": "could not be reproduced on a plain rebuild (cylinder with a shaft; a 10 mm peg chamfers at 1 mm); the private design is needed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3910",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3854",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3853",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3763",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3747",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3746",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3739",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3735",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3721",
+  "why": "other area: shell (including the plastic lip on a shelled rim)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3694",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3686",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: degenerate rolling-ball spine\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3684",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the resampled spine (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3651",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend does not cross the edge between the end faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3644",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid parameters for `solid.chamfer`: no edge at [0.000000000000002136321436930869, -5.9999999999999885, -183]: the nearest edge is 258.940 mm away\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3630",
+  "why": "report without a reproducible description (picture only or several vague problems)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3611",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3606",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3587",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is taller than the walls\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3575",
+  "why": "private design: only the picks are recorded and the failure depends on picking order or on edges moved by an earlier edit (no geometry to rebuild)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3573",
+  "why": "other area: shell (including the plastic lip on a shelled rim)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3572",
+  "why": "report without a reproducible description (picture only or several vague problems)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3565",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3562",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend's end on its end face\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3561",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both); the largest radius that fits is 0.075 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3549",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3533",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3520",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid parameters for `sketch.fillet`: the lines must share a corner point\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3508",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3501",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the edge ends must be planar\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3493",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3468",
+  "why": "other area: shell (offset face next to a fillet)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3464",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both); the largest radius that fits is 1 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3462",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3454",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3445",
+  "why": "empty template: only a pick and a 20.5 mm distance are recorded, no description or error"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3442",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3436",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3418",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3401",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3398",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3392",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3377",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3370",
+  "why": "UI selection: the dialog's Tangent Chain picked up smooth seam edges and kept them when unticked; the geometry of the slot is case 3369"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3342",
+  "why": "documented limit of G2 fillets (curved or non-perpendicular ends are refused with a clear message): no closed form for the corner blend"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3333",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3317",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than a corner radius (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3284",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3282",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3233",
+  "why": "report without a reproducible description (picture only or several vague problems)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3180",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend uses up a neighbouring face with more edges\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3172",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3169",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3125",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 1 mm is too large for this chamfer: the result changes 77 mm\u00b3 of the part, more than the chamfer can (at most 22 mm\u00b3)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3119",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3115",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3091",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 20 mm is too large for this fillet: it runs past the faces beside the edge into other geometry; the largest radius that fits is 19.21 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3085",
+  "why": "other area: import (STEP geometry or crashes); the STEP fixture is not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3082",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: only straight edges\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3075",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3064",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 6 mm is too large for this fillet: it runs past the faces beside the edge into other geometry\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3062",
+  "why": "claim or fix PR whose repro design is not in the source (or could not be reproduced from the text): no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2986",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2983",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2976",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2972",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid input: the edge at [0.012, -28.000, 18.000] is smooth: the faces on either side meet tangentially there, so there is no corner to fillet; pick the sharp\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2971",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2966",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2921",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2874",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2822",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2800",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 5 mm is too large for this fillet: it runs past the faces beside the edge into other geometry; the largest radius that fits is 4.429 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2794",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: blending a loop with sharp corners next to arcs\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2784",
+  "why": "could not be reproduced on a plain rebuild (cylinder with a shaft; a 10 mm peg chamfers at 1 mm); the private design is needed"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2781",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 5.5 mm is too large for this chamfer: the result changes 2557 mm\u00b3 of the part, more than the chamfer can (at most 423 mm\u00b3)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2771",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is taller than the walls\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2711",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2706",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the edge ends must be perpendicular to the edge\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2704",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2703",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2699",
+  "why": "report without a reproducible description (picture only or several vague problems)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2695",
+  "why": "request that a chamfer too large clips instead of erroring (depends on a private design that could not be reproduced); the clipping behaviour is not defined"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2694",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is taller than the walls\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2692",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2690",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2686",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2663",
+  "why": "meta: roadmap, mutation coverage or fuzzer report, no single geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2654",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: only straight edges\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2653",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2593",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the edge ends must be planar\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2591",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2589",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid input: the edge at [6.000, 50.000, 4.000] is smooth: the faces on either side meet tangentially there, so there is no corner to chamfer; pick the sharp \" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2573",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2567",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2538",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2533",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2532",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2519",
+  "why": "empty report: the body was never filled in, no geometry or error recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2500",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid parameters for `sketch.fillet`: the radius is too large for that corner (it needs 5.000 mm of each line)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2477",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: chamfers ending at a concave corner\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2472",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2439",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a fillet larger than the faces next to it; the largest radius that fits is 50.82 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2422",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2420",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2408",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2394",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2383",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid input: the edge at [-165.794, 33.018, 10.000] is smooth: the faces on either side meet tangentially there, so there is no corner to chamfer; pick the sh\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2379",
+  "why": "auto-filed from a private design: only the pick points and the error \"invalid parameters for `sketch.fillet`: fillets and chamfers work on two lines\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2375",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the edge ends must be planar\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2320",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2318",
+  "why": "other area: import (STEP geometry or crashes); the STEP fixture is not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2301",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2296",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2269",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2245",
+  "why": "auto-filed from a private design: only the pick points and the error \"fillet: the rounds would leave openings in the surface (they overlap where a wall or a face is narrower than both)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2230",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: an end face almost along the edge\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2215",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: an end face almost along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2213",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2192",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2189",
+  "why": "auto-filed from a private design: only the pick points and the error \"curve blend: could not fit the rolling-ball surface within the accuracy and section limits\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2174",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2170",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2135",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2128",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2116",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a blend ending in an earlier round\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2083",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2081",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: seams on both sides of a corner of the edge chain (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2051",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2042",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2040",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1955",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces; the largest radius that fits is 4 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1951",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: 10 mm is too large for this chamfer: it runs past the faces beside the edge into other geometry; the largest size that fits is 7.5 mm\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1945",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1940",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: seams on both sides of a corner of the edge chain (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1933",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1876",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1875",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the ball doesn't fit along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1824",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1792",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: only straight edges\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1774",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1728",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is taller than the walls\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1719",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1692",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1691",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1690",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1617",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1597",
+  "why": "meta: roadmap, mutation coverage or fuzzer report, no single geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1573",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1572",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: each end of the edge must touch exactly one more face\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1553",
+  "why": "render interchange (glTF/Blender export), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1535",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1389",
+  "why": "auto-filed from a private design: only the pick points and the error \"curve blend: could not fit the rolling-ball surface within the accuracy and section limits (the operation failed: not supported yet: only straight edges can be \" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1384",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1370",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a curved seam where the edge chain turns (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1303",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a vertex of the edge chain where other faces meet (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1293",
+  "why": "no longer reproduces; the hinge knuckle cap circle is oracle case 63-hinge-knuckle"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1276",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1275",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1263",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1228",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1219",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1208",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1198",
+  "why": "other area: import (STEP export of fillet faces as B-splines)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1183",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1113",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1092",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1090",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1039",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: an end face almost along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1030",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1026",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1001",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#992",
+  "why": "auto-filed from a private design: only the pick points are recorded (no error text or description), no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#989",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: an end face almost along the edge (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#984",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a curved seam where the edge chain turns (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#903",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the blend is larger than the neighbouring faces\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#884",
+  "why": "fixture is a private design or STEP file not in the source (plate with window and block, battery case, clip frame)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#882",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#828",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: a curved seam where the edge chain turns (the operation failed: not supported yet: both faces next to the edge must be planar)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#827",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#818",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#796",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#775",
+  "why": "topological naming after a timeline edit (shell thickness changed): fillet picks follow, no solid geometry of its own"
+ },
+ {
+  "source": "tangency-labs/solidcraft#769",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#764",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#691",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: degenerate rolling-ball spine\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#612",
+  "why": "other area: import (STEP export of fillet faces as B-splines)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#493",
+  "why": "sketch attachment to cut walls and chamfer faces: sketch plane selection, not blend geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#438",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the ends of the edges must be square to them (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#431",
+  "why": "fixture is a private design or STEP file not in the source (plate with window and block, battery case, clip frame)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#397",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the ends of the edges must be square to them (the operation failed: not supported yet: only straight edges can be blended)\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#391",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#311",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#293",
+  "why": "feature: the fit option (reduce or taper a radius that is too large) and the suggested radius; the largest radius that fits at an exactly consumed face is a design choice, and the taper law has reference cases in tests/oracle/77-81"
+ },
+ {
+  "source": "tangency-labs/solidcraft#215",
+  "why": "auto-filed from a private design: only the pick points and the error \"not supported yet: the faces at the edge ends must be perpendicular to the edge\" are recorded, no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#68",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#58",
+  "why": "saddle fillet between two cylinders: volume, area and counts are right and the defect is a 0.05 mm surface deviation from the rolling-ball envelope: needs a surface-deviation grading field the rig lacks (tests/oracle/35 holds the geometry)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#52",
+  "why": "feature request or closed feature PR: setback corner patch / bounded endpoint patches for three unequal radii or a lofted basin; no closed form, fixture not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#46",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#29",
+  "why": "other area: shell (including the plastic lip on a shelled rim)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#15",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#10",
+  "why": "meta: roadmap, mutation coverage or fuzzer report, no single geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#9",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4106",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3908",
+  "why": "claim or fix PR whose repro design is not in the source (or could not be reproduced from the text): no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3898",
+  "why": "other area: shell (offset face next to a fillet)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3864",
+  "why": "other area: import (STEP geometry or crashes); the STEP fixture is not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3860",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3842",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3716",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3576",
+  "why": "other area: shell (including the plastic lip on a shelled rim)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3552",
+  "why": "claim or fix PR whose repro design is not in the source (or could not be reproduced from the text): no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3548",
+  "why": "curved chain ending across two planar end faces (an L-shaped wall on a plate with slanted sides): fixture not described precisely enough to rebuild, no closed-form volume"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3465",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3437",
+  "why": "UI selection: the dialog's Tangent Chain picked up smooth seam edges and kept them when unticked; the geometry of the slot is case 3369"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3400",
+  "why": "UI selection: the dialog's Tangent Chain picked up smooth seam edges and kept them when unticked; the geometry of the slot is case 3369"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3297",
+  "why": "claim or fix PR whose repro design is not in the source (or could not be reproduced from the text): no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3190",
+  "why": "curved chain ending across two planar end faces (an L-shaped wall on a plate with slanted sides): fixture not described precisely enough to rebuild, no closed-form volume"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3179",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3150",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3106",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2894",
+  "why": "right answer is a design choice (refuse, or cut through the faces) for chamfers wider than the faces they join: not gradeable without picking one"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2856",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2490",
+  "why": "chamfer of a straight lip at a tangent wall junction: the reconstruction file is not in the source and 20 mm slot, 60 mm extrusion and R60 cut are not enough to rebuild it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2488",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2487",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2485",
+  "why": "mitre between separately created bottom rounds plus the upright, R2, on a shelled 40 x 80 x 27 box: the mitre pick is not given and no closed form; the same rounds-meeting-a-mitre geometry is case 1557"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2194",
+  "why": "claim or fix PR whose repro design is not in the source (or could not be reproduced from the text): no geometry to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2044",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2041",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2002",
+  "why": "feature: the fit option (reduce or taper a radius that is too large) and the suggested radius; the largest radius that fits at an exactly consumed face is a design choice, and the taper law has reference cases in tests/oracle/77-81"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1854",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1826",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1684",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1642",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1543",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1533",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1421",
+  "why": "other area: booleans"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1420",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1394",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1372",
+  "why": "chamfer chain ending at two existing bevels: only the removed volume (49.147) is quoted, the U-shaped part is not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1356",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1314",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1282",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1281",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1249",
+  "why": "surface modelling (surface.blend and surface fillets, class-A continuity): a different feature, no closed-form right answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1176",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1136",
+  "why": "feature request or closed feature PR: setback corner patch / bounded endpoint patches for three unequal radii or a lofted basin; no closed form, fixture not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1066",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#978",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#962",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#949",
+  "why": "fixture is a private design or STEP file not in the source (plate with window and block, battery case, clip frame)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#855",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#811",
+  "why": "other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#810",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#789",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#777",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#776",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#752",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#749",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#675",
+  "why": "variable, chord, tapered and spline-radius fillets: reference cases already exist in tests/oracle (77 to 81), and the setback corner type is a feature request"
+ },
+ {
+  "source": "tangency-labs/solidcraft#625",
+  "why": "sketch attachment to cut walls and chamfer faces: sketch plane selection, not blend geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#618",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#477",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#404",
+  "why": "refactor, performance or bookkeeping change with no geometry of its own (error wording, a size type, an action-matrix baseline)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#388",
+  "why": "feature: the fit option (reduce or taper a radius that is too large) and the suggested radius; the largest radius that fits at an exactly consumed face is a design choice, and the taper law has reference cases in tests/oracle/77-81"
+ },
+ {
+  "source": "tangency-labs/solidcraft#362",
+  "why": "fillets/chamfers ending at angled faces and sloped pocket rims (#215, tapered pockets): fixtures are not in the source and the removed volume has no simple closed form"
+ },
+ {
+  "source": "tangency-labs/solidcraft#132",
+  "why": "feature request or closed feature PR: setback corner patch / bounded endpoint patches for three unequal radii or a lofted basin; no closed form, fixture not in the source"
+ },
+ {
+  "source": "tangency-labs/solidcraft#121",
+  "why": "sketch fillet/chamfer (2D sketch editing, constraints and dimensions), not a solid.fillet or solid.chamfer operation: no solid geometry to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#109",
+  "why": "UI only: manipulators, previews, labels, navigation, dialogs or units, no solid geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#108",
+  "why": "fillets/chamfers ending at angled faces and sloped pocket rims (#215, tapered pockets): fixtures are not in the source and the removed volume has no simple closed form"
+ },
+ {
+  "source": "tangency-labs/solidcraft#102",
+  "why": "fillets/chamfers ending at angled faces and sloped pocket rims (#215, tapered pockets): fixtures are not in the source and the removed volume has no simple closed form"
+ }
+]
