@@ -290,7 +290,7 @@ pub fn make_curve_cache<O: Copy + PartialEq>(
     // get an Idea of the curve's size.
     let length = curve.approximate_length(k, &ivl, 5, false)?.0;
     // (int arithmetic: GetNumberNaturalKnots() - 1, then 30 * NumberOfSpans)
-    let number_of_spans = curve.number_natural_knots()? as i64 - 1;
+    let number_of_spans = curve.number_natural_knots(k)? as i64 - 1;
     let chord_factor = 250.min(30 * number_of_spans) as f64; // 0.004 of length may be too tight
 
     // set chordHeight tolerance based on curve size

@@ -270,7 +270,7 @@ impl Surface {
             // make temp isoParameter curve for this knot sample value
             let mut iso = create_iso_parametric_curve(k, self, get_sp, parameter, None)?.0;
             // (status ignored)
-            let iso_knots = iso_knots_of(&iso)?;
+            let iso_knots = iso_knots_of(k, &iso)?;
 
             // When curve is degenerate - try another knot sample value
             if iso.is_degenerate(k, EFF_ZERO, None)? {
@@ -1776,8 +1776,8 @@ fn find_element(values: &[f64], target: f64) -> Option<usize> {
 }
 
 /// `pIsoCrv->GetKnots(sIsoKnots)` with its status ignored (no knots on failure).
-fn iso_knots_of(curve: &Curve) -> Result<Vec<f64>> {
-    Ok(ignored(curve.knots(None))?
+fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
+    Ok(ignored(curve.knots(k, None))?
         .map(|(k, _)| k)
         .unwrap_or_default())
 }

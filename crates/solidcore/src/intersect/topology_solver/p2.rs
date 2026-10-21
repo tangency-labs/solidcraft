@@ -237,7 +237,7 @@ fn classified_curve_intervals<O>(
     // UNPORTED(query.face_p2): SmFace::CurveOnClassify -- justified: plan/findings.md
     // "intersect.curve_class_p4" (the solver's object adapter has no face -> (Brep, FaceId) /
     // CurveOnClassifyObjects resolution for its handle `O`, as for PointClassify in
-    // topology_solver::p1; unreachable today: the constructor above defers on ReSet first)
+    // topology_solver::p1)
     Err(SolidError::unported(
         "SmFace::CurveOnClassify",
         "query.face_p2",

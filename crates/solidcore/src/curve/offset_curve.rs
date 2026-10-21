@@ -516,8 +516,8 @@ impl OffsetCurve {
     /// # Errors
     ///
     /// Those of the base curve's `GetKnots`.
-    pub fn knots(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
-        self.base()?.knots(interval)
+    pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.base()?.knots(k, interval)
     }
 
     /// The base curve's natural knot count (`GetNumberNaturalKnots`).
@@ -525,8 +525,8 @@ impl OffsetCurve {
     /// # Errors
     ///
     /// Those of the base curve.
-    pub fn number_natural_knots(&self) -> Result<usize> {
-        self.base()?.number_natural_knots()
+    pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
+        self.base()?.number_natural_knots(k)
     }
 
     /// The base curve's continuities (`CalculateContinuities`).

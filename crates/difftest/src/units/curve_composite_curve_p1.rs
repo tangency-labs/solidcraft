@@ -690,7 +690,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 let ivl = c.natural_interval();
                 o.extend([ivl.min(), ivl.max(), c.dim() as f64]);
                 o.push(ftry(c.degree())? as f64);
-                o.push(ftry(c.number_natural_knots())? as f64);
+                o.push(ftry(c.number_natural_knots(&k))? as f64);
                 o.push(ftry(c.number_control_points())? as f64);
                 o.push(b(c.is_analytic()));
                 o.push(b(c.is_bounded()));
@@ -715,7 +715,7 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::Knots { comp } => {
             let c = Curve::from(tri!(o, composite(comp)?));
-            let (kn, m) = tri!(o, c.knots(None));
+            let (kn, m) = tri!(o, c.knots(&k, None));
             o.push(0.0);
             o.push(kn.len() as f64);
             o.extend_from_slice(&kn);

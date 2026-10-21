@@ -2153,7 +2153,7 @@ impl<'a> GapFunction<'a> {
     /// The normalised sample parameters `[u0 .. un v0 .. vm]` of `BuildSampleSet`,
     /// adjusting the sample counts of B-spline geometry so that the ends and center of
     /// every knot interval are sampled.
-    fn sample_normalized_values(&mut self) -> Result<Vec<f64>> {
+    fn sample_normalized_values(&mut self, k: &Kernel) -> Result<Vec<f64>> {
         let this_curve = self.this_curve();
         let this_surface = self.this_surface();
         let is_bspline = this_curve.is_some_and(|c| c.is_kind_of(BSPLINE_CURVE_TYPE))
@@ -2205,7 +2205,7 @@ impl<'a> GapFunction<'a> {
 
         // Get Spline U (and V) Knots
         let (mut knots_u, mut knots_v) = match (this_curve, this_surface) {
-            (Some(c), _) => (unique_knots(c.knots(None))?, vec![0.0]),
+            (Some(c), _) => (unique_knots(c.knots(k, None))?, vec![0.0]),
             (None, Some(s)) => (
                 unique_knots(s.knots(SurfParamType::U, None))?,
                 unique_knots(s.knots(SurfParamType::V, None))?,
@@ -2319,7 +2319,7 @@ impl<'a> GapFunction<'a> {
             return Ok(());
         }
 
-        let vals = self.sample_normalized_values()?;
+        let vals = self.sample_normalized_values(k)?;
         let (cu, cv) = (self.sample_cnt_u, self.sample_cnt_v);
 
         // Set memory in m_sSampleGaps (SetSize: new slots zeroed)

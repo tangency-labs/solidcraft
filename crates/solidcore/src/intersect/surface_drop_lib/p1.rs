@@ -1179,7 +1179,7 @@ impl Surface {
         }
 
         // get Curve knots - trim them to the input interval range
-        let (mut knots, _) = curve.knots(None)?;
+        let (mut knots, _) = curve.knots(k, None)?;
         while knots
             .first()
             .is_some_and(|&k| k < interval.min() - EFF_ZERO_SQRT)

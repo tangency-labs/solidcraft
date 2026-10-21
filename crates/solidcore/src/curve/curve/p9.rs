@@ -1031,7 +1031,7 @@ fn min_signed_angle_into<O: SolutionObject>(
                 ops.handles[0],
             )
         };
-        let (knots, _) = disc_curve.knots(None)?;
+        let (knots, _) = disc_curve.knots(k, None)?;
 
         // for every continuity boundary
         for (jj, &cont) in conts.iter().enumerate() {
@@ -1550,7 +1550,7 @@ impl Curve {
 
         // Now add all tangent discontinuous points
         if self.is_kind_of(BSPLINE_CURVE_TYPE) {
-            let (knots, _) = self.knots(None)?;
+            let (knots, _) = self.knots(k, None)?;
             let (_, continuities) = self.calculate_continuities(k, 2.0)?;
 
             let n = knots.len();

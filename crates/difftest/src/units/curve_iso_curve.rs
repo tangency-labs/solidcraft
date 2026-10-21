@@ -501,7 +501,7 @@ fn rust_op(k: &solidcore::kernel::Kernel, i: &Inputs, o: &mut Vec<f64>) -> Resul
         OpIn::State => state(o, &c)?,
         OpIn::Knots { ivl } => {
             let e = ivl.map(|[a, b]| Extent1d::from_min_max(a, b));
-            let (k, m) = c.knots(e.as_ref())?;
+            let (k, m) = c.knots(k, e.as_ref())?;
             o.push(0.0);
             o.push(k.len() as f64);
             o.extend_from_slice(&k);

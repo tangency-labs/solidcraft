@@ -621,18 +621,18 @@ impl CompositeCurve {
     /// Those of the segments' [`Curve::knots`]; `InvalidInput` for two or more
     /// segments or with `interval` (upstream reads out of bounds, see the module
     /// docs).
-    pub fn knots(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+    pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
         // no work - no segments
         let Some((first, rest)) = self.segments.split_first() else {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        let (knots, mults) = first.curve.knots(interval)?;
+        let (knots, mults) = first.curve.knots(k, interval)?;
 
         // for every subsequent interval
         if let Some(this) = rest.first() {
             // next segment knots
-            this.curve.knots(None)?;
+            this.curve.knots(k, None)?;
 
             // knot offset: upstream reads rKnots[GetSize()], one past the end
             return Err(SolidError::invalid_input(

@@ -68,6 +68,7 @@
 //!   reads the kernel's tolerances); `Length` of curved spans reaches `SmIntegrator`
 //!   (the ported unit `mass.integrator`).
 
+use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
     proj_signed_angle, property_angle, unitize_tangent, Curve, CurveEvaluate, CurveKind,
     CurvePropertyGs, CurvePropertyType,
@@ -483,9 +484,7 @@ impl Curve {
         }
 
         // First, find the span containing dStartParam.
-        let knots = ignored(self.knots(None))?
-            .map(|(k, _)| k)
-            .unwrap_or_default();
+        let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
         let num_knots = knots.len() as i64;
         let knot = |i: i64| -> Result<f64> {
             usize::try_from(i)

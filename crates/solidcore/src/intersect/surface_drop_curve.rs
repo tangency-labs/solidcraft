@@ -79,6 +79,7 @@
 //!   depends on input; the seam search loop is bounded (19 steps) as upstream.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
+use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::p9::CurveSolveOptions;
@@ -989,11 +990,7 @@ impl<'s> SurfaceDropCurve<'s> {
         let max_drop_dist = self.curve_is_on_surface.then_some(approx_tol);
 
         // Copy TargetCurve knots into m_pCurveKnotVector
-        self.curve_knot_vector = Some(
-            ignored(curve.knots(None))?
-                .map(|(knots, _)| knots)
-                .unwrap_or_default(),
-        );
+        self.curve_knot_vector = Some(knots_ignoring_status(curve.knots_with_status(k, None))?.0);
 
         // Place targetCurve interval start/end points into m_pCurveBreaks
         let mut breaks = Vec::new();
@@ -1201,7 +1198,7 @@ impl<'s> SurfaceDropCurve<'s> {
         }
 
         // Add every curve discontinuity point to breakpoints array
-        let (c_knots, _) = curve.knots(None)?;
+        let (c_knots, _) = curve.knots(k, None)?;
         let conts = curve_cache.continuities();
         for jj in 1..conts.len().saturating_sub(1) {
             if is_c0(conts, jj)? {
@@ -1217,8 +1214,8 @@ impl<'s> SurfaceDropCurve<'s> {
         let mut ii = 1usize;
         while ii < breaks.len() {
             // snap this and last breakpoint parameters to nearby curve knot values
-            let t0 = curve.snap_to_knots(index(&breaks, ii - 1)?, EFF_ZERO_SQRT / 100.0)?;
-            let t1 = curve.snap_to_knots(index(&breaks, ii)?, EFF_ZERO_SQRT / 100.0)?;
+            let t0 = curve.snap_to_knots(k, index(&breaks, ii - 1)?, EFF_ZERO_SQRT / 100.0)?;
+            let t1 = curve.snap_to_knots(k, index(&breaks, ii)?, EFF_ZERO_SQRT / 100.0)?;
 
             // Copy the snapped values back into the array:
             set_index(&mut breaks, ii - 1, t0)?;

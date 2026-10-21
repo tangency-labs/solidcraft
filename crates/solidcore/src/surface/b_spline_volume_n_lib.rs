@@ -203,7 +203,7 @@ impl BSplineVolume {
                     None,
                 )?;
                 // (the knots are fetched and never used; status ignored)
-                let _ = ignored(iso.knots(None))?;
+                let _ = ignored(iso.knots(k, None))?;
 
                 // When curve is degenerate - try another knot sample value
                 if iso.is_degenerate(k, EFF_ZERO, None)? {

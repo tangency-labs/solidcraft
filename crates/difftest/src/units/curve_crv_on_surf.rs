@@ -755,9 +755,17 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
         }
         OpIn::Knots { ivl, want } => {
             let iv = ivl.map(|[x, y]| Extent1d::from_min_max(x, y));
-            let r = c.knots(iv.as_ref());
-            o.push(st(&r)?);
-            let (kn, m) = r.unwrap_or_default();
+            // the status, then what GetKnots wrote (also on a failing status)
+            let (kn, m) = match c.knots_with_status(k, iv.as_ref()) {
+                Ok(w) => {
+                    o.push(st(&w.status)?);
+                    (w.knots, w.mults)
+                }
+                Err(e) => {
+                    o.push(st(&Err::<(), _>(e))?);
+                    (Vec::new(), Vec::new())
+                }
+            };
             o.push(kn.len() as f64);
             o.extend_from_slice(&kn);
             if *want {
@@ -767,7 +775,7 @@ fn rust_op(o: &mut Vec<f64>, c: &mut CrvOnSurf, op: &OpIn, k: &Kernel) -> Result
             put_state(o, c);
         }
         OpIn::Nnk => {
-            let r = c.number_natural_knots();
+            let r = c.number_natural_knots(k);
             st(&r)?;
             o.extend([0.0, r.unwrap_or(0) as f64]);
             put_state(o, c);

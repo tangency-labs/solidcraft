@@ -266,7 +266,7 @@ fn lift_output(flat: &[f64]) -> Output {
     }
 }
 
-fn lift_flat(c: &Curve, max_dist: f64) -> solidcore::Result<Vec<f64>> {
+fn lift_flat(k: &Kernel, c: &Curve, max_dist: f64) -> solidcore::Result<Vec<f64>> {
     let b = bspline_part(c).map_err(|_| solidcore::SolidError::sm_err("difftest::lift"))?;
     let mut o = vec![0.0, max_dist, c.type_code() as f64, c.dim() as f64];
     o.push(b.degree()? as f64);
@@ -275,9 +275,9 @@ fn lift_flat(c: &Curve, max_dist: f64) -> solidcore::Result<Vec<f64>> {
     for p in cp {
         o.extend([p.x, p.y, p.z, p.w]);
     }
-    let (k, m) = c.knots(None)?;
-    o.push(k.len() as f64);
-    o.extend_from_slice(&k);
+    let (kn, m) = c.knots(k, None)?;
+    o.push(kn.len() as f64);
+    o.extend_from_slice(&kn);
     o.extend(m.iter().map(|&x| x as f64));
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
@@ -318,7 +318,7 @@ fn run_rust_lift(i: &LiftInputs) -> Result<Output, HarnessError> {
         .map_or_else(|| c.natural_interval(), |v| Extent1d::from_min_max(v[0], v[1]));
     let r = s
         .lift_curve(&k, &dom, &c, &ivl, i.tol, i.skip_continuity_checks)
-        .and_then(|l| lift_flat(&l.curve, l.max_approx_dev));
+        .and_then(|l| lift_flat(&k, &l.curve, l.max_approx_dev));
     Ok(match r {
         Ok(flat) => lift_output(&flat),
         Err(e) => Output::unported(&e).unwrap_or_else(|| lift_output(&[1.0])),

@@ -107,8 +107,8 @@
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::{
-    at, evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, CurveKind,
-    CRV_ON_SURF_TYPE,
+    at, evaluate_continuity, is_kind_of as curve_is_kind_of, knots_ignoring_status, Curve,
+    CurveEvaluate, CurveKind, KnotsWithStatus, CRV_ON_SURF_TYPE,
 };
 use crate::curve::curve::p6::{calculate_bounding_box_base, DroppedPoint};
 use crate::curve::line::Line;
@@ -222,17 +222,19 @@ fn surface_read_from_db(
 /// (tolerance `tol`) against the knot iso-parameter lines of `surface`
 /// (`IntersectUVDiscontinuties`), in order.
 fn classify_against_surface(
+    _k: &Kernel,
     _curve: &Curve,
     _interval: &Extent1d,
     _tol: f64,
     _surface: &BSplineSurface,
 ) -> Result<Vec<Extent1d>> {
-    // The constructor (CurveClassification::with_curve) needs a Kernel, which the Curve::knots
-    // virtual does not carry (plan/findings.md "intersect.curve_class_p4"); it defers on ReSet.
+    // The call is `intersect::curve_class::p8::uv_discontinuity_intervals(k, curve,
+    // *interval, tol, &Surface::from(surface.clone()))`. It stays a stub because upstream
+    // runs the base `SmCurve::DropPoint` on this curve (whose `GetKnots` caches the breaks
+    // on some solver paths) while the port runs it on a `Curve` copy: with the call wired,
+    // 17 generated drop cases end with different break caches (plan/findings.md,
+    // "intersect.curve_class_p4").
     // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
-    // `SmCurveClassification::IntersectUVDiscontinuties` follows ReSet upstream; it is ported
-    // (CurveClassification::intersect_uv_discontinuities) and runs once ReSet and the Kernel are available.
-    // (then the intervals: intersect::curve_class::CurveClassification::size / at)
     Err(SolidError::unported(
         "SmCurveClassification::ReSet",
         "intersect.curve_class_p2",
@@ -828,14 +830,20 @@ impl CrvOnSurf {
     /// a cubic B-spline (`GetKnots`): the cached breaks (all of them, with
     /// multiplicities `4, 2, ..., 2, 4`) when at least two are cached; else the UV
     /// curve's knots (in `interval`, if given) plus every crossing of the surface's
-    /// knot lines (as a C1 knot, multiplicity 2), which become the cache.
+    /// knot lines (as a C1 knot, multiplicity 2), which become the cache. On a
+    /// failing classification: the adjusted UV curve knots with that status, nothing
+    /// cached (upstream's `SER`).
     ///
     /// # Errors
     ///
     /// Those of the UV curve's degree; [`SolidError::Unported`] from the curve
     /// classification; [`SolidError::InvalidInput`] where upstream would read
     /// outside its arrays.
-    pub fn knots(&mut self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+    pub fn knots_with_status(
+        &mut self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<KnotsWithStatus> {
         // low work
         if !self.need_breaks {
             let num = self.breaks.len();
@@ -845,7 +853,7 @@ impl CrvOnSurf {
                 mults.push(4);
                 mults.extend(core::iter::repeat_n(2, num - 2));
                 mults.push(4);
-                return Ok((self.breaks.clone(), mults));
+                return Ok(KnotsWithStatus::success(self.breaks.clone(), mults));
             }
         }
 
@@ -853,7 +861,7 @@ impl CrvOnSurf {
         let tol_2d = EFF_ZERO * (1.0 + self.surface.natural_uv_domain().max_dimension());
 
         // get the UVCurve knots and multiplicities (status ignored)
-        let (mut knots, mut mults) = ignored(self.uv_curve.knots(interval))?.unwrap_or_default();
+        let (mut knots, mut mults) = ignored(self.uv_curve.knots(k, interval))?.unwrap_or_default();
 
         // modify the mult list to act as if pUVCurve is a degree 3 BSpline
         let uv_degree = self.uv_curve.degree()?;
@@ -868,12 +876,24 @@ impl CrvOnSurf {
         }
 
         // classify the UVTrimCurve against the surface knot isoParameter lines.
-        let classes = classify_against_surface(
+        let classes = match classify_against_surface(
+            k,
             &self.uv_curve,
             &self.uv_curve.natural_interval(),
             tol_2d,
             &self.surface,
-        )?;
+        ) {
+            Ok(classes) => classes,
+            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e) => {
+                let status = Err(e);
+                return Ok(KnotsWithStatus {
+                    knots,
+                    mults,
+                    status,
+                });
+            }
+        };
 
         // add the classification boundaries uniquely and in order to the knot lists
         let cnt = classes.len();
@@ -933,7 +953,20 @@ impl CrvOnSurf {
         // cache the discontinuity break points
         self.breaks.clone_from(&knots);
         self.need_breaks = false;
-        Ok((knots, mults))
+        Ok(KnotsWithStatus::success(knots, mults))
+    }
+
+    /// [`Self::knots_with_status`] with a failing status as the error.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::knots_with_status`], and its failing status.
+    pub fn knots(
+        &mut self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.knots_with_status(k, interval)?.into_result()
     }
 
     /// [`Self::knots`] on a copy (for `&self` callers): upstream's answer, without
@@ -942,8 +975,12 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// As [`Self::knots`].
-    pub fn knots_ref(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
-        self.clone().knots(interval)
+    pub fn knots_ref(
+        &self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.clone().knots(k, interval)
     }
 
     /// The sum of the break multiplicities (`GetNumberNaturalKnots`), caching the
@@ -952,8 +989,8 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from [`Self::knots`].
-    pub fn number_natural_knots(&mut self) -> Result<usize> {
-        let (_, mults) = ignored(self.knots(None))?.unwrap_or_default();
+    pub fn number_natural_knots(&mut self, k: &Kernel) -> Result<usize> {
+        let (_, mults) = knots_ignoring_status(self.knots_with_status(k, None))?;
         Ok(mults.iter().sum())
     }
 
@@ -962,8 +999,8 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// As [`Self::number_natural_knots`].
-    pub fn number_natural_knots_ref(&self) -> Result<usize> {
-        self.clone().number_natural_knots()
+    pub fn number_natural_knots_ref(&self, k: &Kernel) -> Result<usize> {
+        self.clone().number_natural_knots(k)
     }
 
     /// The minimum continuity of the interior breaks and the continuity at every
@@ -984,7 +1021,7 @@ impl CrvOnSurf {
         let mut min_cont = ContinuityType::Undefined;
 
         // get effective knots and continuities (status ignored)
-        let (knots, _) = ignored(self.knots(None))?.unwrap_or_default();
+        let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
         let n = knots.len();
         if n == 0 {
             return Err(SolidError::invalid_input(OP_CONTS, "no breaks"));
@@ -1094,7 +1131,7 @@ impl CrvOnSurf {
 
         // otherwise make one
         if self.need_breaks {
-            let (knots, _) = ignored(self.knots(None))?.unwrap_or_default();
+            let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
             self.breaks = knots;
             self.need_breaks = false;
         }
@@ -1518,16 +1555,20 @@ impl CrvOnSurf {
 
         // Do a very large sample when asked for a precise answer (GetKnots ignored)
         if num_samples == 0 {
-            let this_knots = ignored(self.knots_ref(None))?.map_or(0, |(k, _)| k.len());
-            let other_knots = ignored(other.knots(None))?.map_or(0, |(k, _)| k.len());
+            let this_knots = knots_ignoring_status(self.clone().knots_with_status(k, None))?
+                .0
+                .len();
+            let other_knots = knots_ignoring_status(other.knots_with_status(k, None))?
+                .0
+                .len();
             num_samples = 22 + this_knots + other_knots;
         }
 
         // special case line/line check
         if self.degree() == 1
-            && self.number_natural_knots_ref()? == 4
+            && self.number_natural_knots_ref(k)? == 4
             && other.degree()? == 1
-            && other.number_natural_knots()? == 4
+            && other.number_natural_knots(k)? == 4
         {
             num_samples = 2;
         }
@@ -1840,12 +1881,15 @@ mod tests {
     fn cached_knots_and_edits() {
         let k = Kernel::default();
         let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
-        assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
+        assert!(matches!(
+            c.knots(&k, None),
+            Err(SolidError::Unported { .. })
+        ));
         c.set_breaks_cache(false, vec![0.0, 0.25, 1.0]);
-        let (kn, m) = c.knots(None).unwrap();
+        let (kn, m) = c.knots(&k, None).unwrap();
         assert_eq!(kn, vec![0.0, 0.25, 1.0]);
         assert_eq!(m, vec![4, 2, 4]);
-        assert_eq!(c.number_natural_knots().unwrap(), 10);
+        assert_eq!(c.number_natural_knots(&k).unwrap(), 10);
         let (min, conts) = c.calculate_continuities(&k, CONTINUITY_ANGLE).unwrap();
         assert_eq!(conts.len(), 3);
         assert_ne!(min, ContinuityType::Undefined);

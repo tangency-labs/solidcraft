@@ -66,6 +66,7 @@
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
 //!   check split the other curve, or `this` and the other are the same curve.
 
+use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::p2::{
     at, snap_sol_to_specified_endpoint, Curve, CurveKind, CurvePropertyType,
@@ -883,16 +884,20 @@ impl Curve {
         // there are a large number of knots.
         if num_samples == 0 {
             do_precise = true;
-            let knots = ignored(self.knots(None))?.map_or(0, |(k, _)| k.len());
-            let other_knots = ignored(other.knots(None))?.map_or(0, |(k, _)| k.len());
+            let knots = knots_ignoring_status(self.knots_with_status(k, None))?
+                .0
+                .len();
+            let other_knots = knots_ignoring_status(other.knots_with_status(k, None))?
+                .0
+                .len();
             num_samples = 22 + knots as u64 + other_knots as u64;
         }
 
         // special case line/line check
         if self.degree()? == 1
-            && self.number_natural_knots()? == 4
+            && self.number_natural_knots(k)? == 4
             && other.degree()? == 1
-            && other.number_natural_knots()? == 4
+            && other.number_natural_knots(k)? == 4
         {
             do_precise = false;
             num_samples = 2;

@@ -1970,7 +1970,7 @@ impl<'s> SurfPtSolveStepper<'s> {
         let mut min_param = domain.min();
 
         // Drop the point to each continuous section.
-        let knots = match iso_curve.knots(None) {
+        let knots = match iso_curve.knots(k, None) {
             Ok((k, _)) => k,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => Vec::new(),

@@ -18,6 +18,6 @@ pub mod p8;
 pub mod p9;
 
 pub use p2::{
-    Curve, CurveEvaluate, CurveKind, CurvePropertyType, LineIntersection, OwnerChange, StepOff,
-    TessStepResult,
+    knots_ignoring_status, Curve, CurveEvaluate, CurveKind, CurvePropertyType, KnotsWithStatus,
+    LineIntersection, OwnerChange, StepOff, TessStepResult,
 };

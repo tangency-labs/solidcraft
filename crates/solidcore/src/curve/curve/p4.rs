@@ -1127,22 +1127,22 @@ impl Curve {
     /// # Errors
     ///
     /// Those of [`Curve::knots`].
-    pub fn snap_to_knots(&self, param: f64, snap_tol: f64) -> Result<f64> {
+    pub fn snap_to_knots(&self, k: &Kernel, param: f64, snap_tol: f64) -> Result<f64> {
         // init output
         let mut snapped = param;
 
         // locals
         let mut jump = BIG_DOUBLE;
-        let (knots, _) = self.knots(None)?;
+        let (knots, _) = self.knots(k, None)?;
 
         // for every knot
-        for &k in &knots {
-            let test_jump = (k - param).abs();
+        for &knot in &knots {
+            let test_jump = (knot - param).abs();
 
             // when TestJump is less than SnapDistance and the smallest jump yet seen
             if test_jump < snap_tol && test_jump < jump {
                 // snap parameter to knot value
-                snapped = k;
+                snapped = knot;
 
                 // remember smallest snap dist value
                 jump = test_jump;
@@ -2200,8 +2200,8 @@ mod tests {
     fn snap_and_property() {
         let k = &Kernel::default();
         let c = seg([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
-        assert_eq!(c.snap_to_knots(0.999, 0.01).unwrap(), 1.0);
-        assert_eq!(c.snap_to_knots(0.5, 0.01).unwrap(), 0.5);
+        assert_eq!(c.snap_to_knots(k, 0.999, 0.01).unwrap(), 1.0);
+        assert_eq!(c.snap_to_knots(k, 0.5, 0.01).unwrap(), 0.5);
         let p = [Vec3::new(1.0, 1.0, 0.0)];
         let mut efo = CurvePropertyEfo::new(
             k,

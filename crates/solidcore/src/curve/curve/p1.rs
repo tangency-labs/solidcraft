@@ -64,6 +64,7 @@
 //!   evaluators behind `LocalCurveSolve` / `LocalCurveIntersect`, `SmCurve::IsArc`)
 //!   are wired; [`SolidError::Unported`] is propagated from what they reach.
 
+use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
     add_to_curve, evaluate_continuity, find_test_params, flush_crv, output, pop_stack,
     proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve, CurveKind,
@@ -1767,9 +1768,7 @@ impl Curve {
         let max_3d_distance_squared = max_3d_distance * max_3d_distance;
 
         // SmCurve locals - knots (status ignored)
-        let knots = ignored(self.knots(None))?
-            .map(|(k, _)| k)
-            .unwrap_or_default();
+        let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
 
         // get this SmCurve's start position and derivative
         let mut cur_pv: [Vec3; 2] = eval_n(k, self, interval.min(), 1, true, true)?; // nonZeroTangent values

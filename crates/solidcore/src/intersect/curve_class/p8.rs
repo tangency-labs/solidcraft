@@ -11,6 +11,9 @@
 //! | [`CurveClassification::intersect_volume_discontinuities`] | `Intersect3DDiscontinuities` (volume) |
 //! | `insert_solutions` (private) | `sm_InsertSolutions` call adapter (part 5) |
 //! | `plane_intersections` (private) | `SmSurface::GlobalCurveIntersect` call on a boundary plane |
+//! | [`uv_discontinuity_intervals`] | the classification in `SmCrvOnSurf::GetKnots` |
+//! | [`volume_discontinuity_intervals`] | the classification in `SmCrvInVolume::GetKnots` |
+//! | [`FreeHandle`] | the stack classification's objects (a curve and its surface or volume) |
 //!
 //! Deviations: handles and caller-supplied geometry replace pointers; Kernel is explicit.
 //! Temporary boundaries have local ownership; a detached surface copy replaces the
@@ -39,6 +42,7 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
@@ -48,7 +52,7 @@ use crate::geom::tol::{
     SmallTopoType,
 };
 use crate::intersect::curve_class::{
-    CurveClassification, FoundInterval, IntervalPosition, NO_INTERVAL,
+    ClassificationInit, CurveClassification, FoundInterval, IntervalPosition, NO_INTERVAL,
 };
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
@@ -68,16 +72,16 @@ use crate::surface::volume::{Discontinuities3d, Volume};
 /// plane (upstream's objects are the curves and the plane, whose parameter intervals
 /// `IdenticalSolutions` reads).
 #[derive(Clone, Copy, PartialEq)]
-struct BoundaryObject(u8, crate::geom::extent1d::Extent1d, Extent2d);
+struct BoundaryObject(u8, Extent1d, Extent2d);
 impl BoundaryObject {
     /// Curve `tag` with natural interval `ivl`.
-    fn curve(tag: u8, ivl: crate::geom::extent1d::Extent1d) -> Self {
+    fn curve(tag: u8, ivl: Extent1d) -> Self {
         Self(tag, ivl, Extent2d::new())
     }
 
     /// The boundary plane with natural UV domain `domain`.
     fn plane(domain: Extent2d) -> Self {
-        Self(PLANE_TAG, crate::geom::extent1d::Extent1d::new(), domain)
+        Self(PLANE_TAG, Extent1d::new(), domain)
     }
 }
 impl SolutionObject for BoundaryObject {
@@ -88,7 +92,7 @@ impl SolutionObject for BoundaryObject {
             ObjectKind::Curve
         }
     }
-    fn natural_interval(&self) -> Option<crate::geom::extent1d::Extent1d> {
+    fn natural_interval(&self) -> Option<Extent1d> {
         (self.0 != PLANE_TAG).then_some(self.1)
     }
     fn natural_uv_domain(&self) -> Option<Extent2d> {
@@ -278,7 +282,7 @@ fn ends(knots: &[f64]) -> Result<(f64, f64)> {
 fn intersections(
     k: &Kernel,
     curve: &Curve,
-    interval: &crate::geom::extent1d::Extent1d,
+    interval: &Extent1d,
     boundary: &Curve,
     tol: f64,
     fast: bool,
@@ -1048,6 +1052,157 @@ impl<O: ClassObject> CurveClassification<O> {
         }
         Ok(())
     }
+}
+
+// ---- free-standing classifications ------------------------------------------------------
+
+/// The objects of a classification of one free-standing curve against one surface or
+/// volume: the stack `SmCurveClassification` of `SmCrvOnSurf::GetKnots` and
+/// `SmCrvInVolume::GetKnots`, plus the temporary boundaries this part records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreeHandle {
+    /// The classified curve.
+    Curve,
+    /// The surface or volume it is classified against.
+    Target,
+    /// The `index`-th temporary of `kind` ([`ClassObject::temporary`]).
+    Temporary(usize, ClassObjectKind),
+}
+
+impl ClassObject for FreeHandle {
+    fn class_kind(&self) -> ClassObjectKind {
+        match self {
+            Self::Curve => ClassObjectKind::Curve,
+            // only read through ClassGeometry::surface / volume
+            Self::Target => ClassObjectKind::Other,
+            Self::Temporary(_, kind) => *kind,
+        }
+    }
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        Some(Self::Temporary(index, kind))
+    }
+}
+
+/// What a free-standing curve is classified against.
+#[derive(Clone, Copy)]
+enum FreeTarget<'a> {
+    Surface(&'a Surface),
+    Volume(&'a Volume),
+}
+
+/// The geometry behind [`FreeHandle`]s (temporaries are resolved by this part's own
+/// wrapper).
+struct FreeGeometry<'a> {
+    curve: &'a Curve,
+    target: FreeTarget<'a>,
+}
+
+impl ClassGeometry<FreeHandle> for FreeGeometry<'_> {
+    fn curve(&self, o: FreeHandle) -> Option<&Curve> {
+        (o == FreeHandle::Curve).then_some(self.curve)
+    }
+    fn surface(&self, o: FreeHandle) -> Option<&Surface> {
+        match (o, self.target) {
+            (FreeHandle::Target, FreeTarget::Surface(s)) => Some(s),
+            _ => None,
+        }
+    }
+    fn volume(&self, o: FreeHandle) -> Option<&Volume> {
+        match (o, self.target) {
+            (FreeHandle::Target, FreeTarget::Volume(v)) => Some(v),
+            _ => None,
+        }
+    }
+    fn point(&self, _o: FreeHandle) -> Option<Point3> {
+        None
+    }
+}
+
+/// The interval parameter ranges of `cc`, in order (`GetSize` / `GetAt(ii).m_vInterval`).
+fn interval_ranges(cc: &CurveClassification<FreeHandle>) -> Vec<Extent1d> {
+    cc.intervals().iter().map(|i| i.interval).collect()
+}
+
+/// The classification `SmCrvOnSurf::GetKnots` makes of its UV curve `uv_curve` over
+/// `interval` (zone tolerance `tol`) on `surface`, cut at the surface's knot lines
+/// (`SmCurveClassification(uv, ivl, NULL, tol, 0, NULL, FALSE, TRUE, surface)` then
+/// `IntersectUVDiscontinuties`): the parameter range of every interval, in order.
+///
+/// # Errors
+///
+/// Those of [`CurveClassification::intersect_uv_discontinuities`]; the constructor's
+/// status is ignored, as upstream.
+pub fn uv_discontinuity_intervals(
+    k: &Kernel,
+    uv_curve: &Curve,
+    interval: Extent1d,
+    tol: f64,
+    surface: &Surface,
+) -> Result<Vec<Extent1d>> {
+    let geometry = FreeGeometry {
+        curve: uv_curve,
+        target: FreeTarget::Surface(surface),
+    };
+    let mut cc = CurveClassification::with_curve(
+        k,
+        &ClassificationInit {
+            curve: Some(FreeHandle::Curve),
+            interval,
+            uv_curve: None,
+            src_zone_tol_3d: tol,
+            opt_data_size: 0,
+            is_curve_owned: false,
+            is_curve_current: true,
+            surface1: Some(FreeHandle::Target),
+            surface2: None,
+            uv_curve2: None,
+            ti: None,
+        },
+    )?;
+    cc.intersect_uv_discontinuities(k, &geometry, surface, FreeHandle::Target)?;
+    Ok(interval_ranges(&cc))
+}
+
+/// The classification `SmCrvInVolume::GetKnots` makes of its base curve `curve` over
+/// `interval` (zone tolerance `tol`) against `volume`'s discontinuity planes
+/// (`SmCurveClassification(curve, ivl, NULL, tol)` then
+/// `Intersect3DDiscontinuities(volume, in_param_space)`): the parameter range of every
+/// interval, in order.
+///
+/// # Errors
+///
+/// Those of [`CurveClassification::intersect_volume_discontinuities`]; the
+/// constructor's status is ignored, as upstream.
+pub fn volume_discontinuity_intervals(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    tol: f64,
+    volume: &Volume,
+    in_param_space: bool,
+) -> Result<Vec<Extent1d>> {
+    let geometry = FreeGeometry {
+        curve,
+        target: FreeTarget::Volume(volume),
+    };
+    let mut cc = CurveClassification::with_curve(
+        k,
+        &ClassificationInit {
+            curve: Some(FreeHandle::Curve),
+            interval,
+            uv_curve: None,
+            src_zone_tol_3d: tol,
+            opt_data_size: 0,
+            is_curve_owned: false,
+            is_curve_current: true,
+            surface1: None,
+            surface2: None,
+            uv_curve2: None,
+            ti: None,
+        },
+    )?;
+    cc.intersect_volume_discontinuities(k, &geometry, volume, FreeHandle::Target, in_param_space)?;
+    Ok(interval_ranges(&cc))
 }
 
 #[cfg(test)]

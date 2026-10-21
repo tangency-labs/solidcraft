@@ -791,7 +791,7 @@ fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
         }
         OpIn::Snap { curve, t, tol } => {
             let c = build(curve)?;
-            let r = tri!(o, c.snap_to_knots(*t, *tol));
+            let r = tri!(o, c.snap_to_knots(k, *t, *tol));
             o.extend([0.0, r]);
         }
         OpIn::Assert {

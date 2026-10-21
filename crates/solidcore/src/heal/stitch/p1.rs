@@ -472,8 +472,8 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
         }
 
         // knot counts (statuses ignored: a failing call leaves its list empty)
-        let knots1 = ignored(curve_of(b, edge1)?.knots(None))?.map_or(0, |(k1, _)| k1.len());
-        let knots2 = ignored(curve_of(b, edge2)?.knots(None))?.map_or(0, |(k2, _)| k2.len());
+        let knots1 = ignored(curve_of(b, edge1)?.knots(k, None))?.map_or(0, |(k1, _)| k1.len());
+        let knots2 = ignored(curve_of(b, edge2)?.knots(k, None))?.map_or(0, |(k2, _)| k2.len());
 
         // when knot counts vary - keep the smallest count
         if knots2 != knots1 {
@@ -1766,8 +1766,8 @@ impl<'c> Stitch<'c> {
 
                     // If both edges are lines then we don't have to do the harder test.
                     let edges_are_lines = (e_curve.degree()? == 1
-                        && e_curve.number_natural_knots()? == 4)
-                        && (te_curve.degree()? == 1 && te_curve.number_natural_knots()? == 4);
+                        && e_curve.number_natural_knots(k)? == 4)
+                        && (te_curve.degree()? == 1 && te_curve.number_natural_knots(k)? == 4);
                     if !edges_are_lines {
                         // do a quick 5 point distance check
                         dist_to_curve = e_curve

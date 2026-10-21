@@ -626,7 +626,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(c.type_code() as f64);
             o.push(c.dim() as f64);
             let deg = tri!(o, c.degree());
-            let nnk = tri!(o, c.number_natural_knots());
+            let nnk = tri!(o, c.number_natural_knots(&k));
             let ncp = tri!(o, c.number_control_points());
             let rational = tri!(o, c.is_rational());
             o.extend([deg as f64, nnk as f64, ncp as f64, ivl.min(), ivl.max()]);
@@ -665,7 +665,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Knots { ivl } => {
             let e = ivl.map(|[a, bb]| Extent1d::from_min_max(a, bb));
             let c = Curve::from(pc);
-            let (kn, m) = tri!(o, c.knots(e.as_ref()));
+            let (kn, m) = tri!(o, c.knots(&k, e.as_ref()));
             o.push(0.0);
             o.push(kn.len() as f64);
             o.extend_from_slice(&kn);

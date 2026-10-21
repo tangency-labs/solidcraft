@@ -6144,6 +6144,30 @@ mutated scales and accepted/reduced step counts are compared.
   `Curve::knots` virtual is out of this unit's scope. Their stubs name what blocks them first,
   `UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet` (then `intersect.curve_class_p8`); the
   porter of `intersect.curve_class_p2` must also bring a `Kernel` to those two sites.
+- **Resolved: `Kernel` under `Curve::knots` (PR #437).** PR #437 threads `k: &Kernel`
+  through the `GetKnots` / `GetNumberNaturalKnots` virtuals (`Curve::knots`, `Curve::number_natural_knots`
+  and the CrvOnSurf, CrvInVolume, Composite, Offset and Projected overrides, plus `Curve::snap_to_knots`).
+  The stack classification is `intersect::curve_class::p8::{uv_discontinuity_intervals,
+  volume_discontinuity_intervals}`, one shared `FreeHandle` adapter (a free-standing curve against one
+  surface or volume, temporaries included). `curve::crv_in_volume` calls it (all 2030 cases pass);
+  `curve::crv_on_surf` does not yet, see the next item.
+- **`GetKnots` writes its out-parameters before the classification can fail (PR #437).** Both overrides
+  copy the base (UV) curve's knots, adjust the multiplicities to a cubic, and only then `SER` on the
+  classification; their own callers (`GetNumberNaturalKnots`, `CalculateContinuities`, the base
+  `SmCurve` members, `SmCurveCache::CreateBezierSegmentBlock`) ignore the status and read what was written.
+  `Curve::knots_with_status` / `KnotsWithStatus` carry both; `knots_ignoring_status` is the read of a caller
+  that ignores the status. A 2d base curve always fails `Intersect3DDiscontinuities` (`SM_ERR`), so every
+  2d `SmCrvInVolume` reaches this path.
+- **CrvOnSurf's `ReSet` stays a stub: the base `DropPoint` runs on a copy.** `SmCrvOnSurf::DropPoint` calls
+  `this->SmCurve::DropPoint(...)` (three exits), and on some global-solve paths that reaches `GetKnots` on
+  `this` (through the curve cache), which caches the breaks (`m_bNeedBreaks = FALSE`). The port calls
+  `self.as_curve().drop_point_base(..)`: the base member runs on a `Curve` copy, and `Curve`'s `&self`
+  members compute an override's knots without storing them (`knots_ref`). With the classification wired, the
+  dropped point matches but 17 generated `curve.crv_on_surf` drop cases end with a different break cache
+  (`need_breaks` and the breaks in the state record). Caching the breaks after every base drop is wrong
+  too (41 cases then differ: C++ caches only on some paths). Fix: let the base members keep an override's
+  caches (e.g. run them on the `CrvOnSurf` itself, or give its caches interior mutability), then wire
+  `classify_against_surface` to `uv_discontinuity_intervals`.
 - **Upstream defect** UB-124 (`plan/upstream-issues.md`): the face, surface and curve are dereferenced
   before the functions' own `NULL` checks.
 

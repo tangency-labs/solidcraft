@@ -517,8 +517,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Knots { ivl, want } => {
             let iv = ivl.map(|[x, y]| Extent1d::from_min_max(x, y));
-            let (kn, m) = tri!(o, civ.knots(iv.as_ref()));
-            o.push(0.0);
+            // the status, then what GetKnots wrote (also on a failing status)
+            let w = tri!(o, civ.knots_with_status(&k, iv.as_ref()));
+            match st_of(&w.status) {
+                Ok(s) => o.push(s),
+                Err(d) => return Ok(*d),
+            }
+            let (kn, m) = (w.knots, w.mults);
             o.push(kn.len() as f64);
             o.extend_from_slice(&kn);
             if *want {
@@ -533,7 +538,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.extend(m.iter().map(|&x| x as f64));
         }
         OpIn::Nnk => {
-            let n = tri!(o, civ.number_natural_knots());
+            let n = tri!(o, civ.number_natural_knots(&k));
             o.extend([0.0, n as f64]);
             put_cache(&mut o, &civ);
         }

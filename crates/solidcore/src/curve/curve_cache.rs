@@ -81,6 +81,7 @@
 //!   `GetBrep`, `GetBSplineCurve`, `GetMemoryUsed`, `SetComputeAuxTreeData`, `Dump`
 //!   and `Draw` belong to other units or are debug output.
 
+use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{at, Curve, CurveKind, FindCurveDistanceExtrema};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -1428,8 +1429,8 @@ pub fn create_bezier_segment_block(
         }
         create_bez_segments(n).map_err(SolidError::nl_ser(OP_BLOCK))
     } else {
-        // the knot vector matches CalculateContinuities
-        let (knots, _) = curve.knots(None)?;
+        // the knot vector matches CalculateContinuities (status ignored)
+        let (knots, _) = knots_ignoring_status(curve.knots_with_status(k, None))?;
         if knots.len() < 2 {
             return Err(SolidError::sm_err(OP_BLOCK));
         }

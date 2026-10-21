@@ -784,8 +784,8 @@ impl Stitch<'_> {
 
                     // skip edge pairs not within tolerance of one another
                     let edges_are_lines = (e_curve.degree()? == 1
-                        && e_curve.number_natural_knots()? == 4)
-                        && (te_curve.degree()? == 1 && te_curve.number_natural_knots()? == 4);
+                        && e_curve.number_natural_knots(k)? == 4)
+                        && (te_curve.degree()? == 1 && te_curve.number_natural_knots(k)? == 4);
                     dist_to_curve = 0.0;
                     if !edges_are_lines {
                         // do a quick 5 point distance check

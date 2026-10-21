@@ -87,7 +87,7 @@
 //!   an unbounded caller value).
 
 use crate::curve::curve::p2::{
-    at, evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate,
+    at, evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, KnotsWithStatus,
     CRV_IN_VOLUME_TYPE,
 };
 use crate::error::{ignored, Result, SolidError};
@@ -96,6 +96,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero_to_tol;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::curve_class::p8::volume_discontinuity_intervals;
 use crate::kernel::Kernel;
 use crate::math::{max2, BIG_DOUBLE, BOUNDED_INFINITE_PARAM, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -133,22 +134,14 @@ fn volume_read_from_db(volume_type: i64, db: &mut DatabaseReader, version: u64) 
 /// (tolerance `tol`) against the volume's discontinuity iso-planes
 /// (`Intersect3DDiscontinuities`), in order.
 fn classify_against_volume(
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
-    _volume: &Volume,
-    _in_param_space: bool,
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
+    volume: &Volume,
+    in_param_space: bool,
 ) -> Result<Vec<Extent1d>> {
-    // The constructor (CurveClassification::with_curve) needs a Kernel, which the Curve::knots
-    // virtual does not carry (plan/findings.md "intersect.curve_class_p4"); it defers on ReSet.
-    // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
-    // `SmCurveClassification::Intersect3DDiscontinuities` follows ReSet upstream; it is ported
-    // (CurveClassification::intersect_volume_discontinuities) and runs once ReSet and the Kernel are available.
-    // (then the intervals: intersect::curve_class::CurveClassification::size / at)
-    Err(SolidError::unported(
-        "SmCurveClassification::ReSet",
-        "intersect.curve_class_p2",
-    ))
+    volume_discontinuity_intervals(k, curve, *interval, tol, volume, in_param_space)
 }
 
 // ---- continuity codes ---------------------------------------------------------------
@@ -591,9 +584,10 @@ impl CrvInVolume {
 
     /// The uncached breaks: the base curve's knots with multiplicities adjusted to
     /// a cubic, plus every classification boundary not already a knot (as a C1
-    /// knot, multiplicity 2). Returns the breaks, multiplicities and the UVW
-    /// tolerance.
-    fn compute_breaks(&self) -> Result<(Vec<f64>, Vec<usize>, f64)> {
+    /// knot, multiplicity 2). Returns the breaks, multiplicities and status, and the
+    /// UVW tolerance; a failing classification ends it with the adjusted base
+    /// knots written (upstream's `SER`).
+    fn compute_breaks(&self, k: &Kernel) -> Result<(KnotsWithStatus, f64)> {
         // pick a UVWSpace tolerance
         let volume_param_size = self
             .volume
@@ -608,7 +602,7 @@ impl CrvInVolume {
         let tol_uvw = EFF_ZERO * (1.0 + max2(volume_param_size, curve_param_size));
 
         // get the Curve knots and multiplicities for the natural curve (status ignored)
-        let (mut knots, mut mults) = ignored(self.curve.knots(None))?.unwrap_or_default();
+        let (mut knots, mut mults) = ignored(self.curve.knots(k, None))?.unwrap_or_default();
 
         // modify the multiplicity list to act as if Curve is a degree 3 BSpline
         let crv_degree = self.curve.degree()?;
@@ -623,13 +617,28 @@ impl CrvInVolume {
         }
 
         // classify the BaseCurve against the volume knot isoParameter lines
-        let classes = classify_against_volume(
+        let classes = match classify_against_volume(
+            k,
             &self.curve,
             &self.curve.natural_interval(),
             tol_uvw,
             &self.volume,
             self.in_param_space,
-        )?;
+        ) {
+            Ok(classes) => classes,
+            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e) => {
+                let status = Err(e);
+                return Ok((
+                    KnotsWithStatus {
+                        knots,
+                        mults,
+                        status,
+                    },
+                    tol_uvw,
+                ));
+            }
+        };
 
         // add the classification boundaries uniquely and in order to the knots and mults
         let cnt = classes.len();
@@ -674,7 +683,7 @@ impl CrvInVolume {
             }
             uvw_knot = *knots.get(jj).ok_or_else(short)?;
         }
-        Ok((knots, mults, tol_uvw))
+        Ok((KnotsWithStatus::success(knots, mults), tol_uvw))
     }
 
     /// The continuity of each break from its multiplicity on a cubic (the ends are
@@ -746,42 +755,85 @@ impl CrvInVolume {
     }
 
     /// The breaks ("knots") and their effective multiplicities, optionally limited
-    /// to `interval` (`GetKnots`), computing and caching them when needed.
+    /// to `interval` (`GetKnots`), computing and caching them when needed; on a
+    /// failing classification, the adjusted base curve knots with that status
+    /// (nothing cached or culled, as upstream).
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the volume and the curve classification;
     /// [`SolidError::InvalidInput`] where upstream would read outside its arrays.
-    pub fn knots(&mut self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+    pub fn knots_with_status(
+        &mut self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<KnotsWithStatus> {
         // low work - Knots and Conts already cached
         if !self.need_breaks {
-            return Ok(self.cached_knots(interval));
+            let (knots, mults) = self.cached_knots(interval);
+            return Ok(KnotsWithStatus::success(knots, mults));
         }
-        let (mut knots, mut mults, tol) = self.compute_breaks()?;
+        let (mut r, tol) = self.compute_breaks(k)?;
+        if r.status.is_err() {
+            return Ok(r);
+        }
 
         // cache the knots
-        self.breaks.clone_from(&knots);
+        self.breaks.clone_from(&r.knots);
         self.need_breaks = false;
-        self.conts = Self::conts_of(&mults);
+        self.conts = Self::conts_of(&r.mults);
 
         // when given an interval - cull unwanted output values
-        Self::cull(&mut knots, &mut mults, interval, tol)?;
-        Ok((knots, mults))
+        Self::cull(&mut r.knots, &mut r.mults, interval, tol)?;
+        Ok(r)
     }
 
-    /// [`Self::knots`] without storing the cache (for `&self` callers): the same
-    /// answer as upstream's first call.
+    /// [`Self::knots_with_status`] without storing the cache (for `&self` callers):
+    /// the same answer as upstream's first call.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::knots_with_status`].
+    pub fn knots_with_status_ref(
+        &self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<KnotsWithStatus> {
+        if !self.need_breaks {
+            let (knots, mults) = self.cached_knots(interval);
+            return Ok(KnotsWithStatus::success(knots, mults));
+        }
+        let (mut r, tol) = self.compute_breaks(k)?;
+        if r.status.is_ok() {
+            Self::cull(&mut r.knots, &mut r.mults, interval, tol)?;
+        }
+        Ok(r)
+    }
+
+    /// [`Self::knots_with_status`] with a failing status as the error.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::knots_with_status`], and its failing status.
+    pub fn knots(
+        &mut self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.knots_with_status(k, interval)?.into_result()
+    }
+
+    /// [`Self::knots_with_status_ref`] with a failing status as the error.
     ///
     /// # Errors
     ///
     /// As [`Self::knots`].
-    pub fn knots_ref(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
-        if !self.need_breaks {
-            return Ok(self.cached_knots(interval));
-        }
-        let (mut knots, mut mults, tol) = self.compute_breaks()?;
-        Self::cull(&mut knots, &mut mults, interval, tol)?;
-        Ok((knots, mults))
+    pub fn knots_ref(
+        &self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.knots_with_status_ref(k, interval)?.into_result()
     }
 
     /// Fills `mults` (one per knot, zero-initialised) from the cached continuities.
@@ -866,8 +918,8 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// Those of [`Self::knots`].
-    pub fn number_natural_knots(&mut self) -> Result<usize> {
-        let (_, mults) = self.knots(None)?;
+    pub fn number_natural_knots(&mut self, k: &Kernel) -> Result<usize> {
+        let mults = self.knots_with_status(k, None)?.mults;
         Ok(mults.iter().sum())
     }
 
@@ -876,8 +928,8 @@ impl CrvInVolume {
     /// # Errors
     ///
     /// Those of [`Self::knots_ref`].
-    pub fn number_natural_knots_ref(&self) -> Result<usize> {
-        let (_, mults) = self.knots_ref(None)?;
+    pub fn number_natural_knots_ref(&self, k: &Kernel) -> Result<usize> {
+        let mults = self.knots_with_status_ref(k, None)?.mults;
         Ok(mults.iter().sum())
     }
 
@@ -931,7 +983,7 @@ impl CrvInVolume {
         k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-        let (breaks, _) = self.knots(None)?;
+        let breaks = self.knots_with_status(k, None)?.knots;
         self.continuities_at(k, &breaks, angle_tol)
     }
 
@@ -945,7 +997,7 @@ impl CrvInVolume {
         k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-        let (breaks, _) = self.knots_ref(None)?;
+        let breaks = self.knots_with_status_ref(k, None)?.knots;
         self.continuities_at(k, &breaks, angle_tol)
     }
 
@@ -1291,19 +1343,22 @@ mod tests {
         assert_eq!(c.generate_mults(&[0.1, 0.5]).unwrap(), vec![0, 1]);
         // past the last break
         assert!(c.generate_mults(&[2.0]).is_err());
-        let (k, m) = c
-            .knots_ref(Some(&Extent1d::from_min_max(0.2, 0.6)))
+        let k = &Kernel::default();
+        let (kn, m) = c
+            .knots_ref(k, Some(&Extent1d::from_min_max(0.2, 0.6)))
             .unwrap();
-        assert_eq!(k, vec![0.25, 0.5]);
+        assert_eq!(kn, vec![0.25, 0.5]);
         assert_eq!(m, vec![3, 1]);
-        assert_eq!(c.number_natural_knots_ref().unwrap(), 9);
+        assert_eq!(c.number_natural_knots_ref(k).unwrap(), 9);
     }
 
     #[test]
-    fn uncached_knots_are_unported() {
+    fn uncached_knots_classify_against_the_volume() {
         let k = &Kernel::default();
         let mut c = civ(3);
-        assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
+        // GetKnots classifies the base curve (no longer deferred on ReSet)
+        let r = c.knots(k, None);
+        assert!(!matches!(r, Err(SolidError::Unported { .. })), "{r:?}");
         // the bend volume evaluates (a default bend divides by its zero neutral
         // distance)
         assert_eq!(c.evaluate(k, 0.5, 2, true, true).unwrap().len(), 3);

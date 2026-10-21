@@ -854,7 +854,7 @@ impl Curve {
     /// # Errors
     ///
     /// `SM_ERR` for a B-spline without NURB.
-    pub fn number_natural_knots(&self) -> Result<usize> {
+    pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
         match &self.kind {
             CurveKind::BSpline(c) => c.number_natural_knots(),
             CurveKind::Hyperbola(c) => c.base().number_natural_knots(),
@@ -864,10 +864,10 @@ impl Curve {
             | CurveKind::Conic(_)
             | CurveKind::Iso(_)
             | CurveKind::Composite(_) => Ok(2),
-            CurveKind::Offset(c) => c.number_natural_knots(),
-            CurveKind::Projected(c) => c.number_natural_knots(),
-            CurveKind::CrvInVolume(c) => c.number_natural_knots_ref(),
-            CurveKind::CrvOnSurf(c) => c.number_natural_knots_ref(),
+            CurveKind::Offset(c) => c.number_natural_knots(k),
+            CurveKind::Projected(c) => c.number_natural_knots(k),
+            CurveKind::CrvInVolume(c) => c.number_natural_knots_ref(k),
+            CurveKind::CrvOnSurf(c) => c.number_natural_knots_ref(k),
             CurveKind::Line(c) => Ok(c.number_natural_knots()),
         }
     }
@@ -1185,9 +1185,30 @@ impl Curve {
     /// # Errors
     ///
     /// `SM_ERR` for a B-spline without NURB.
-    pub fn knots(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+    pub fn knots_with_status(
+        &self,
+        k: &Kernel,
+        interval: Option<&Extent1d>,
+    ) -> Result<KnotsWithStatus> {
         match &self.kind {
-            CurveKind::Composite(c) => c.knots(interval),
+            CurveKind::CrvInVolume(c) => c.knots_with_status_ref(k, interval),
+            CurveKind::CrvOnSurf(c) => c.as_ref().clone().knots_with_status(k, interval),
+            _ => {
+                let (knots, mults) = self.knots(k, interval)?;
+                Ok(KnotsWithStatus::success(knots, mults))
+            }
+        }
+    }
+
+    /// Unique knots and multiplicities, optionally limited to `interval`
+    /// (`GetKnots`), with a failing status as the error.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a B-spline without NURB.
+    pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
+        match &self.kind {
+            CurveKind::Composite(c) => c.knots(k, interval),
             CurveKind::BSpline(c) => c.knots(interval),
             CurveKind::Hyperbola(c) => c.base().knots(interval),
             CurveKind::Ellipse(c) => c.base().knots(interval),
@@ -1200,11 +1221,11 @@ impl Curve {
                 let (k, m) = c.knots(interval);
                 Ok((k, m.into_iter().map(|v| v as usize).collect()))
             }
-            CurveKind::Projected(c) => c.knots(interval),
+            CurveKind::Projected(c) => c.knots(k, interval),
             CurveKind::Iso(c) => c.knots(interval),
-            CurveKind::Offset(c) => c.knots(interval),
-            CurveKind::CrvInVolume(c) => c.knots_ref(interval),
-            CurveKind::CrvOnSurf(c) => c.knots_ref(interval),
+            CurveKind::Offset(c) => c.knots(k, interval),
+            CurveKind::CrvInVolume(c) => c.knots_ref(k, interval),
+            CurveKind::CrvOnSurf(c) => c.knots_ref(k, interval),
             CurveKind::Line(c) => c.base_with_nurb()?.knots(interval),
         }
     }
@@ -1629,14 +1650,14 @@ impl Curve {
         // special case line/plane check
         let mut do_precise = false;
         let is_plane = surface_is_plane(surface)?;
-        if is_plane && self.degree()? == 1 && self.number_natural_knots()? == 4 {
+        if is_plane && self.degree()? == 1 && self.number_natural_knots(k)? == 4 {
             do_precise = false;
             num_samples = 2;
         } else if num_samples == 0 {
             // Do a very large sample and adjust it upward to compensate for
             // cases where there are a large number of knots.
             do_precise = true;
-            let num_knots1 = self.number_natural_knots()?;
+            let num_knots1 = self.number_natural_knots(k)?;
             let num_knots2 = surface_knot_count(surface, false)?;
             let num_knots3 = surface_knot_count(surface, true)?;
             num_samples = 22 + num_knots1 + num_knots2 + num_knots3;
@@ -3673,6 +3694,53 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CciGlobalSolver<'t, O> {
     }
 }
 
+/// `GetKnots`' out-parameters with its status. The classifying overrides
+/// (`SmCrvOnSurf`, `SmCrvInVolume`) write the base curve's knots and multiplicities
+/// before their classification can fail (`SER`), and their own callers ignore the
+/// status and read what was written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnotsWithStatus {
+    /// `rKnots`.
+    pub knots: Vec<f64>,
+    /// `pOptMults`.
+    pub mults: Vec<usize>,
+    /// The returned status: `Err` (never [`SolidError::Unported`]) for a failing one.
+    pub status: Result<()>,
+}
+
+impl KnotsWithStatus {
+    /// A successful `GetKnots`.
+    #[must_use]
+    pub const fn success(knots: Vec<f64>, mults: Vec<usize>) -> Self {
+        Self {
+            knots,
+            mults,
+            status: Ok(()),
+        }
+    }
+
+    /// The lists, or the failing status.
+    ///
+    /// # Errors
+    ///
+    /// The failing status.
+    pub fn into_result(self) -> Result<(Vec<f64>, Vec<usize>)> {
+        self.status?;
+        Ok((self.knots, self.mults))
+    }
+}
+
+/// The lists a caller that ignores `GetKnots`' status reads: what was written, also on a
+/// failing status; empty when nothing was (an error before the out-parameters, as
+/// [`ignored`]).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`].
+pub fn knots_ignoring_status(r: Result<KnotsWithStatus>) -> Result<(Vec<f64>, Vec<usize>)> {
+    Ok(ignored(r)?.map_or_else(Default::default, |r| (r.knots, r.mults)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3739,7 +3807,7 @@ mod tests {
         assert!(is_kind_of(a_object::TYPE));
         assert_eq!(h.degree().unwrap(), 3);
         assert_eq!(h.number_control_points().unwrap(), 0);
-        assert_eq!(h.number_natural_knots().unwrap(), 2);
+        assert_eq!(h.number_natural_knots(k).unwrap(), 2);
         assert!(!h.is_rational().unwrap());
         let b = cubic();
         assert!(b.approx_eq(k, &b.clone()).unwrap() && !b.approx_eq(k, &h).unwrap());

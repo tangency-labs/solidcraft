@@ -892,7 +892,7 @@ fn put_zone_tol_and_knots(
     o.push(zt(edge.curve.is_some()));
     o.push(zt(eu::uv_trim_curve(b, prim).map_err(err)?.0.is_some()));
     o.push(zt(eu::uv_trim_curve(b, mate).map_err(err)?.0.is_some()));
-    match edge.curve.as_ref().map(|c| c.knots(None)) {
+    match edge.curve.as_ref().map(|c| c.knots(k, None)) {
         Some(Ok((knots, mults))) => {
             o.push(knots.len() as f64);
             o.extend_from_slice(&knots);

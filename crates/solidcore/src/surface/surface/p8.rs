@@ -2497,7 +2497,7 @@ pub fn extract_iso_curve(
     }
 
     // Check starting and ending knots for too high multiplicity.
-    let Some((_, multiplicities)) = ignored(iso.knots(None))? else {
+    let Some((_, multiplicities)) = ignored(iso.knots(k, None))? else {
         return Ok(None);
     };
     let degree = iso.degree()?;
