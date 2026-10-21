@@ -22,9 +22,11 @@ pub mod flat;
 pub mod history;
 pub mod import;
 mod measure;
+mod ops;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties};
+pub use ops::{BooleanOp, MAX_POINTS};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,8 +35,14 @@ pub enum Error {
     Status(i32),
     /// An argument the C API rejected before SMLib saw it.
     Argument,
-    /// SMLib reported success but returned no body.
+    /// SMLib reported success but returned no body (for a boolean: the result is empty).
     Empty,
+    /// SMLib reported success, but a solid input gave a result that is not a closed solid.
+    NotSolid,
+    /// Selection point `point` is farther than the tolerance from every edge (face).
+    NoMatch { point: usize },
+    /// Selection point `point` is equally near to two edges (faces).
+    Ambiguous { point: usize },
     /// A C++ exception (most likely out of memory) was caught at the boundary.
     Exception,
     /// The C API is a different version from the one this crate was written against.
@@ -52,6 +60,9 @@ impl std::fmt::Display for Error {
             Error::Status(s) => write!(f, "SMLib failed (status {s})"),
             Error::Argument => write!(f, "invalid argument for SMLib"),
             Error::Empty => write!(f, "SMLib returned an empty body"),
+            Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
+            Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
+            Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
             Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),
@@ -68,6 +79,7 @@ fn error(s: i32) -> Error {
     match s {
         ffi::ERR_ARG | ffi::ERR_BUFFER => Error::Argument,
         ffi::ERR_EMPTY => Error::Empty,
+        ffi::ops::ERR_NOT_SOLID => Error::NotSolid,
         ffi::ERR_EXCEPTION => Error::Exception,
         ffi::NOT_BUILT => Error::NotBuilt,
         s => Error::Status(s),

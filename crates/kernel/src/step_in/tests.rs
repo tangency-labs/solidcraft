@@ -1130,6 +1130,9 @@ fn surface_of_revolution_sense_follows_iso() {
     let m = measure(&imp.bodies[0].body).unwrap();
     let want = std::f64::consts::PI * 25.0 * 10.0;
     assert!(rel(m.volume, want) < 1e-3, "{} vs {want}", m.volume);
+    // Read into schema 4 (a placed revolution), the same cylinder, outward.
+    let v = schema_4_volume(&t);
+    assert!(rel(v, want) < 1e-3, "schema 4: {v} vs {want}");
     // The same face with the opposite sense is inside out.
     let flipped = t.replace("#36=ADVANCED_FACE('',(#35),#8,.T.);", "#36=ADVANCED_FACE('',(#35),#8,.F.);");
     let bad = step_import(&flipped).unwrap();
@@ -1821,6 +1824,30 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
+/// A schema 4 record as truck's adapter builds it: truck holds a plane by three points, the
+/// same plane within a rounding.
+fn truck_ready(record: &solidcraft_geom::brep::Brep) -> solidcraft_geom::brep::Brep {
+    let mut record = record.clone();
+    for f in &mut record.faces {
+        if let solidcraft_geom::brep::Surface::Plane { origin, u_axis, v_axis } = f.surface {
+            let at = |d: [f64; 3]| [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]];
+            f.surface = solidcraft_geom::brep::Surface::PlaneThrough { origin, u_point: at(u_axis), v_point: at(v_axis) };
+        }
+    }
+    record
+}
+
+/// The volume of the one solid `solidcraft_step::topology` reads from `text` into schema 4,
+/// built back into a truck body: negative when its faces point into its material.
+pub(super) fn schema_4_volume(text: &str) -> f64 {
+    let ex = solidcraft_step::p21::parse(text).unwrap();
+    let r = solidcraft_step::topology::read_solids(&ex);
+    assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
+    let solid = crate::native::solid_of_record(truck_ready(&r.solids[0].brep)).unwrap();
+    let sign = solid.boundaries().iter().map(crate::body::shell_volume).sum::<Option<f64>>().unwrap().signum();
+    sign * measure(&crate::body::Body::new(solid).unwrap()).unwrap().volume
+}
+
 /// Each STEP file in `SOLIDCRAFT_STEP_CORPUS`: bodies, faces, edges and volume as truck
 /// imports it and as `solidcraft_step::topology` reads it into schema 4 records (built back into
 /// truck solids for their volume, signed: negative means faces turned into the material).
@@ -1859,15 +1886,7 @@ fn corpus_truck_and_schema_4_counts() {
         let (f, e) = r.solids.iter().fold((0, 0), |(f, e), s| (f + s.brep.faces.len(), e + s.brep.edges.len()));
         let (mut v, mut unbuilt) = (0.0, Vec::new());
         for s in &r.solids {
-            // Truck holds a plane by three points: the same plane, within a rounding.
-            let mut record = s.brep.clone();
-            for f in &mut record.faces {
-                if let solidcraft_geom::brep::Surface::Plane { origin, u_axis, v_axis } = f.surface {
-                    let at = |d: [f64; 3]| [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]];
-                    f.surface = solidcraft_geom::brep::Surface::PlaneThrough { origin, u_point: at(u_axis), v_point: at(v_axis) };
-                }
-            }
-            match crate::native::solid_of_record(record) {
+            match crate::native::solid_of_record(truck_ready(&s.brep)) {
                 Ok(solid) => v += volume(&solid).unwrap_or(f64::NAN),
                 Err(err) => unbuilt.push(err.to_string()),
             }

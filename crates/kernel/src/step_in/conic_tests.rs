@@ -176,6 +176,8 @@ fn hyperbola_bounded_faces_import() {
     assert!(rel(want, 175.447_506_9) < 1e-9, "{want}");
     let imp = import_piece(&hyperbola_piece(), want);
     round_trip(&imp, want);
+    let v = super::tests::schema_4_volume(&hyperbola_piece());
+    assert!(rel(v, want) < 1e-4, "schema 4: {v} vs {want}");
 }
 
 #[test]
@@ -184,6 +186,8 @@ fn parabola_bounded_faces_import() {
     assert!(rel(want, 447.014_684_29) < 1e-9, "{want}");
     let imp = import_piece(&parabola_piece(), want);
     round_trip(&imp, want);
+    let v = super::tests::schema_4_volume(&parabola_piece());
+    assert!(rel(v, want) < 1e-4, "schema 4: {v} vs {want}");
 }
 
 /// The kernel curves lie exactly on the conics, end to end, whichever way they run.
