@@ -234,6 +234,93 @@ fn meridians_run_straight_into_the_poles() {
     }
 }
 
+/// A whole sphere bounded only by its seam (one meridian from pole to pole, used twice), in
+/// frames where rounding leaves the loop with the uses on one line a tiny positive area: the
+/// two uses come out a period apart and the loop turns counter-clockwise around the whole
+/// (u, v) box, in either loop order, for a circle or a NURBS meridian, with its ends at the
+/// poles or within a tenth of the tolerance of them.
+#[test]
+fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let tol = 1e-7;
+    let frames = [
+        about_z([0.; 3], false),
+        about_z([1., -2., 3.], true),
+        frame([1., 2., 3.], [0., 0.6, 0.8], [0., -0.8, 0.6]),
+        frame([-4., 0.5, 2.], [0.36, 0.48, 0.8], [-0.8, 0.6, 0.]),
+    ];
+    for sf in frames {
+        let sphere = Surface::Sphere { frame: sf.clone(), radius: 6. };
+        let ax = crate::brep::eval::Axes::new(&sf);
+        for turn in [0f64, 2.1, -0.7] {
+            let x = ax.x * turn.cos() + ax.y * turn.sin();
+            let p = |v: Vec3| [v.x, v.y, v.z];
+            let (o, r, z) = (ax.o, x * 6., ax.z * 6.);
+            let circle = Curve::Circle { frame: Frame { origin: p(o), x_axis: p(x), y_axis: p(ax.z) }, radius: 6. };
+            for off in [0., 0.1 * tol] {
+                // South pole to north pole through the equator, as two rational quarter arcs,
+                // the ends `off` to the side of the poles.
+                let h = |v: Vec3, wt: f64| [v.x * wt, v.y * wt, v.z * wt, wt];
+                let side = ax.y * off;
+                let nurbs = Curve::RationalSpline {
+                    knots: vec![0., 0., 0., 0.5, 0.5, 1., 1., 1.],
+                    homogeneous: vec![h(o - z + side, 1.), h(o - z + r, w), h(o + r, 1.), h(o + z + r, w), h(o + z - side, 1.)],
+                };
+                for (seam, iv) in [(&circle, [-FRAC_PI_2, FRAC_PI_2]), (&nurbs, [0., 1.])] {
+                    for order in [[true, false], [false, true]] {
+                        let l: Vec<EdgeUse> = order.iter().map(|&forward| EdgeUse { edge: 0, curve: seam, interval: iv, forward }).collect();
+                        let pcs = &pcurves(&sphere, std::slice::from_ref(&l), tol).unwrap()[0];
+                        let what = format!("{sf:?} {turn} {off} {seam:?} {order:?}");
+                        for pc in pcs {
+                            assert!(lift_error(&sphere, seam, iv, pc) <= tol, "{what}");
+                        }
+                        let mid = 0.5 * (iv[0] + iv[1]);
+                        let (a, b) = (pcs[0].eval(mid).unwrap(), pcs[1].eval(mid).unwrap());
+                        assert!(((a[0] - b[0]).abs() - TAU).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-12, "a period apart: {a:?} {b:?} {what}");
+                        let (ends, area) = walk(&l, pcs);
+                        for k in 0..2 {
+                            assert!((ends[k].1[1] - ends[(k + 1) % 2].0[1]).abs() < 1e-6, "closed in v: {ends:?} {what}");
+                        }
+                        // The box less the corners `walk` cuts (it joins each use's 16th
+                        // sample to the next use's start): about 15/16 of it.
+                        assert!((area / (TAU * PI * 15. / 16.) - 1.).abs() < 1e-2, "counter-clockwise around the box: {area} {what}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A whole torus bounded only by its two seams (a circle about the axis and a circle around
+/// the tube, each used twice): no pole, continuity alone puts each seam's uses a period apart
+/// and the loop around the whole (u, v) box.
+#[test]
+fn a_torus_bounded_by_its_seams_spans_both_periods() {
+    let frames = [about_z([0.; 3], false), frame([1., 2., 3.], [0., 0.6, 0.8], [0., -0.8, 0.6])];
+    for sf in frames {
+        let torus = Surface::Torus { frame: sf.clone(), major_radius: 10., minor_radius: 2. };
+        let ax = crate::brep::eval::Axes::new(&sf);
+        let p = |v: Vec3| [v.x, v.y, v.z];
+        // The outer equator (v = 0, u from 0) and the tube circle at u = 0 (v from 0, upwards).
+        let around = Curve::Circle { frame: sf.clone(), radius: 12. };
+        let tube = Curve::Circle { frame: Frame { origin: p(ax.o + ax.x * 10.), x_axis: p(ax.x), y_axis: p(ax.z) }, radius: 2. };
+        let full = [0., TAU];
+        let l = vec![
+            EdgeUse { edge: 0, curve: &around, interval: full, forward: true },
+            EdgeUse { edge: 1, curve: &tube, interval: full, forward: true },
+            EdgeUse { edge: 0, curve: &around, interval: full, forward: false },
+            EdgeUse { edge: 1, curve: &tube, interval: full, forward: false },
+        ];
+        let pcs = &pcurves(&torus, std::slice::from_ref(&l), 1e-9).unwrap()[0];
+        let (ends, area) = walk(&l, pcs);
+        for k in 0..4 {
+            let (end, start) = (ends[k].1, ends[(k + 1) % 4].0);
+            assert!((end[0] - start[0]).abs() < 1e-12 && (end[1] - start[1]).abs() < 1e-12, "{k}: {end:?} {start:?}");
+        }
+        assert!((area / (TAU * TAU) - 1.).abs() < 1e-12, "counter-clockwise around the box: {area}");
+    }
+}
+
 /// An intersection record evaluates to the point of both surfaces in the leader's normal
 /// plane, and its pcurves on either surface fit.
 #[test]
