@@ -823,8 +823,8 @@ fn hostile_topology_is_an_error_never_a_panic() {
 }
 
 /// The step-conformance parts (tests/step-conformance, CC0): every one reads, its faces facing
-/// out of its material, except the NURBS cylinder, dome and torus whose faces wind around a
-/// closed spline surface without a seam edge (refused for now).
+/// out of its material; the NURBS cylinder, dome and torus ring, whose faces wind around a
+/// spline closed on itself in u without a seam edge, get one along its boundary column.
 #[test]
 fn step_conformance_parts() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -835,10 +835,6 @@ fn step_conformance_parts() {
     for path in paths {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let r = read_solids(&p21::parse(&std::fs::read_to_string(&path).unwrap()).unwrap());
-        if name.ends_with("_nurbs") {
-            assert!(r.solids.is_empty() && r.failures[0].message.contains("closed spline surface's seam"), "{name}: {:?}", r.failures);
-            continue;
-        }
         assert!(r.failures.is_empty() && r.solids.len() == 1, "{name}: {:?}", r.failures);
         let b = &r.solids[0].brep;
         b.validate().unwrap();

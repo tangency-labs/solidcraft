@@ -1902,9 +1902,8 @@ fn corpus_truck_and_schema_4_counts() {
 
 /// The step-conformance parts read into SMLib (`SOLIDCRAFT_KERNEL=smlib`): the STEP reader's
 /// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
-/// face count, and every face is traced to a face of the file. The NURBS cylinder, dome and
-/// torus wind around a closed spline surface without a seam edge, which the reader refuses for
-/// now, and stay refused on this path with that reason.
+/// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
+/// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
 #[cfg(feature = "smlib")]
 #[test]
 fn step_conformance_parts_read_into_smlib() {
@@ -1930,21 +1929,12 @@ fn step_conformance_parts_read_into_smlib() {
         items.sort_unstable();
         let (mut v, mut n) = (0.0, 0);
         for item in items {
-            let made = parallel::smlib_part(&ex, item, units);
-            if name.ends_with("_nurbs") {
-                let msg = made.err().map(|f| f.msg).unwrap_or_default();
-                assert!(msg.contains("closed spline surface's seam"), "{name}: {msg}");
-                continue;
-            }
-            let (part, _) = made.unwrap_or_else(|f| panic!("{name}: {}", f.msg));
+            let (part, _) = parallel::smlib_part(&ex, item, units).unwrap_or_else(|f| panic!("{name}: {}", f.msg));
             assert_eq!(part.face_origin.len(), part.body.face_count(), "{name}");
             assert!(part.face_origin.iter().all(|f| ex.get(*f).is_some_and(|e| e.name() == "ADVANCED_FACE")), "{name}: {:?}", part.face_origin);
             let m = measure(&part.body).unwrap_or_else(|e| panic!("{name}: {e}"));
             v += m.volume;
             n += m.faces;
-        }
-        if name.ends_with("_nurbs") {
-            continue;
         }
         assert!(rel(v, volume) < 1e-3, "{name}: volume {v} vs {volume}");
         assert_eq!(n, faces, "{name}: faces");

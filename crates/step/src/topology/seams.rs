@@ -5,7 +5,11 @@
 //! a ruling line on a cylinder or cone, a meridian arc on a sphere, from a vertex of one loop to
 //! the other loop (split there when it has no vertex at that angle) or to the pole the face
 //! covers; on a surface of revolution, its profile turned to the vertex's angle. The loops merge into one: the first, the seam out, the second (or nothing at a pole),
-//! the seam back. A torus face winding without a seam is refused for now.
+//! the seam back. A face on a B-spline surface that closes on itself around u (its first and
+//! last control columns the same) gets a seam the same way, along the surface's own boundary
+//! column (u at the start of its knots), the loops split there where they have no vertex on it;
+//! the period is the width of its knots. A torus face winding without a seam, and a spline
+//! closed in v or both ways, are refused for now.
 
 use std::f64::consts::{PI, TAU};
 
@@ -25,7 +29,12 @@ fn arr(v: Vec3) -> [f64; 3] {
 }
 
 fn wrap(x: f64) -> f64 {
-    x - (x / TAU).round() * TAU
+    wrap_by(x, TAU)
+}
+
+/// `x` wrapped into (−period/2, period/2].
+fn wrap_by(x: f64, period: f64) -> f64 {
+    x - (x / period).round() * period
 }
 
 /// The axis frame of a surface of revolution: origin, unit axis, and the pole points at the
@@ -35,6 +44,8 @@ struct Axis {
     z: Vec3,
     kind: Kind,
     poles: [Option<Vec3>; 2],
+    /// The period around (2π, or a closed spline's knot width).
+    period: f64,
 }
 
 #[derive(Clone, PartialEq)]
@@ -43,6 +54,12 @@ enum Kind {
     Sphere(f64),
     /// A placed revolution with u the angle: its profile.
     Revolved(BCurve),
+    /// A B-spline surface closed on itself around u: its boundary column at u = `u0` (the start
+    /// of its knots), a curve in v, along which every seam runs.
+    Iso {
+        u0: f64,
+        column: BCurve,
+    },
 }
 
 fn axis(s: &BSurface) -> Option<Axis> {
@@ -53,17 +70,17 @@ fn axis(s: &BSurface) -> Option<Axis> {
     match s {
         BSurface::Cylinder { frame: f, .. } => {
             let (origin, z) = frame(f);
-            Some(Axis { origin, z, kind: Kind::Ruled, poles: [None, None] })
+            Some(Axis { origin, z, kind: Kind::Ruled, poles: [None, None], period: TAU })
         }
         BSurface::Cone { frame: f, radius_at_origin, half_angle } => {
             let (origin, z) = frame(f);
             let apex = origin + z * (-radius_at_origin / half_angle.tan());
             let poles = if *half_angle > 0.0 { [Some(apex), None] } else { [None, Some(apex)] };
-            Some(Axis { origin, z, kind: Kind::Ruled, poles })
+            Some(Axis { origin, z, kind: Kind::Ruled, poles, period: TAU })
         }
         BSurface::Sphere { frame: f, radius } => {
             let (origin, z) = frame(f);
-            Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)] })
+            Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)], period: TAU })
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
             let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
@@ -76,10 +93,32 @@ fn axis(s: &BSurface) -> Option<Axis> {
                     (d - z * d.dot(z)).len() <= 1e-9 * (1.0 + d.len())
                 })
             };
-            Some(Axis { origin, z, kind: Kind::Revolved((**profile).clone()), poles: [pole(a), pole(b)] })
+            Some(Axis { origin, z, kind: Kind::Revolved((**profile).clone()), poles: [pole(a), pole(b)], period: TAU })
         }
         _ => None,
     }
+}
+
+/// The seam frame of a B-spline surface closed around u only ([`Kind::Iso`]): its column at the
+/// start of its u knots, and the points its v ends collapse to (a pole), if they do.
+fn spline_axis(s: &BSurface, eval: &SurfaceEval) -> Option<Axis> {
+    let dom = eval.domain();
+    let (Some(period), None) = (dom.period[0], dom.period[1]) else { return None };
+    let ((u0, u1), (v0, v1)) = (dom.range[0]?, dom.range[1]?);
+    let column = match s {
+        BSurface::Spline { v_knots, points, .. } => BCurve::Spline { knots: v_knots.clone(), points: points.first()?.clone() },
+        BSurface::RationalSpline { v_knots, homogeneous, .. } => {
+            BCurve::RationalSpline { knots: v_knots.clone(), homogeneous: homogeneous.first()?.clone() }
+        }
+        _ => return None,
+    };
+    // A v end is a pole where the surface's points across u there are one point.
+    let pole = |v: f64| {
+        let p = eval.point([u0, v])?;
+        let across = (1..8).filter_map(|k| eval.point([u0 + (u1 - u0) * k as f64 / 8.0, v])).map(|q| q.dist(p)).fold(0.0, f64::max);
+        (across <= 1e-9 * (1.0 + p.len())).then_some(p)
+    };
+    Some(Axis { origin: Vec3::new(0.0, 0.0, 0.0), z: Vec3::new(0.0, 0.0, 1.0), kind: Kind::Iso { u0, column }, poles: [pole(v0), pole(v1)], period })
 }
 
 const IDENTITY: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -121,16 +160,18 @@ impl Builder<'_, '_> {
         for fi in 0..self.faces.len() {
             let Some(face) = self.faces.get(fi) else { continue };
             let surface = face.surface.clone();
-            let periodic = super::natural_periods(&surface);
-            if !periodic.iter().any(|p| *p) {
+            let natural = super::natural_periods(&surface);
+            let eval = SurfaceEval::new(&surface).map_err(|e| e.to_string())?;
+            // Periodic as the surface is, or as a spline closed on itself is (its knot width).
+            let periods = [0, 1].map(|d| if natural[d] { Some(TAU) } else { eval.domain().period[d] });
+            if periods.iter().all(Option::is_none) {
                 continue;
             }
-            let eval = SurfaceEval::new(&surface).map_err(|e| e.to_string())?;
             let mut up = Vec::new();
             let mut down = Vec::new();
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
-                let w = self.winding(&eval, es, periodic)?;
+                let w = self.winding(&eval, es, periods)?;
                 if w[1] != 0 || w[0].abs() > 1 {
                     return Err(format!("face #{}: {}", face.step, unsupported("a loop winding around a surface more than once or in v")));
                 }
@@ -144,8 +185,8 @@ impl Builder<'_, '_> {
                 continue;
             }
             let step = face.step;
-            let Some(ax) = axis(&surface) else {
-                return Err(format!("face #{step}: {}", unsupported("a face winding around a torus without a seam edge")));
+            let Some(ax) = axis(&surface).or_else(|| spline_axis(&surface, &eval)) else {
+                return Err(format!("face #{step}: {}", unsupported("a face winding around a torus or a spline closed in v without a seam edge")));
             };
             match (up.as_slice(), down.as_slice()) {
                 // The face lies to the left of its loops in (u, v): above a loop running +u.
@@ -160,7 +201,7 @@ impl Builder<'_, '_> {
     }
 
     /// Turns (in u, in v) a loop makes around a periodic surface.
-    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periodic: [bool; 2]) -> R<[i64; 2]> {
+    fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2]) -> R<[i64; 2]> {
         let mut last: Option<[f64; 2]> = None;
         let mut total = [0.0; 2];
         for &(e, forward) in es {
@@ -174,15 +215,15 @@ impl Builder<'_, '_> {
                 let Some(q) = eval.project(p, last, f64::INFINITY) else { continue };
                 if let Some(l) = last {
                     for d in 0..2 {
-                        if periodic[d] {
-                            total[d] += wrap(q[d] - l[d]);
+                        if let Some(p) = periods[d] {
+                            total[d] += wrap_by(q[d] - l[d], p) / p;
                         }
                     }
                 }
                 last = Some(q);
             }
         }
-        Ok(total.map(|x| (x / TAU).round() as i64))
+        Ok(total.map(|x| x.round() as i64))
     }
 
     /// The vertex where use `k` of a loop starts.
@@ -220,6 +261,20 @@ impl Builder<'_, '_> {
                     return Err("a degenerate seam".into());
                 }
                 (BCurve::Circle { frame: Frame { origin: arr(ax.origin), x_axis: arr(x), y_axis: arr(y) }, radius: *r }, [0.0, theta], true)
+            }
+            Kind::Iso { column, .. } => {
+                // Each vertex's v on the surface (a pole's from its end of the v range).
+                let Some((v0, v1)) = eval.domain().range[1] else { return Err("a closed spline with no v range".into()) };
+                let v_of = |p: Vec3| -> R<f64> {
+                    Ok(match ax.poles {
+                        [Some(q), _] if q.dist(p) <= self.tol => v0,
+                        [_, Some(q)] if q.dist(p) <= self.tol => v1,
+                        _ => eval.project(p, None, f64::INFINITY).ok_or("a seam vertex off its surface")?[1],
+                    })
+                };
+                let (va, vb) = (v_of(pa)?, v_of(pb)?);
+                let along = va < vb;
+                (column.clone(), if along { [va, vb] } else { [vb, va] }, along)
             }
             Kind::Revolved(profile) => {
                 // a's angle; each vertex's profile parameter (a pole's from the profile's end).
@@ -277,6 +332,10 @@ impl Builder<'_, '_> {
             }
         }
         let k = k.ok_or_else(|| format!("face #{step}: a loop around the axis on its pole"))?;
+        let k = match ax.kind {
+            Kind::Iso { u0, .. } => self.seam_start(fi, li, u0, ax, eval)?,
+            _ => k,
+        };
         let ring = self.rotated(fi, li, k)?;
         let a = self.start(*ring.first().ok_or("empty loop")?)?;
         // The face's vertex loop at the pole, if it has one, else a new vertex there.
@@ -328,6 +387,16 @@ impl Builder<'_, '_> {
             };
             Ok(wrap(ua - ub).abs() * r <= s.tol)
         };
+        if let Kind::Iso { u0, .. } = ax.kind {
+            // Both loops start on the spline's boundary column, split there where they don't.
+            let i = self.seam_start(fi, la, u0, ax, eval)?;
+            let j = self.seam_start(fi, lb, u0, ax, eval)?;
+            *splits += 2;
+            if *splits > MAX_SPLITS {
+                return Err(format!("more than {MAX_SPLITS} edges split for seams"));
+            }
+            return self.join_by_seam(fi, la, lb, i, j, ax, eval);
+        }
         let mut pair = None;
         'search: for (i, ua) in a_es.iter().enumerate().take(100) {
             for (j, ub) in b_es.iter().enumerate().take(100) {
@@ -348,7 +417,7 @@ impl Builder<'_, '_> {
                 let target = angle(self, self.start(*a_es.first().ok_or("empty loop")?)?)?;
                 let mut found = None;
                 for &(e, _) in &b_es {
-                    if let Some(t) = self.crossing(e, target, eval)? {
+                    if let Some(t) = self.crossing(e, target, ax.period, eval)? {
                         found = Some((e, t));
                         break;
                     }
@@ -366,6 +435,13 @@ impl Builder<'_, '_> {
                 (0, j.ok_or("the split vertex is not on its loop")?)
             }
         };
+        self.join_by_seam(fi, la, lb, i, j, ax, eval)
+    }
+
+    /// Join loops `la` and `lb` of face `fi`, from their uses `i` and `j`, by a seam between
+    /// the vertices those uses start at: loop A, the seam out, loop B, the seam back.
+    #[allow(clippy::too_many_arguments)]
+    fn join_by_seam(&mut self, fi: usize, la: usize, lb: usize, i: usize, j: usize, ax: &Axis, eval: &SurfaceEval) -> R<()> {
         let a_ring = self.rotated(fi, la, i)?;
         let b_ring = self.rotated(fi, lb, j)?;
         let va = self.start(*a_ring.first().ok_or("empty loop")?)?;
@@ -385,11 +461,13 @@ impl Builder<'_, '_> {
 
     /// The parameter inside edge `e`'s interval where its curve reaches the angle `target`
     /// about the axis, if it does.
-    fn crossing(&self, e: u32, target: f64, eval: &SurfaceEval) -> R<Option<f64>> {
+    fn crossing(&self, e: u32, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let [lo, hi] = edge.interval;
-        let d = |t: f64| c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).map(|q| wrap(q[0] - target));
+        let d = |t: f64| c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).map(|q| wrap_by(q[0] - target, period));
+        // A jump across the half period is the wrap, not a crossing.
+        let near = period / TAU;
         let n = 64;
         let mut prev: Option<(f64, f64)> = None;
         for k in 0..=n {
@@ -397,8 +475,8 @@ impl Builder<'_, '_> {
             let Some(x) = d(t) else { continue };
             if let Some((t0, x0)) = prev
                 && x0.signum() != x.signum()
-                && x0.abs() < 1.0
-                && x.abs() < 1.0
+                && x0.abs() < near
+                && x.abs() < near
             {
                 let (mut a, mut b, mut fa) = (t0, t, x0);
                 for _ in 0..100 {
@@ -418,6 +496,37 @@ impl Builder<'_, '_> {
             prev = Some((t, x));
         }
         Ok(None)
+    }
+
+    /// The use of loop `li` of face `fi` that starts on the surface's column at u = `u0`: a
+    /// vertex there within the tolerance, else one made by splitting the loop's edge that
+    /// crosses it.
+    fn seam_start(&mut self, fi: usize, li: usize, u0: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+        let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+        let es = es.clone();
+        let on_seam = |s: &Self, v: u32| -> R<bool> {
+            let p = s.vpoint(v)?;
+            let Some(q) = eval.project(p, None, f64::INFINITY) else { return Ok(false) };
+            Ok(eval.point([u0, q[1]]).is_some_and(|c| c.dist(p) <= s.tol))
+        };
+        for (k, u) in es.iter().enumerate() {
+            if on_seam(self, self.start(*u)?)? {
+                return Ok(k);
+            }
+        }
+        for &(e, _) in &es {
+            if let Some(t) = self.crossing(e, u0, ax.period, eval)? {
+                let v = self.split_edge(e, t)?;
+                let Some(LoopB::Edges(now)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
+                for (k, u) in now.iter().enumerate() {
+                    if self.start(*u)? == v {
+                        return Ok(k);
+                    }
+                }
+                return Err("the split vertex is not on its loop".into());
+            }
+        }
+        Err(unsupported("a loop around a closed spline that never reaches its boundary column"))
     }
 
     /// Split edge `e` at `t` inside its interval: it keeps [min, t], a new edge takes
