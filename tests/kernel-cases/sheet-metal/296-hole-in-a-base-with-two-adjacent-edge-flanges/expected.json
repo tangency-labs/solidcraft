@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#296",
+  "tangency-labs/solidcraft#355"
+ ],
+ "what": "an 80 x 40 base with a 30 mm flange on the y = 0 edge and a 15 mm flange on the x = 80 edge, and a round hole through the base beside them: sew failed with a non-manifold edge contact",
+ "source": "invariants",
+ "method": "the hole is cut straight through the flat base, clear of both bends and of the corner, so it must give one valid closed body; the corner geometry of two adjacent flanges has no simple closed form, so no volume is graded",
+ "body_count": 1
+}
