@@ -67,6 +67,13 @@ pub enum Damage {
     /// / `Remove` when they make or remove a shell (`SmBrep.cpp:6827-6949`, `:7967`). Only
     /// with [`Op::DeleteEdge`], [`Op::DeleteVertex`] and [`Op::Check`].
     NoRegion(i64),
+    /// The vertex with this index (walk order, a loop vertex with an even number of vertex
+    /// uses) loses its last vertex use from its list (the loop use keeps it), leaving an odd
+    /// number: `DeleteVertex` of a loop vertex without edges takes its vertex uses in pairs
+    /// and reads `sVertexuses[ii + 1]` of the last one, an unset slot of the 16-slot stack
+    /// buffer, then dereferences it (`SmBrep.cpp:7937-7942`). Only with [`Op::DeleteVertex`]
+    /// and [`Op::Check`].
+    LostVertexuse(i64),
 }
 
 /// The first value of the output when [`eval`] refused a damaged input because upstream
@@ -146,6 +153,17 @@ pub fn eval(path: &str, input: &[f64], r: Request) -> Result<Vec<f64>, FfiError>
                 return Err(invalid("damaged shell index"));
             }
             (2, i)
+        }
+        Some(Damage::LostVertexuse(i)) => {
+            if !matches!(r.op, Op::DeleteVertex | Op::Check) {
+                return Err(invalid(
+                    "a lost vertex use is only probed for delete_vertex and check",
+                ));
+            }
+            if i < 0 || i as u64 >= c[9] as u64 {
+                return Err(invalid("damaged vertex index"));
+            }
+            (3, i)
         }
     };
     let op = match r.op {

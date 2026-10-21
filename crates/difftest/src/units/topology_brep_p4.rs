@@ -26,14 +26,17 @@ use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore::curve::curve::p2::CurveEvaluate;
 use solidcore::error::{EntityRef, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p4::{self, DeleteEnv};
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::shell::ShellMembers;
 use solidcore::topology::topology::Topology as SmTopologyRecord;
 use solidcore::topology::{
     ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, LoopuseStart, ShellId, VertexId, VertexuseId,
@@ -69,6 +72,9 @@ enum DamageIn {
     /// The shell with this index loses its region (`delete_edge`, `delete_vertex`,
     /// `check`).
     NoRegion(i64),
+    /// The vertex with this index (a loop vertex with an even number of vertex uses) loses
+    /// its last vertex use from its list (`delete_vertex`, `check`).
+    LostVertexuse(i64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +170,7 @@ fn request(i: &Inputs) -> Request {
         damage: i.damage.map(|d| match d {
             DamageIn::NoSurface(f) => Damage::NoSurface(f),
             DamageIn::NoRegion(s) => Damage::NoRegion(s),
+            DamageIn::LostVertexuse(v) => Damage::LostVertexuse(v),
         }),
         op: match i.op {
             OpIn::DeleteEdge => Op::DeleteEdge,
@@ -242,15 +249,17 @@ use Slot::{F, I, L, R};
 
 /// The fields of each kind, in the order the shim writes them (`emit_records`).
 const LAYOUT: [&[Slot]; 10] = [
-    // region: in the B-rep
-    &[I],
-    // shell: region
-    &[R(0)],
+    // region: in the B-rep, shells (in list order from the head)
+    &[I, L(1)],
+    // shell: region, type (`m_tShellType`), has a list head (`m_pList`), the head as a face
+    // use, as an edge use, as a vertex use (by the type; `-1` for the other two)
+    &[R(0), I, I, R(2), R(6), R(8)],
     // face use: shell, face, mate, orientation, loop uses
     &[R(1), R(3), R(2), I, L(4)],
     // face: face use, domain (u0 v0 u1 v1), rectangular trim, tolerance, has a surface,
-    // surface owned by the face, natural domain of the surface (u0 v0 u1 v1)
-    &[R(2), F, F, F, F, I, F, I, I, F, F, F, F],
+    // surface owned by the face, natural domain of the surface (u0 v0 u1 v1), the surface
+    // point at the centre of that domain (evaluated: 1/0, then x y z)
+    &[R(2), F, F, F, F, I, F, I, I, F, F, F, F, I, F, F, F],
     // loop use: face use, loop, mate, start type, start edge use, start vertex use,
     // orientation
     &[R(2), R(5), R(4), I, R(6), R(8), I],
@@ -259,8 +268,8 @@ const LAYOUT: [&[Slot]; 10] = [
     // edge use: edge, owner type, owner loop use, owner shell, cw, ccw, vertex use,
     // orientation, has a UV trim curve
     &[R(7), I, R(4), R(1), R(6), R(6), R(8), I, I],
-    // edge: tolerance, interval, edge uses, has a curve
-    &[F, F, F, L(6), I],
+    // edge: tolerance, interval, edge uses, has a curve, natural interval of the curve
+    &[F, F, F, L(6), I, F, F],
     // vertex use: vertex, owner type, owner edge use, loop use, shell, UV point
     &[R(9), I, R(6), R(4), R(1), F, F],
     // vertex: point, tolerance, vertex uses
@@ -392,11 +401,32 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
     for (id, r) in b.regions().iter() {
         let mut rec = Rec::new(lb.id(0, id));
         rec.i(i64::from(r.in_brep));
+        rec.l(1, &lb.ids(1, &r.shells));
         regions.push(rec);
     }
     for (id, s) in b.shells().iter() {
         let mut rec = Rec::new(lb.id(1, id));
         rec.r(0, lb.at(0, s.region));
+        rec.i(s.shell_type.code());
+        // the head by the type, as the shim reads it (`SmFaceuse_TYPE` 16022, `SmEdgeuse_TYPE`
+        // 16005, `SmVertexuse_TYPE` 16006)
+        let head = match &s.members {
+            ShellMembers::Empty => None,
+            ShellMembers::Faceuses(list) => list.first().copied().map(EntityRef::Faceuse),
+            ShellMembers::Edgeuse(eu) => Some(EntityRef::Edgeuse(*eu)),
+            ShellMembers::Vertexuse(vu) => Some(EntityRef::Vertexuse(*vu)),
+        };
+        rec.i(i64::from(head.is_some()));
+        let (mut fu, mut eu, mut vu) = (-1, -1, -1);
+        match head {
+            Some(EntityRef::Faceuse(x)) if s.is_faceuse_shell() => fu = lb.id(2, x),
+            Some(EntityRef::Edgeuse(x)) if s.is_wire_shell() => eu = lb.id(6, x),
+            Some(EntityRef::Vertexuse(x)) if s.is_vertex_shell() => vu = lb.id(8, x),
+            _ => {}
+        }
+        rec.r(2, fu);
+        rec.r(6, eu);
+        rec.r(8, vu);
         shells.push(rec);
     }
     for (id, f) in b.faceuses().iter() {
@@ -425,6 +455,17 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
             [d.min().x, d.min().y, d.max().x, d.max().y]
         });
         for x in natural {
+            rec.f(x);
+        }
+        // the surface point at the centre of the natural domain (the shim's `EvaluatePoint`)
+        let point = f.surface.as_ref().and_then(|s| {
+            let d = s.natural_uv_domain();
+            let c = Point2::new((d.min().x + d.max().x) * 0.5, (d.min().y + d.max().y) * 0.5);
+            s.evaluate_point(&Kernel::default(), c).ok()
+        });
+        rec.i(i64::from(point.is_some()));
+        let [px, py, pz] = point.map_or([0.0; 3], |p| [p.x, p.y, p.z]);
+        for x in [px, py, pz] {
             rec.f(x);
         }
         faces.push(rec);
@@ -475,6 +516,9 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
         rec.f(e.interval.max());
         rec.l(6, &lb.ids(6, &e.edgeuses));
         rec.i(i64::from(e.curve.is_some()));
+        let ni = e.curve.as_ref().map(CurveEvaluate::natural_interval);
+        rec.f(ni.as_ref().map_or(0.0, |i| i.min()));
+        rec.f(ni.as_ref().map_or(0.0, |i| i.max()));
         edges.push(rec);
     }
     for (id, v) in b.vertexuses().iter() {
@@ -679,6 +723,19 @@ fn own_surfaces(b: &mut Brep) -> Result<(), HarnessError> {
             }
         }
     }
+    // the edge curves' owners (`SmCurve::GetOwner`/`GetEdge`, set by the B-rep build
+    // upstream): the edge's arena identity, which `SmBrep::GetCurves`
+    // (`topology::brep::p1::curves`) tests the owner against; `ShrinkGeometry` trims the
+    // curves that name an edge
+    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    for e in edges {
+        if let Some(c) = b.edge_mut(e).map_err(|e| err(&e))?.curve.as_mut() {
+            let _ = c.set_owner(
+                Some(arena_identity(CacheObject::Edge(e))),
+                Some(arena_identity(CacheObject::Brep)),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -697,6 +754,18 @@ fn damage(b: &mut Brep, d: Option<DamageIn>) -> Result<(), HarnessError> {
             b.shell_mut(ShellId::from_index(index(s)?))
                 .map_err(|e| err(&e))?
                 .region = None;
+        }
+        Some(DamageIn::LostVertexuse(v)) => {
+            // the last vertex use leaves the vertex's list (`SmOwningTopology::Remove`: its
+            // owner link is cleared too); the loop use keeps pointing at it
+            let v = VertexId::from_index(index(v)?);
+            let vu = b
+                .vertex_mut(v)
+                .map_err(|e| err(&e))?
+                .vertexuses
+                .pop()
+                .ok_or_else(|| err("lost vertex use: the vertex has none"))?;
+            b.vertexuse_mut(vu).map_err(|e| err(&e))?.vertex = None;
         }
     }
     Ok(())

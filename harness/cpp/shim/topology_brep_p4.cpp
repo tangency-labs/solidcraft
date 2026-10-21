@@ -106,9 +106,21 @@ void emit_records(SmBrep* brep, Graph& after, std::vector<double>& o)
     auto L = [&](int k, SmTopology* p) { return label(after, k, p); };
     emit_kind(o, after, 0, after.regions, [&](SmRegion* p) {
         o.push_back(p->GetOwner() == (SmOwningTopology*)brep ? 1.0 : 0.0);
+        // the shell list of the region, in order from its head
+        put_labels(o, after, 1, p->GetList());
     });
-    emit_kind(o, after, 1, after.shells,
-              [&](SmShell* p) { o.push_back(L(0, p->GetOwner())); });
+    emit_kind(o, after, 1, after.shells, [&](SmShell* p) {
+        o.push_back(L(0, p->GetOwner()));
+        // m_tShellType and m_pList (the head), which the wire branches of DeleteEdge set; the
+        // head is a face use, an edge use or a vertex use by the type (a label of that kind)
+        SM_TYPE ty = p->*ShPeek::type();
+        SmTopology* head = p->GetList();
+        o.push_back((double)ty);
+        o.push_back(head ? 1.0 : 0.0);
+        o.push_back(ty == SmFaceuse_TYPE ? L(2, head) : -1.0);
+        o.push_back(ty == SmEdgeuse_TYPE ? L(6, head) : -1.0);
+        o.push_back(ty == SmVertexuse_TYPE ? L(8, head) : -1.0);
+    });
     emit_kind(o, after, 2, after.faceuses, [&](SmFaceuse* p) {
         o.push_back(L(1, p->GetOwner()));
         o.push_back(L(3, p->*FuPeek::face()));
@@ -135,6 +147,19 @@ void emit_records(SmBrep* brep, Graph& after, std::vector<double>& o)
         o.push_back(s ? n.GetMin().y : 0.0);
         o.push_back(s ? n.GetMax().x : 0.0);
         o.push_back(s ? n.GetMax().y : 0.0);
+        // one surface point (the centre of the natural domain), so that equal domains cannot
+        // hide a missing or a reversed surface swap; whether the evaluation succeeded first
+        SmPoint3d sp(0.0, 0.0, 0.0);
+        double ok = 0.0;
+        if (s)
+        {
+            SmPoint2d c((n.GetMin().x + n.GetMax().x) * 0.5, (n.GetMin().y + n.GetMax().y) * 0.5);
+            ok = s->EvaluatePoint(c, sp) == SM_SUCCESS ? 1.0 : 0.0;
+        }
+        o.push_back(ok);
+        o.push_back(ok != 0.0 ? sp.x : 0.0);
+        o.push_back(ok != 0.0 ? sp.y : 0.0);
+        o.push_back(ok != 0.0 ? sp.z : 0.0);
     });
     emit_kind(o, after, 4, after.loopuses, [&](SmLoopuse* p) {
         o.push_back(L(2, p->GetOwner()));
@@ -169,6 +194,10 @@ void emit_records(SmBrep* brep, Graph& after, std::vector<double>& o)
         o.push_back(ivl.GetMax());
         put_labels(o, after, 6, p->GetList());
         o.push_back(p->GetCurve() ? 1.0 : 0.0);
+        // the natural interval of the curve (ShrinkGeometry trims it)
+        SmExtent1d ni = p->GetCurve() ? p->GetCurve()->GetNaturalInterval() : SmExtent1d(0.0, 0.0);
+        o.push_back(ni.GetMin());
+        o.push_back(ni.GetMax());
     });
     emit_kind(o, after, 8, after.vertexuses, [&](SmVertexuse* p) {
         o.push_back(L(9, p->GetOwner()));
@@ -198,7 +227,10 @@ void emit_records(SmBrep* brep, Graph& after, std::vector<double>& o)
 // a region). An adversarial case damages the built B-rep before the operation; the damage is
 // a raw pointer write, so the objects stay in every list and the walk still reaches them:
 //   1  the surface of face `damage_index` is dropped (the face keeps its other members);
-//   2  the owner (region) pointer of shell `damage_index` is cleared.
+//   2  the owner (region) pointer of shell `damage_index` is cleared;
+//   3  the last vertex use of loop vertex `damage_index` is cut out of the vertex's list (the
+//      loop use keeps pointing at it); only for a vertex with an even number of vertex uses,
+//      so that the vertex is left with an odd number, and only with ops 1 and 5.
 // A damaged B-rep upstream would dereference NULL on is refused (the status `-2`, nothing
 // run), and only that: every other damaged input runs and is compared like any other.
 //
@@ -212,7 +244,24 @@ void emit_records(SmBrep* brep, Graph& after, std::vector<double>& o)
 // `pShell->GetRegion()->PostInsert / Remove` on the shell of the target: whether the edit gets
 // there (a new shell is made, or the shell is removed) is read off the same operation on an
 // undamaged copy, where it shows as a change of the number of shells.
+// Kind 3, DeleteVertex of a loop vertex (SmBrep.cpp:7937-7942): the vertex uses are taken in
+// pairs and `sVertexuses[ii + 1]` is read for every `ii`; the array is the 16-slot stack buffer
+// `sVUData` (:7894), filled only up to `GetSize()`, and `pVU2->m_pSorLUorEU` is read at once
+// (:7942). With an odd number of vertex uses the last pair therefore dereferences an unset
+// stack slot as a pointer (undefined, in practice NULL or a stale pointer). Only a vertex
+// without edges gets that far (the edges check comes first, with `SM_ERR`), and only with
+// editing enabled.
 const double ST_NULL_DEREF_GUARD = -2.0;
+
+// DeleteVertex(vertices[target]) takes the loop vertex branch with an odd number of vertex uses.
+bool ub_odd_vertexuses(SmVertex* v)
+{
+    SmTArray<SmEdge*> edges(8);
+    v->GetEdges(edges);
+    if (edges.GetSize() > 0 || v->IsShellVertex())
+        return false;
+    return list_of(v->GetList()).size() % 2 == 1;
+}
 
 // DeleteEdge(edges[target]) reads two surfaces, one of them missing.
 bool ub_surfaceless_edge(Graph& g, int64_t target)
@@ -283,7 +332,7 @@ SC_EXPORT int32_t sc_topology_brep_p4_eval(int32_t op, const char* path, const d
                                            int32_t flag, int32_t damage, int64_t damage_index, double* out,
                                            int64_t cap, int64_t* out_len)
 {
-    if (!path || !in || n_in < 1 || !out_len || op < 0 || op > 5 || damage < 0 || damage > 2)
+    if (!path || !in || n_in < 1 || !out_len || op < 0 || op > 5 || damage < 0 || damage > 3)
         return SC_ERR_ARG;
     SC_TRY
     Rd rd{in, 0};
@@ -308,10 +357,16 @@ SC_EXPORT int32_t sc_topology_brep_p4_eval(int32_t op, const char* path, const d
     // destructors of the region and of the shell expect it), when the shell is still there.
     SmShell* damaged_shell = nullptr;
     SmOwningTopology* shell_owner = nullptr;
+    // The same for the vertex use cut out of its vertex (damage 3): it goes back on the list.
+    SmVertex* lost_vertex = nullptr;
+    SmVertexuse* lost_vu = nullptr;
     auto repair_shell = [&](const Graph& walked) {
         if (damaged_shell && std::find(walked.shells.begin(), walked.shells.end(), damaged_shell) != walked.shells.end())
             damaged_shell->*TopPeek::list_owner() = shell_owner;
         damaged_shell = nullptr;
+        if (lost_vertex && std::find(walked.vertices.begin(), walked.vertices.end(), lost_vertex) != walked.vertices.end())
+            lost_vertex->PostInsert(lost_vu);
+        lost_vertex = nullptr;
     };
     if (damage != 0)
     {
@@ -322,11 +377,24 @@ SC_EXPORT int32_t sc_topology_brep_p4_eval(int32_t op, const char* path, const d
         if (damage == 2 && (!(edge_op || vertex_op || op == 5) || damage_index < 0 ||
                             damage_index >= (int64_t)g.shells.size()))
             return SC_ERR_ARG;
+        if (damage == 3 && (!(vertex_op || op == 5) || damage_index < 0 || damage_index >= (int64_t)g.vertices.size()))
+            return SC_ERR_ARG;
         if ((edge_op && (target < 0 || target >= (int64_t)g.edges.size())) ||
             (vertex_op && (target < 0 || target >= (int64_t)g.vertices.size())))
             return SC_ERR_ARG;
         if (damage == 1)
             g.faces[(size_t)damage_index]->*FPeek::srf() = nullptr;
+        else if (damage == 3)
+        {
+            // a loop vertex with an even number (>= 2) of vertex uses, left with an odd number
+            SmVertex* v = g.vertices[(size_t)damage_index];
+            std::vector<SmTopology*> vus = list_of(v->GetList());
+            if (v->IsShellVertex() || vus.size() < 2 || vus.size() % 2 != 0)
+                return SC_ERR_ARG;
+            lost_vertex = v;
+            lost_vu = (SmVertexuse*)vus.back();
+            v->Remove(lost_vu);
+        }
         else
         {
             damaged_shell = g.shells[(size_t)damage_index];
@@ -335,6 +403,8 @@ SC_EXPORT int32_t sc_topology_brep_p4_eval(int32_t op, const char* path, const d
         }
         // (with editing disabled both ops stop at the first line with `SM_ERR`)
         bool ub = (damage == 1 && edge_op && editing && ub_surfaceless_edge(g, target)) ||
+                  (damage == 3 && vertex_op && editing && g.vertices[(size_t)target] == lost_vertex &&
+                   ub_odd_vertexuses(lost_vertex)) ||
                   (damage == 2 && (edge_op || vertex_op) &&
                    ub_regionless_shell(op, path, in, editing, target, damage_index));
         if (ub)

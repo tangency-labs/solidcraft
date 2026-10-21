@@ -10,12 +10,12 @@
 //!
 //! Deviations: operands, marks and mate maps are borrowed explicitly instead of
 //! reading `SmMerge::m_vTI`; ids replace pointers. Output stays mutable because
-//! upstream preserves its partial contents on failure. Classification (including
-//! face/edge-to-region resolution) waits for `query.brep`; graph deletion is
-//! `topology.brep_p4`'s `DeleteEdge` / `DeleteVertex`, notified through `copy`'s
-//! records, attributes and primary identities and the primary kernel's context
-//! (hence `&mut Kernel`). Edge copying is [`p2::merge_edge`] of each edge's
-//! primary edge use; vertex copying delegates to [`p1::merge_vertex`]. B-rep
+//! upstream preserves its partial contents on failure. Classification goes through
+//! `query.brep` (`p1::classify_point_editing_disabled`), each B-rep with its own kernel;
+//! graph deletion is `topology.brep_p4`'s `DeleteEdge` / `DeleteVertex`, notified through
+//! `copy`'s records, attributes and primary identities and the primary kernel's context
+//! (hence `&mut Kernel`). Edge copying is [`p2::merge_edge`] of each edge's primary edge
+//! use; vertex copying delegates to [`p1::merge_vertex`]. B-rep
 //! caches are not attached to arena B-reps yet, so the optional cache resizing is
 //! absent. The deletion retry loop is iterative; wire collection uses the bounded
 //! explicit stack of `topology_traverser`. No input-dependent recursion is added.
@@ -26,7 +26,7 @@
 //! Missing/dangling mates are rejected only when added to the keep list:
 //! typed ids cannot represent the null pointer upstream can append there.
 
-use crate::boolean::merge::p1::{self, VertexCopy};
+use crate::boolean::merge::p1;
 use crate::boolean::merge::p2::{self, MergeContext, TopologyCopy};
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::{EntityRef, Result, SolidError};
@@ -34,7 +34,8 @@ use crate::geom::a_object::BooleanOperation;
 use crate::geom::context::{Context, MarkType};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::math::Point3;
+use crate::math::{Point3, EFF_ZERO};
+use crate::query::brep::BrepQuery;
 use crate::topology::brep::p4::{self, DeleteEnv};
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::topology_traverser::{collect_wire_edges, Entity, Marks};
@@ -552,7 +553,7 @@ mod tests {
         attributes: &'a mut AttributeStore,
     ) -> TopologyCopy<'a> {
         TopologyCopy {
-            vertices: VertexCopy {
+            vertices: p1::VertexCopy {
                 records,
                 attributes,
                 source_key: &|v| ObjectRef {

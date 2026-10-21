@@ -48,6 +48,11 @@
     {"name":"adv_wire_noregion2_vertex7","upstream_ref":"source/SMLib/src/SmBrep.cpp:7967","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":7,"damage":{"no_region":2}}},
     {"name":"adv_wire_noregion2_vertex8","upstream_ref":"source/SMLib/src/SmBrep.cpp:7967","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":8,"damage":{"no_region":2}}},
     {"name":"adv_wire_noregion2_vertex9","upstream_ref":"source/SMLib/src/SmBrep.cpp:7967","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":9,"damage":{"no_region":2}}},
-    {"name":"adv_wire_noregion2_vertex7_noedit","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":7,"editing":false,"damage":{"no_region":2}}}
+    {"name":"adv_wire_noregion2_vertex7_noedit","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":7,"editing":false,"damage":{"no_region":2}}},
+    {"name":"adv_wire_lostvu1_check","upstream_ref":"source/SMLib/src/SmBrep.cpp:7937","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"check","damage":{"lost_vertexuse":1}}},
+    {"name":"adv_wire_lostvu1_vertex1","upstream_ref":"source/SMLib/src/SmBrep.cpp:7942","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":1,"damage":{"lost_vertexuse":1}}},
+    {"name":"adv_wire_lostvu1_vertex1_noedit","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":1,"editing":false,"damage":{"lost_vertexuse":1}}},
+    {"name":"adv_wire_lostvu1_vertex0","upstream_ref":"source/SMLib/src/SmBrep.cpp:7967","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":0,"damage":{"lost_vertexuse":1}}},
+    {"name":"adv_wire_lostvu1_vertex2","upstream_ref":"source/SMLib/src/SmBrep.cpp:7940","inputs":{"brep":{"kind":"file","file":"fixture:wire_path.smb"},"op":"delete_vertex","target":2,"damage":{"lost_vertexuse":1}}}
   ]
 }

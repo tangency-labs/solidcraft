@@ -46,6 +46,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
 use crate::topology::brep::p4;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;

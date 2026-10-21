@@ -50,10 +50,11 @@
 //!   `GetSurfaces` / `GetCurves` are `topology.brep_p1`'s; a surface (curve) is named
 //!   by the face (edge) holding it (identity of the returned reference).
 //! - **Notifications** go to the ported handlers (`SmEdge::Notify`,
-//!   `SmVertex::Notify`, `SmFace::Notify`) with the caller's [`DeleteEnv`] and the
-//!   kernel's context, and with upstream's data arguments (the B-rep is named by
-//!   [`Brep::key`]); `SmFace::Notify` runs without a trimmed-surface cache (not part of
-//!   the arena model). `SmBrep::Notify` (unit `topology.brep_p2`) is not ported yet.
+//!   `SmVertex::Notify`, `SmFace::Notify`, `SmBrep::Notify`) with the caller's
+//!   [`DeleteEnv`] and the kernel's context, and with upstream's data arguments (the
+//!   B-rep is named by [`Brep::key`]); `SmFace::Notify` and `SmBrep::Notify` run without
+//!   a cache (the trimmed-surface and B-rep spatial caches are not part of the arena
+//!   model). `~SmBrep` has no caller state and notifies through call-local records.
 //!   Their statuses are ignored upstream; [`SolidError::Unported`] propagates.
 //! - **Destructor notifications.** Upstream's `delete` of a face, edge, edge use or
 //!   shell runs its destructor, which notifies `SM_NO_DESTRUCTION` (`~SmFace`,
@@ -97,6 +98,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as query_face2;
 use crate::topology::brep::p1::{self as brep1, LockBrepBox};
+use crate::topology::brep::p2::{self as brep2, NotifyArg};
 use crate::topology::edge::{self, NotifyEnv};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
@@ -164,18 +166,30 @@ fn brep_ref(b: &Brep) -> ObjectRef {
     }
 }
 
-/// `SmBrep::Notify(op, data1, data2, data3)` (unit `topology.brep_p2`) with upstream's
-/// data arguments. (The handler's state and B-rep cache slot, as #149 shapes them, are
-/// not types on main yet; they join [`DeleteEnv`] when the handler lands. `~SmBrep`
-/// has no caller state and notifies through the B-rep alone.)
+/// `SmBrep::Notify(op, data1, data2, data3)` (unit `topology.brep_p2`,
+/// [`brep2::notify`]) with upstream's data arguments, the caller's records, attributes
+/// and identities and the kernel's context. The B-rep's spatial cache is not part of
+/// the arena model (`None`: the B-rep has none, as for [`loopuse`]'s notifications).
 fn brep_notify(
-    b: &mut Brep,
+    k: &mut Kernel,
+    b: &Brep,
+    env: &mut DeleteEnv<'_>,
     operation: NotifyOperation,
-    data: [Option<ObjectRef>; 3],
+    data: [Option<NotifyArg>; 3],
 ) -> Result<()> {
-    let _ = (b, operation, data);
-    // UNPORTED(topology.brep_p2): SmBrep::Notify
-    Err(SolidError::unported("SmBrep::Notify", "topology.brep_p2"))
+    let key_of = env.key_of;
+    let mut n = NotifyEnv {
+        records: env.records,
+        attributes: env.attributes,
+        context: Some(&mut k.context),
+        key_of,
+    };
+    brep2::notify(b, &mut n, None, operation, data)
+}
+
+/// The B-rep as a notification argument (`this`).
+fn brep_arg(b: &Brep) -> NotifyArg {
+    NotifyArg::Object(brep_ref(b))
 }
 
 /// `pFace->Notify(op, pFace, this, NULL)`: [`face3::notify`] with the caller's records,
@@ -642,18 +656,22 @@ pub fn delete_edge(
     }
 
     // prepare the public - notify the Brep it's about to be edited
-    let this = brep_ref(b);
-    let edge_ref = (env.key_of)(EntityRef::Edge(e));
+    let this = brep_arg(b);
+    let edge_arg = NotifyArg::Entity(EntityRef::Edge(e));
     ignore_status(brep_notify(
+        k,
         b,
+        env,
         NotifyOperation::PreEdit,
         [Some(this), None, None],
     ))?;
     ignore_status(notify_edge(k, b, env, e))?;
     ignore_status(brep_notify(
+        k,
         b,
+        env,
         NotifyOperation::RmFromBrep,
-        [Some(edge_ref), Some(this), None],
+        [Some(edge_arg), Some(this), None],
     ))?;
 
     // get radial/mate list starters
@@ -780,11 +798,11 @@ fn delete_manifold_edge(
     if merge_face {
         // inform the public about this upcoming merge in Brep
         let data = [
-            surv_f.map(|f| (env.key_of)(EntityRef::Face(f))),
-            del_f.map(|f| (env.key_of)(EntityRef::Face(f))),
-            Some(brep_ref(b)),
+            surv_f.map(|f| NotifyArg::Entity(EntityRef::Face(f))),
+            del_f.map(|f| NotifyArg::Entity(EntityRef::Face(f))),
+            Some(brep_arg(b)),
         ];
-        ignore_status(brep_notify(b, NotifyOperation::MergeInBrep, data))?;
+        ignore_status(brep_notify(k, b, env, NotifyOperation::MergeInBrep, data))?;
     }
 
     // Remove parameter space curves from both faces if they do not have the same
@@ -1353,18 +1371,22 @@ pub fn delete_vertex(
     }
 
     // inform the public of upcoming change
-    let this = brep_ref(b);
-    let vertex_ref = (env.key_of)(EntityRef::Vertex(v));
+    let this = brep_arg(b);
+    let vertex_arg = NotifyArg::Entity(EntityRef::Vertex(v));
     ignore_status(brep_notify(
+        k,
         b,
+        env,
         NotifyOperation::PreEdit,
         [Some(this), None, None],
     ))?;
     ignore_status(notify_vertex(k, b, env, v))?;
     ignore_status(brep_notify(
+        k,
         b,
+        env,
         NotifyOperation::RmFromBrep,
-        [Some(vertex_ref), Some(this), None],
+        [Some(vertex_arg), Some(this), None],
     ))?;
 
     // vertices should be disconnected from edges prior to delete
@@ -1606,26 +1628,30 @@ pub fn shrink_geometry(k: &Kernel, b: &mut Brep) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] while `SmBrep::Notify` and the B-rep queries are not
-/// ported.
+/// [`SolidError::Unported`] from the callees not ported yet.
 pub fn destroy(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // Do these before Notify (in case of user callback).
     b.set_editing_enabled(true);
     let prev_doing_boolean = k.context.doing_boolean();
     k.context.set_doing_boolean(true);
-    let r = destroy_records(b);
+    let r = destroy_records(k, b);
     k.context.set_doing_boolean(prev_doing_boolean);
     r
 }
 
-fn destroy_records(b: &mut Brep) -> Result<()> {
+fn destroy_records(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     const OP: &str = OP_DESTROY;
-    let this = brep_ref(b);
-    ignore_status(brep_notify(
-        b,
-        NotifyOperation::Destruction,
-        [Some(this), None, None],
-    ))?;
+    let this = brep_arg(b);
+    // no caller state: the notification goes through call-local records
+    with_local_env(|env| {
+        ignore_status(brep_notify(
+            k,
+            b,
+            env,
+            NotifyOperation::Destruction,
+            [Some(this), None, None],
+        ))
+    })?;
 
     // faces
     for f in brep1::faces(b, None)? {

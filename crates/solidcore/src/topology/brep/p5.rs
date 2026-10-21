@@ -2058,6 +2058,16 @@ pub fn stitch_and_orient(
     b: &mut Brep,
     options: &StitchAndOrientOptions,
 ) -> Result<()> {
+    plain_edit(k, b, |k, b, env| stitch_and_orient_in(k, b, options, env))
+}
+
+/// [`stitch_and_orient`] under the edit's notification environment ([`plain_edit`]).
+fn stitch_and_orient_in(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<()> {
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     crate::error::ignore_status(stitch_faces(

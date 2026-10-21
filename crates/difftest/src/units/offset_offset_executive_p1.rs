@@ -3284,24 +3284,27 @@ mod tests {
 
     #[test]
     fn each_highlevel_probe_calls_its_real_method() {
-        for (branch, dependency, status) in [
-            (Probe::ReplaceEmpty, None, 1000),
-            (Probe::RemoveNoMerge, None, 1000),
-            (Probe::RemoveEmpty, Some("topology.brep_p5"), 1000),
-            (Probe::SideWallNull, None, 1000),
-            (Probe::SideWallUnmapped, None, 1000),
-            (Probe::FillEmpty, None, 1000),
-            (Probe::VertexNull, None, 1006),
-            (
-                Probe::VertexIsolated,
-                Some("offset.offset_geometry_creation"),
-                1000,
-            ),
-            (Probe::FaceuseNull, None, 1006),
-            (Probe::FaceuseNoSurface, None, 1000),
-            (Probe::PiecewiseEmpty, Some("query.brep"), 1000),
-            (Probe::MapPlane, Some("topology.edgeuse_p3"), 1000),
-            (Probe::EdgeusesUnmapped, None, 1000),
+        // `status, counts[4], has offset B-rep`: no counts, the offset B-rep kept
+        let plain = |status: i64| [status, 0, 0, 0, 0, 1];
+        for (branch, dependency, record) in [
+            (Probe::ReplaceEmpty, None, plain(1000)),
+            (Probe::RemoveNoMerge, None, plain(1000)),
+            (Probe::RemoveEmpty, None, plain(1000)),
+            (Probe::SideWallNull, None, plain(1000)),
+            (Probe::SideWallUnmapped, None, plain(1000)),
+            (Probe::FillEmpty, None, plain(1000)),
+            (Probe::VertexNull, None, plain(1006)),
+            // VertexOffset builds the vertex's offset surface
+            (Probe::VertexIsolated, None, [1000, 0, 0, 1, 0, 1]),
+            (Probe::FaceuseNull, None, plain(1006)),
+            (Probe::FaceuseNoSurface, None, plain(1000)),
+            // PiecewiseMerge succeeds on the empty B-rep (its B-rep box is
+            // query.brep's) and hands the offset B-rep on
+            (Probe::PiecewiseEmpty, None, [1000, 0, 0, 0, 1, 0]),
+            // MapEdgeuses now evaluates through topology.edgeuse_p3, which must
+            // build the hand-made plane face's missing UV trim curve.
+            (Probe::MapPlane, Some("intersect.surface_drop_lib_p3"), plain(1000)),
+            (Probe::EdgeusesUnmapped, None, plain(1000)),
         ] {
             let input = Inputs::Probe {
                 branch,
