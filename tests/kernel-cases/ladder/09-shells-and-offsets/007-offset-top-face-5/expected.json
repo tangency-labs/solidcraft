@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the stock's top face offset 5 mm",
+ "source": "analytic",
+ "method": "a 60x40x25 box",
+ "body_count": 1,
+ "volume_mm3": 60000,
+ "faces": 6
+}

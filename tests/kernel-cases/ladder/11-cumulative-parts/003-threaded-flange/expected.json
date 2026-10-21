@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk",
+ "source": "invariants",
+ "method": "a thread meeting a round and a chamfer, tapped holes; one valid body",
+ "body_count": 1
+}

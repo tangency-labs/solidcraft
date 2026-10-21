@@ -1,0 +1,152 @@
+"""Helpers for the kernel ladder's cases (tests/kernel-cases/ladder): command builders, plain
+Python 3 quadrature (standard library only) and the case writers. See cases.py."""
+import json
+import math
+import os
+
+PI = math.pi
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests", "kernel-cases", "ladder")
+CASES = []  # (tier, name)
+TIERS = {}
+
+def C(cmd, **p):
+    return {"command": cmd, "params": p}
+
+def box(corner, l, w, h, **kw):
+    return C("solid.box", corner=corner, length=l, width=w, height=h, **kw)
+
+def cyl(base, r, h, **kw):
+    return C("solid.cylinder", base=base, radius=r, height=h, **kw)
+
+def sketch(plane, *items, name=None):
+    p = {"plane": plane}
+    if name:
+        p["name"] = name
+    return [C("sketch.create", **p), *items, C("sketch.finish")]
+
+def line(points, ids=None, closed=False):
+    p = {"points": points}
+    if ids:
+        p["ids"] = ids
+    if closed:
+        p["closed"] = True
+    return C("sketch.line", **p)
+
+def plane(origin, x, y):
+    return {"origin": origin, "x_dir": x, "y_dir": y}
+
+def vplane(origin):
+    """A vertical sketch plane: sketch x = world x, sketch y = world z (normal -Y)."""
+    return plane(origin, [1, 0, 0], [0, 0, 1])
+
+def flat(*cmds):
+    out = []
+    for c in cmds:
+        out.extend(c if isinstance(c, list) else [c])
+    return out
+
+def leggauss(n):
+    """Gauss-Legendre nodes and weights on [-1, 1] (Newton on the Legendre polynomial)."""
+    xs, ws = [], []
+    for i in range(1, n + 1):
+        x = math.cos(math.pi * (i - 0.25) / (n + 0.5))
+        for _ in range(100):
+            p0, p1 = 1.0, x
+            for k in range(2, n + 1):
+                p0, p1 = p1, ((2 * k - 1) * x * p1 - (k - 1) * p0) / k
+            dp = n * (x * p1 - p0) / (x * x - 1)
+            dx = p1 / dp
+            x -= dx
+            if abs(dx) < 1e-16:
+                break
+        xs.append(x)
+        ws.append(2 / ((1 - x * x) * dp * dp))
+    return xs, ws
+
+_GL = {}
+
+def quad(f, a, b, n=64):
+    if n not in _GL:
+        _GL[n] = leggauss(n)
+    x, w = _GL[n]
+    return sum(wi * f(a + (b - a) * (xi + 1) / 2) for xi, wi in zip(x, w)) * (b - a) / 2
+
+def quad_split(f, a, b, pieces=200, n=32):
+    h = (b - a) / pieces
+    return sum(quad(f, a + i * h, a + (i + 1) * h, n) for i in range(pieces))
+
+def bez(P, t):
+    c = ((1 - t) ** 3, 3 * t * (1 - t) ** 2, 3 * t * t * (1 - t), t ** 3)
+    return tuple(sum(ci * p[k] for ci, p in zip(c, P)) for k in range(2))
+
+def dbez(P, t):
+    c = (3 * (1 - t) ** 2, 6 * t * (1 - t), 3 * t * t)
+    d = [tuple(P[i + 1][k] - P[i][k] for k in range(2)) for i in range(3)]
+    return tuple(sum(ci * q[k] for ci, q in zip(c, d)) for k in range(2))
+
+def norm(v):
+    return math.hypot(*v)
+
+def bez_len(P):
+    return quad_split(lambda t: norm(dbez(P, t)), 0, 1, 50)
+
+def bez_min_radius(P):
+    best = 1e18
+    for i in range(2001):
+        t = i / 2000
+        d = dbez(P, t)
+        dd = tuple(6 * (1 - t) * (P[2][k] - 2 * P[1][k] + P[0][k]) + 6 * t * (P[3][k] - 2 * P[2][k] + P[1][k]) for k in range(2))
+        kap = abs(d[0] * dd[1] - d[1] * dd[0]) / norm(d) ** 3
+        if kap > 0:
+            best = min(best, 1 / kap)
+    return best
+
+def bez_area_under(P, base):
+    """Area between a Bezier arch (ends on y = base) and the line y = base: -int (y-base) dx."""
+    return abs(quad(lambda t: (bez(P, t)[1] - base) * dbez(P, t)[0], 0, 1))
+
+SPANDREL = 1 - PI / 4            # area factor of a fillet's removed section, times r^2
+XBAR = (10 - 3 * PI) / (12 - 3 * PI)  # spandrel centroid from the corner, times r
+
+def case(tier, name, what, commands, expected, method, source="analytic", base=None, sources=None):
+    d = os.path.join(ROOT, tier, name)
+    os.makedirs(d, exist_ok=True)
+    recipe = {}
+    if base:
+        recipe["base"] = base
+    recipe["commands"] = commands
+    exp = {"sources": sources or [], "what": what, "source": source, "method": method}
+    for k, v in expected.items():
+        if isinstance(v, float):
+            v = round(v, 9)
+        exp[k] = v
+    with open(os.path.join(d, "recipe.json"), "w") as f:
+        json.dump(recipe, f, indent=1)
+        f.write("\n")
+    with open(os.path.join(d, "expected.json"), "w") as f:
+        json.dump(exp, f, indent=1)
+        f.write("\n")
+    CASES.append((tier, name))
+
+def missing(tier, name, what, why, method):
+    d = os.path.join(ROOT, tier, name)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "recipe.json"), "w") as f:
+        json.dump({"commands": []}, f, indent=1)
+        f.write("\n")
+    with open(os.path.join(d, "expected.json"), "w") as f:
+        json.dump({"sources": [], "what": what, "source": "invariants", "method": method, "missing": why}, f, indent=1)
+        f.write("\n")
+    CASES.append((tier, name))
+
+def iso_material_fraction_ext(d, P):
+    """ISO 68-1 basic external profile: material fraction m(r) per pitch, r in [r_root, d/2]."""
+    H = math.sqrt(3) / 2 * P
+    r1 = d / 2 - 5 * H / 8
+    t = math.tan(PI / 6)
+    return r1, (lambda r: 1.0 if r <= r1 else 1 - (P / 4 + 2 * (r - r1) * t) / P)
+
+def iso_groove_fraction_int(d, P):
+    """ISO 68-1 basic internal profile: fraction of a pitch the groove takes at radius r <= d/2."""
+    t = math.tan(PI / 6)
+    return lambda r: (P / 8 + 2 * (d / 2 - r) * t) / P

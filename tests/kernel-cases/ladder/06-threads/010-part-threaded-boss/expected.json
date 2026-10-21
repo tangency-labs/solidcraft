@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "the running part with a modelled M16 thread on its d16 boss",
+ "source": "invariants",
+ "method": "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last",
+ "body_count": 1
+}

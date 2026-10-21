@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a variable round on the top front edge, r5 at x=0 to r1 at x=60",
+ "source": "analytic",
+ "method": "linear radius, quarter-round sections (tests/oracle/77): V = abc - (1-pi/4) L (a^2 + ab + b^2)/3",
+ "body_count": 1,
+ "volume_mm3": 47866.946861306,
+ "faces": 7
+}

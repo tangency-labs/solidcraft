@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "a modelled M10 thread on a d10 shaft running down to a d16 shoulder",
+ "source": "invariants",
+ "method": "the thread must end at the shoulder, leaving the d16 collar whole; no closed form for the end; one valid body",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   0
+  ],
+  "max": [
+   8,
+   8,
+   35
+  ]
+ }
+}

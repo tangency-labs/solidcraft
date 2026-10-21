@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d5 hole patterned 3 x 2 at 20 mm in a 60x40x10 plate",
+ "source": "analytic",
+ "method": "six holes pi 2.5^2 10",
+ "body_count": 1,
+ "volume_mm3": 22821.902754904,
+ "faces": 12
+}

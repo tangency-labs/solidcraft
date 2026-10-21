@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom",
+ "source": "invariants",
+ "method": "walls meeting rounds and their corner patches; one valid body",
+ "body_count": 1
+}

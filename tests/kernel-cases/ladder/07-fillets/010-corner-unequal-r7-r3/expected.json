@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge",
+ "source": "invariants",
+ "method": "two radii meeting at a corner over a tangent chain; one valid body",
+ "body_count": 1
+}

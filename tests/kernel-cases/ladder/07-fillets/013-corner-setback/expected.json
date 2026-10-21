@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "three r5 rounds at a corner with setbacks of 8 mm along each edge",
+ "source": "invariants",
+ "method": "the setback corner patch would be graded by invariants",
+ "missing": "solid.fillet has no corner setback distances"
+}

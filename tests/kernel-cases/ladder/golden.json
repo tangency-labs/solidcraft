@@ -1,0 +1,2017 @@
+{
+  "cases": {
+    "ladder/01-primitives/001-box": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.00093575,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/01-primitives/002-cylinder": {
+      "default": {
+        "measured": {
+          "area_mm2": 2513.147252648079,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 9423.690515173837
+        },
+        "seconds": 0.0014005,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/01-primitives/003-cone": {
+      "default": {
+        "measured": {
+          "area_mm2": 1307.5019487288487,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 2,
+          "vertices": 2,
+          "volume_mm3": 3141.019886181097
+        },
+        "seconds": 0.002922667,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/01-primitives/004-frustum": {
+      "default": {
+        "measured": {
+          "area_mm2": 1364.104142163897,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 3664.869667183306
+        },
+        "seconds": 0.002304042,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/01-primitives/005-sphere": {
+      "default": {
+        "measured": {
+          "area_mm2": 1256.5932642692544,
+          "body_count": 1,
+          "edges": 0,
+          "faces": 1,
+          "vertices": 0,
+          "volume_mm3": 4188.493085661013
+        },
+        "seconds": 0.004350375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/01-primitives/006-torus": {
+      "default": {
+        "measured": {
+          "area_mm2": 3947.6911127816757,
+          "body_count": 1,
+          "edges": 0,
+          "faces": 1,
+          "vertices": 0,
+          "volume_mm3": 9868.15605110991
+        },
+        "seconds": 0.0115975,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/001-coincident-face-join": {
+      "default": {
+        "measured": {
+          "area_mm2": 10800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 72000.0
+        },
+        "seconds": 0.006791125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/002-coplanar-overlap-join": {
+      "default": {
+        "measured": {
+          "area_mm2": 14400.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 10,
+          "vertices": 16,
+          "volume_mm3": 84000.0
+        },
+        "seconds": 0.005450958,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/003-pocket-flush-with-top": {
+      "default": {
+        "measured": {
+          "area_mm2": 9600.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 11,
+          "vertices": 16,
+          "volume_mm3": 44000.0
+        },
+        "seconds": 0.004264125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/004-edge-on-edge-no-overlap": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.003738709,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/005-vertex-on-face-no-overlap": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.007946417,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/006-tangent-along-line-no-overlap": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.010566583,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/007-near-tangent-gap-1e-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.010871792,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/008-near-tangent-gap-1e-6": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.010626125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/009-near-tangent-overlap-1e-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8799.999999999882,
+          "body_count": 1,
+          "edges": 18,
+          "faces": 8,
+          "vertices": 12,
+          "volume_mm3": 47999.99999999921
+        },
+        "seconds": 0.007120167,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/010-near-tangent-overlap-1e-6": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 48000.0
+        },
+        "seconds": 0.010546,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/011-tangent-along-circle-through-hole": {
+      "default": {
+        "measured": {
+          "area_mm2": 9428.370711515512,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 41717.85835306114
+        },
+        "seconds": 0.048083,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/012-tangent-along-circle-bowl": {
+      "default": {
+        "seconds": 3.343824333,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/013-cut-across-cylinder-seam": {
+      "default": {
+        "measured": {
+          "area_mm2": 2036.78119982643,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 5887.9766980280665
+        },
+        "seconds": 0.006591084,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/014-cut-through-sphere-pole": {
+      "default": {
+        "measured": {
+          "area_mm2": 1332.0313215995125,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 4110.623680055086
+        },
+        "seconds": 0.334621125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/015-knife-edge-wedge-cut": {
+      "default": {
+        "measured": {
+          "area_mm2": 6929.822128134703,
+          "body_count": 1,
+          "edges": 9,
+          "faces": 5,
+          "vertices": 6,
+          "volume_mm3": 24000.0
+        },
+        "seconds": 0.00465175,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/016-v-groove-pinches-bottom-to-line": {
+      "default": {
+        "measured": {
+          "area_mm2": 9225.904606350496,
+          "body_count": 1,
+          "edges": 23,
+          "faces": 11,
+          "vertices": 14,
+          "volume_mm3": 38400.0
+        },
+        "seconds": 0.00609325,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/017-cylinder-tangent-top-and-bottom": {
+      "default": {
+        "measured": {
+          "area_mm2": 11941.534849086385,
+          "body_count": 1,
+          "edges": 22,
+          "faces": 9,
+          "vertices": 12,
+          "volume_mm3": 29153.91062636393
+        },
+        "seconds": 0.014504542,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/018-hole-tangent-to-side-face": {
+      "default": {
+        "measured": {
+          "area_mm2": 9428.373503399229,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 41717.91429077657
+        },
+        "seconds": 0.009196667,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/019-notch-flush-with-end-face": {
+      "default": {
+        "measured": {
+          "area_mm2": 8800.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 10,
+          "vertices": 16,
+          "volume_mm3": 32000.0
+        },
+        "seconds": 0.005541791,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/02-booleans/020-part-back-wall": {
+      "default": {
+        "measured": {
+          "area_mm2": 10900.0,
+          "body_count": 1,
+          "edges": 18,
+          "faces": 8,
+          "vertices": 12,
+          "volume_mm3": 57000.0
+        },
+        "seconds": 0.00790175,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/001-extrude-rect-with-arc-end": {
+      "default": {
+        "measured": {
+          "area_mm2": 10513.088490445303,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 60564.88556370952
+        },
+        "seconds": 0.001467834,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/002-extrude-annulus": {
+      "default": {
+        "measured": {
+          "area_mm2": 4712.234879709544,
+          "body_count": 1,
+          "edges": 4,
+          "faces": 4,
+          "vertices": 4,
+          "volume_mm3": 14136.480098042548
+        },
+        "seconds": 0.002882042,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/003-extrude-tapered-circle": {
+      "default": {
+        "measured": {
+          "area_mm2": 1678.9787421189897,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 5247.30382974983
+        },
+        "seconds": 0.001769,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/004-revolve-full-off-axis": {
+      "default": {
+        "measured": {
+          "area_mm2": 7539.473905549408,
+          "body_count": 1,
+          "edges": 4,
+          "faces": 4,
+          "vertices": 4,
+          "volume_mm3": 28269.679056500216
+        },
+        "seconds": 0.014281334,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/005-revolve-touching-axis-hemisphere": {
+      "default": {
+        "measured": {
+          "area_mm2": 3769.6980702123765,
+          "body_count": 1,
+          "edges": 1,
+          "faces": 2,
+          "vertices": 1,
+          "volume_mm3": 16753.416629342133
+        },
+        "seconds": 0.015970542,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/006-revolve-partial-90": {
+      "default": {
+        "measured": {
+          "area_mm2": 1142.457601758199,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 2356.190459014158
+        },
+        "seconds": 0.014789083,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/007-revolve-180-touching-axis": {
+      "default": {
+        "measured": {
+          "area_mm2": 2249.241075072362,
+          "body_count": 1,
+          "edges": 6,
+          "faces": 4,
+          "vertices": 4,
+          "volume_mm3": 7067.894042431624
+        },
+        "seconds": 0.002638875,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/008-extrude-slot": {
+      "default": {
+        "measured": {
+          "area_mm2": 3656.5330999392927,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 11141.176810322673
+        },
+        "seconds": 0.002881375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/03-analytic-profiles/009-part-boss-and-slot": {
+      "default": {
+        "measured": {
+          "area_mm2": 12164.760282822132,
+          "body_count": 1,
+          "edges": 32,
+          "faces": 14,
+          "vertices": 22,
+          "volume_mm3": 55605.24907108947
+        },
+        "seconds": 0.12831875,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/001-extrude-bezier-arch": {
+      "default": {
+        "measured": {
+          "area_mm2": 2766.769042067676,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 8199.694831123337
+        },
+        "seconds": 0.002273333,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/002-revolve-bezier-profile": {
+      "default": {
+        "measured": {
+          "area_mm2": 5856.745425824418,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 34130.36142790597
+        },
+        "seconds": 0.031965375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/003-pipe-along-bezier": {
+      "default": {
+        "measured": {
+          "area_mm2": 605.6085153085496,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 580.4692497771506
+        },
+        "seconds": 0.040463833,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/004-sweep-square-along-bezier": {
+      "default": {
+        "measured": {
+          "area_mm2": 770.7553071789786,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 738.4215101809574
+        },
+        "seconds": 0.026751333,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/005-loft-square-frustum": {
+      "default": {
+        "measured": {
+          "area_mm2": 5794.733192202047,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 27999.999999999887
+        },
+        "seconds": 0.003325292,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/006-loft-circle-frustum": {
+      "default": {
+        "measured": {
+          "area_mm2": 4550.945564916025,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 21990.05727759267
+        },
+        "seconds": 0.003139958,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/007-loft-three-circles": {
+      "default": {
+        "measured": {
+          "area_mm2": 6453.8181258884515,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 23459.759039219105
+        },
+        "seconds": 0.003198208,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/008-loft-square-to-circle": {
+      "default": {
+        "measured": {
+          "area_mm2": 5455.544745750849,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 26343.66696300323
+        },
+        "seconds": 0.002894375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/009-extrude-periodic-fit-spline": {
+      "default": {
+        "measured": {
+          "area_mm2": 3698.2551381710246,
+          "body_count": 1,
+          "edges": 18,
+          "faces": 8,
+          "vertices": 12,
+          "volume_mm3": 12279.46663039849
+        },
+        "seconds": 0.003586333,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/04-spline-profiles/010-part-bezier-window": {
+      "default": {
+        "measured": {
+          "area_mm2": 12389.025843079045,
+          "body_count": 1,
+          "edges": 38,
+          "faces": 16,
+          "vertices": 26,
+          "volume_mm3": 54273.36245081687
+        },
+        "seconds": 0.280533708,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/001-simple-through": {
+      "default": {
+        "measured": {
+          "area_mm2": 9271.238896931009,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 46429.46458826573
+        },
+        "seconds": 0.009346917,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/002-simple-blind-flat": {
+      "default": {
+        "measured": {
+          "area_mm2": 9114.146219052129,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 8,
+          "vertices": 10,
+          "volume_mm3": 47214.732294132635
+        },
+        "seconds": 0.009338,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/003-drilled-blind-118": {
+      "default": {
+        "measured": {
+          "area_mm2": 9127.233531923126,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 8,
+          "vertices": 11,
+          "volume_mm3": 47136.10165280392
+        },
+        "seconds": 0.081221125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/004-counterbore": {
+      "default": {
+        "measured": {
+          "area_mm2": 9234.726866633784,
+          "body_count": 1,
+          "edges": 16,
+          "faces": 9,
+          "vertices": 12,
+          "volume_mm3": 46926.65268551433
+        },
+        "seconds": 0.017519167,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/005-countersink": {
+      "default": {
+        "measured": {
+          "area_mm2": 9122.958367725925,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 8,
+          "vertices": 11,
+          "volume_mm3": 47219.68222572232
+        },
+        "seconds": 0.189785083,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/006-tapped-m6-through": {
+      "default": {
+        "measured": {
+          "area_mm2": 9074.882833758822,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47607.36614706644
+        },
+        "seconds": 0.011172708,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/007-tapped-m8-blind": {
+      "default": {
+        "measured": {
+          "area_mm2": 9060.420997695732,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 8,
+          "vertices": 11,
+          "volume_mm3": 47546.474471511
+        },
+        "seconds": 0.07102625,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/008-tapped-m5-into-curved-face": {
+      "default": {
+        "measured": {
+          "area_mm2": 10551.5388137954,
+          "body_count": 1,
+          "edges": 4,
+          "faces": 4,
+          "vertices": 4,
+          "volume_mm3": 74842.7885077873
+        },
+        "seconds": 0.373989209,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/009-hole-0.5-from-edge": {
+      "default": {
+        "measured": {
+          "area_mm2": 9271.238896931007,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 46429.46458826572
+        },
+        "seconds": 0.009341583,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/010-hole-tangent-to-end-face": {
+      "default": {
+        "measured": {
+          "area_mm2": 9271.238892022762,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 46429.543922858364
+        },
+        "seconds": 0.009070708,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/011-crossing-holes-steinmetz": {
+      "default": {
+        "measured": {
+          "area_mm2": 9970.801353767854,
+          "body_count": 1,
+          "edges": 17,
+          "faces": 8,
+          "vertices": 13,
+          "volume_mm3": 43954.432213307766
+        },
+        "seconds": 0.494772542,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/012-crossing-tapped-holes-offset": {
+      "default": {
+        "measured": {
+          "area_mm2": 9586.60796229969,
+          "body_count": 1,
+          "edges": 17,
+          "faces": 8,
+          "vertices": 13,
+          "volume_mm3": 46870.36213666151
+        },
+        "seconds": 0.636756584,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/05-holes-and-taps/013-part-holes": {
+      "default": {
+        "measured": {
+          "area_mm2": 13115.19280667113,
+          "body_count": 1,
+          "edges": 44,
+          "faces": 20,
+          "vertices": 32,
+          "volume_mm3": 53470.583718975606
+        },
+        "seconds": 2.9695160830000003,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/001-external-m10-full": {
+      "default": {
+        "measured": {
+          "area_mm2": 1529.4042487894849,
+          "body_count": 1,
+          "edges": 16354,
+          "faces": 6730,
+          "vertices": 9616,
+          "volume_mm3": 1948.741057097491
+        },
+        "seconds": 2.172735334,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/002-external-m10x1-fine": {
+      "default": {
+        "measured": {
+          "area_mm2": 1584.174824512129,
+          "body_count": 1,
+          "edges": 26902,
+          "faces": 10956,
+          "vertices": 15906,
+          "volume_mm3": 2076.804702383333
+        },
+        "seconds": 2.68426125,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/003-external-m10-partial-length": {
+      "default": {
+        "measured": {
+          "area_mm2": 1314.9911695222038,
+          "body_count": 1,
+          "edges": 8302,
+          "faces": 3409,
+          "vertices": 4894,
+          "volume_mm3": 2151.422182916339
+        },
+        "seconds": 0.590479958,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/004-external-m10-to-shoulder": {
+      "default": {
+        "measured": {
+          "area_mm2": 2169.9815981466654,
+          "body_count": 1,
+          "edges": 14480,
+          "faces": 6021,
+          "vertices": 8454,
+          "volume_mm3": 3610.2325548497306
+        },
+        "seconds": 1.5457759580000001,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/005-internal-m10-through": {
+      "default": {
+        "measured": {
+          "area_mm2": 4975.095933679673,
+          "body_count": 1,
+          "edges": 10555,
+          "faces": 4364,
+          "vertices": 6173,
+          "volume_mm3": 16691.009759504228
+        },
+        "seconds": 0.805998584,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/006-external-m10-into-chamfer": {
+      "default": {
+        "measured": {
+          "area_mm2": 1508.5872297957983,
+          "body_count": 1,
+          "edges": 16358,
+          "faces": 6738,
+          "vertices": 9614,
+          "volume_mm3": 1943.2536102766353
+        },
+        "seconds": 2.40492525,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/007-external-m10-at-filleted-shoulder": {
+      "default": {
+        "measured": {
+          "area_mm2": 2121.5899255556014,
+          "body_count": 1,
+          "edges": 16693,
+          "faces": 7123,
+          "vertices": 9555,
+          "volume_mm3": 3631.4173516267765
+        },
+        "seconds": 9.833373459,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/008-multi-start-thread": {
+      "default": {
+        "seconds": null,
+        "status": "unsupported"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/009-thread-runout-length": {
+      "default": {
+        "seconds": null,
+        "status": "unsupported"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/06-threads/010-part-threaded-boss": {
+      "default": {
+        "measured": {
+          "area_mm2": 13583.96229831793,
+          "body_count": 1,
+          "edges": 6255,
+          "faces": 2683,
+          "vertices": 3567,
+          "volume_mm3": 53114.87966146553
+        },
+        "seconds": 2.9410735409999997,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/001-single-edge-r5": {
+      "default": {
+        "measured": {
+          "area_mm2": 8660.480655132957,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47677.886125669735
+        },
+        "seconds": 0.016275167,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/002-four-vertical-edges-r5": {
+      "default": {
+        "measured": {
+          "area_mm2": 8585.34186016752,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 10,
+          "vertices": 16,
+          "volume_mm3": 47570.514759229154
+        },
+        "seconds": 0.032937417,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/003-tangent-chain-r3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8334.875841941504,
+          "body_count": 1,
+          "edges": 40,
+          "faces": 18,
+          "vertices": 24,
+          "volume_mm3": 47208.95029779139
+        },
+        "seconds": 0.061546042,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/004-convex-and-concave-r5": {
+      "default": {
+        "measured": {
+          "area_mm2": 4514.145186810165,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 10,
+          "vertices": 16,
+          "volume_mm3": 13999.99998749348
+        },
+        "seconds": 0.0121775,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/005-variable-r5-to-r1": {
+      "default": {
+        "measured": {
+          "area_mm2": 8717.215054233078,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47866.92526435128
+        },
+        "seconds": 0.004042125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/006-variable-r5-to-zero": {
+      "default": {
+        "measured": {
+          "area_mm2": 8730.44634473237,
+          "body_count": 1,
+          "edges": 14,
+          "faces": 7,
+          "vertices": 9,
+          "volume_mm3": 47892.61481331315
+        },
+        "seconds": 0.004036291,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/007-variable-r5-to-1e-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8730.321541410496,
+          "body_count": 1,
+          "edges": 16,
+          "faces": 7,
+          "vertices": 11,
+          "volume_mm3": 47892.606779337424
+        },
+        "seconds": 0.004170334,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/008-constant-r1e-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8799.964851815777,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47999.999970019206
+        },
+        "seconds": 0.011696125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/009-corner-three-equal-r5": {
+      "default": {
+        "measured": {
+          "area_mm2": 8522.789688489427,
+          "body_count": 1,
+          "edges": 21,
+          "faces": 10,
+          "vertices": 13,
+          "volume_mm3": 47376.731598742124
+        },
+        "seconds": 0.0360895,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/010-corner-unequal-r7-r3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8589.092595801692,
+          "body_count": 1,
+          "edges": 22,
+          "faces": 10,
+          "vertices": 14,
+          "volume_mm3": 47604.19999568275
+        },
+        "seconds": 0.046529333,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/011-chain-ending-at-corner": {
+      "default": {
+        "measured": {
+          "area_mm2": 8571.103566007207,
+          "body_count": 1,
+          "edges": 17,
+          "faces": 8,
+          "vertices": 11,
+          "volume_mm3": 47475.28654740171
+        },
+        "seconds": 0.031272708,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/012-variable-into-rounded-corner": {
+      "default": {
+        "seconds": 0.019334792,
+        "status": "unsupported"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/013-corner-setback": {
+      "default": {
+        "seconds": null,
+        "status": "unsupported"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/014-curved-edge-r2": {
+      "default": {
+        "measured": {
+          "area_mm2": 1829.210906234833,
+          "body_count": 1,
+          "edges": 3,
+          "faces": 4,
+          "vertices": 3,
+          "volume_mm3": 6231.437377339935
+        },
+        "seconds": 0.023461666,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/015-corner-g2-patch": {
+      "default": {
+        "seconds": 0.009254333,
+        "status": "unsupported"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/016-corner-three-sequential-r5-r3-r7": {
+      "default": {
+        "seconds": 0.080988792,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/07-fillets/017-part-rounds": {
+      "default": {
+        "measured": {
+          "area_mm2": 12905.615501917395,
+          "body_count": 1,
+          "edges": 54,
+          "faces": 24,
+          "vertices": 39,
+          "volume_mm3": 53151.04538041395
+        },
+        "seconds": 4.101630291,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/001-equal-5": {
+      "default": {
+        "measured": {
+          "area_mm2": 8599.264068711927,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47250.0
+        },
+        "seconds": 0.012236375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/002-two-distances-5-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8654.857113690718,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47550.0
+        },
+        "seconds": 0.012206292,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/003-distance-angle-5-30": {
+      "default": {
+        "measured": {
+          "area_mm2": 8658.771324027148,
+          "body_count": 1,
+          "edges": 15,
+          "faces": 7,
+          "vertices": 10,
+          "volume_mm3": 47566.987298107786
+        },
+        "seconds": 0.012881625,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/004-corner-three-equal-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8573.979057816261,
+          "body_count": 1,
+          "edges": 21,
+          "faces": 9,
+          "vertices": 14,
+          "volume_mm3": 47480.25
+        },
+        "seconds": 0.035578625,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/005-corner-two-mitred-3": {
+      "default": {
+        "measured": {
+          "area_mm2": 8611.536146650571,
+          "body_count": 1,
+          "edges": 17,
+          "faces": 8,
+          "vertices": 11,
+          "volume_mm3": 47559.0
+        },
+        "seconds": 0.0224305,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/006-curved-edge-2": {
+      "default": {
+        "measured": {
+          "area_mm2": 1806.037992350068,
+          "body_count": 1,
+          "edges": 3,
+          "faces": 4,
+          "vertices": 3,
+          "volume_mm3": 6165.23680786219
+        },
+        "seconds": 0.060670625,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/007-chamfer-then-fillets": {
+      "default": {
+        "measured": {
+          "area_mm2": 8652.790296884197,
+          "body_count": 1,
+          "edges": 21,
+          "faces": 9,
+          "vertices": 14,
+          "volume_mm3": 47700.035898423615
+        },
+        "seconds": 0.040296208,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/08-chamfers/008-part-chamfers": {
+      "default": {
+        "measured": {
+          "area_mm2": 12800.576019818938,
+          "body_count": 1,
+          "edges": 58,
+          "faces": 26,
+          "vertices": 42,
+          "volume_mm3": 53006.96565814107
+        },
+        "seconds": 7.966854958,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/001-box-open-top-t2": {
+      "default": {
+        "measured": {
+          "area_mm2": 12112.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 11,
+          "vertices": 16,
+          "volume_mm3": 11712.0
+        },
+        "seconds": 0.004860833,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/002-cylinder-open-top-t1": {
+      "default": {
+        "measured": {
+          "area_mm2": 4153.008908296044,
+          "body_count": 1,
+          "edges": 4,
+          "faces": 5,
+          "vertices": 4,
+          "volume_mm3": 2044.9841165189566
+        },
+        "seconds": 0.024618375,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/003-tube-two-open-faces": {
+      "default": {
+        "measured": {
+          "area_mm2": 8448.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 10,
+          "vertices": 16,
+          "volume_mm3": 7680.0
+        },
+        "seconds": 0.004447042,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/004-thin-wall-0.2": {
+      "default": {
+        "measured": {
+          "area_mm2": 12728.32,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 11,
+          "vertices": 16,
+          "volume_mm3": 1268.8320000000078
+        },
+        "seconds": 0.004979333,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/005-shell-rounds-r5-t2": {
+      "default": {
+        "measured": {
+          "area_mm2": 11804.643214143103,
+          "body_count": 1,
+          "edges": 48,
+          "faces": 19,
+          "vertices": 32,
+          "volume_mm3": 11421.790820329137
+        },
+        "seconds": 0.046784125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/006-shell-rounds-r1-thinner-than-t2": {
+      "default": {
+        "measured": {
+          "area_mm2": 12075.93165009534,
+          "body_count": 1,
+          "edges": 36,
+          "faces": 15,
+          "vertices": 24,
+          "volume_mm3": 11694.806432750607
+        },
+        "seconds": 0.043761042,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/007-offset-top-face-5": {
+      "default": {
+        "measured": {
+          "area_mm2": 9800.0,
+          "body_count": 1,
+          "edges": 12,
+          "faces": 6,
+          "vertices": 8,
+          "volume_mm3": 60000.0
+        },
+        "seconds": 0.002552917,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/008-offset-cylinder-wall-2": {
+      "default": {
+        "measured": {
+          "area_mm2": 2412.5985226719185,
+          "body_count": 1,
+          "edges": 2,
+          "faces": 3,
+          "vertices": 2,
+          "volume_mm3": 9046.765907054167
+        },
+        "seconds": 0.009921875,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/009-shell-outside-t2": {
+      "default": {
+        "measured": {
+          "area_mm2": 14384.0,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 11,
+          "vertices": 16,
+          "volume_mm3": 13952.0
+        },
+        "seconds": 0.006274125,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/010-shell-under-rounded-top": {
+      "default": {
+        "measured": {
+          "area_mm2": 11769.800232101234,
+          "body_count": 1,
+          "edges": 40,
+          "faces": 19,
+          "vertices": 24,
+          "volume_mm3": 11375.069952750084
+        },
+        "seconds": 0.08896025,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/09-shells-and-offsets/011-part-shell": {
+      "default": {
+        "seconds": 8.184976875,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/001-rect-pattern-holes": {
+      "default": {
+        "measured": {
+          "area_mm2": 7506.858345396518,
+          "body_count": 1,
+          "edges": 24,
+          "faces": 12,
+          "vertices": 20,
+          "volume_mm3": 22822.098441199283
+        },
+        "seconds": 0.041283709,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/002-circular-pattern-holes": {
+      "default": {
+        "measured": {
+          "area_mm2": 8595.26292897519,
+          "body_count": 1,
+          "edges": 18,
+          "faces": 11,
+          "vertices": 18,
+          "volume_mm3": 26012.083999715745
+        },
+        "seconds": 0.060355292,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/003-overlapping-pattern-leaves-core": {
+      "default": {
+        "measured": {
+          "area_mm2": 3867.92079909876,
+          "body_count": 2,
+          "edges": 38,
+          "faces": 17,
+          "vertices": 26,
+          "volume_mm3": 9195.609192170054
+        },
+        "seconds": 0.044988292,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/004-mirror-body-joined": {
+      "default": {
+        "measured": {
+          "area_mm2": 9742.477793862017,
+          "body_count": 1,
+          "edges": 16,
+          "faces": 8,
+          "vertices": 12,
+          "volume_mm3": 44858.92917653146
+        },
+        "seconds": 0.025089084,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/005-mirror-feature": {
+      "default": {
+        "measured": {
+          "area_mm2": 9742.477793862021,
+          "body_count": 1,
+          "edges": 16,
+          "faces": 8,
+          "vertices": 12,
+          "volume_mm3": 44858.929176531434
+        },
+        "seconds": 0.016752334,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/006-circular-pattern-counterbores": {
+      "default": {
+        "measured": {
+          "area_mm2": 8472.778471680762,
+          "body_count": 1,
+          "edges": 26,
+          "faces": 21,
+          "vertices": 26,
+          "volume_mm3": 26304.386263968252
+        },
+        "seconds": 0.138256875,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/007-pattern-bodies": {
+      "default": {
+        "measured": {
+          "area_mm2": 980.1266278426201,
+          "body_count": 4,
+          "edges": 8,
+          "faces": 12,
+          "vertices": 8,
+          "volume_mm3": 1130.836229678923
+        },
+        "seconds": 0.001980667,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/10-patterns-and-mirrors/008-part-vents": {
+      "default": {
+        "seconds": 8.422307333,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/11-cumulative-parts/001-bracket": {
+      "default": {
+        "measured": {
+          "area_mm2": 10415.806728296244,
+          "body_count": 1,
+          "edges": 28,
+          "faces": 12,
+          "vertices": 20,
+          "volume_mm3": 31550.56707386659
+        },
+        "seconds": 0.194415458,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/11-cumulative-parts/002-flange": {
+      "default": {
+        "measured": {
+          "area_mm2": 16258.711483873363,
+          "body_count": 1,
+          "edges": 20,
+          "faces": 14,
+          "vertices": 20,
+          "volume_mm3": 55442.22875030476
+        },
+        "seconds": 0.175310166,
+        "status": "pass"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/11-cumulative-parts/003-threaded-flange": {
+      "default": {
+        "measured": {
+          "area_mm2": 18077.627618549766,
+          "body_count": 1,
+          "edges": 9955,
+          "faces": 4307,
+          "vertices": 5649,
+          "volume_mm3": 52427.566640422
+        },
+        "seconds": 5.985274333,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    },
+    "ladder/11-cumulative-parts/004-housing": {
+      "default": {
+        "seconds": 8.909698459,
+        "status": "fail"
+      },
+      "smlib": {
+        "seconds": null,
+        "status": "unsupported"
+      }
+    }
+  },
+  "kernels": [
+    "default",
+    "smlib"
+  ],
+  "reason": "first recording of the ladder (truck; SMLib booleans not on this branch yet)"
+}

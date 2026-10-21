@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a two-start M10 thread (lead 3, pitch 1.5)",
+ "source": "invariants",
+ "method": "would be graded as 001 with the material fraction of two grooves per lead",
+ "missing": "solid.thread has no start count: multi-start threads"
+}

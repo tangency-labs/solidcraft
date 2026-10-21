@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
+ "source": "invariants",
+ "method": "two rounds ending at a sharp vertical edge; one valid body",
+ "body_count": 1
+}

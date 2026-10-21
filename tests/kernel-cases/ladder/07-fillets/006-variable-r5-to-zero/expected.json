@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a variable round on the top front edge, r5 at x=0 down to 0 at the x=60 vertex",
+ "source": "analytic",
+ "method": "as 005 with b=0 (tests/oracle/78): the round closes to the corner, which stays",
+ "body_count": 1,
+ "volume_mm3": 47892.699081699,
+ "faces": 7
+}

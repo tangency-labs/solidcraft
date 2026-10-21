@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "three r5 rounds at a corner with the g2 corner patch",
+ "source": "invariants",
+ "method": "the g2 patch replaces the sphere octant; no closed-form volume; one valid body, the same faces as 009",
+ "body_count": 1,
+ "faces": 10
+}

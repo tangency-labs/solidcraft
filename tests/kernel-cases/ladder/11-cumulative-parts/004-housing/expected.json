@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss",
+ "source": "invariants",
+ "method": "the last case carries every tier; one valid body",
+ "body_count": 1
+}

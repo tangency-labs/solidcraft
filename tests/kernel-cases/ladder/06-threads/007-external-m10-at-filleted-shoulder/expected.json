@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet",
+ "source": "invariants",
+ "method": "thread meeting a concave fillet; one valid body",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   0
+  ],
+  "max": [
+   8,
+   8,
+   35
+  ]
+ }
+}

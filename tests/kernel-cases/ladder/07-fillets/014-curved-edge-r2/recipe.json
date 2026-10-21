@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      10,
+      0,
+      20
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

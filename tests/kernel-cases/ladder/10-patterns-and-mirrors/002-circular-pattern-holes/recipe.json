@@ -1,0 +1,39 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 30,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     0,
+     10
+    ],
+    "diameter": 6,
+    "name": "H"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "H"
+    ],
+    "axis": "Z",
+    "count": 8
+   }
+  }
+ ]
+}

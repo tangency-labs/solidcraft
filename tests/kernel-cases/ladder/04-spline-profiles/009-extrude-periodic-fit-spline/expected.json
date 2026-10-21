@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a closed periodic fit-point spline through 6 points, extruded 10",
+ "source": "invariants",
+ "method": "the fit's parametrisation is the spline's own: no closed-form area, and how many side faces a periodic spline makes is the kernel's own; one valid body",
+ "body_count": 1
+}
