@@ -1269,7 +1269,9 @@ pub(crate) fn round_pick_feedback(app: &SolveApp) -> (Vec<(Vec3, Vec3)>, Vec<Vec
         }
     } else if let (Some(Hit::Edge { body, index, .. }), Some(sel)) = (app.viewport.hover.as_ref(), hovered.as_ref()) {
         // Where the round edge is taken as its centre (`Dialog::circle_centre_pick`, Move's points).
-        if (matches!(sel, Sel::Vertex { .. }) || d.edge_is_centre(inp)) && let Some((c, ..)) = crate::dialogs::edge_circle(s, body, *index) {
+        if (matches!(sel, Sel::Vertex { .. }) || d.edge_is_centre(inp))
+            && let Some((c, ..)) = crate::dialogs::edge_circle(s, body, *index)
+        {
             centres.push(c);
         }
     }
