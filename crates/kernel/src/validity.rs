@@ -65,10 +65,13 @@ pub fn smlib_built() -> bool {
     cfg!(feature = "smlib")
 }
 
-/// The kernel booleans run on in this process: `"default"` or `"smlib"`. The regression rig
-/// refuses to grade a kernel the process isn't running. The SMLib boolean switch
-/// (`SOLIDCRAFT_BOOLEANS=smlib`) answers here once it lands; until then this is always
-/// `"default"`.
+/// The kernel this process runs on ([`crate::backend`]): `"default"` (truck) or `"smlib"`, and
+/// `"invalid"` where [`crate::KERNEL_ENV`] names neither or names SMLib in a build without it.
+/// The regression rig refuses to grade a kernel the process isn't running.
 pub fn boolean_kernel() -> &'static str {
-    "default"
+    match crate::backend() {
+        Ok(crate::Backend::Truck) => "default",
+        Ok(crate::Backend::Smlib) => "smlib",
+        Err(_) => "invalid",
+    }
 }

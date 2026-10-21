@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
 
-/// The kernel this process runs booleans with (`SOLIDCRAFT_BOOLEANS`, set by the caller).
+/// The kernel this process runs on (`SOLIDCRAFT_KERNEL`, set by the caller).
 fn kernel() -> String {
-    std::env::var("SOLIDCRAFT_BOOLEANS").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "default".into())
+    std::env::var("SOLIDCRAFT_KERNEL").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "default".into())
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one

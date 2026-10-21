@@ -531,7 +531,7 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
 #[cfg(feature = "smlib")]
 mod smlib {
     use super::*;
-    use crate::boolean_backend::smlib_boolean;
+    use crate::smlib_boolean::smlib_boolean;
 
     fn through_smlib(a: &Body, b: &Body, op: BoolOp) -> Body {
         smlib_boolean(a, b, op).unwrap().expect("a result")
