@@ -602,7 +602,10 @@ fn call(spec: Spec, objs: &[Entry], o1: Option<usize>, o2: Option<usize>) -> Res
         LocalKind::Base | LocalKind::Point | LocalKind::Curve => true,
         // NER(pV) checks the vertex for NULL
         LocalKind::PointVertex => second.is_none() || is_vertex(second),
-        LocalKind::VertexVertex => is_vertex(first) && (second.is_none() || is_vertex(second)),
+        // The release `SM_ASSERT(pObjN->IsKindOf(..))` of `SmTLSVertexVertex::SolveIt` and
+        // `SmTLSEdgeEdge::SolveIt` still evaluates its argument, so both objects are
+        // dereferenced before any `NULL` check (UB-238).
+        LocalKind::VertexVertex => is_vertex(first) && is_vertex(second),
         LocalKind::PointCurve => match (second, spec.interval) {
             // the interval must lie near the curve's range
             (Some(Entry::Curve(info, _)), Some((a, b))) => {
@@ -617,7 +620,7 @@ fn call(spec: Spec, objs: &[Entry], o1: Option<usize>, o2: Option<usize>) -> Res
         LocalKind::CurveVertex => is_vertex(entry(objs, o2)),
         // NER(pCurve) checks the second curve for NULL
         LocalKind::CurveEdge => second.is_none() || is_edge_curve(second),
-        LocalKind::EdgeEdge => is_edge_curve(first) && (second.is_none() || is_edge_curve(second)),
+        LocalKind::EdgeEdge => is_edge_curve(first) && is_edge_curve(second),
     };
     if !ok {
         return Err(bad("call objects do not fit the solver"));
@@ -754,4 +757,38 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(kind: LocalKind, swap: bool) -> Spec {
+        Spec {
+            kind,
+            swap,
+            interval: None,
+        }
+    }
+
+    #[test]
+    fn vertex_and_edge_pair_solvers_refuse_a_null_object() {
+        let vertices = [Entry::Vertex, Entry::Vertex];
+        let edge = Entry::Curve(CurveInfo { a: 0.0, b: 1.0 }, true);
+        let edges = [edge, edge];
+        for swap in [false, true] {
+            let vv = spec(LocalKind::VertexVertex, swap);
+            assert!(call(vv, &vertices, Some(0), Some(1)).is_ok());
+            assert!(call(vv, &vertices, Some(0), None).is_err());
+            assert!(call(vv, &vertices, None, Some(1)).is_err());
+            let ee = spec(LocalKind::EdgeEdge, swap);
+            assert!(call(ee, &edges, Some(0), Some(1)).is_ok());
+            assert!(call(ee, &edges, Some(0), None).is_err());
+            assert!(call(ee, &edges, None, Some(1)).is_err());
+            // NER(pV) / NER(pCurve) still accept a NULL second object
+            let pv = spec(LocalKind::PointVertex, swap);
+            let (o1, o2) = if swap { (None, Some(0)) } else { (Some(0), None) };
+            assert!(call(pv, &vertices, o1, o2).is_ok());
+        }
+    }
 }
