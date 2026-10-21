@@ -34,7 +34,7 @@ use solidcraft_geom::Vec3;
 use solidcraft_geom::brep as b;
 
 use crate::flat::{self, *};
-use crate::history::Order;
+use crate::history::{Order, Piece};
 use crate::import::Arrays;
 use crate::{Brep, Result, error, ffi, init};
 
@@ -576,6 +576,7 @@ enum Loop {
 }
 
 /// One edge before renumbering, along its record's parameter.
+#[derive(Clone)]
 struct Edge {
     curve: b::Curve,
     interval: [f64; 2],
@@ -727,66 +728,59 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
             face_uses.get_mut(f).ok_or_else(|| invalid("face"))?.push((s, same));
         }
     }
-    let mut shell_of: Vec<Option<u32>> = vec![None; n_shells];
-    let mut shells: Vec<Vec<(u32, bool)>> = Vec::new();
-    for s in 0..n_shells {
-        if shell_of.get(s).copied().flatten().is_some() {
-            continue;
-        }
-        let uses = shell_faceuses.get(s).ok_or_else(|| invalid("shell"))?;
-        let (f0, _) = faceuse(uses.start).map_err(|_| invalid("empty shell"))?;
-        let mate = match face_uses.get(f0).map(Vec::as_slice) {
-            Some([(a, _), (b, _)]) => {
-                if *a == s {
-                    *b
-                } else {
-                    *a
-                }
-            }
-            _ => return Err(invalid("a face without its two uses")),
-        };
-        let side = if mate == s {
-            s
-        } else {
-            let (rs, rm) = (region_of.get(s).copied().unwrap_or(0), region_of.get(mate).copied().unwrap_or(0));
-            match (material(rs), material(rm)) {
-                (false, true) => s,
-                (true, false) => mate,
-                _ => return Err(unsupported("a shell between two material regions or two empty ones")),
-            }
-        };
-        let mut oriented = Vec::new();
-        for fu in shell_faceuses.get(side).ok_or_else(|| invalid("shell"))?.clone() {
+    // Each record shell is one closed boundary between an empty region and a material one: the
+    // faces with the same runtime shell on the empty side and on the material side, as the empty
+    // side uses them. Solids touching along an edge or at a vertex share their empty side's
+    // runtime shell but not their material side's, so each gets its own record shell (the edges
+    // and vertices they share are split below). A sheet's one shell holds both uses of each
+    // face: the `same` one is kept.
+    let mut groups: Vec<((usize, usize), Vec<(u32, bool)>)> = Vec::new();
+    for (s, uses) in shell_faceuses.iter().enumerate() {
+        for fu in uses.clone() {
             let (f, same) = faceuse(fu)?;
-            // A sheet lists both uses of each face in its one shell: keep the `same` one.
-            if mate == s && !same {
-                continue;
-            }
-            if !face_uses.get(f).is_some_and(|u| u.iter().any(|(o, _)| *o == mate)) {
-                return Err(unsupported("a shell whose faces' other sides are in different shells"));
-            }
+            let key = match face_uses.get(f).map(Vec::as_slice) {
+                Some([(a, _), (b, _)]) if a == b => {
+                    if !same {
+                        continue;
+                    }
+                    (*a, *a)
+                }
+                Some([(a, _), (b, _)]) => {
+                    let other = if *a == s { *b } else { *a };
+                    let (here, there) = (region_of.get(s).copied().unwrap_or(0), region_of.get(other).copied().unwrap_or(0));
+                    match (material(here), material(there)) {
+                        (false, true) => (s, other),
+                        (true, false) => continue,
+                        _ => return Err(unsupported("a face between two material regions or two empty ones")),
+                    }
+                }
+                _ => return Err(invalid("a face without its two uses")),
+            };
             let agrees = faces.get(f).ok_or_else(|| invalid("face"))?.agrees;
-            oriented.push((index(f)?, same == agrees));
-        }
-        let id = index(shells.len())?;
-        shells.push(oriented);
-        for k in [s, mate] {
-            if let Some(slot) = shell_of.get_mut(k) {
-                *slot = Some(id);
-            }
+            let at = match groups.iter().position(|(k, _)| *k == key) {
+                Some(at) => at,
+                None => {
+                    groups.push((key, Vec::new()));
+                    groups.len() - 1
+                }
+            };
+            groups.get_mut(at).ok_or_else(|| invalid("shell"))?.1.push((index(f)?, same == agrees));
         }
     }
     let mut regions = Vec::with_capacity(region_shells.len());
     for (r, block) in region_shells.iter().enumerate() {
         let mut listed = Vec::new();
         for s in block.clone() {
-            let id = shell_of.get(s).copied().flatten().ok_or_else(|| invalid("shell"))?;
-            if !listed.contains(&id) {
-                listed.push(id);
+            for (g, ((empty, solid), _)) in groups.iter().enumerate() {
+                let id = index(g)?;
+                if (*empty == s || *solid == s) && !listed.contains(&id) {
+                    listed.push(id);
+                }
             }
         }
         regions.push(b::Region { shells: listed, void: r > 0 && !material(r) });
     }
+    let shells: Vec<Vec<(u32, bool)>> = groups.into_iter().map(|(_, faces)| faces).collect();
     // Shells renumbered in first appearance walking the regions.
     let mut order: Vec<u32> = Vec::new();
     for r in &regions {
@@ -818,7 +812,10 @@ struct Parts {
 /// the edges and then the vertex loops, with each face's pcurves; validated. With it, the
 /// canonical index of each array face and edge.
 fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res<(b::Brep, Order)> {
-    let Parts { faces, edges, shells, regions } = parts;
+    let Parts { mut faces, mut edges, shells, regions } = parts;
+    let n_edges = edges.len();
+    let (edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
+    let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
     for shell in &shells {
@@ -865,7 +862,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
         return Err(unsupported("wire edges from SMLib"));
     }
     if edge_uses.iter().any(|u| u.len() > 2) {
-        return Err(unsupported("the radial order of an edge with more than two uses"));
+        return Err(unsupported("a solid touching itself along an edge"));
     }
     let mut vertex_new: Vec<Option<u32>> = vec![None; n_vertices];
     let mut vertex_order = Vec::new();
@@ -934,7 +931,13 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
         face_records.push(b::Face { surface: face.surface.clone(), domain: face.domain, loops });
     }
     let positions = flat.f(VERTEX_POSITION);
-    let vertices = vertex_order.iter().map(|&v| Ok(b::Vertex { point: v3(positions, v as usize, "vertex")?, tolerance })).collect::<Res<Vec<_>>>()?;
+    let vertices = vertex_order
+        .iter()
+        .map(|&v| {
+            let at = vertex_source.get(v as usize).copied().ok_or_else(|| invalid("vertex"))?;
+            Ok(b::Vertex { point: v3(positions, at, "vertex")?, tolerance })
+        })
+        .collect::<Res<Vec<_>>>()?;
     let shells = shells
         .into_iter()
         .map(|s| {
@@ -952,8 +955,109 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerance: f64) -> Res
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
-    let order = Order { faces: placed(&face_new)?, edges: placed(&edge_new)? };
+    let edge_new = placed(&edge_new)?;
+    // SMLib's edges split where solids touch: every piece, with the faces it bounds.
+    let mut pieces = Vec::new();
+    for (e, &canonical) in edge_new.iter().enumerate() {
+        let edge = edge_source.get(e).copied().ok_or_else(|| invalid("edge"))?;
+        if edge_source.iter().filter(|s| **s == edge).count() > 1 {
+            let record = brep.edges.get(canonical).ok_or_else(|| invalid("edge"))?;
+            let faces: std::collections::BTreeSet<usize> = record.uses.iter().map(|u| u.face as usize).collect();
+            pieces.push(Piece { edge, canonical, faces: faces.into_iter().collect() });
+        }
+    }
+    pieces.sort_by_key(|p| (p.edge, p.canonical));
+    let mut edges_out = Vec::with_capacity(n_edges);
+    for e in 0..n_edges {
+        edges_out
+            .push(pieces.iter().find(|p| p.edge == e).map_or_else(|| edge_new.get(e).copied().ok_or_else(|| invalid("edge")), |p| Ok(p.canonical))?);
+    }
+    let order = Order { faces: placed(&face_new)?, edges: edges_out, pieces };
     Ok((brep, order))
+}
+
+/// Edges and vertices that solids touching each other share (faces of more than one shell use
+/// them), split into one copy per shell, so each shell is a closed manifold boundary of its own.
+/// The geometry is unchanged. Returns, for every edge and vertex after the split, the array edge
+/// and vertex it is (a copy's original).
+fn split_shared(faces: &mut [Face], edges: &mut Vec<Edge>, shells: &[Vec<(u32, bool)>], n_vertices: usize) -> Res<(Vec<usize>, Vec<usize>)> {
+    let mut shell_of = vec![None; faces.len()];
+    for (k, shell) in shells.iter().enumerate() {
+        for &(f, _) in shell {
+            *shell_of.get_mut(f as usize).ok_or_else(|| invalid("face"))? = Some(k);
+        }
+    }
+    let mut edge_source: Vec<usize> = (0..edges.len()).collect();
+    // Edges: the first shell to use one keeps it, every other gets a copy.
+    let mut edge_shell: Vec<Option<usize>> = vec![None; edges.len()];
+    let mut copies: HashMap<(u32, usize), u32> = HashMap::new();
+    for (f, face) in faces.iter_mut().enumerate() {
+        let Some(k) = shell_of.get(f).copied().flatten() else { continue };
+        for l in &mut face.loops {
+            let Loop::Edges(uses) = l else { continue };
+            for (e, _) in uses.iter_mut() {
+                let slot = edge_shell.get_mut(*e as usize).ok_or_else(|| invalid("edge"))?;
+                match slot {
+                    None => *slot = Some(k),
+                    Some(owner) if *owner == k => {}
+                    Some(_) => {
+                        let copy = match copies.get(&(*e, k)) {
+                            Some(c) => *c,
+                            None => {
+                                let c = index(edges.len())?;
+                                edges.push(edges.get(*e as usize).ok_or_else(|| invalid("edge"))?.clone());
+                                edge_source.push(*e as usize);
+                                edge_shell.push(Some(k));
+                                copies.insert((*e, k), c);
+                                c
+                            }
+                        };
+                        *e = copy;
+                    }
+                }
+            }
+        }
+    }
+    // Vertices: likewise, through the edges (each now in one shell) and the vertex loops.
+    let mut vertex_source: Vec<usize> = (0..n_vertices).collect();
+    let mut vertex_shell: Vec<Option<usize>> = vec![None; n_vertices];
+    let mut vertex_copies: HashMap<(u32, usize), u32> = HashMap::new();
+    let mut place = |v: &mut u32, k: usize| -> Res<()> {
+        let slot = vertex_shell.get_mut(*v as usize).ok_or_else(|| invalid("vertex"))?;
+        match slot {
+            None => *slot = Some(k),
+            Some(owner) if *owner == k => {}
+            Some(_) => {
+                let copy = match vertex_copies.get(&(*v, k)) {
+                    Some(c) => *c,
+                    None => {
+                        let c = index(vertex_source.len())?;
+                        vertex_source.push(*v as usize);
+                        vertex_shell.push(Some(k));
+                        vertex_copies.insert((*v, k), c);
+                        c
+                    }
+                };
+                *v = copy;
+            }
+        }
+        Ok(())
+    };
+    for (e, edge) in edges.iter_mut().enumerate() {
+        let Some(k) = edge_shell.get(e).copied().flatten() else { continue };
+        for v in &mut edge.vertices {
+            place(v, k)?;
+        }
+    }
+    for (f, face) in faces.iter_mut().enumerate() {
+        let Some(k) = shell_of.get(f).copied().flatten() else { continue };
+        for l in &mut face.loops {
+            if let Loop::Vertex(v) = l {
+                place(v, k)?;
+            }
+        }
+    }
+    Ok((edge_source, vertex_source))
 }
 
 /// A face's pcurves, edge loop by edge loop, from the plain-record routine on the face's
