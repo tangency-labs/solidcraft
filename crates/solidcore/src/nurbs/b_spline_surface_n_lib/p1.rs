@@ -89,7 +89,10 @@
 //! - **`CreateExtendedSurface`** halves the extension distance after each failed
 //!   extension until it drops below `dDist / 100`, which never happens for a zero or
 //!   NaN distance (upstream then loops forever); the port stops after
-//!   [`MAX_EXTEND_HALVINGS`] halvings with [`SolidError::NotConverged`].
+//!   [`MAX_EXTEND_HALVINGS`] halvings with [`SolidError::NotConverged`]. After a
+//!   successful extension it doubles the distance until it reaches `dDist / 2`, which
+//!   a negative distance never does (it doubles towards `-inf`, upstream HANG-16); the
+//!   port stops after [`MAX_EXTEND_DOUBLINGS`] doublings with the same error.
 //! - **`N_LinearMultiplyCrv`** returns nothing upstream; its port fails only for a
 //!   degree-0 cross-boundary derivative (no Greville abscissae), which
 //!   [`create_coons_srf`] passes on.
@@ -134,6 +137,14 @@ use crate::nurbs::srf_tool::p4::make_compatible_uv;
 /// forever for a zero or NaN distance; halving a positive distance reaches zero after
 /// fewer than 1100 steps).
 pub const MAX_EXTEND_HALVINGS: usize = 1100;
+
+/// Largest number of distance doublings of one side of
+/// [`BSplineSurface::create_extended_surface_dir`]. A positive distance is doubled back
+/// at most once more than it was halved, so only a negative distance reaches this:
+/// upstream doubles it away from the loop's exit (`dExtDist < dDist/2.0`) towards
+/// `-inf` and loops forever while the extensions succeed (`plan/upstream-issues.md`
+/// HANG-16).
+pub const MAX_EXTEND_DOUBLINGS: usize = MAX_EXTEND_HALVINGS + 1;
 
 const OP_BUILD_CURVE: &str = "nurbs::b_spline_surface_n_lib::p1::build_nlib_curve";
 const OP_NLIB_CURVE: &str = "nurbs::b_spline_surface_n_lib::p1::create_nlib_curve";
@@ -1763,7 +1774,7 @@ impl BSplineSurface {
 /// One side of `CreateExtendedSurface`: extends `esur` across `end` of `dir` by
 /// `ext_dist`, halving the distance after each failure (`SM_ERR` below
 /// `dist / 100`), checks validity, then repeats with doubled distances while the
-/// distance is below `dist / 2`.
+/// distance is below `dist / 2` (at most [`MAX_EXTEND_DOUBLINGS`] times).
 fn extend_side(
     esur: &mut Surface,
     dist: f64,
@@ -1806,7 +1817,16 @@ fn extend_side(
     }
 
     // if needed - multiple extensions until Extension gets to be near requested size
+    let mut doublings = 0usize;
     while *ext_dist < dist / 2.0 {
+        // upstream loops forever for a negative distance (HANG-16)
+        doublings += 1;
+        if doublings > MAX_EXTEND_DOUBLINGS {
+            return Err(SolidError::NotConverged {
+                operation: OP,
+                iterations: u32::try_from(MAX_EXTEND_DOUBLINGS).unwrap_or(u32::MAX),
+            });
+        }
         *ext_dist *= 2.0;
         *esur = extend_by_dist(esur, *ext_dist, dir, end, gflg).map_err(SolidError::nl_ser(OP))?;
         if esur.is_valid().is_err() {
@@ -1920,6 +1940,18 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn negative_extension_distance_stops() {
+        // upstream doubles a negative distance towards -inf forever (HANG-16)
+        let k = &Kernel::default();
+        let r = plane_surface().create_extended_surface(k, -5.0, ContinuityType::G1R);
+        assert!(matches!(r, Err(SolidError::NotConverged { .. })), "{r:?}");
+        // a positive distance is unaffected
+        assert!(plane_surface()
+            .create_extended_surface(k, 0.5, ContinuityType::G1R)
+            .is_ok());
     }
 
     #[test]
