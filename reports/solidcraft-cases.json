@@ -1,0 +1,162 @@
+{
+  "cases": [
+    {
+      "id": "2844-ring-on-perforated-plate/plain_plate_ring_sunk",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
+    },
+    {
+      "id": "2844-ring-on-perforated-plate/holed_plate_ring_standing",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
+    },
+    {
+      "id": "2844-ring-on-perforated-plate/holed_plate_ring_sunk",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
+    },
+    {
+      "id": "3369-fillet-edge-on-tangent-seam/edge_ends_on_seam",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3369",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3922",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/blend.rs: a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round (draft PR)"
+    },
+    {
+      "id": "3369-fillet-edge-on-tangent-seam/control_edge_off_seam",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3369",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3922",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/blend.rs: a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round (draft PR)"
+    },
+    {
+      "id": "3468-offset-face-next-to-fillet/boss_wall_out_1",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet"
+    },
+    {
+      "id": "3468-offset-face-next-to-fillet/boss_wall_in_1",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet"
+    },
+    {
+      "id": "3468-offset-face-next-to-fillet/box_wall_beside_vertical_round",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet"
+    },
+    {
+      "id": "3468-offset-face-next-to-fillet/box_top_beside_top_round",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p1",
+          "symbol": "SmPrimitiveCreation::CreateBox"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet"
+    },
+    {
+      "id": "3526-intersect-multi-lump-target/two_spheres_one_box",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3526",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3888",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p2",
+          "symbol": "SmPrimitiveCreation::CreateSphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target"
+    },
+    {
+      "id": "3526-intersect-multi-lump-target/box_clear_of_both",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3526",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3888",
+      "rust": {
+        "deferred": {
+          "blocked_by": "primitive.primitive_creation_p2",
+          "symbol": "SmPrimitiveCreation::CreateSphere"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target"
+    }
+  ],
+  "glob": null,
+  "summary": {
+    "blocked_by": {
+      "primitive.primitive_creation_p1": 9,
+      "primitive.primitive_creation_p2": 2
+    },
+    "rust": {
+      "DEFERRED": 11,
+      "ERROR": 0,
+      "FAIL": 0,
+      "PASS": 0,
+      "UNCHECKED": 0
+    }
+  },
+  "volume_accuracy": 1e-6
+}

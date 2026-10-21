@@ -1,0 +1,254 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
+ "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet",
+ "summary": "Offset Face on a face next to a fillet was refused: the round must move with the face, keep its radius and stay tangent. Geometry is the PR test's; it checks the volume change, here turned into the absolute volume, with its tolerance (1e-3 of the change for the boss, 1e-6 for the boxes). SM_API has no entry point that offsets selected faces (SmApiOffsetBrepFull and SmApiShellBrepFull move every face), so offset_faces is deferred on that missing entry point.",
+ "cases": [
+  {
+   "name": "boss_wall_out_1",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      60,
+      40,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      30,
+      20,
+      10
+     ],
+     "radius": 10,
+     "height": 10
+    },
+    {
+     "op": "union",
+     "id": "body",
+     "a": "box",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "body",
+     "body": "body",
+     "edges": [
+      [
+       40,
+       20,
+       10
+      ]
+     ],
+     "radius": 2
+    },
+    {
+     "op": "offset_faces",
+     "id": "result",
+     "body": "body",
+     "faces": [
+      [
+       40,
+       20,
+       16
+      ]
+     ],
+     "distance": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 27863.06545197909,
+     "tol": 0.6651279896803962,
+     "formula": "60*40*10 + pi*(10+1)^2*10 + 2*pi*(4 - pi)*(10+1 + 2*(10 - 3*pi)/(3*(4 - pi))) (Pappus: the round's section carried to its new radius)"
+    }
+   }
+  },
+  {
+   "name": "boss_wall_in_1",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      60,
+      40,
+      10
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      30,
+      20,
+      10
+     ],
+     "radius": 10,
+     "height": 10
+    },
+    {
+     "op": "union",
+     "id": "body",
+     "a": "box",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "body",
+     "body": "body",
+     "edges": [
+      [
+       40,
+       20,
+       10
+      ]
+     ],
+     "radius": 2
+    },
+    {
+     "op": "offset_faces",
+     "id": "result",
+     "body": "body",
+     "faces": [
+      [
+       40,
+       20,
+       16
+      ]
+     ],
+     "distance": -1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 26595.641325690092,
+     "tol": 0.6022961366086004,
+     "formula": "60*40*10 + pi*(10-1)^2*10 + 2*pi*(4 - pi)*(10-1 + 2*(10 - 3*pi)/(3*(4 - pi))) (Pappus: the round's section carried to its new radius)"
+    }
+   }
+  },
+  {
+   "name": "box_wall_beside_vertical_round",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "body",
+     "body": "box",
+     "edges": [
+      [
+       40,
+       0,
+       10
+      ]
+     ],
+     "radius": 3
+    },
+    {
+     "op": "offset_faces",
+     "id": "result",
+     "body": "body",
+     "faces": [
+      [
+       40,
+       15,
+       10
+      ]
+     ],
+     "distance": 2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 25161.37166941154,
+     "tol": 0.0012,
+     "formula": "42*30*20 - 3^2*(1 - pi/4)*20"
+    }
+   }
+  },
+  {
+   "name": "box_top_beside_top_round",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "body",
+     "body": "box",
+     "edges": [
+      [
+       20,
+       0,
+       20
+      ]
+     ],
+     "radius": 3
+    },
+    {
+     "op": "offset_faces",
+     "id": "result",
+     "body": "body",
+     "faces": [
+      [
+       20,
+       15,
+       20
+      ]
+     ],
+     "distance": 2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 26322.743338823082,
+     "tol": 0.0024,
+     "formula": "40*30*22 - 3^2*(1 - pi/4)*40"
+    }
+   }
+  }
+ ]
+}

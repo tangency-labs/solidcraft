@@ -1,0 +1,218 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3369",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3922",
+ "test": "crates/kernel/src/blend.rs: a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round (draft PR)",
+ "summary": "An r 2 fillet on the edge between a stadium bar's flat top and a slot floor was refused because each end of the edge also lies on the seam where the top runs tangent into the rounded end. Geometry is the issue's repro (the PR test's stadium, extruded 14 along X); the bar is built as a box and two cylinders along X instead of an extruded profile. Expected: the round's section (4 - pi) along the 6 mm between the slot walls, with the PR test's 1e-3 relative tolerance on that removed volume. The control is the issue's: the slot floor 0.5 mm into the bar, off the seam.",
+ "cases": [
+  {
+   "name": "edge_ends_on_seam",
+   "note": "the issue's case",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      -9.5
+     ],
+     "size": [
+      14,
+      25,
+      19
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "end0",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 9.5,
+     "height": 14
+    },
+    {
+     "op": "cylinder",
+     "id": "end1",
+     "origin": [
+      0,
+      25,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 9.5,
+     "height": 14
+    },
+    {
+     "op": "union",
+     "id": "bar",
+     "a": "block",
+     "b": "end0"
+    },
+    {
+     "op": "union",
+     "id": "bar",
+     "a": "bar",
+     "b": "end1"
+    },
+    {
+     "op": "box",
+     "id": "slot",
+     "origin": [
+      3.5,
+      -12,
+      -10
+     ],
+     "size": [
+      6,
+      12,
+      20
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "bar",
+     "b": "slot"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       6.5,
+       0,
+       9.5
+      ]
+     ],
+     "radius": 2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 9763.665662772806,
+     "tol": 0.0051504440784612415,
+     "formula": "14*(25*19 + pi*9.5^2) - 6*pi*9.5^2/2 - 6*(4 - pi)"
+    }
+   }
+  },
+  {
+   "name": "control_edge_off_seam",
+   "note": "control from the issue: the same fillet succeeded in SolidCraft",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      -9.5
+     ],
+     "size": [
+      14,
+      25,
+      19
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "end0",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 9.5,
+     "height": 14
+    },
+    {
+     "op": "cylinder",
+     "id": "end1",
+     "origin": [
+      0,
+      25,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 9.5,
+     "height": 14
+    },
+    {
+     "op": "union",
+     "id": "bar",
+     "a": "block",
+     "b": "end0"
+    },
+    {
+     "op": "union",
+     "id": "bar",
+     "a": "bar",
+     "b": "end1"
+    },
+    {
+     "op": "box",
+     "id": "slot",
+     "origin": [
+      3.5,
+      -11.5,
+      -10
+     ],
+     "size": [
+      6,
+      12,
+      20
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "bar",
+     "b": "slot"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       6.5,
+       0.5,
+       9.5
+      ]
+     ],
+     "radius": 2
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 9706.665662772806,
+     "tol": 0.0051504440784612415,
+     "formula": "14*(25*19 + pi*9.5^2) - 6*(pi*9.5^2/2 + 0.5*19) - 6*(4 - pi)"
+    }
+   }
+  }
+ ]
+}

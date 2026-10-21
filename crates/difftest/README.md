@@ -37,6 +37,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--fuzz N` | with `--unit`: probe the unit's FFI guard with N mutated cases, each run in a child process (below). No report written. |
 | `--fuzz-out D` | where `--fuzz` writes failing inputs (default `bin/fuzz/`; files go to `D/<unit>/`) |
 | `--ssi-corpus [--tol T] [--jobs N] [glob]` | score both engines against the SSI corpus (see [below](#--ssi-corpus-exact-ground-truth-ssi-corpus)); not a gate |
+| `--solidcraft-cases [glob]` | score the Rust port on SolidCraft's whole-operation regression cases (see [below](#--solidcraft-cases-solidcraft-regression-cases)); not a gate, no `cpp` feature needed |
 
 Exit status: `0` no failures (deferred cases are not failures), `1` any
 failure, `2` usage or setup error. Output: one summary line per unit,
@@ -485,6 +486,48 @@ errors (unreadable case, report not writable); verdicts never fail the run.
 
   grades the same raw files (without `SSI_SC_RAW` it reruns the shim per case).
 
+## `--solidcraft-cases`: SolidCraft regression cases
+
+A correctness report, separate from the gate like `--ssi-corpus`: it never changes a
+unit's status and verdicts never fail the run. `fixtures/solidcraft/` holds one file per
+SolidCraft issue that was found and fixed on SolidCraft's earlier kernel (the issue, the
+fixing PR and the test the cases come from). Each case is a list of `SM_API`-level steps
+and the values its `result` body must have, known in closed form, so the bugs stay
+fixed once the operations run end to end here. Geometry and tolerances are those of the
+SolidCraft PR's own test wherever it has one.
+
+```sh
+nice -n 10 cargo run -p difftest -- --solidcraft-cases                 # all cases (Rust only)
+nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<file stem>/<name>) matching a glob
+```
+
+* **Steps** (`"op"`): `box`, `sphere`, `cylinder` (`axis`, default +Z), `union`,
+  `difference` (optional `pattern`: the tool cut once per grid position, one cut after
+  the other), `intersection`, `fillet` (edges by a point on each), `offset_faces` (faces
+  by a point on each). Each writes the body `id`; the last writes `result`.
+* **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left), `volume`
+  (`value`, absolute `tol`, the `formula` it came from), `cylinder_faces_max`.
+* **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no check failed but one cannot be measured
+  yet: `cylinder_faces_max` until solidcore has a cylinder surface kind), `ERROR` (a step
+  returned an error other than `Unported`), `DEFERRED`. A step that reaches unported code
+  defers the case on the unit in its `SolidError::Unported`; `fillet` has no Rust
+  `SmApiFilletEdges` yet and defers on `blend.fillet_executive_p1`; `offset_faces` defers
+  on `no SM_API entry point`, since `SM_API` only offsets or shells whole bodies
+  (`SmApiOffsetBrepFull`, `SmApiShellBrepFull`).
+* **Engines.** Rust only for now. A C++ engine (a shim running the same steps through
+  `SM_API`) would show which of these bugs upstream SMLib has.
+* **Output.** One line per case, then
+
+  ```
+  SOLIDCRAFT-CASES rust: PASS=… FAIL=… UNCHECKED=… ERROR=… DEFERRED=… (cases=…)
+  SOLIDCRAFT-CASES rust: blocked_by=<unit>(<cases>),…
+  ```
+
+  and `reports/solidcraft-cases.json` (`reports/solidcraft-cases_<glob>.json` for a
+  glob): per case its source links, verdict, deferral, measured values and checks.
+* `cargo test -p difftest --lib solidcraft` checks that every case file loads, every
+  case runs to a verdict, and every deferral names a plan unit.
+
 ## Notes
 
 * Cases run sequentially in one process: the C++ kernel has global state. A
@@ -492,7 +535,7 @@ errors (unreadable case, report not writable); verdicts never fail the run.
   its cases in child processes instead).
 * Rust panics in a runner are caught and reported as a failing case.
 * `solidcore-ffi` without feature `cpp` is an empty crate that builds for
-  `wasm32-unknown-unknown`; the difftest binary refuses to run without `cpp`.
+  `wasm32-unknown-unknown`; the difftest binary refuses to run without `cpp`, except for `--solidcraft-cases` (Rust only).
 * Debugging: the binary is `bin/debug/difftest`; set breakpoints with
   mcp-debugger (the C++ kernel is built with `-g`).
 * Reports: `reports/difftest/<unit>.json` — sorted keys, no timestamps,

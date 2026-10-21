@@ -11,6 +11,7 @@
 //!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`difftest::jobs`)
 //! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
+//! cargo run -p difftest -- --solidcraft-cases [glob]   # Rust only; no `cpp` feature needed
 //! ```
 //! Exit status: 0 no failures (deferred cases are not failures), 1 any failure,
 //! 2 usage / harness setup error.
@@ -25,7 +26,8 @@ use difftest::{fuzz, plan, registry, report, run_unit, CaseContext, RunOptions, 
 const USAGE: &str = "usage: difftest [--unit <id>]... [--green] [--all] [--list] \
 [--status-of <id>] [--seeds N] [--filter <substr>] [--perturb] [--report-dir <dir>] [--no-report] [--jobs N]
        difftest --unit <id>... --fuzz N [--fuzz-out <dir>] [--seeds N] [--filter <substr>]
-       difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]";
+       difftest --ssi-corpus [--tol 1e-6|default] [--jobs N] [--report-dir <dir>] [--no-report] [case-glob]
+       difftest --solidcraft-cases [--report-dir <dir>] [--no-report] [case-glob]";
 
 /// Default child processes of `--ssi-corpus`.
 const DEFAULT_SSI_JOBS: usize = 2;
@@ -51,6 +53,7 @@ struct Args {
     report_dir: Option<PathBuf>,
     no_report: bool,
     ssi_corpus: bool,
+    solidcraft_cases: bool,
     tol: Option<String>,
     jobs: Option<usize>,
     glob: Option<String>,
@@ -78,6 +81,7 @@ fn parse_args() -> Result<Args, String> {
             "--report-dir" => a.report_dir = Some(PathBuf::from(val("--report-dir")?)),
             "--no-report" => a.no_report = true,
             "--ssi-corpus" => a.ssi_corpus = true,
+            "--solidcraft-cases" => a.solidcraft_cases = true,
             "--tol" => a.tol = Some(val("--tol")?),
             "--jobs" | "-j" => {
                 let v = val("--jobs")?;
@@ -89,7 +93,11 @@ fn parse_args() -> Result<Args, String> {
             }
             "--fuzz-out" => a.fuzz_out = Some(PathBuf::from(val("--fuzz-out")?)),
             "-h" | "--help" => return Err(String::new()),
-            other if a.ssi_corpus && !other.starts_with('-') && a.glob.is_none() => {
+            other
+                if (a.ssi_corpus || a.solidcraft_cases)
+                    && !other.starts_with('-')
+                    && a.glob.is_none() =>
+            {
                 a.glob = Some(other.to_string());
             }
             other => return Err(format!("unknown argument `{other}`")),
@@ -133,6 +141,16 @@ fn main() -> ExitCode {
         root: root.clone(),
         seeds: args.seeds.unwrap_or(DEFAULT_SEEDS),
     };
+
+    // Rust only, so it runs without the C++ kernel.
+    if args.solidcraft_cases {
+        let opts = difftest::solidcraft::CasesOptions {
+            glob: args.glob.clone(),
+            report_dir: args.report_dir.clone(),
+            no_report: args.no_report,
+        };
+        return difftest::solidcraft::run_cases(&root, &opts);
+    }
 
     if !solidcore_ffi::LINKED {
         eprintln!(
