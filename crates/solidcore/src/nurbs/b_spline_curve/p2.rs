@@ -437,6 +437,23 @@ impl BSplineCurve {
         interval: &Extent1d,
         req: BoundingBoxRequest,
     ) -> Result<BoundingBoxes> {
+        self.calculate_bounding_box_onto(interval, req, PseudoBox::new())
+    }
+
+    /// [`BSplineCurve::calculate_bounding_box`] onto the caller's pseudo box (upstream's
+    /// in/out `pPseudoBox`): its intervals are reset and its basis is kept unless the
+    /// control points set one, which a failed `SetBasis` does not (a degenerate span
+    /// whose squared extent overflows).
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineCurve::calculate_bounding_box`].
+    pub fn calculate_bounding_box_onto(
+        &self,
+        interval: &Extent1d,
+        req: BoundingBoxRequest,
+        initial_pseudo: PseudoBox,
+    ) -> Result<BoundingBoxes> {
         let mut out = BoundingBoxes::default();
 
         // no work - nothing to compute
@@ -495,7 +512,8 @@ impl BSplineCurve {
         // polygon running from the start span to the end span
         if req.pseudo {
             // init intervals - leave basis vectors alone
-            let mut pseudo = PseudoBox::new();
+            let mut pseudo = initial_pseudo;
+            pseudo.init();
 
             // locals to find control point triple with a near-max cross product
             let (mut i_max, mut j_max, mut k_max) = (1usize, 2usize, 3usize);
@@ -1959,6 +1977,26 @@ mod tests {
         ];
         assert!(BSplineCurve::create_by_joining(&mut gap, None).is_err());
         assert!(BSplineCurve::create_by_joining(&mut [], None).is_err());
+    }
+
+    /// A span whose squared extent overflows sets no basis (`MakeUnitOrthoVectors`
+    /// fails, `SetBasis` refuses the result), so the caller's basis stays: zero for a
+    /// curve cache span (zero-filled slot), the constructor's for a fresh box.
+    #[test]
+    fn bounding_box_keeps_the_callers_basis_when_none_can_be_set() {
+        let c = line(Point3::new(0.77, 0.05, 0.0), Point3::new(1e300, 0.38, 0.0));
+        let req = BoundingBoxRequest {
+            normal: true,
+            pseudo: true,
+            polar: false,
+        };
+        let ivl = c.natural_interval();
+        let span = c
+            .calculate_bounding_box_onto(&ivl, req, PseudoBox::zero_filled())
+            .unwrap();
+        assert_eq!(span.pseudo.unwrap().basis(), &[Vec3::ZERO; 3]);
+        let fresh = c.calculate_bounding_box(&ivl, req).unwrap();
+        assert_eq!(fresh.pseudo.unwrap().basis(), &[Vec3::X, Vec3::Y, Vec3::Z]);
     }
 
     #[test]

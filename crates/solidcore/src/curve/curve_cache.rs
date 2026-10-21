@@ -44,7 +44,10 @@
 //!   [`Nurb`] values and a `Vec` used as the split stack (same push/pop order). The
 //!   byte-size bookkeeping (`m_lBezierSize`, `m_lTotalBezSize`,
 //!   `sm_ComputeNurbCurveSize`) has no counterpart. Parent data are pre-allocated
-//!   zero-filled, as upstream's block allocation.
+//!   zero-filled, as upstream's block allocation, and so is a span's pseudo box
+//!   ([`PseudoBox::zero_filled`]): `GetNewElement` runs no constructor, and
+//!   `CalculateBoundingBox` keeps that zero basis when it can set none (a span whose
+//!   squared extent overflows).
 //! - **Tree data.** Tree nodes point at spans through
 //!   [`crate::geom::tree::CurveSpanRef`]; [`CurveCache::build_tree`] hands the span
 //!   and parent arrays to the tree ([`Tree::set_curve_data`]) so the global solvers
@@ -483,7 +486,12 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         right_continuity: ContinuityType,
     ) -> Nurb {
         let num_span = self.spans.len() as u64;
-        let mut new = BezierSpan::default();
+        // (a zero-filled GetNewElement slot: no constructor runs, so the pseudo box's
+        // basis stays zero until build_tree sets it)
+        let mut new = BezierSpan {
+            pseudo_box: PseudoBox::zero_filled(),
+            ..BezierSpan::default()
+        };
 
         // a leaf node is its own left and right most bezier component
         new.aux.left = num_span;
@@ -863,8 +871,14 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 pseudo: true,
                 polar: false,
             };
-            // (status ignored upstream: a failure leaves the zero-filled box)
-            let boxes = ignored(bsp.calculate_bounding_box(&bsp.natural_interval(), req))?;
+            // (status ignored upstream: a failure leaves the zero-filled box; the span's
+            // own pseudo box goes in, keeping its basis when none can be set)
+            let initial = self
+                .spans
+                .get(i)
+                .map_or_else(PseudoBox::zero_filled, |s| s.pseudo_box);
+            let boxes =
+                ignored(bsp.calculate_bounding_box_onto(&bsp.natural_interval(), req, initial))?;
             let (bbox, pseudo) = boxes.map_or((None, None), |b| (b.normal, b.pseudo));
             if let (Some(p), Some(span)) = (pseudo, self.spans.get_mut(i)) {
                 span.pseudo_box = p;

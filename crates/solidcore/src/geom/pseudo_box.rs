@@ -275,6 +275,23 @@ impl PseudoBox {
         }
     }
 
+    /// The bytes of an `SmPseudoBox` whose constructor never ran in zero-filled
+    /// memory: zero basis vectors and intervals, not orthogonal. Upstream's curve cache
+    /// spans live in `smos_Calloc` blocks (`SmMemBlockMgr::GetNewElement`), so a
+    /// span's box starts so until `CalculateBoundingBox` sets its basis.
+    #[must_use]
+    pub const fn zero_filled() -> Self {
+        Self {
+            orthogonal_basis: false,
+            basis: [Vec3::ZERO, Vec3::ZERO, Vec3::ZERO],
+            intervals: [
+                Extent1d::from_raw(0.0, 0.0),
+                Extent1d::from_raw(0.0, 0.0),
+                Extent1d::from_raw(0.0, 0.0),
+            ],
+        }
+    }
+
     /// The header constructor `SmPseudoBox(xDir, yDir, zDir, xIvl, yIvl, zIvl)`:
     /// [`PseudoBox::set_basis`] (whose failure leaves the basis uninitialised,
     /// [`Vec3::UNDEF`]) then [`PseudoBox::set_intervals`].
