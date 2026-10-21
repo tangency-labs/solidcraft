@@ -13459,100 +13459,99 @@ boundary. No Rust/C++ value mismatch was observed in the completed fuzz cases.
 The ordinary unit run remains 2686 cases, 2250 passed, 436 deferred, 0 failed,
 with maximum relative error 0.
 
-## surface: owning face's zone tolerance cached on `Surface` (branch `surface/owner-zone-tol`, 2026-10-20)
+## blend.fillet_solver_p2: fillet-geometry stubs need a FilletBrep
 
-Upstream reads `GetFace()->GetTolerance()` from a surface in ten places (`SmTol::GetZoneTol3d(SmObject*)`
-SmTol.cpp:775, `SmBSplineSurface::CalculateBoundingBox` SmBSplineSurface.cpp:797-806, `SmSurface::DropPoint`
-SmSurface.cpp:10432, `LocalSurfaceSurfaceIntersectXYZ` SmSurface.cpp:29051, `ClassifyCurveSurfaceXsectPoint`
-SmSurface.cpp:13373, `SmPlane` zone tolerance, `IsPlanar`, approx tol, point_class, surface_cache_p2). The port's
-surface owner is an opaque handle, so every site returned `Unported(topology.face_p2)`. `Surface` now caches the
-owning face record's `tolerance`, keyed by the reached face handle (a different or cleared owner never reads it);
-`Brep::sync_face_surface_tolerance` keeps it current at every place a face record's surface or tolerance changes.
-A face owner without cache still returns `Unported`. `surface.surface_cache_p1` `mark_face_containment` (an opaque
-node face handle) is not covered. On main 862746f4 (`--green`, all units): `topology.face_p2` deferral label 3495 ->
-766, `surface.surface_cache_p2` 223 -> 0, total deferred 24839 -> 22724, +2039 pass over 15 units, +76 FAIL in
-`query.face_p3` (75) and `query.face_p1` (1), both below (exposed, not caused: each case read the face tolerance
-correctly; the next divergent step is elsewhere). After both fixes below: 0 FAIL, +1751 pass over 15 units, total
-deferred 24839 -> 23088 (`query.face_p3` 75 and `query.face_p1` 289 now defer on unported callees).
+`CreateCliffRollOverSideFG`, `sm_FindRolloverSideEdge`, `RecordFilletError`, the torus rail-end checks and the `store` step of
+the `Calc*FilletGeom` methods call the `SmFilletGeom` / `SmFilletEdge` / `SmFilletVertex` / `SmFilletEdgeuse` /
+`SmFilletVertexuse` members (`blend.fillet_geom_p1`, partial) and the `SmFilletVertex(SmFilletCorner*)` / `SmFilletEdge(..)` /
+`SmFilletGeom(..)` constructors (co-ported in `fillet_geom::p1` as `FilletVertex::new` / `FilletBrep::new_fillet_edge` /
+`FilletGeom::new`; `SmFilletGeom::SmFilletGeom` is `blend.fillet_geom_p5`'s, co-ported there). The ported ones live inside a
+`FilletBrep` and are addressed by its ids. PR #249's first rounds kept the solver on a plain pseudo `Brep` and stubbed all of them;
+since the review round they take the pseudo B-rep as the `FilletBrep` the executive owns (`GetPseudoBrep()` is the `pseudo` /
+`fb` argument; the solver's `FilletGeomRef { index }` names the geometry of the same index in it, a convention of this unit,
+`FilletGeom::new` takes the `SmFilletSolver` base instead of the constructor-less `ConstantRadiusAssistedFs`, and `CreateCliffRollOver
+SideFG` gets `this`'s `FilletSolverId`), and every one of the 27 `blend.fillet_geom_p1` sites is wired. `SmVertex::SetPoint` and
+`SmEdge::SetCurve` on the pseudo B-rep apply the `SM_NO_CHANGE_GEOMETRY` resets directly, as `blend.fillet_geom_p1`/`_p4` and
+`blend.fillet_corner_p3` do (`fillet_geom::p4::{set_vertex_point, set_edge_curve}` are `pub(crate)` for it), and `SmVertex::PostInsert`
+of a vertex use is the same direct write as `blend.fillet_corner_p3`'s. What stays an `UNPORTED` stub: `SmFilletEdge::MakeFilletEdge`
+and `SmFilletEdge::CalcEdgeOnEdge` (todo units `blend.fillet_geom_p5`/`_p6`), `SmFilletExecutive::GetFilletCornerOfVertex` /
+`NoteFilletError` (`blend.fillet_executive_p1`), the `PreInsert`/`PostInsert` of edge uses (`topology.proto_topology_p1`,
+`justified:` by "blend.fillet_solver_p1: pseudo-B-rep mutations": the orientation and list order they set are that unit's), and the
+new edge uses: `FilletBrep::new_fillet_edgeuse` is a real call that still stops at `SmBrep::SmBrep` (`topology.brep_p3`: the
+pseudo B-rep has no infinite region). So `CreateCliffRollOverSideFG` runs up to the creation of the side geometry's rail edge
+uses, and `sm_FindRolloverSideEdge` runs in full (Rust unit tests in `fillet_solver/p2.rs`; no difftest op: its C++ is a static
+function of `SmFilletSolver.cpp` that needs a classified rail, a pseudo B-rep and a target B-rep of a matching shape).
+`sm_SrfSrfIntersection` (a free function of `blend.fillet_geom_p2`) is wired in `CreateCliffRollOverSideFG`, with the points the
+two vertices were just set to. The `Calc*FilletGeom` entry points run in the difftest (`geom` op) against a `FilletBrep` mirroring
+the shim's `MakeRailEdge` rails; the torus rail-end checks set `m_bExtendAfter` and are compared with rail ends typed
+`SM_FV_RAIL_X_EDGEUSE`, processed.
 
-### topology.trimming_tools: stale `TT_NOT_RUN` shim gate
+## blend.fillet_solver_p2: back-edges into the solver from blend.fillet_geom
 
-`harness/cpp/shim/topology_trimming_tools.cpp` returned `-3` (`TT_NOT_RUN`) for `b_check_face`, `b_orient` and
-`b_order` on every face with loops, written while `SmFace::ComputeLoopOrientation` was unported. `topology.face_p3`
-ported it; the Rust side kept deferring only through `SmFace::GetTolerance`. With the cache the Rust side
-completes, so 305 cases (104 check_face, 102 orient, 99 order) compared a real result against `-3`. The shim now
-runs `CheckFace` / `FixTrimLoopOrientation` / `FixTrimLoopOrder` in full, guarded with `-2` (mirrored in the
-runner) where a loop lacks its loop use, a face with loops lacks surface or UV trim curves, or `CheckLoop` would
-dereference a null UV extreme (17 cases). The fixtures never reorient a loop (orient always 0, order always
-`false`): those two ops are compared on the no-change path only. Follow-up: misordered / misoriented loop fixtures.
+`RailRailIntersect` and `PointOnPlaneSolve` were stubbed in `blend.fillet_geom_p1` (`sm_CreateCubicRailRailInterpolant`),
+`blend.fillet_geom_p2` (`SmFilletVertex::CalcRailIntRail`, `CalcVertOnCrossSection`, `CalcSetBackVert`) and
+`blend.fillet_intersector` (the `FilletSolverOps::point_on_plane_solve` default). Wired as follows:
+- `sm_CreateCubicRailRailInterpolant` takes its two `ConstantRadiusAssistedFs` by `&mut` now and calls
+  `FilletSolver::rail_rail_intersect` (its virtual callees can change the solvers); the intersection points start as
+  `SmTsectPnt()`, as upstream's locals. `SmTemporaryRadiusChange::SetUp` (`blend.fillet_executive_p2`) does nothing unless the
+  solver is an `SmVariableRadiusFS`, so `RailRailIntersect` stops there only for such a solver (`is_kind_of`); for any other
+  class, whose `IsKindOf` is ported, the whole solve runs (the difftest's test solver: 32 generated cases with all four offset surfaces, `gen*_rail_rail_solve`, all pass). A `ConstantRadiusAssistedFs`
+  answers `IsKindOf` with `Unported` (`blend.fillet_standard_solver_p2`), so the class test stops there for it.
+- `blend.fillet_geom_p2` held base `FilletSolver`s in the caller's table and built `ConstantRadiusAssistedFs` *clones* of them with
+  radii `[0, 0]` for the virtuals (review of PR #249: invented radii, and the virtuals' changes to the solver, such as offsets
+  or surface extensions, were lost). The table is now `&mut [ConstantRadiusAssistedFs]` (`calc_rail_int_rail`,
+  `calc_rail_int_edgeuse`, `calc_vert_on_cross_section`, `calc_set_back_vert`, `calc_rail_rail_interpolation`): the solvers carry
+  their own radii and stay borrowed, so offset and extension changes stay in the table. `RailRailIntersect` and the virtual
+  `PointOnPlaneSolve` dispatch on the table's solver, so `PointOnPlaneSolve` reaches
+  `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (`blend.fillet_standard_solver_p2`). Not modelled: another class in the table
+  (upstream, a plain `SmConstantRadiusFS` or `SmVariableRadiusFS` would run the base `SmFilletSolver::PointOnPlaneSolve`; the
+  trait objects of both solver traits would need a table of boxed solvers) and the same solver as both arguments of
+  `RailRailIntersect` or `sm_CreateCubicRailRailInterpolant` (one object upstream; the Rust table cannot lend it twice, so the second
+  argument runs on a copy and its changes are dropped). `CalcRailIntRail` passes the vertex uses' points in and writes them back
+  also on failure (they are in/out upstream). All three functions stop at the corner's filleted vertex
+  (`blend.fillet_corner_p1`) before reaching the solver, so no compared case changes.
+- `SmFilletIntersector` runs `PointOnPlaneSolve` on `ConstantRadiusAssistedFs`, whose override is
+  `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (`blend.fillet_standard_solver_p2`): the intersector trait method has no default
+  any more (the base version is never reached through it), and that implementation returns `Unported` for its owner. The
+  intersector's 37 cases that deferred at `blend.fillet_solver_p2` now defer at `blend.fillet_standard_solver_p2`.
 
-### topology.brep_p1 `edge_edge_blend` on analytic face surfaces: harness input mismatch, not a port bug
+## blend.fillet_solver_p2: SmTemporaryRadiusChange needs the executive's handles
 
-Inputs: `surf_rev.smb` (`crates/difftest/fixtures/topology.brep_p1/upstream_files.json#1518` flag=1 eu1=0 eu2=1
-dir=0, `#1520` flag=3 eu1=1 eu2=2 dir=1). C++ `out[979]` = 3.4935082719274374e-1 vs Rust 3.4935082670870377e-1
-(1.4e-9), growing to 7.3e-4 (`3_1_2_1`: 5.3e-4). Previously deferred on `SmFace::GetTolerance`. Cause: the
-shared `topology.edgeuse_p1` export hands Rust the faces' `SmSurfOfRevolution` as its B-spline part. In
-`GetSampleValues` -> `DropPoint`, C++ succeeds in `SmSurfOfRevolution::DropPointFast` (SmSurfOfRevolution.cpp:2356),
-while Rust's B-spline `drop_point_fast` is the base `SM_ERR` and it uses `LocalPointSolve` (bit-identical to C++
-`LocalPointSolve`). First drop difference: u = 0x3fcdfd6b2cbee1af vs 0x3fcdfd6b2cbee37e (5.5e-14), amplified by
-the G2 blend fit. With the C++ faces flattened to the same B-spline part (temporary shim switch), all 159 compared
-blend cases match at 0. surf_extrude (`SmSurfOfExtrusion::DropPointFast`, up to 9.4e-10) and surf_rev 2_0_2_0
-(8.9e-11) show the same drift below 1e-9. Resolution: the runner defers blends (flag != 0) whose faces are
-non-exact surfaces (`harness:analytic-geometry-export`, +27 cases: 2 FAIL, 25 pass). Exporting revolution /
-extrusion surfaces exactly in `sc_edgeuse_graph.h` would let them be compared.
+`blend.fillet_executive_p2` (partial on main since 2026-10-21) ports `SmTemporaryRadiusChange` as
+`fillet_executive::p2::TemporaryRadiusChange<O>`, over the executive's opaque handles: its constructor and `SetUp` take
+`&mut impl ExecutiveAccess<O>` and the solver and side edge use as handles `O` (`variable_radius_solver(fs)`,
+`solver_edgeuse(fs, i)`, `edgeuse_edge`, `edge_vertices`). `SmFilletSolver::RailRailIntersect` here runs on
+`&mut dyn FilletSolverOps` and two typed `Brep` ids, with no `ExecutiveAccess` adapter and no handle for either solver, and
+`FilletSolverOps` has no cast to `VariableRadiusFs`. So the two `SmTemporaryRadiusChange` locals stay `UNPORTED` stubs behind the
+`IsKindOf(SmVariableRadiusFS_TYPE)` class test (`SetUp` returns at once for every other class, which is what the class test
+reproduces), until the executive owns the solvers and can hand `RailRailIntersect` its access and handles. No compared case reaches
+them: the difftest's test solver is not an `SmVariableRadiusFS`.
 
-### query.face_p3 `bisector`: `LoopObjectCurves` has no `vertex_face_gap` (75 FAIL, previously deferred on `SmFace::GetTolerance`)
+## blend.fillet_solver_p2: `LoadInitialValues` gets a copy of the rail's offset surface
 
-`sms_FindAndClassifyLoopBisector` calls `SmFace::CurveOnClassify(TRUE, cc, TRUE /* bHasBigGaps */, TRUE, ..)`
-(SmFace.cpp:2884-2892). With big gaps and a face, `IntersectVertices` reads
-`pVertex->GetVertexuseOfFace(pFace)->GetVertexFaceGap()` (SmCurveClass.cpp:14716-14744). The port's
-`vertex_big_gap_tolerance` (`crates/solidcore/src/intersect/curve_class/p5.rs:163`) asks
-`ClassGeometry::vertex_face_gap`, which `query::face::p3::LoopObjectCurves` (`crates/solidcore/src/query/face/p3.rs:549`)
-does not implement (trait default `None`), so every call returns `InvalidInput("unresolved classification
-vertex/face gap")`. The bisector ignores that status as upstream does (`ignored(curve_on_classify(..))`), so the Rust
-side records no intervals: e.g. `bisector_Mouse_f2_t0` `values.interval_bounds.len` C++ 6 vs Rust 2,
-`bisector_holed_box_top_flat` `ints.interval_classes[0]` C++ 103 vs Rust 100. A temporary probe showed this error on
-all 75 classification calls of the failing cases and on no other path. Fix: implement `vertex_face_gap` on
-`LoopObjectCurves` (vertex use of the face, `has_vertex_face_gap`, cached or computed `SmVertexuse::GetVertexFaceGap`
-length, 0 when absent); it needs a kernel and a non-caching gap computation, since the adapter holds `&Brep`.
-More generally, an adapter gap reported as `InvalidInput` is indistinguishable from an upstream status under
-`ignored`: no `ClassGeometry` implementation provides `vertex_face_gap` today.
+`PointOnPlaneSolve`, `RailEdgeuseIntersect` and `RailRailIntersect` pass `*GetSurface(lRailIndex)` as `crSurface1` of the
+virtual `LoadInitialValues`. p1's `FilletSolverOps::load_initial_values` takes `&mut OffsetSurface`, so p2 passes a clone of the
+rail's surface and writes the clone back afterwards (keeping an extension the evaluation grows). A `LoadInitialValues` that also
+changes the solver's own rail surface (`SmConstantDistanceFS` calls `SetOffsets(approx radius)` on both rails) would have that
+change on the rail overwritten by the write-back, where upstream it sticks (`crSurface1` is the rail surface). The test solver's
+`LoadInitialValues` does not touch the rails, so no case shows it. #168's `SmConstantDistanceFS` (all four virtuals ported) needs
+the trait's `surface1` to name the rail (as #168's `InitialSurface` does) and a p1 `FilletSolverOps` implementation for
+`ConstantDistanceFs`, both in `blend.fillet_solver_p1`'s interface.
 
-Resolved: the gap is a B-rep property, so `query::face::p2::curve_on_classify` (which has the B-rep and kernel)
-now computes it for every caller, not only `LoopObjectCurves`: with `has_big_gaps` it reads
-`vertex::vertexuse_of_face` -> `vertexuse::vertex_face_gap(.., false)` length (0 without a gap) of each face
-vertex on one private B-rep snapshot per call (it keeps the gap caches across both passes, as upstream's
-`GetVertexFaceGap` caches into the B-rep), and answers `ClassGeometry::vertex_face_gap` for those vertex handles
-through a wrapper around the caller's geometry. With the gap tolerance in place, all 75 cases reach
-`SmCrvGeometry::GlobalPointSolve` on the bisector's `SmCrvOnSurf`, whose `Curve::knots` stops at the known
-`UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet` (`crates/solidcore/src/curve/crv_on_surf.rs:218`,
-no `Kernel` under `Curve::knots`): 75 FAIL -> 75 deferred. `query.face_p3`: 543 pass / 0 fail / 656 deferred.
-
-### query.face_p1 `gen0160` (1 FAIL, previously deferred on `SmFace::GetTolerance`)
-
-Generated `Point3DClassify` on a 1e-3 x 3e-3 bilinear-in-u B-spline sliver whose u=0 edge collapses onto the z axis
-(`generated:seed=4634842130399439208`), point offset ~5e-4, `src_tol` 0.01, `pc_tol` 1e-8, face tolerance 1e-5.
-`values.pc[0]` C++ 102 (FACE, uv 0.720517876766358, 0.823164791473039) vs Rust 104 (VERTEX, no uv). The global point
-solve's UV is bit-identical on both sides (probe), and the three face-tolerance reads (`is_on_boundary`,
-`local_point_solve_1`) all return 1e-5 as in C++; the divergence is inside `query::face::p2::point_classify`, which
-reads no surface face tolerance. Not localised further.
-
-Resolved (C++ probe, hunks in the worktree's `GEN0160-PROBES.diff`, reverted): after `Point3DClassify` the face
-surface has an `SmTrimSrfCache` with `m_bHaveTSurfaceCache` 1, `m_bFaceContainmentDone` 1, `m_bFaceWasModified` 0,
-`GetSurface()->GetFace() == this`; the one leaf node at the UV is `SM_NC_INSIDE`. The face's 4 vertices (tolerance
-1e-5) are 1.083e-3 from the surface point, inside the vertex test's `max(1e-5, 1e-5, GetTolerance()=src 0.01)`.
-C++ `PointClassify` at the same UV with the cache dropped returns VERTEX (104), as Rust. Cause: upstream
-`Point3DClassify` calls `smsurf_GetSurfaceCache(pSurface)` first (SmFace.cpp:12792), which builds the trimmed
-surface cache with its face containment; `PointClassify` then classifies through the inside leaf and returns FACE
-before the vertex test. The port skipped that call (its header claimed a fresh cache is never
-face-containment-complete, which is wrong for a face with loops: SmTrimSrfCache.cpp:330-347). Fix:
-`point_3d_classify` now builds it (`make_trim_srf_cache`, else `make_surface_cache`) and passes it to
-`point_classify`. The trimmed cache's face walk is unported (`Unported("SmFace handle of a surface's face",
-topology.face_p2)`), so every `Point3DClassify` case on a face-owned surface now defers there: the 288 point cases
-that passed with the skipped call (the cache path and the vertex/loop path agree outside such tolerance edges)
-plus `gen0160`. `query.face_p1`: 1580 pass / 0 fail / 644 deferred (main 862746f4: 1570 / 0 / 654). They become
-comparable with `surface.surface_cache_p1` `mark_face_containment` and the `TrimSrfCache` face walk.
-
+Why the harness still runs the test solver (`P2FS` / `TestSolver`) and no library solver (review of PR #249 corrected this note):
+- `SmConstantRadiusFS::LoadInitialValues` belongs to `blend.fillet_standard_solver_p2`, so with #168's `SmConstantRadiusFS` every
+  solve would defer. `EiffelTowerFs` and `SecantConstantRadiusFs` (`blend.fillet_custom_solver`) do implement `FilletSolverOps`
+  (inherited `GetJacobianSize` / `SetupOffsetValues`, their own `LoadJacobian`), and their `LoadInitialValues` returns at once
+  without `lDoSurf2Calcs`, so `PointOnPlaneSolve` (which passes 0) and the `Calc*FilletGeom` builders (which only call
+  `SetupOffsetValues`) could run on them on both sides; the ops that pass `lDoSurf2Calcs = TRUE` (`RailEdgeuseIntersect`,
+  `RailRailIntersect`) reach the unported `GuessPointOnPlaneSolve`, and a `ConstantRadiusAssistedFs`-based solver answers
+  `IsKindOf` with `Unported`, which stops `RailRailIntersect` at its `SmTemporaryRadiusChange` class test.
+- Not added to this round: a library solver is built from an edge use of a solid B-rep (`SmConstantRadiusAssistedFS(.., pEdgeuse)`
+  takes the offset surfaces and orientations of the two faces at the edge), which needs `blend.fillet_custom_solver`'s solid
+  fixtures and its C++ constructor plumbing in this shim; the plane and geometry ops would then compare the real
+  `FilletSolverOps -> ConstantRadius*` dispatch once. A follow-up for whoever wires `blend.fillet_standard_solver_p2`.
+- The test solver reaches what no library solver does: a varying radius through `slope`, 0-5 extra unknowns (the user-double
+  overflow of `PointOnPlaneSolve`, UB-192). The mirror is record by record: `TestSolver` (runner) against `P2FS` (shim).
 
 ## Kernel-aware Surface integration: PR #133 review follow-up (2026-10-16)
 

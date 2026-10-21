@@ -802,17 +802,13 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// `FilletSolver::edgeuse` (`blend.fillet_solver_p1`).
     fn solver_edgeuse(&self, solver: O, index: usize) -> Result<Option<O>>;
 
-    /// `SmFilletSolver::GetFilletCorner(lIndex)`; waiting for `blend.fillet_solver_p2`.
-    /// A vertex without a corner (`SmFilletCorner::Create` returned `NULL`) yields
-    /// `None`; upstream returns its raw `m_vVertexCornerMap` edge-use array cast to a
-    /// corner (UB-209).
-    fn solver_corner(&self, _solver: O, _index: usize) -> Result<Option<O>> {
-        // UNPORTED(blend.fillet_solver_p2): SmFilletSolver::GetFilletCorner
-        Err(SolidError::unported(
-            "SmFilletSolver::GetFilletCorner",
-            "blend.fillet_solver_p2",
-        ))
-    }
+    /// `SmFilletSolver::GetFilletCorner(lIndex)`: delegate to the solver's
+    /// `FilletSolver::fillet_corner` (`blend.fillet_solver_p2`; its corner lookup,
+    /// `SmFilletExecutive::GetFilletCornerOfVertex`, is unit
+    /// `blend.fillet_executive_p1`'s). A vertex without a corner
+    /// (`SmFilletCorner::Create` returned `NULL`) yields `None`; upstream returns its
+    /// raw `m_vVertexCornerMap` edge-use array cast to a corner (UB-209).
+    fn solver_corner(&self, solver: O, index: usize) -> Result<Option<O>>;
 
     /// `SmFilletSolver::GetOtherFilletCorner(pCorner)`; waiting for
     /// `blend.fillet_solver_p3`.

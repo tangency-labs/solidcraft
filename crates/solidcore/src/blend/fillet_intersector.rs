@@ -256,8 +256,8 @@ pub trait FilletSolverOps {
     /// # Errors
     ///
     /// The solver's failure. A virtual: each implementer dispatches it on its own
-    /// class (the base `SmFilletSolver::PointOnPlaneSolve` belongs to unit
-    /// `blend.fillet_solver_p2`).
+    /// class (the base `SmFilletSolver::PointOnPlaneSolve` is
+    /// [`crate::blend::fillet_solver::p1::FilletSolver::point_on_plane_solve`]).
     #[allow(clippy::too_many_arguments)]
     fn point_on_plane_solve(
         &mut self,
@@ -450,55 +450,24 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         compute_uv_vectors(point)
     }
 
-    /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (unit
-    /// `blend.fillet_standard_solver_p2`). The intersector holds no B-rep: a solver with
-    /// edge uses fails in `LoadInitialValues` ([`SolidError::InvalidInput`]).
     fn point_on_plane_solve(
         &mut self,
-        k: &Kernel,
-        plane_origin: Point3,
-        plane_normal: Vec3,
-        uv_domain1: &Extent2d,
-        uv_domain2: &Extent2d,
-        uv1: Point2,
-        uv2: Point2,
-        point: &mut TsectPnt,
+        _k: &Kernel,
+        _plane_origin: Point3,
+        _plane_normal: Vec3,
+        _uv_domain1: &Extent2d,
+        _uv_domain2: &Extent2d,
+        _uv1: Point2,
+        _uv2: Point2,
+        _point: &mut TsectPnt,
     ) -> Result<bool> {
-        crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
-            self,
-            k,
-            None,
-            plane_origin,
-            plane_normal,
-            uv_domain1,
-            uv_domain2,
-            uv1,
-            uv2,
-            point,
-        )
-    }
-
-    fn step_solve(
-        &mut self,
-        k: &Kernel,
-        point: &TsectPnt,
-        step_size: &mut f64,
-        uv_domain1: &Extent2d,
-        uv_domain2: &Extent2d,
-        flags: &mut StepSolve,
-        next: &mut TsectPnt,
-    ) -> Result<()> {
-        // non-virtual in the base; it dispatches on this solver's virtuals
-        // (GetSolverType, LoadInitialValues, ...), so the solver itself is passed. The
-        // flags are copied back on an error too: upstream sets them in place.
-        let mut out = StepSolveOutcome::default();
-        let r = FilletSolver::step_solve(
-            self, k, None, point, step_size, uv_domain1, uv_domain2, next, &mut out,
-        );
-        flags.found_answer = out.found_good_point;
-        flags.clipped = out.clipped;
-        flags.boundary_hit = out.boundary_hit;
-        r
+        // the virtual dispatches to the class's own override (the base version is
+        // never reached for this class)
+        // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusAssistedFS::PointOnPlaneSolve
+        Err(SolidError::unported(
+            "SmConstantRadiusAssistedFS::PointOnPlaneSolve",
+            "blend.fillet_standard_solver_p2",
+        ))
     }
 
     fn set_status(&mut self, status: FilStatus) -> Result<()> {
@@ -1963,7 +1932,7 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
             FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
@@ -1998,7 +1967,7 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
             FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
@@ -2029,7 +1998,7 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
             FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let mut t = pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0);
         t.point_type = IntersectionPointType::TangentCurve;
@@ -2125,6 +2094,20 @@ mod tests {
             }
             flags.found_answer = true;
             Ok(())
+        }
+
+        fn point_on_plane_solve(
+            &mut self,
+            _k: &Kernel,
+            _plane_origin: Point3,
+            _plane_normal: Vec3,
+            _uv_domain1: &Extent2d,
+            _uv_domain2: &Extent2d,
+            _uv1: Point2,
+            _uv2: Point2,
+            _point: &mut TsectPnt,
+        ) -> Result<bool> {
+            Err(SolidError::sm_err("test"))
         }
 
         fn compute_surface_values(
@@ -2303,7 +2286,7 @@ mod tests {
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
-        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomId> =
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, FilletGeomRef> =
             FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let mut out = TsectCurves::default();
         // no points: SM_ERR_NULL_POINTER
