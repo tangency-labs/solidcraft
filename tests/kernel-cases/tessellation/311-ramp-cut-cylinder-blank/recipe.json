@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "solid.cylinder", "params": {"radius": 75, "height": 16, "body_name": "Blank"}},
+  {"command": "sketch.create", "params": {"plane": "YZ", "name": "Ramp"}},
+  {"command": "sketch.line", "params": {"closed": true, "infer": false, "connect": false, "points": [[18.5, 16], [76, 0.7345132743362814], [76, 17], [18.5, 17]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"sketch": "Ramp", "distance": 182, "direction": "symmetric", "operation": "cut", "targets": ["Blank"]}}
+]}
