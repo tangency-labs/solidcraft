@@ -38,6 +38,9 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
     if turns > 1.0 && pitch.abs() <= extent {
         return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
     }
+    if crate::backend()? == crate::Backend::Smlib {
+        return crate::smlib_sweeps::screw(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns);
+    }
     // One smooth B-spline wall per profile segment; the ruled walls below are the fallback.
     if let Ok(b) = smooth_helix(plane, &profile, axis_origin, k, pitch, turns) {
         return Ok(b);
@@ -183,6 +186,9 @@ fn lp_area_path(plane: &Plane, lp: &Loop2, o: Vec3, k: Vec3, turns: f64) -> f64 
 
 /// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid).
 pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
+    if crate::backend()? == crate::Backend::Smlib {
+        return Err(crate::smlib_sweeps::refuse("loft to a point"));
+    }
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }

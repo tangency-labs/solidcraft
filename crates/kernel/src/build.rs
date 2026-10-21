@@ -156,7 +156,7 @@ fn attach_profile(wires: &[mt::Wire]) -> Result<mt::Face> {
     guard("face", || builder::try_attach_plane(wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))
 }
 
-fn region_ok(r: &Region2) -> Result<()> {
+pub(crate) fn region_ok(r: &Region2) -> Result<()> {
     if r.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
     }
@@ -214,6 +214,17 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
     }
     if regions.is_empty() {
         return Err(KernelError::Invalid("no profile selected".into()));
+    }
+    if crate::backend()? == crate::Backend::Smlib {
+        return regions
+            .iter()
+            .map(|r| {
+                region_ok(r)?;
+                let pieces = oriented(r)?;
+                let numbered = if whole_sides { pieces.map_loops(|l| l.merged_lines(continues_straight)) } else { pieces.clone() };
+                crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&numbered, &pieces), Some(r), lo, hi - lo, 1.0, None)
+            })
+            .collect();
     }
     let n = plane.normal();
     let mut out = Vec::new();
@@ -313,7 +324,7 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
 
 /// `t` carries on from `s` in the same straight line: the turn at their meeting point is within
 /// rounding of none, measured against both lengths.
-fn continues_straight(s: &Seg2, t: &Seg2) -> bool {
+pub(crate) fn continues_straight(s: &Seg2, t: &Seg2) -> bool {
     let (u, v) = (s.end() - s.start(), t.end() - t.start());
     let (lu, lv) = (u.len(), v.len());
     lu > 0.0 && lv > 0.0 && s.end().dist(t.start()) <= 1e-9 * (lu + lv) && u.dot(v) > 0.0 && u.cross(v).abs() <= 1e-9 * lu * lv
@@ -432,6 +443,15 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
             let (a, b, c) = (s.start(), s.end(), t.end());
             on_axis(a) && on_axis(b) && on_axis(c) && (b - a).dot(c - b) > 0.0
         };
+        if crate::backend()? == crate::Backend::Smlib {
+            // Partial turns go toward the side the sketch normal points to, as below.
+            let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
+            let c = plane.to_world(r.centroid());
+            let radial = (c - o) - axis * (c - o).dot(axis);
+            let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
+            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
+            continue;
+        }
         let given = numbered_region(r)?.map_loops(|l| reseam(snap_loop(l).merged_lines(axis_run)));
         let r = &given.region();
         if angle.abs() >= std::f64::consts::TAU - 1e-9
@@ -597,7 +617,7 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 /// neighbours now meet at one point). Loops of arcs on one circle, and loops of lines, arcs and
 /// free curves (spline and conic pieces, such as the outlines of text) where the arcs meet their
 /// neighbours tangentially are supported.
-fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
+pub(crate) fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
     if d == 0.0 {
         return Ok(lp.segs.iter().copied().map(Some).collect());
     }
@@ -1296,6 +1316,9 @@ pub fn extrude_tapered_between(plane: &Plane, region: &Region2, from: f64, to: f
         return Err(KernelError::Invalid("taper must be between −90° and 90°".into()));
     }
     region_ok(region)?;
+    if crate::backend()? == crate::Backend::Smlib {
+        return smlib_tapered(plane, region, from, to, foot, dir_sign.signum(), taper);
+    }
     let (t, sign) = (taper.tan(), dir_sign.signum());
     let (bottom_plane, top_plane) = (plane.offset(from * sign), plane.offset(to * sign));
     // A side drawn in collinear pieces slopes as one face over all of them, as a straight
@@ -1356,6 +1379,28 @@ pub fn extrude_tapered_between(plane: &Plane, region: &Region2, from: f64, to: f
         }
         Err(KernelError::Failed(format!("tapered extrude: {last}")))
     })
+}
+
+/// [`extrude_tapered_between`] through SMLib's draft extrusion: one loop (SMLib's takes no
+/// holes), its section at `from` the profile offset by the taper, no straight foot.
+fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64, sign: f64, taper: f64) -> Result<Body> {
+    if foot > 0.0 {
+        return Err(crate::smlib_sweeps::refuse("draft extrusion with a straight foot"));
+    }
+    if !region.holes.is_empty() {
+        return Err(crate::smlib_sweeps::refuse("draft extrusion of a profile with holes (SMLib's takes one loop)"));
+    }
+    let outer = oriented(region)?.map_loops(|l| l.merged_lines(continues_straight)).outer;
+    let bottom = if from == 0.0 || taper == 0.0 {
+        outer
+    } else {
+        let moved = offset_loop(&outer.lp, from * taper.tan())?;
+        let segs: Option<Vec<Seg2>> = moved.into_iter().collect();
+        let segs = segs.ok_or_else(|| crate::smlib_sweeps::refuse("draft extrusion that starts before its profile where the taper closes a side"))?;
+        NumberedLoop { lp: Loop2 { segs }, from: outer.from }
+    };
+    let draft = (taper != 0.0).then_some(crate::smlib_sweeps::Draft { taper });
+    crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::pieces([&bottom]), Some(region), from * sign, to - from, sign, draft)
 }
 
 /// Revolve 360° a loop that has exactly one line segment on the axis, without degenerate faces.
@@ -1830,6 +1875,17 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    if crate::backend()? == crate::Backend::Smlib {
+        if !rails.is_empty() {
+            return Err(crate::smlib_sweeps::refuse("loft along guide rails"));
+        }
+        let reversed = loft_reversed(sections)?;
+        let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
+        let loops = loft_numbered_loops(&numbered, reversed)?;
+        let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
+        let pieces: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> = loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
+        return crate::smlib_sweeps::loft(&pieces, first);
+    }
     let (wires, edge_sources, reversed) = loft_wires(sections)?;
     let (Some(first), Some(last)) = (wires.first(), wires.last()) else { return Err(KernelError::Failed("loft: sections".into())) };
     let mut planes: Vec<Plane> = sections.iter().map(|(p, _)| *p).collect();
@@ -1876,6 +1932,9 @@ pub fn loft_regions(sections: &[(Plane, Region2)]) -> Result<Body> {
     }
     if holes == 0 {
         return loft(&sections.iter().map(|(p, r)| (*p, r.outer.clone())).collect::<Vec<_>>());
+    }
+    if crate::backend()? == crate::Backend::Smlib {
+        return Err(crate::smlib_sweeps::refuse("loft through sections with holes"));
     }
     let regions: Vec<Region2> = sections.iter().map(|(_, r)| r.clone()).collect();
     let mut numbered = numbered::number_regions(&regions);
@@ -1983,7 +2042,7 @@ pub(crate) fn loft_wires(sections: &[(Plane, Loop2)]) -> Result<(Vec<mt::Wire>, 
     Ok((wires, sources, reversed))
 }
 
-fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
+pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(KernelError::Invalid("a loft needs 2…50 sections".into()));
     }
@@ -2019,16 +2078,17 @@ fn loft_numbered_wires(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Re
     let mut wires: Vec<mt::Wire> = Vec::new();
     // Per section, the profile segments under each of its wire's edges.
     let mut edge_sources: Vec<Vec<Vec<usize>>> = Vec::new();
-    for (p, r) in loft_section_loops(sections, reversed)? {
+    for (p, r) in loft_numbered_loops(sections, reversed)? {
         wires.push(uniform_wire(&p, &r.lp)?);
         edge_sources.push(r.from);
     }
     Ok((wires, edge_sources))
 }
 
-/// The sections of a loft as the wires are built from them: in loft order, oriented alike,
-/// re-split to the same number of segments and started where they line up best.
-pub(crate) fn loft_section_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
+/// The loft's sections as the walls are built through them: in canonical order (`reversed`
+/// turns them round), each oriented the same way, re-split to the same number of segments and
+/// started at the segment that lines up with the lead section's first.
+pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
     let n = sections.iter().map(|(_, l)| l.lp.segs.len()).max().unwrap_or(0);
     if n == 0 || n > MAX_SEGS {
         return Err(KernelError::Invalid("empty section".into()));
@@ -2289,6 +2349,34 @@ pub(crate) fn rotate_about(p: Vec3, center: Vec3, k: Vec3, angle: f64) -> Vec3 {
     center + v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
 }
 
+/// [`sweep_with`] through SMLib's curve sweep: the profile turning with the path or only moving
+/// along it (orientation parallel), along a path without corners (SMLib's sweep follows smooth
+/// paths). Twists, end scales, guide rails and orientation directions have no SMLib sweep.
+fn smlib_sweep(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+    ctl.check()?;
+    region_ok(region)?;
+    if path.is_empty() || path.len() > 1000 {
+        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
+    }
+    let translate = match ctl.orientation {
+        crate::SweepOrientation::Perpendicular => false,
+        crate::SweepOrientation::Parallel => true,
+        crate::SweepOrientation::Direction(_) => return Err(crate::smlib_sweeps::refuse("sweep with an orientation direction")),
+    };
+    if ctl.twist != 0.0 || ctl.scale != 1.0 {
+        return Err(crate::smlib_sweeps::refuse("sweep with a twist or an end scale"));
+    }
+    if !ctl.rails.is_empty() {
+        return Err(crate::smlib_sweeps::refuse("sweep along guide rails"));
+    }
+    let ends: Vec<(Vec3, Vec3)> =
+        path.iter().map(PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+    if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
+        return Err(crate::smlib_sweeps::refuse("sweep along a path with corners (SMLib's sweep follows smooth paths)"));
+    }
+    crate::smlib_sweeps::sweep(plane, &crate::smlib_sweeps::pieces(oriented(region)?.loops()), path, translate)
+}
+
 /// The path as a polyline: its first point, then each segment's points (arcs within 0.01 mm of
 /// their chords).
 pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
@@ -2307,6 +2395,9 @@ pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
 /// orientation, a twist or an end scale follow the path as a polyline through stations (see
 /// [`crate::sweep_path_with`]).
 pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+    if crate::backend()? == crate::Backend::Smlib {
+        return smlib_sweep(plane, region, path, ctl);
+    }
     if ctl.is_default() {
         return sweep(plane, region, path);
     }
@@ -2325,6 +2416,9 @@ pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate
 /// perpendicular to the path (lines translate it, arcs rotate it). A path with sharp corners
 /// is swept as a polyline, mitred at the corners.
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
+    if crate::backend()? == crate::Backend::Smlib {
+        return smlib_sweep(plane, region, path, &crate::SweepControl::default());
+    }
     region_ok(region)?;
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));

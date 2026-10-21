@@ -20,13 +20,13 @@ use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History
 const SAMPLES: usize = 24;
 
 /// A face's triangles with their unit normals, and its box.
-struct FaceTris {
-    tris: Vec<([Vec3; 3], Vec3)>,
-    bounds: Aabb3,
-    area: f64,
+pub(crate) struct FaceTris {
+    pub(crate) tris: Vec<([Vec3; 3], Vec3)>,
+    pub(crate) bounds: Aabb3,
+    pub(crate) area: f64,
 }
 
-fn face_tris(m: &Mesh) -> Vec<FaceTris> {
+pub(crate) fn face_tris(m: &Mesh) -> Vec<FaceTris> {
     let n = m.tri_face.iter().copied().max().map(|x| x as usize + 1).unwrap_or(0);
     let mut out: Vec<FaceTris> = (0..n).map(|_| FaceTris { tris: Vec::new(), bounds: Aabb3::EMPTY, area: 0.0 }).collect();
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -40,7 +40,7 @@ fn face_tris(m: &Mesh) -> Vec<FaceTris> {
     out
 }
 
-fn closest_on_tri(p: Vec3, [a, b, c]: [Vec3; 3]) -> Vec3 {
+pub(crate) fn closest_on_tri(p: Vec3, [a, b, c]: [Vec3; 3]) -> Vec3 {
     let (ab, ac, ap) = (b - a, c - a, p - a);
     let (d1, d2) = (ab.dot(ap), ac.dot(ap));
     if d1 <= 0.0 && d2 <= 0.0 {
