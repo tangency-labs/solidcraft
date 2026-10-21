@@ -154,7 +154,9 @@ impl Drop for NameCell {
     }
 }
 
-pub use crate::name_lookup::{EdgeHit, FaceHit, LEGACY_MARK, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_one};
+pub use crate::name_lookup::{
+    EdgeHit, FaceHit, LEGACY_MARK, face_has_name, faces_with_stem, legacy_name, locate_edge, locate_face, locate_face_on_body, locate_one,
+};
 pub use crate::piece_names::parent_piece;
 
 /// Deeper chains than this are named by position only (bounded work and stack).

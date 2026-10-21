@@ -3910,7 +3910,7 @@ fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[EdgeRef], warning: &mut Option<
 }
 
 /// The body a fillet/chamfer applies to: by name, or the one closest to the first edge point.
-fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec3]) -> Result<usize> {
+pub fn blend_target(state: &ModelState, body: &Option<crate::BodyName>, edges: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
         return state.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
     }
