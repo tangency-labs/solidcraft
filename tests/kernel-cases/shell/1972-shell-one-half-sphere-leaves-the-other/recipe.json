@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "Ball",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "normal": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      3,
+      2,
+      0
+     ]
+    ],
+    "thickness": 2,
+    "body": "Ball"
+   }
+  }
+ ]
+}

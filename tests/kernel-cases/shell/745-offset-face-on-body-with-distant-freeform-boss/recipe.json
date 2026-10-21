@@ -1,0 +1,107 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      25,
+      5
+     ],
+     [
+      35,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      35,
+      5
+     ],
+     [
+      37,
+      10
+     ],
+     [
+      30,
+      15
+     ],
+     [
+      25,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S",
+    "distance": 5,
+    "operation": "join",
+    "targets": [
+     "B"
+    ]
+   }
+  },
+  {
+   "command": "solid.offset_face",
+   "params": {
+    "faces": [
+     [
+      0,
+      10,
+      5
+     ]
+    ],
+    "distance": "1 mm"
+   }
+  }
+ ]
+}

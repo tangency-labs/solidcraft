@@ -1,0 +1,59 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Blk"
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "Blk",
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "normal": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      10
+     ]
+    ],
+    "thickness": 2,
+    "body": "Blk"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      10
+     ]
+    ],
+    "thickness": 2,
+    "body": "Blk (1)"
+   }
+  }
+ ]
+}
