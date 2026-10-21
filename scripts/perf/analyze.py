@@ -26,7 +26,8 @@ def main():
     top = int(sys.argv[sys.argv.index("--top") + 1]) if "--top" in sys.argv else 40
     focus = sys.argv[sys.argv.index("--focus") + 1] if "--focus" in sys.argv else None
     lines_mode = "--lines" in sys.argv
-    d = json.load(open(path))
+    with open(path) as f:
+        d = json.load(f)
     exe = None
     segs = []
     for ln in d["maps"].splitlines():

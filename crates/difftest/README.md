@@ -158,7 +158,8 @@ is written the same way (so it can be re-run), but does not fail the run.
 
 A mutation fuzzer for the Rust database readers only (no C++, not part of the
 gate). Build and run it with the difftest profile, so arithmetic overflow
-panics and is reported:
+panics and is reported. Unix-only (the code is in `examples/reader_fuzz/fuzz.rs`;
+on other platforms the example only prints a notice and exits 2):
 
 ```sh
 X="nice -n 10 cargo run --profile difftest -p difftest --example reader_fuzz --"

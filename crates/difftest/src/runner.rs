@@ -224,7 +224,7 @@ fn fnv1a64(s: &str) -> u64 {
 }
 
 impl UnitTiming {
-    /// One `TIME` line: `TIME <unit> cases=<s> cpp=<s> rust=<s> compare=<s> ratio=<rust/cpp> slowest_rust=<case>:<s>`.
+    /// One `TIME` line: `TIME <unit> n=<cases> cases=<s> cpp=<s> rust=<s> compare=<s> ratio=<rust/cpp> slowest_rust=<case>:<s>`.
     pub fn line(&self, unit: &str, n_cases: usize) -> String {
         let ratio = if self.cpp.as_secs_f64() > 0.0 {
             self.rust.as_secs_f64() / self.cpp.as_secs_f64()
