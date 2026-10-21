@@ -539,11 +539,31 @@ mod smlib {
 
     #[test]
     fn operands_number_as_their_records() {
-        let bodies = [boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0), crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap()];
+        let bodies = [
+            boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0),
+            crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap(),
+            crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap(),
+            crate::torus(Vec3::new(0.0, 0.0, 0.0), 10.0, 2.0).unwrap(),
+        ];
         for (i, b) in bodies.iter().enumerate() {
             let (_, order) = crate::native::smlib_body_ordered(b).unwrap();
             assert!(order.is_some(), "body {i}");
         }
+    }
+
+    #[test]
+    fn box_minus_sphere() {
+        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
+        let r = through_smlib(&a, &b, BoolOp::Cut);
+        let h = verified(&r, &[&a, &b], 0.02);
+        // The three notched box faces, the three untouched, and the sphere's patches inside.
+        assert_eq!(changes(h)[..2].iter().sum::<usize>() + changes(h)[2], h.faces.len(), "{}", show(h));
+        assert!(
+            meets(h).iter().all(|(x, y)| matches!((x, y), (FaceOrigin::Face { operand: 0, .. }, FaceOrigin::Face { operand: 1, .. }))),
+            "{}",
+            show(h)
+        );
     }
 
     #[test]

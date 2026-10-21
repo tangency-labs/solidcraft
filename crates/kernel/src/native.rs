@@ -169,9 +169,8 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
     guard("decode SMLib B-rep", || {
         let (solid, numbering) = adapter::decode_numbered(record, adapter::Producer::Foreign)?;
         let body = Body::oriented(solid)?;
-        let faces_kept = body.solid.face_iter().map(|f| f.id()).eq(numbering.faces.iter().copied());
-        let edges_kept = crate::body::edge_order(body.solid.face_iter()).0.iter().map(|e| e.id()).eq(numbering.edges.iter().copied());
-        Ok((body, (faces_kept && edges_kept).then_some(order)))
+        let kept = numbering.kept_by(&body.solid);
+        Ok((body, kept.then_some(order)))
     })
 }
 
