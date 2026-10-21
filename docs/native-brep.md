@@ -189,6 +189,20 @@ onto their edges, that a closed shell is watertight or that shells nest as the
 regions say. A backend's adapter checks what it needs. The binary reader bounds
 bytes, allocation and nesting before creating these structures.
 
+`Brep::check_geometry` spot-checks, on a record `validate` accepted, that its
+geometry agrees with its topology, each distance against the record's own
+tolerance: every edge's curve meets its start and end vertices at its interval's
+ends (within the edge's and the vertex's tolerances together); every oriented
+edge's pcurve, lifted through its face's surface, lies on the edge's curve at the
+interval's ends and middle (within the edge's) and starts on the same period as
+the use before it ends, except along a direction that collapses at a pole; every
+vertex loop's vertex lies on its face's surface (within the vertex's). It makes a
+fixed number of evaluations per record, so its work is linear in the item
+budget, and a point it cannot evaluate is an error naming the record. It is not
+a certificate either: between the points it checks, an edge may still leave its
+surface. The truck adapter runs it before building topology, which truck does
+without checks of its own.
+
 Schema tests build and validate one minimal body of each form (an open sheet, a
 closed shell, a seam edge, a vertex loop with a wire and a vertex shell, a void)
 and one fixture per defect, without a kernel.
