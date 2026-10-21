@@ -1,0 +1,37 @@
+{
+  "de": {
+    "cmd.file_save_for_sharing": "Konstruktion zum Teilen speichern (.zip)",
+    "issue.attach_design": "Um das Design zu teilen, hängen Sie es als .zip an: GitHub nimmt keine .solidcraft-Dateien an. Verwenden Sie „Design zum Anhängen speichern (.zip)“ oder benennen Sie name.solidcraft in name.solidcraft.zip um. Hängen Sie es nur an, wenn das Design öffentlich geteilt werden darf.",
+    "issue.note_design_save_failed": "Das Design konnte nicht gespeichert werden: {error}",
+    "issue.note_design_saved": "Design als .zip gespeichert. Hängen Sie es im GitHub-Entwurf nur an, wenn es öffentlich geteilt werden darf.",
+    "issue.save_design": "Design zum Anhängen speichern (.zip)…"
+  },
+  "en": {
+    "cmd.file_save_for_sharing": "Save Design to Share (.zip)",
+    "issue.attach_design": "To share the design, attach it as a .zip: GitHub does not accept .solidcraft files. Use Save design to attach (.zip), or rename name.solidcraft to name.solidcraft.zip. Only attach it if the design can be shared publicly.",
+    "issue.note_design_save_failed": "Could not save the design: {error}",
+    "issue.note_design_saved": "Design saved as a .zip. Attach it in the GitHub draft only if it can be shared publicly.",
+    "issue.save_design": "Save design to attach (.zip)…"
+  },
+  "ja": {
+    "cmd.file_save_for_sharing": "共有用にデザインを保存 (.zip)",
+    "issue.attach_design": "デザインを共有するには .zip として添付してください。GitHub は .solidcraft ファイルを受け付けません。「添付用にデザインを保存 (.zip)」を使うか、name.solidcraft の名前を name.solidcraft.zip に変更します。公開してよいデザインの場合のみ添付してください。",
+    "issue.note_design_save_failed": "デザインを保存できませんでした: {error}",
+    "issue.note_design_saved": "デザインを .zip として保存しました。公開してよい場合のみ GitHub の下書きに添付してください。",
+    "issue.save_design": "添付用にデザインを保存 (.zip)…"
+  },
+  "ko": {
+    "cmd.file_save_for_sharing": "공유용 디자인 저장 (.zip)",
+    "issue.attach_design": "디자인을 공유하려면 .zip으로 첨부하세요. GitHub는 .solidcraft 파일을 받지 않습니다. \"첨부용 디자인 저장 (.zip)\"을 사용하거나 name.solidcraft의 이름을 name.solidcraft.zip으로 바꾸세요. 공개해도 되는 디자인일 때만 첨부하세요.",
+    "issue.note_design_save_failed": "디자인을 저장할 수 없습니다: {error}",
+    "issue.note_design_saved": "디자인을 .zip으로 저장했습니다. 공개해도 될 때만 GitHub 초안에 첨부하세요.",
+    "issue.save_design": "첨부용 디자인 저장 (.zip)…"
+  },
+  "zh": {
+    "cmd.file_save_for_sharing": "保存设计以共享 (.zip)",
+    "issue.attach_design": "要共享设计，请以 .zip 附加：GitHub 不接受 .solidcraft 文件。使用“保存设计以附加 (.zip)”，或将 name.solidcraft 重命名为 name.solidcraft.zip。仅在设计可以公开时附加。",
+    "issue.note_design_save_failed": "无法保存设计：{error}",
+    "issue.note_design_saved": "设计已保存为 .zip。仅在可以公开时将其附加到 GitHub 草稿中。",
+    "issue.save_design": "保存设计以附加 (.zip)…"
+  }
+}

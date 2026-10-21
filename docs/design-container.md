@@ -6,6 +6,14 @@ the existing JSON design reader and migrations. Plain JSON remains a fully suppo
 self-contained input/output format. `io::write_design` keeps its JSON contract;
 `io::write_design_container` is the fallible container writer.
 
+Because a container is a ZIP, a design is shared on issue trackers that take no `.solidcraft`
+attachment (GitHub) under a `.solidcraft.zip` name: `file.save_for_sharing` writes one, and a
+renamed design file is the same thing. Opening a ZIP without `container.json` reads it as a zip
+an archiver made of a design file: it must hold exactly one `.solidcraft`, `.solvecraft` or
+`.json` entry (folders and macOS `__MACOSX/`, `._*` entries aside), at most 64 entries, with no
+absolute, `..` or backslash names. That design is read in memory and opens unsaved, so saving
+asks for a file instead of replacing the zip. Zips inside such a zip are not opened.
+
 Packages have `container.json` with `{"format":"solidcraft-container/1"}` and
 `document.json` with the versioned parametric document (`solidcraft/N`, the format in `crates/doc/src/format.rs`).
 The independent versions let document migrations evolve without changing blob encodings.
