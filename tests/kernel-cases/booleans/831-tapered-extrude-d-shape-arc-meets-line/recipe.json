@@ -1,0 +1,55 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "D"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      -5
+     ],
+     [
+      0,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0,
+     5
+    ],
+    "end": [
+     0,
+     -5
+    ],
+    "through": [
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "D",
+    "distance": "2 mm",
+    "taper": "-10 deg"
+   }
+  }
+ ]
+}

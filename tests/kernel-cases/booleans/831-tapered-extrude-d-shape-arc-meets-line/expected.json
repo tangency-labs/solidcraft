@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#831"
+ ],
+ "what": "tapered extrude of a D shape (an arc meeting a line at a sharp corner): refused as 'tapered profiles where an arc meets another edge at a corner'",
+ "source": "analytic",
+ "method": "half disc r5 (x>=0) with a -10 deg taper (shrinks inward), 2 mm: the section at height z is the eroded D = disc r=5-d cut at x>=d, d=z tan10deg (erosion of a convex intersection is the intersection of the erosions). Area(d) = rho^2 acos(d/rho) - d sqrt(rho^2-d^2), rho=5-d; V = integral_0^2 Area(z tan10) dz = 69.7714 (Simpson; Area(0) = 12.5 pi = 39.27 at the base)",
+ "body_count": 1,
+ "volume_mm3": 69.77140599276278
+}

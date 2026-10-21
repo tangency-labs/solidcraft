@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1649"
+ ],
+ "what": "union of two crossing cylinders, both moved (1000,-700,300) mm: volume lost with position",
+ "source": "analytic",
+ "method": "A: axis x, r5, x 17.5..27.5 about (y,z)=(30,7.5); B: axis y, r12.5, y 30..35 about (x,z)=(17.5,15). V = Va + Vb - Vint, Va=pi*25*10=785.398, Vb=pi*156.25*5=2454.369. Vint = integral over z in [2.5,12.5] of L(z)*min(10,w(z)) dz with L=sqrt(25-(z-7.5)^2) (A's y half-chord, B only has y>=30) and w=sqrt(156.25-(z-15)^2) (B's x reach from x=17.5, A spans 10) = 346.31 (substitution z=7.5+5 sin t, Simpson; cross-checked by a 400^3 midpoint grid: 346.36). V = 3239.767 - 346.31 = 2893.46. The translation does not change it",
+ "body_count": 1,
+ "volume_mm3": 2893.458
+}

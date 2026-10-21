@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1949"
+ ],
+ "what": "with a taper too, a side drawn in two collinear pieces is one face",
+ "source": "analytic",
+ "method": "rectangle 20x10 (with a point on a long side) extruded 5 with +5 deg taper (grows outward): frustum of rectangles; offset t=5*tan(5deg): top (20+2t)x(10+2t). V = h/3 (A0 + A1 + sqrt(A0 A1)); faces 6",
+ "body_count": 1,
+ "volume_mm3": 1066.8173784443,
+ "faces": 6
+}

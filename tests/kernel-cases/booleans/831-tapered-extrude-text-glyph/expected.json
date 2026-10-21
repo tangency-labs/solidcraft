@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#831"
+ ],
+ "what": "tapered extrude of a text glyph (Bezier outline): refused with a misleading 'mixing lines and arcs' error",
+ "source": "invariants",
+ "method": "the letter S, 1 mm tall with -10 deg draft, is one valid closed solid (the glyph is one connected region); no number is derived because the glyph outline is the font's. Its volume is positive and below the plain extrusion's",
+ "body_count": 1
+}

@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1910",
+  "tangency-labs/solidcraft#1865"
+ ],
+ "what": "intersection of two cylinders of one radius on one axis (z 0..30 and 22..46) whose round sides lie in each other over the shared 8 mm",
+ "source": "analytic",
+ "method": "common part is the cylinder r25.6 over z 22..30: V = pi*25.6^2*8 = 5242.88 pi = 16471.0; faces 3",
+ "body_count": 1,
+ "volume_mm3": 16470.993291652856,
+ "faces": 3
+}

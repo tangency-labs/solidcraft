@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -100,
+     0,
+     0
+    ],
+    "length": 200,
+    "width": 3.75,
+    "height": 95,
+    "body_name": "Wall"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": -1
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -24,
+     -0.5
+    ],
+    "p1": [
+     24,
+     3.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 91,
+    "operation": "cut",
+    "targets": [
+     "Wall"
+    ]
+   }
+  }
+ ]
+}
