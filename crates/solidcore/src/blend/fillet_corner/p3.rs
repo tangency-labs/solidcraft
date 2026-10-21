@@ -1302,7 +1302,7 @@ impl FilletCorner {
 
             // Recreate fillet edges
             let _ = (insert_after, other_vert, small_rad_geom, large_rad_geom);
-            // UNPORTED(blend.fillet_geom_p5): SmFilletEdge::MakeFilletEdge
+            // UNPORTED(blend.fillet_geom_p5): SmFilletEdge::MakeFilletEdge (justified: findings.md "blend.fillet_geom_p5: solver and corner callers")
             return Err(unported(
                 "SmFilletEdge::MakeFilletEdge",
                 "blend.fillet_geom_p5",

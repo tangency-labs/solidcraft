@@ -47,6 +47,7 @@
 //! | [`evaluate_mate`]                               | `sm_EvaluateMate`                          |
 //! | [`surface_drop_point`]                          | `sm_SurfaceDropPoint`                      |
 //! | [`two_pnts_intersection`]                       | `sm_TwoPntsIntersection`                   |
+//! | [`SurfaceHandle`] (private `CliffHandle` for `CalcCliffRailIntEdge`) | the surface object `SmSolution` names in a surface point solve |
 //! | [`find_stepoff_uv`]                             | `sm_FindStepoffUV`                         |
 //! | [`classify_face_point`]                         | `sm_ClassifyFacePoint`                     |
 //! | [`interpolate_endpts_and_tangents`]             | `sm_InterpolateEndptsAndTangents`          |
@@ -2217,6 +2218,63 @@ impl SolutionObject for CliffHandle<'_> {
     }
 }
 
+/// The surface the point solves of `sm_SurfaceDropPoint` (and so of
+/// `sm_TwoPntsIntersection`) name: upstream's solutions point at `pSurface`
+/// (`SmSurface::GlobalPointSolve`, `this`, SmFilletGeom.cpp:161), whose natural UV domain
+/// `SmSolution::GetParameterInterval` reads back. `SmGlobalSolver::IdenticalSolutions`
+/// (SmGlobalSolver.cpp:1910-1931) merges two solutions whose parameters differ by less
+/// than `1e-4` of that domain's sides, so a seam point dropped onto a closed surface keeps
+/// exactly the solutions upstream keeps (`sm_TwoPntsIntersection` branches on
+/// `GetSize() == 2`, SmFilletGeom.cpp:286). Compares by identity, like a pointer.
+#[derive(Debug, Clone, Copy)]
+pub struct SurfaceHandle<'a>(pub &'a Surface);
+
+impl PartialEq for SurfaceHandle<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+impl SolutionObject for SurfaceHandle<'_> {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Surface
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        Some(self.0.natural_uv_domain())
+    }
+}
+
+/// The curve object a curve solve's solutions name (upstream the curve itself, `this`
+/// of `SmCurve::GlobalPointSolve` / `GlobalCurveIntersect`, or the analytic replacement
+/// its curve cache may make of it), with the natural interval
+/// `SmSolution::GetParameterInterval` reads back from it. `SmGlobalSolver::IdenticalSolutions`
+/// (SmGlobalSolver.cpp:1910-1931) merges two solutions whose parameters differ by less
+/// than `1e-4` of that interval, so the solutions must name the curve, as upstream's do.
+///
+/// `id` tells the objects of one solve apart (two curves, and their analytic
+/// replacements). Assumption: an analytic replacement carries the same interval as its
+/// curve (`ivl` of the handle for it is the curve's own). That holds only if the curve
+/// cache's analytic replacement keeps the B-spline's parameterisation; upstream reads the
+/// replacement's own `GetNaturalInterval()`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CurveObjectHandle {
+    /// Which object of the solve this is.
+    pub id: u8,
+    /// Its natural parameter interval.
+    pub ivl: Extent1d,
+}
+
+impl SolutionObject for CurveObjectHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        Some(self.ivl)
+    }
+}
+
 // ---- static helpers ---------------------------------------------------------------------
 
 /// The UV point of a surface point-solve solution.
@@ -2332,6 +2390,12 @@ fn is_closed(
 /// seam copy on the side `direction` points to), then `PointBasedSurfaceIntersect` traces
 /// the curve at `tol_3d` with a 30 degree angle tolerance.
 ///
+/// The drops' solutions name their surface ([`SurfaceHandle`]), as upstream's do
+/// (`sm_SurfaceDropPoint`, SmFilletGeom.cpp:161): `SmGlobalSolver::IdenticalSolutions`
+/// then merges seam near-duplicates within `1e-4` of the surface's UV domain, and the
+/// `solutions.len() == 2` seam test (cpp:286) counts what upstream counts (review of
+/// #264; with the object-less handle the tolerance was only `100 * EFF_ZERO * (1 + |s|)`).
+///
 /// # Errors
 ///
 /// Those of the point drops ([`surface_drop_point`]) and of
@@ -2360,10 +2424,11 @@ pub fn two_pnts_intersection(
     // Drop start point onto surf1 - watch for closed surfaces
     let mut surface1_points: Vec<Point2> = Vec::new();
     let mut surface2_points: Vec<Point2> = Vec::new();
-    let solutions = drop_or_bad(surface_drop_point::<NoObject>(
+    // (the solutions name the surface they were dropped onto, as upstream's do)
+    let solutions = drop_or_bad(surface_drop_point(
         k,
         surf1,
-        Some(NoObject),
+        Some(SurfaceHandle(surf1)),
         start_pnt,
         dropping_tol,
     ))?;
@@ -2382,10 +2447,10 @@ pub fn two_pnts_intersection(
     let uv11 = solution_uv(&solutions, index11);
 
     // Drop start point onto surf2 - watch for closed surfaces
-    let solutions = drop_or_bad(surface_drop_point::<NoObject>(
+    let solutions = drop_or_bad(surface_drop_point(
         k,
         surf2,
-        Some(NoObject),
+        Some(SurfaceHandle(surf2)),
         start_pnt,
         dropping_tol,
     ))?;
@@ -2410,7 +2475,7 @@ pub fn two_pnts_intersection(
     if let Some(end_pnt) = opt_end_pnt {
         // Drop end point onto surf1 - watch for closed surfaces
         let solutions =
-            surface_drop_point::<NoObject>(k, surf1, Some(NoObject), end_pnt, dropping_tol)?;
+            surface_drop_point(k, surf1, Some(SurfaceHandle(surf1)), end_pnt, dropping_tol)?;
         let mut index12 = 0;
         if solutions.len() == 2 {
             // Closed surface
@@ -2427,7 +2492,7 @@ pub fn two_pnts_intersection(
 
         // Drop end point onto surf2 - watch for closed surfaces
         let solutions =
-            surface_drop_point::<NoObject>(k, surf2, Some(NoObject), end_pnt, dropping_tol)?;
+            surface_drop_point(k, surf2, Some(SurfaceHandle(surf2)), end_pnt, dropping_tol)?;
         let mut index22 = 0;
         if solutions.len() == 2 {
             // Closed surface
@@ -2472,7 +2537,7 @@ pub fn two_pnts_intersection(
 
 /// The start-point drops of `sm_TwoPntsIntersection`: an empty success is
 /// `SM_ERR_BAD_INTERSECTIONS`, any other status passes through.
-fn drop_or_bad(r: Result<SolutionArray<NoObject>>) -> Result<SolutionArray<NoObject>> {
+fn drop_or_bad<O: SolutionObject>(r: Result<SolutionArray<O>>) -> Result<SolutionArray<O>> {
     let solutions = r?;
     if solutions.is_empty() {
         return Err(upstream(OP_TWO_PNTS, SM_ERR_BAD_INTERSECTIONS));

@@ -114,7 +114,8 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
 
     match op {
         Op::UvCurve => {
-            rd.opt_index(b.nv())?.ok_or_else(|| bad("start vertex -1"))?;
+            rd.opt_index(b.nv())?
+                .ok_or_else(|| bad("start vertex -1"))?;
             rd.opt_index(b.nv())?.ok_or_else(|| bad("end vertex -1"))?;
             rd.flag()?;
             match rd.index(2)? {

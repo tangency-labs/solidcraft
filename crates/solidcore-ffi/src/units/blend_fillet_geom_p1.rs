@@ -31,7 +31,8 @@
 //! B-rep wire-edge curves (3D) each followed by the edge tolerance `tol`; `nv` vertices `x y z type status corner pc_class pc_kind
 //! pc_index pc_sub pc_face t_param u v` (`pc_kind` 0 none, 1 the start/end (`pc_sub`)
 //! vertex of target wire edge `pc_index`, 2 its primary edge use, 3 target face
-//! `pc_index`; `pc_face` a target face or -1; `corner` an opaque tag or -1); `ng`
+//! `pc_index`, 4 the target wire edge `pc_index` itself (an `SmEdge`, what `SM_PC_EDGE` classifies
+//! to upstream); `pc_face` a target face or -1; `corner` an opaque tag or -1); `ng`
 //! geometries `type status has_center [curve] has_surface [surface]`; `ne` edges `vs ve
 //! type status corner has_curve [curve] has_ivl t0 t1 fbe1 fbe2`, then per edge use
 //! (primary, mate) `has_uv [uvcurve] geom`, then per edge use its vertex use's `u v`;
@@ -586,12 +587,12 @@ pub(crate) fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         if pc_class < 100 {
             return Err(bad("vertex: point class below SM_PC_UNKNOWN"));
         }
-        let pc_kind = rd.index(3)?;
+        let pc_kind = rd.index(4)?;
         let pc_index = rd.opt_index(MAX_LIST)?;
         let pc_sub = rd.index(1)?;
         match (pc_kind, pc_index) {
             (0, _) => {}
-            (1 | 2, Some(i)) if i < nt => {}
+            (1 | 2 | 4, Some(i)) if i < nt => {}
             (3, Some(i)) if i < nf && pc_sub == 0 => {}
             _ => return Err(bad("vertex: classification object out of range")),
         }

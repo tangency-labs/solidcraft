@@ -10793,6 +10793,186 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   intersector still carries `UNPORTED(blend.fillet_solver_p1)` stubs although that unit
   is now `partial`; unifying the traits and wiring those stubs is left to a follow-up.
 
+## blend.fillet_geom_p5: examine solvers
+
+`SmFilletEdge::CalcCrossSection` (PR #264) calls `sm_ExamineNFixFilletGeoms` for the two
+fillet geometries of an Nx2 corner or a closed blending corner. Its port in
+`blend.fillet_geom_p1` (PR #147, `examine_n_fix_fillet_geoms`) takes the geometries'
+solvers as co-ported `ConstantRadiusAssistedFs` values, while the fillet-geometry routines
+of `blend.fillet_geom_p4` / `_p5` resolve `GetFilletSolver()` in a table of
+`blend.fillet_solver_p1`'s `FilletSolver` base (PR #192). There is no conversion from the
+base to the derived solver, so the call is an `UNPORTED(blend.fillet_geom_p1)` stub marked
+`justified:` with this section. It is reached only past `SmFilletCorner::GetCornerType`
+(`UNPORTED(blend.fillet_corner_p1)`), so no difftest case reaches it; wire it once p1's
+signature takes the `FilletSolver` base (or a solver trait) and the corner unit lands. No
+disagreement.
+
+## blend.fillet_geom_p5: solver and corner callers
+
+Five `UNPORTED(blend.fillet_geom_p5)` stubs stay in units merged before this one:
+`SmFilletGeom::SmFilletGeom` (copy), `CreateEndCurve` and `TrimRailCurves` in
+`FilletSolver::split_fillet_geom` / `trim_rails`, `SmFilletEdge::MakeFilletEdge` in
+`sm_SplitRail` (`blend/fillet_solver/p1.rs`, `blend.fillet_solver_p1`) and in the corner
+operations of `blend.fillet_corner_p3` (`blend/fillet_corner/p3.rs`). Those callers hold a
+fillet geometry as a data-less `FilletGeomRef { index }` and the pseudo-B-rep as a bare
+`topology::Brep`, while the ported routines are methods of `FilletBrep` (the pseudo-B-rep
+with its fillet side tables, `blend.fillet_geom_p1`) addressed by `FilletGeomId` / vertex
+ids and need the solver table (`&[FilletSolver]`). There is no map from a `FilletGeomRef`
+to a `FilletGeomId` and no `FilletBrep` in those callers, so the calls are marked
+`justified:` with this section; each still returns `Unported`. The same callers' other
+fillet-geometry calls (`SmFilletGeom::GetRail`, `SetUpRailPoint`, `SmFilletVertex`
+constructor, `blend.fillet_geom_p1` / `_p6`) are stubs for the same reason; wire them all
+together when the solver and corner units address geometries in a `FilletBrep`. The
+targets are `FilletBrep::copy_fillet_geom`, `create_end_curve`, `trim_rail_curves` and
+`make_fillet_edge` (`blend/fillet_geom/p5.rs`). No disagreement.
+
+## blend.fillet_geom_p5: what the difftest does and does not cover (PR #264, review round 3)
+
+- **Real-value comparisons**: `TrimRailCurves` / `TrimCliffRails` (rail curves, intervals,
+  UV curves, vertex-use UV points of both rails and of the other rails of a cliff
+  rollover; cliff-rail pieces taking a side surface from a second geometry; closed rails
+  `pStartV == pEndV`; unprocessed `SM_FV_CLIFF_RAIL_X_EDGE` vertices computed by
+  `CalcCliffRailIntEdge`), `CalcCrossSection`, `CalcFilletIntSideFace`
+  (`blend.fillet_geom_p4` / `_p2` wired), and `UpdateSplitFace` (original faces and split
+  faces per edge, the shim setting the rails' original faces first).
+- **Status-only or status + early-exit comparisons**: `CalcFilletIntFillet` and
+  `CalcEdgeOnExtendedEdge` can only reach the first `NER` of their corner
+  (`NER(m_cpCorner)` cpp:2491, `NER(pOptCorner)` cpp:7638), because the shim refuses a
+  real corner: the bodies of `calc_fillet_int_fillet` and `calc_edge_on_extended_edge` are
+  compared by no case until `blend.fillet_corner_p1` lands. The builders
+  (`MakeFilletEdge`, `MakeRailEdge`, `MakeRailEdgeuse`, `CreateEndCurve`) compare the
+  status and the edge count today, and all of them past their early exits defer at
+  `topology.brep_p3` (the infinite region of `SmBrep()`). After a success both sides now
+  also append `blend.fillet_geom_p1`'s whole pseudo-B-rep export (the new edge's type,
+  both uses' orientations and list order, each vertex use's vertex, for `EndCurve` the 3D
+  curve, interval, primary UV curve and the geometry's side uses, for `RailEdge` the
+  geometry's rail and vertices): its Rust side is written but unreachable until
+  `topology.brep_p3` lands, so it has never been compared with the C++ record; the porter of
+  `topology.brep_p3` should expect to debug it. One known difference to account for
+  then: a rail made by `MakeRailEdgeuse` has no vertex uses at the far end, while the
+  Rust arena record `Edge.vertices` names the fillet vertex at both ends (the export reads
+  that field; every topology accessor derives the vertices from the uses). The
+  `RailEdgeuse` op compares its two checks before the allocations (`NER(pFilletSolver)`,
+  `NER(pFilletVertex)`); the base solvers of the harness carry no edge uses, so past them
+  upstream ends in `NER(pBaseEU)`, whose `SmObjDelete` clean-up deletes a vertex use that
+  is still linked in the fillet vertex (a double free in `~SmFilletVertex`, UB-238, source
+  inspection): the shim refuses that path, so one generated case runs the op today.
+  The C++ side of the success export did run once: `MakeRailEdge` hands its two new
+  vertices to the geometry (`m_vVertices`), so the shim takes them back out of the
+  model's own vertex list after the export (the model deleted them a second time and
+  crashed `~SmFilletGeom` otherwise).
+  `copy_fillet_geom` has no shim op: its first dereference is
+  `SmFilletExecutive::GetPseudoBrep` (`blend.fillet_executive_p1`), which the harness
+  cannot build.
+- **Unreachable**: the `SM_OT_OPPOSITE` primary-use `SER(SM_ERR)` in `TrimRailCurves`
+  (cpp:10625-10628): the model builds every primary edge use `SM_OT_SAME` (`EuIn` has no
+  orientation).
+- **`SM_BT_BLEND` end curves**: the harness model pairs `SM_PC_EDGE` with an `SmEdge`
+  (`pc_kind` 4 of `blend.fillet_geom_p1`'s model; upstream always does:
+  `SmFilletSolver.cpp:7605-7619`, read back as `SmEdge*` by `FindEdgeTangentAtPoint` and at
+  `SmFilletSolver.cpp:7665`; `CalcCliffRailIntEdge` reads an `SmEdgeuse` only for
+  `SM_FV_CLIFF_RAIL_X_EDGE` vertices, which are classified `SM_PC_EDGEUSE`). An earlier
+  note that `FindEdgeTangentAtPoint` casts an edge-use-classified vertex to an `SmEdge` was
+  a harness artefact (the model could build `SM_PC_EDGE` with an edge use) and is
+  retracted; the shim now refuses only an `SM_PC_EDGE` object that is not an `SmEdge`.
+  BLEND cases defer at `FindEdgeTangentAtPoint` (`blend.fillet_geom_p6`).
+
+## blend.fillet_geom_p5: rail trims and cross sections disagree in the tolerance-dominated regime (resolved)
+
+**Resolved in round 2 (2026-10-20): a port bug in this unit's calls, not in the curve
+units.** Instrumenting both sides on `gen0024` (rail 1, `app_tol 1e-9`, end point
+`3.6e-7` off a rail of size `1e-3`) showed the drop of the start vertex agree bit for bit
+(`t = 0.58501075132934788`) and `SmCurve::GlobalPointSolve(.., SM_SR_ALL)` differ: upstream
+returns one solution (`0.035778619102039888`, value `3.6387038570803368e-7`), the port
+four within `5e-8` of each other in parameter and `1e-15` in value, and
+`TrimRailCurves` takes the first (`0.035778566244631806`). Upstream merges them in
+`SmGlobalSolver::AddSortedSolution` -> `IdenticalSolutions` (SmGlobalSolver.cpp:1910-1931),
+whose parameter tolerance is `max(100 SM_EFF_ZERO (1 + |t|), 1e-4 * length)` with the
+length from `SmSolution::GetParameterInterval`, i.e. the natural interval of the solution's
+object, the curve. The port called `global_point_solve` / `global_curve_self_intersect`
+with no solution object (`NoObject`, `None` handles), so the interval was missing, the
+tolerance `~1e-9` and the near-duplicates stayed. Fix: the rail solves in
+`TrimRailCurves` / `TrimCliffRails` (and the self-intersection) name the rail curve with
+its natural interval (`RailCurveHandle`, as `query.edge` does), and `sm_CreateUVCurve`'s
+surface solves in `blend.fillet_geom_p4` name the surface with its natural UV domain
+(`UvSurfaceHandle`, SmFilletGeom.cpp:4461-4504). After it: 300 generated cases 287 pass,
+0 fail, max_rel_err 0.
+
+**Round 3 (review of #264, 2026-10-20): the same pattern in the other fillet-geometry
+solves.** The object-less solves whose solutions are counted or chosen (a `== 2` or
+`!= 1` test on the solution count, a pick of the first solution) are the ones that can
+disagree. Fixed here, as co-ports in units that are already merged (this PR edits their
+files; their difftests were re-run):
+- `blend.fillet_geom_p1` `two_pnts_intersection` (`sm_TwoPntsIntersection`, the four
+  `sm_SurfaceDropPoint` calls; `== 2` seam test, cpp:286): the drops now name their
+  surface (`SurfaceHandle`, p1.rs), as upstream's `GlobalPointSolve` does (cpp:161). The
+  p1 runner's `SurfaceDropPoint` op passes the same handle. This is on `calc_fillet_int_side_face`
+  / `calc_edge_on_extended_edge` / the cliff rails / `calc_fillet_int_fillet` path of this
+  unit (all through `srf_srf_intersection` with skip = `false`). Seam fixtures at scale
+  `1e-3` / `1e-6` with the tolerance at the surface's extent were added to
+  `fixtures/blend.fillet_geom_p1/cases.json` (`drop_point_cylinder_seam_1e-*_tol_extent`,
+  `two_pnts_cylinder_seam_1e-*_tol_extent`); they agree with and without the handle (no
+  generated or fixture p1 input was found, up to 5000 seeds, where the handle changes a
+  result), so the change is a fidelity fix without a reproducing case.
+- `blend.fillet_geom_p2` `calc_set_back_vert` (`SmFilletVertex::CalcSetBackVert`, cpp:3366
+  / 3370, `solutions.len() != 1 -> SM_ERR`; the earlier text of this section misplaced it
+  "in the `sm_TwoPntsIntersection` area"): the two `GlobalPointSolve`s name their offset
+  surface (`SurfaceHandle`).
+- `blend.fillet_geom_p4` `calc_fillet_int_2_fillets` (`GlobalCurveIntersect`, cpp:2806,
+  `len() != 1 -> SM_ERR`): the intersection names the two curves and their analytic
+  replacements (`CurveObjectHandle`, p1.rs, shared with p5's rail handles). The p2 and p4
+  vertex calculators are reached by no difftest case (the corner object model is
+  `blend.fillet_corner_p1`), so those two changes are faithful by construction, not
+  by a comparison; @bherbruck owns both units.
+
+Left as is: `p1.rs` `find_fillet_brep_edge` (`SR_SINGLE`, only the first solution's
+value is read), `find_stepoff_uv` (`SR_SINGLE`, tests emptiness and takes the best),
+`normalized_drop` (`surface.drop_point::<NoObject>`), `p4.rs` `calc_rail_int_extended_edgeuse`
+(only tests emptiness): none depends on how many near-duplicates survive.
+
+**Cross-cutting (for the orchestrator).** `NoObject` (`surface/surface/p4.rs`,
+`ObjectKind::Surface` with no natural domain) is used in about 30 files crate-wide (99
+mentions outside its definition: the surface, intersect, topology, query, heal and blend
+units). Every solve there whose solutions are counted, compared with a size or chosen by
+index is exposed to the same near-duplicate difference at small parameter domains or
+large tolerances; a sweep is a task of its own (audit each `::<NoObject>` call against the
+upstream call's `this`; `IdenticalSolutions` merges within `1e-4` of the object's natural
+interval or domain, SmGlobalSolver.cpp:1910-1931, `SmSolution::GetParameterInterval`,
+SmSolutionArray.cpp:730-828).
+
+Original report (round 1):
+
+PR #264, difftest `--unit blend.fillet_geom_p5` (300 generated cases: 283 pass, 4 fail,
+13 deferred; `--seeds 2000`: 1896 pass, 22 fail, 82 deferred). Every failure has a model
+at scale `1e-3` or `1e-6` (`scale_of` in the p1 generator) with a solver tolerance
+`1e-9 .. 1e-3`, i.e. a tolerance comparable to or larger than the rail; ordinary scales
+agree bit for bit. Three kinds, all inside callees of ported units:
+
+1. `TrimRailCurves` / `TrimCliffRails` (17 of the 2000-seed failures, mostly cliff
+   rollover geometries): the trimmed rail's control points and the vertex uses' UV
+   points differ at `1e-9 .. 1.5e-6` relative (e.g. `gen0024`: the end vertex's
+   `GlobalPointSolve` parameter, cpp `3.577861910203989e-2`, rust
+   `3.5778566244631806e-2`; `gen0162`: cpp `5.9835695910636895e-5`, rust
+   `5.9835698254225096e-5`). The calls are `SmCurve::DropPoint` (MINIMIZE, growing
+   tolerances) and `SmCurve::GlobalPointSolve(ivl, SM_SO_MINIMIZE, p, tol, NULL, NULL,
+   SM_SR_ALL)` on the same rail curve, then `Copy`/`Trim`; the Rust side passes the same
+   arguments (`curve.curve_p6` / `curve.curve_p1`). Suspected: upstream keeps the curve's
+   cache on the curve object across the drop and the solve (`SmCacheMgr`), the port
+   rebuilds it per call; or a solver branch of those units that only differs when the
+   tolerance exceeds the curve's extent. Not isolated yet.
+2. `gen1042` (`TrimRailCurves`, rational degree-1 rail at scale `1e-3`, tolerance
+   `1e-3`, coincident end points): upstream's `GlobalCurveSelfIntersect(ivl, 1e-2)` (unit
+   `curve.curve_p9`) returns exactly one solution (the rail is trimmed to its interior
+   knots `[1.1280950573855266, 2.243313725505451]`), the port's does not (no trim).
+3. `gen0677` (`CalcCrossSection` on a fillet surface at scale `1e-3`): upstream succeeds
+   with a lifted 3D curve and a UV curve; the port returns `SM_ERR_NULL_POINTER` (no UV
+   curve to lift), so `sm_CreateUVCurve` (`blend.fillet_geom_p4`, PR #252) or `LiftCurve`
+   (`surface.surface_p11`) differs there.
+
+Not fixed here: the differing code is in the callees, which are shared with other units.
+The unit stays `blocked` until these are isolated (start with a curve-level difftest of
+`DropPoint` + `GlobalPointSolve` on one curve object at scale `1e-3` with tolerance
+`1e-9 .. 1e-3`). No tolerance was loosened and no generator scale was narrowed.
 
 ## blend.fillet_corner_p3 (PR #256, 2026-10-19)
 
@@ -10909,6 +11089,7 @@ Difftest (`fixtures/heal.stitch_p1/constructed.json`: the SM_API_test box tests,
   `Line::create_line_segment` statuses are compared.
 - `SmApiCreateBlendPrimitive` is still not difftested: it needs a B-rep with faces, which needs the
   `SmBrep` construction units (`topology.brep_p3`/`p5`/`p8`) and `primitive.primitive_creation_*`.
+
 ## heal.stitch_p2 (`SmStitch.cpp` part 2: `DoStitching`, `StitchIntoSolid`, `StitchIntoShell`, one-list `StitchVertexPairs`, `SplitEdgesWithVertices`; PR #205, 2026-10-17; partial, no disagreements)
 
 - **Co-port with `heal.stitch_p1` (#196).** p1 owns the `Stitch` struct, the callback and

@@ -1767,6 +1767,33 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** UB (indeterminate reads).
 - **Rust port:** `FilletGeom::new` starts them as `0.0` and `false`.
 
+#### UB-213. `SmFilletEdge::CalcCrossSection` lifts `*pUVCurve1` when `sm_CreateUVCurve` succeeds without any curve
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:5759-5768` (`SmFilletEdge::CalcCrossSection`): `SER(sm_CreateUVCurve(.., p3DCurve, pUVCurve1, pUVCurve2))`, then `if (p3DCurve == NULL) { SER(pSurface1->LiftCurve(.., *pUVCurve1, pUVCurve1->GetNaturalInterval(), ..)); NER(p3DCurve); }`.
+- **What happens:** `NER(p3DCurve)` comes after the lift and nothing checks `pUVCurve1` before it. When `sm_CreateUVCurve` returns `SM_SUCCESS` with neither a 3D curve nor a UV curve (both out-pointers stay `NULL`), `*pUVCurve1` and `pUVCurve1->GetNaturalInterval()` dereference a null pointer.
+- **Trigger:** a fillet edge for which `sm_CreateUVCurve` (`:4212`) returns `SM_SUCCESS` with `rp3DCurve` and `rpUVCurve1` both `NULL`, i.e. a success exit that builds no curve.
+- **How found:** line-by-line comparison while porting `blend.fillet_geom_p5` (PR #264); the shim guards the call.
+- **Confirmed:** no (source inspection; the difftest shim refuses the input rather than running it, and no generated input has been seen to reach it).
+- **Severity:** UB (null dereference).
+- **Rust port:** `FilletBrep::calc_cross_section` returns `SM_ERR_NULL_POINTER` at the lift (`blend/fillet_geom/p5.rs`, the `UB-213` comment). The `blend.fillet_geom_p5` shim runs the same `sm_CreateUVCurve` call first (`p5_cross_runs`) and refuses (`SC_ERR_ARG`) an input where it succeeds with no curve, so no run reaches the dereference.
+
+#### UB-214. `SmFilletEdge::CalcFilletIntSideFace` calls `pCorner->IsExtendedSurfacePatch()` before its `pCorner` test
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:6219` (the call) and `:6223` (`(pCorner) ? pCorner->GetExtendedSurface(pFace) : NULL`), `SmFilletEdge::CalcFilletIntSideFace`; the else branch (`:6234`) also calls `pCorner->GetFilletedVertex()` unchecked.
+- **What happens:** the conditional that tests `pCorner` four lines after the dereference shows the author expected a null corner, but `pCorner->IsExtendedSurfacePatch()` (`SmFilletCorner.h:206`, an inline read of `m_bExtendedSurfacePatch`) already ran on it: a null `pCorner` reads a member through a null `this`.
+- **Trigger:** `CalcFilletIntSideFace` on a fillet edge with no 3D curve whose primary edge use has a fillet geometry, with a `NULL` corner argument (the function's default; `SmFilletVertex::CalcFilletIntSideFace` callers pass the vertex's corner, which is not `NULL` in a real run).
+- **How found:** line-by-line comparison while porting `blend.fillet_geom_p5` (PR #264); the shim's guard `p5_side_runs` models it.
+- **Confirmed:** no (source inspection; the difftest shim refuses the input).
+- **Severity:** UB (null dereference).
+- **Rust port:** `FilletBrep::calc_fillet_int_side_face` returns `SM_ERR_NULL_POINTER` for the missing corner (`blend/fillet_geom/p5.rs`, the `UB-214` comment); the shim refuses (`SC_ERR_ARG`) the inputs that reach it.
+
+#### UB-238. `SmFilletGeom::MakeRailEdgeuse` leaves a deleted vertex use linked in the fillet vertex when `NER(pBaseEU)` fails
+- **Location:** `source/SMLib/src/SmFilletGeom.cpp:10042-10052` (the allocation and `pFilletVertex->PostInsert(pNewVU)`), `:10076-10077` (`SmEdgeuse *pBaseEU = pFilletSolver->GetEdgeuse(lRailIndex); NER(pBaseEU);`), `:10089-10090` (`pBaseEU1->GetFace()`), `SmFilletGeom::MakeRailEdgeuse`.
+- **What happens:** the new edge use and vertex use are created under `SmObjDelete sClean3` / `sClean2`, and the vertex use is inserted into `pFilletVertex`'s use list (`SER(pFilletVertex->PostInsert(pNewVU))`) before the base edge use is looked up. When the solver has no edge use for `lRailIndex`, `NER(pBaseEU)` returns and the clean-up deletes the vertex use while it is still linked; a vertex use's destructor does not unlink it, so `~SmFilletVertex` deletes the same object a second time (double free). When `GetEdgeuse(lRailIndex)` is set but `GetEdgeuse(1-lRailIndex)` is not, `pBaseEU1->GetFace()` dereferences a null pointer.
+- **Trigger:** `MakeRailEdgeuse` with a non-null fillet solver and fillet vertex whose solver lacks one of its two base edge uses (a solver the executive has not set up).
+- **How found:** line-by-line reading of `MakeRailEdgeuse` while adding its op to the `blend.fillet_geom_p5` shim (PR #264); `~SmFilletVertex` (`:1333-1342`) deletes every vertex use in its list and `~SmFilletVertexuse` (`SmFilletGeom.h:180`) / `~SmVertexuse` (`SmVertexuse.h:149`) do not unlink the use from the vertex.
+- **Confirmed:** no (source inspection; the shim refuses the input rather than running it).
+- **Severity:** UB (double free, null dereference).
+- **Rust port:** `FilletBrep::make_rail_edgeuse` checks `NER(pFilletSolver)` and `NER(pFilletVertex)` and then defers at the edge-use constructor (`UNPORTED(topology.brep_p3)`); the shim refuses (`SC_ERR_ARG`) a solver without both base edge uses once those two checks pass, so the harness only compares the two defined early exits.
+
 #### UB-162. `sm_RedistributeSeamUVTrimCurves` reads a fourth edge use that need not exist
 - **Location:** `source/SMLib/src/SmBrep.cpp:12097`-`12105` (`sm_RedistributeSeamUVTrimCurves`): `SM_PTR_ARRAY(sNewEdgeuses, SmEdgeuse, 16)`, `pNewE->GetEdgeuses(sNewEdgeuses); SM_ASSERT(sNewEdgeuses.GetSize() == 4)`, then `sNewEdgeuses[0]` and `sNewEdgeuses[3]`.
 - **What happens:** The assertion is a no-op in release builds. For a seam edge with fewer than four edge uses the function reads slot 3 of the 16-slot stack array, an uninitialised pointer, and calls `GetCWEdgeuse()` on it.

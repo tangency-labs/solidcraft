@@ -97,7 +97,6 @@ use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p2::SurfaceIntersection;
-use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::edgeuse::p3::{
@@ -112,6 +111,7 @@ use super::p1::{
     adjust_uv_on_seam, create_cubic_rail_rail_interpolant, evaluate_mate,
     interpolate_endpts_and_tangents, two_pnts_intersection, FilStatus, FilletBrep, FilletCornerId,
     FilletCornerType, FilletEdgeType, FilletGeomId, FilletSolverId, FilletVertexType,
+    SurfaceHandle,
 };
 use super::p4::{set_edge_curve, set_vertex_point};
 
@@ -1720,9 +1720,12 @@ impl FilletBrep {
                        domain: &Extent2d|
          -> Result<Point2> {
             let surf = Surface::from(surf.clone());
-            let solutions = surf.global_point_solve::<NoObject>(
+            // the solutions name the surface (`this` of `GlobalPointSolve`), as upstream's
+            // do: `IdenticalSolutions` merges near-duplicates within `1e-4` of its domain
+            // before the `!= 1` count below
+            let solutions = surf.global_point_solve(
                 k,
-                None,
+                Some(SurfaceHandle(&surf)),
                 domain,
                 SolverOperation::Minimize,
                 plane_orig,
