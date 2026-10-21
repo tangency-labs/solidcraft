@@ -408,6 +408,9 @@ impl ExecutiveAccess<Handle> for Access {
         }
         Ok(Vec::new())
     }
+    fn edge_is_manifold(&self, _: Handle) -> SolidResult<bool> {
+        missing()
+    }
     fn vertices(&self, handle: Handle) -> SolidResult<Vec<Handle>> {
         let brep = self
             .breps

@@ -694,6 +694,9 @@ impl ExecutiveAccess<Handle> for Access {
         }
         Ok(b.edges().ids().map(Handle::Edge).collect())
     }
+    fn edge_is_manifold(&self, _: Handle) -> SolidResult<bool> {
+        missing()
+    }
     fn vertices(&self, handle: Handle) -> SolidResult<Vec<Handle>> {
         if !self.brep(handle)?.vertices().is_empty() {
             return missing();

@@ -59,7 +59,11 @@ struct Access {
     corner_point: Point3,
     constant_results: Vec<bool>,
     corner_fail: Option<&'static str>,
+    /// A hand-built target body: `edges(Handle(0))` lists its edges as
+    /// `Handle(BODY_EDGE + i)` and the manifold check runs on its records.
+    body: Option<Brep>,
 }
+const BODY_EDGE: u8 = 100;
 fn absent<T>() -> Result<T> {
     Err(invalid("test handle has no geometry"))
 }
@@ -161,6 +165,10 @@ impl ExecutiveAccess<Handle> for Access {
         Ok(())
     }
     fn edges(&self, brep: Handle) -> Result<Vec<Handle>> {
+        if let (Some(body), Handle(0)) = (&self.body, brep) {
+            let count = u8::try_from(body.edge_list().len()).unwrap();
+            return Ok((0..count).map(|i| Handle(BODY_EDGE + i)).collect());
+        }
         Ok(if !self.mapped_edges {
             vec![]
         } else if brep == Handle(0) {
@@ -168,6 +176,25 @@ impl ExecutiveAccess<Handle> for Access {
         } else {
             vec![Handle(11), Handle(13)]
         })
+    }
+    fn edge_is_manifold(&self, edge: Handle) -> Result<bool> {
+        match (&self.body, self.body_edge(edge)) {
+            (Some(body), Some(id)) => crate::topology::edge::is_manifold(body, id),
+            // Scripted edges stand for no body.
+            _ => Ok(true),
+        }
+    }
+    fn edge_entity(&self, edge: Handle) -> Option<EntityRef> {
+        self.body_edge(edge).map(EntityRef::Edge)
+    }
+    fn create_corners(
+        &mut self,
+        _: &mut Kernel,
+        _: &mut FilletExecutive<Handle>,
+        _: Option<&mut ErrorInfo<Handle>>,
+    ) -> Result<()> {
+        self.events.push("corners");
+        Ok(())
     }
     fn vertices(&self, _: Handle) -> Result<Vec<Handle>> {
         Ok(vec![])
@@ -1091,4 +1118,236 @@ fn solver_tolerance_sentinel_is_converted_at_set_tolerance_call() {
         access.brep_tolerances,
         [0.125, zone_tol3d(&k, crate::geom::tol::USE_DEFAULT)]
     );
+}
+
+// ---- closed-manifold result check (not upstream; tangency-labs/solidcore#422) ----
+
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::topology::{
+    Brep, EdgeId, Edgeuse, EdgeuseOwner, Faceuse, LoopEdge, Loopuse, LoopuseStart, ShellId,
+    VertexId,
+};
+
+impl Access {
+    fn body_edge(&self, edge: Handle) -> Option<EdgeId> {
+        let index = edge.0.checked_sub(BODY_EDGE)?;
+        self.body
+            .as_ref()?
+            .edge_list()
+            .get(usize::from(index))
+            .copied()
+    }
+}
+
+/// Adds triangle `corners` to `body` with the use topology SMLib builds: a mated
+/// pair of face uses, one loop use each, and on each side one loop edge use per
+/// edge, linked around the loop and appended to the edge's radial list.
+fn add_triangle(body: &mut Brep, shell: ShellId, corners: [VertexId; 3]) {
+    let mut loop_edges = Vec::new();
+    for (start, end) in [
+        (corners[0], corners[1]),
+        (corners[1], corners[2]),
+        (corners[2], corners[0]),
+    ] {
+        let existing = body.edge_list().iter().copied().find(|&e| {
+            let [a, b] = body.edge(e).unwrap().vertices;
+            (a, b) == (start, end) || (a, b) == (end, start)
+        });
+        let edge = existing.unwrap_or_else(|| body.add_edge(start, end).unwrap());
+        let forward = body.edge(edge).unwrap().vertices[0] == start;
+        loop_edges.push(LoopEdge { edge, forward });
+    }
+    let face = body.add_face(shell).unwrap();
+    let loop_ = body.add_loop(face, loop_edges.clone()).unwrap();
+    let up = body
+        .add_faceuse_record(Faceuse {
+            shell: Some(shell),
+            face: Some(face),
+            orientation: OrientType::Same,
+            ..Faceuse::default()
+        })
+        .unwrap();
+    let down = body
+        .add_faceuse_record(Faceuse {
+            shell: Some(shell),
+            face: Some(face),
+            mate: Some(up),
+            orientation: OrientType::Opposite,
+            ..Faceuse::default()
+        })
+        .unwrap();
+    body.faceuse_mut(up).unwrap().mate = Some(down);
+    body.face_mut(face).unwrap().faceuse = Some(up);
+    let mut loopuses = Vec::new();
+    for (faceuse, reversed) in [(up, false), (down, true)] {
+        let loopuse = body
+            .add_loopuse_record(Loopuse {
+                faceuse: Some(faceuse),
+                loop_: Some(loop_),
+                orientation: if reversed {
+                    OrientType::Opposite
+                } else {
+                    OrientType::Same
+                },
+                ..Loopuse::default()
+            })
+            .unwrap();
+        body.faceuse_mut(faceuse).unwrap().loopuses.push(loopuse);
+        let mut side = loop_edges.clone();
+        if reversed {
+            side.reverse();
+        }
+        let mut uses = Vec::new();
+        for LoopEdge { edge, forward } in side {
+            let edgeuse = body
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    owner: EdgeuseOwner::Loopuse(Some(loopuse)),
+                    orientation: if forward == reversed {
+                        OrientType::Opposite
+                    } else {
+                        OrientType::Same
+                    },
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            body.edge_mut(edge).unwrap().edgeuses.push(edgeuse);
+            uses.push(edgeuse);
+        }
+        for (i, &edgeuse) in uses.iter().enumerate() {
+            let record = body.edgeuse_mut(edgeuse).unwrap();
+            record.ccw = Some(uses[(i + 1) % uses.len()]);
+            record.cw = Some(uses[(i + uses.len() - 1) % uses.len()]);
+        }
+        body.loopuse_mut(loopuse).unwrap().start = LoopuseStart::Edgeuse(Some(uses[0]));
+        loopuses.push(loopuse);
+    }
+    body.loopuse_mut(loopuses[0]).unwrap().mate = Some(loopuses[1]);
+    body.loopuse_mut(loopuses[1]).unwrap().mate = Some(loopuses[0]);
+    body.loop_mut(loop_).unwrap().loopuse = Some(loopuses[0]);
+}
+
+/// A unit tetrahedron with the outward faces listed by `faces` (indices 0..4).
+fn tetrahedron(faces: &[usize]) -> (Brep, [VertexId; 4]) {
+    let mut body = Brep::new();
+    let shell = body.add_shell().unwrap();
+    let v = [
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+        Point3::new(0.0, 0.0, 1.0),
+    ]
+    .map(|p| body.add_vertex(p).unwrap());
+    let all = [
+        [v[0], v[2], v[1]],
+        [v[0], v[1], v[3]],
+        [v[0], v[3], v[2]],
+        [v[1], v[2], v[3]],
+    ];
+    for &face in faces {
+        add_triangle(&mut body, shell, all[face]);
+    }
+    (body, v)
+}
+
+fn edge_between(body: &Brep, a: VertexId, b: VertexId) -> EdgeId {
+    body.edge_list()
+        .iter()
+        .copied()
+        .find(|&e| {
+            let [s, t] = body.edge(e).unwrap().vertices;
+            (s, t) == (a, b) || (s, t) == (b, a)
+        })
+        .unwrap()
+}
+
+fn fillet_body(body: Brep) -> (FilletExecutive<Handle>, Access, Result<()>) {
+    let mut executive = state();
+    let mut access = Access {
+        body: Some(body),
+        ..Access::default()
+    };
+    let mut k = Kernel::default();
+    let result = executive.do_fillet(&mut k, &mut access);
+    (executive, access, result)
+}
+
+#[test]
+fn hand_built_tetrahedron_is_a_closed_manifold_solid() {
+    let (body, _) = tetrahedron(&[0, 1, 2, 3]);
+    assert_eq!(body.edge_list().len(), 6);
+    for &e in body.edge_list() {
+        assert_eq!(body.edge(e).unwrap().edgeuses.len(), 4);
+        assert!(crate::topology::edge::is_manifold(&body, e).unwrap());
+    }
+}
+
+#[test]
+fn closed_manifold_result_is_accepted_unchanged() {
+    let (executive, access, result) = fillet_body(tetrahedron(&[0, 1, 2, 3]).0);
+    result.unwrap();
+    assert_eq!(access.events.first(), Some(&"corners"));
+    assert_eq!(executive.error.code, 0);
+    assert!(executive.error.edge.is_none());
+}
+
+#[test]
+fn open_result_is_refused_naming_its_first_laminar_edge() {
+    // Face 3 is missing: its edges (1,2), (1,3) and (2,3) have one face each, and
+    // (1,2) comes first in the edge list.
+    let (body, v) = tetrahedron(&[0, 1, 2]);
+    let laminar = edge_between(&body, v[1], v[2]);
+    let index = body.edge_list().iter().position(|&e| e == laminar).unwrap();
+    assert!(body.edge_list()[..index]
+        .iter()
+        .all(|&e| crate::topology::edge::is_manifold(&body, e).unwrap()));
+    let (executive, _, result) = fillet_body(body);
+    assert_eq!(
+        result,
+        Err(SolidError::Upstream {
+            operation: OP,
+            code: 1001,
+            entity: Some(EntityRef::Edge(laminar)),
+        })
+    );
+    assert_eq!(executive.error.code, 7); // SM_FILERR_BAD_MERGE
+    assert_eq!(executive.error.status, 2); // SM_FIL_FAILURE
+    assert_eq!(
+        executive.error.edge,
+        Some(Handle(BODY_EDGE + u8::try_from(index).unwrap()))
+    );
+    assert_eq!(
+        executive.error.comment,
+        "Fillet Merge Failure: Result Is Not A Closed Manifold Solid"
+    );
+}
+
+#[test]
+fn result_with_a_fin_on_an_edge_is_refused_naming_that_edge() {
+    // A closed tetrahedron plus a fifth face on edge (0,1): six edge uses there.
+    let (mut body, v) = tetrahedron(&[0, 1, 2, 3]);
+    let fin = body.add_vertex(Point3::new(1.0, -1.0, 0.0)).unwrap();
+    let shell = body.shells().ids().next().unwrap();
+    add_triangle(&mut body, shell, [v[0], v[1], fin]);
+    let shared = edge_between(&body, v[0], v[1]);
+    assert_eq!(body.edge(shared).unwrap().edgeuses.len(), 6);
+    let (executive, _, result) = fillet_body(body);
+    assert!(matches!(
+        result,
+        Err(SolidError::Upstream { code: 1001, entity: Some(EntityRef::Edge(e)), .. })
+            if e == shared
+    ));
+    assert_eq!(executive.error.code, 7);
+}
+
+#[test]
+fn do_filleting_alone_does_not_check_the_result() {
+    let mut executive = state();
+    let mut access = Access {
+        body: Some(tetrahedron(&[0, 1, 2]).0),
+        ..Access::default()
+    };
+    let mut k = Kernel::default();
+    executive.do_filleting(&mut k, &mut access, None).unwrap();
+    assert_eq!(executive.error.code, 0);
 }
