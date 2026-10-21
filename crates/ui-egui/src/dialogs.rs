@@ -491,6 +491,8 @@ pub struct Dialog {
     pub(crate) chain_applied: bool,
     /// A pattern's objects of the Object Type not shown now, restored when it is chosen again.
     pub(crate) other_objects: Vec<Sel>,
+    /// The multi-pick input whose picked items are listed under it, each removable (#3683).
+    pub(crate) listed: Option<usize>,
     /// Shell feedback is derived from the picks, never saved as additional face references.
     shell_chain: std::cell::RefCell<Option<ShellChain>>,
     /// An extrude Press Pull opened with nothing selected: its first pick may be a curved face or
@@ -750,6 +752,7 @@ impl Dialog {
             picked_edges: Vec::new(),
             chain_applied,
             other_objects: Vec::new(),
+            listed: None,
             shell_chain: Default::default(),
             press_pull: false,
             op_auto: Default::default(),
@@ -2593,6 +2596,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     let mut remove = None;
+    let mut toggle_list: Option<usize> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
@@ -2658,22 +2662,50 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     if button.clicked() {
                         clear = Some(i);
                     }
+                    // Several picks: an arrow beside the clear button lists them, each with its
+                    // own remove button (#3683).
+                    if inp.multi && !matches!(d.kind, Kind::SketchModify(_)) {
+                        let open = d.listed == Some(i);
+                        let at = rect.translate(vec2(-t.space_24, 0.0));
+                        let label = crate::i18n::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
+                        let arrow = ui.push_id(("picked_items_toggle", i), |ui| crate::ui_kit::disclosure_button_at(ui, at, open, label)).inner;
+                        crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
+                        if arrow.clicked() {
+                            toggle_list = Some(i);
+                        }
+                    }
                 }
             });
         });
-        if matches!(d.kind, Kind::SketchModify(_)) && inp.multi {
-            for (index, item) in inp.items.iter().enumerate() {
-                if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, item)).clicked() {
-                    remove = Some((i, index));
+        let listed = inp.multi && (matches!(d.kind, Kind::SketchModify(_)) || d.listed == Some(i));
+        if listed && !inp.items.is_empty() {
+            egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
+                for (index, item) in inp.items.iter().enumerate() {
+                    if crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, item)).clicked() {
+                        remove = Some((i, index));
+                    }
                 }
-            }
+            });
         }
     }
+    if let Some(i) = toggle_list {
+        d.listed = if d.listed == Some(i) { None } else { Some(i) };
+    }
     if let Some((input, index)) = remove
-        && let Some(input) = d.inputs.get_mut(input)
-        && index < input.items.len()
+        && let Some(items) = d.inputs.get_mut(input).map(|inp| &mut inp.items)
+        && index < items.len()
     {
-        input.items.remove(index);
+        let gone = items.remove(index);
+        if items.is_empty() && d.listed == Some(input) {
+            d.listed = None;
+        }
+        // As a pick that toggles it off: the hand-picked edges and the explicit profile choice follow.
+        if input == 0 {
+            d.picked_edges.retain(|x| !selection::same_item(x, &gone));
+            if matches!(d.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+                d.profile_selection_changed = true;
+            }
+        }
     }
     if let Some(i) = activate {
         d.active = i;
@@ -2681,6 +2713,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     if let Some(i) = clear {
         if let Some(key) = feature_pattern_reference_key(d, i) {
             d.extra.remove(key);
+        }
+        if d.listed == Some(i) {
+            d.listed = None;
         }
         let Some(inp) = d.inputs.get_mut(i) else { return };
         inp.items.clear();
