@@ -24,6 +24,7 @@ pub mod import;
 mod measure;
 mod ops;
 pub mod ssi;
+pub mod sweeps;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties};
