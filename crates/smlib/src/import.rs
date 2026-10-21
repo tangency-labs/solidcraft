@@ -165,6 +165,9 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
         }
     }
 
+    // Each edge's interval as SMLib takes it, and how far it moved (see `turned`).
+    let intervals: Vec<([f64; 2], f64)> = brep.edges.iter().map(|e| turned(&e.curve, e.interval)).collect();
+
     // Faces, loops and edgeuses, with the surfaces and, on B-spline faces, the trims.
     let any_spline_face = brep.faces.iter().any(|f| matches!(f.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }));
     for f in &brep.faces {
@@ -185,7 +188,8 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
                         a.i(flat::EDGEUSE_ORIENTATION).push(i64::from(u.forward));
                         if any_spline_face {
                             if spline {
-                                trim(&mut a, &u.pcurve, u.forward)?;
+                                let shift = intervals.get(u.edge as usize).map_or(0.0, |i| i.1);
+                                trim(&mut a, &u.pcurve, u.forward, shift)?;
                             } else {
                                 a.i(flat::EDGEUSE_NURBS_VERTEX_COUNT).push(0);
                                 a.i(flat::EDGEUSE_NURBS_ORDER).push(0);
@@ -199,10 +203,10 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     a.i(flat::EDGEUSE_NEXT_RADIAL).extend(next);
     a.i(flat::EDGEUSE_RADIAL_ENTRY).extend(entry);
 
-    for e in &brep.edges {
+    for (e, (interval, _)) in brep.edges.iter().zip(&intervals) {
         curve(&mut a, &e.curve)?;
         a.i(flat::EDGE_VERTICES).extend([i64::from(e.vertices[0]), i64::from(e.vertices[1])]);
-        a.r(flat::EDGE_RANGE).extend(e.interval);
+        a.r(flat::EDGE_RANGE).extend(*interval);
         // Each edge's own tolerance, never below the body's.
         a.r(flat::EDGE_TOLERANCE).push(e.tolerance.max(brep.tolerance));
     }
@@ -445,14 +449,35 @@ fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f
     Ok(())
 }
 
-/// A pcurve as the edgeuse's UV trim: reversed when the loop runs against the edge.
-fn trim(a: &mut Arrays, c: &b::Curve2, forward: bool) -> R<()> {
+/// A circle's or ellipse's interval (radians) as SMLib takes it, within [-2π, 2π]: schema 4
+/// lets one run past a full turn (a quarter arc after the seam, [2π, 2.5π]), SMLib's circles
+/// take angles up to one turn either way. The same arc a whole turn back, and that shift, by
+/// which the edge's pcurves move too (their parameter is the edge's).
+fn turned(c: &b::Curve, interval: [f64; 2]) -> ([f64; 2], f64) {
+    use std::f64::consts::TAU;
+    if !matches!(c, b::Curve::Circle { .. } | b::Curve::Ellipse { .. }) {
+        return (interval, 0.0);
+    }
+    let [lo, hi] = interval;
+    let shift = if hi > TAU {
+        -TAU * ((hi - TAU) / TAU).ceil()
+    } else if lo < -TAU {
+        TAU * ((-TAU - lo) / TAU).ceil()
+    } else {
+        0.0
+    };
+    ([lo + shift, hi + shift], shift)
+}
+
+/// A pcurve as the edgeuse's UV trim, its parameter moved by `shift` (the edge's, see
+/// [`turned`]): reversed when the loop runs against the edge.
+fn trim(a: &mut Arrays, c: &b::Curve2, forward: bool, shift: f64) -> R<()> {
     let (knots, mut pts): (&[f64], Vec<([f64; 2], f64)>) = match c {
         b::Curve2::Spline { knots, points } => (knots, points.iter().map(|p| (*p, 1.0)).collect()),
         b::Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.iter().map(|h| ([h[0] / h[2], h[1] / h[2]], h[2])).collect()),
     };
     let order = knots.len().checked_sub(pts.len()).filter(|o| *o >= 2).ok_or(Unsupported::Invalid("pcurve order"))?;
-    let mut k = knots.to_vec();
+    let mut k: Vec<f64> = knots.iter().map(|t| t + shift).collect();
     if !forward {
         pts.reverse();
         k = k.iter().rev().map(|t| -t).collect();
