@@ -562,7 +562,8 @@ mod tests {
         let seam = mt::Edge::new_unchecked(&p0, &p1, iso_curve(&wall, true, 0., 0., 1.).unwrap());
         let low = mt::Edge::new_unchecked(&p0, &p0, iso_curve(&wall, false, 0., 0., TAU).unwrap());
         let high = mt::Edge::new_unchecked(&p1, &p1, iso_curve(&wall, false, 1., 0., TAU).unwrap());
-        let cylinder = mt::Face::new_unchecked(vec![mt::Wire::from(vec![seam.clone(), high, seam.inverse(), low.inverse()])], wall);
+        let cylinder = mt::Face::new_unchecked(vec![mt::Wire::from(vec![seam.clone(), high.clone(), seam.inverse(), low.inverse()])], wall.clone());
+        let band = mt::Face::new_unchecked(vec![mt::Wire::from(vec![low]), mt::Wire::from(vec![high.inverse()])], wall);
         let half = Loop2 {
             segs: vec![
                 Seg2::Arc { center: Vec2::ZERO, radius: 6., start: -FRAC_PI_2, sweep: PI },
@@ -574,14 +575,22 @@ mod tests {
         let (s0, s1) = (mt::Vertex::new(round.subs(0., 0.)), mt::Vertex::new(round.subs(1., 0.)));
         let meridian = mt::Edge::new_unchecked(&s0, &s1, iso_curve(&round, true, 0., 0., 1.).unwrap());
         let sphere = mt::Face::new_unchecked(vec![mt::Wire::from(vec![meridian.clone(), meridian.inverse()])], round);
-        vec![("seam cylinder", cylinder), ("seam sphere", sphere)]
+        vec![("seam cylinder", cylinder), ("seam sphere", sphere), ("band", band)]
     }
 
     #[test]
     fn pcurves_of_seams_lie_a_period_apart() {
         use solidcraft_geom::brep::Curve2;
         for (name, face) in seam_faces() {
+            for bad in [0., -1., f64::NAN, f64::INFINITY] {
+                assert!(pcurve::pcurves(&face, bad).is_err());
+            }
             for tol in [1e-3, 1e-6] {
+                // A face round the surface without a seam: each loop closes a period apart.
+                if name == "band" {
+                    assert_eq!(check_faces(std::slice::from_ref(&face), tol), [(0, 0), (0, 1)]);
+                    continue;
+                }
                 assert!(check_faces(std::slice::from_ref(&face), tol).is_empty(), "{name}");
                 let wire = &pcurve::pcurves(&face, tol).unwrap()[0];
                 let at = |c: &Curve2, f: f64| {
