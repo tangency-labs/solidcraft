@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#199",
+  "tangency-labs/solidcraft#317"
+ ],
+ "what": "an R3 round on the four vertical edges of a 14x6x10 box: the two rounds on each 6 mm end face meet exactly (the face is used up)",
+ "source": "analytic",
+ "method": "box 14x6x10, R3 = half the end width on the four vertical edges: the two rounds of each end meet in a half cylinder, the section is a stadium: area 14*6 - (4-pi)*3^2 = 76.274, V = 762.74.",
+ "body_count": 1,
+ "volume_mm3": 762.7433388230814
+}
