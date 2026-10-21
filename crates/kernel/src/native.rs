@@ -174,13 +174,28 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
     })
 }
 
-/// `body` in SMLib ([`smlib_body`]), with where each of SMLib's faces and edges is in the body's
-/// face and edge order: SMLib's export of the imported body, checked to number every face,
-/// edge and vertex as the body's record does. `None` where it does not.
+/// `body` in SMLib ([`smlib_body`], healed where SMLib's check refuses it as given), with where
+/// each of SMLib's faces and edges is in the body's face and edge order: SMLib's export of the
+/// imported body, checked to number every face, edge and vertex as the body's record does.
+/// `None` where it does not.
 #[cfg(feature = "smlib")]
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    use solidcraft_smlib::{Brep, CheckLevel};
     let record = brep_record(body)?;
-    let brep = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    let import = |trusted: bool| Brep::from_record(&record, trusted).map_err(|e| KernelError::Failed(format!("SMLib: {e}")));
+    let valid = |b: &Brep| b.check(CheckLevel::All).is_ok_and(|c| c.is_valid());
+    // A record SMLib's check refuses as given (a gap a little over the record's tolerance, a
+    // hole listed before its face's outer loop) goes through SMLib's healer; healed, it is kept
+    // only where SMLib then finds it valid.
+    let trusted = import(true)?;
+    let brep = if valid(&trusted) {
+        trusted
+    } else {
+        match import(false) {
+            Ok(healed) if valid(&healed) => healed,
+            _ => trusted,
+        }
+    };
     let order = match brep.to_native_ordered() {
         Ok((back, order)) => same_numbering(&record, &back).then_some(order),
         Err(e) => {
