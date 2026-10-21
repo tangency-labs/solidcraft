@@ -56,7 +56,7 @@ use solidcraft_doc::{Document, Model, ModelState};
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
     Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
+    find_command, join_face_body, resolve_design_links, scope_bodies, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
