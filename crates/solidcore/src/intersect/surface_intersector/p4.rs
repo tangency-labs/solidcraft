@@ -13,6 +13,7 @@
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
 //! | [`IntersectionCurve`]                                 | the curve, type and deviation out-params of both drivers |
+//! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` (`this->ComputePointValues(..)`, ..) on a derived intersector |
 //!
 //! Deviations:
 //! - **Points.** Points are arena ids ([`TsectId`]), as in parts 1 to 3: the start
@@ -27,9 +28,14 @@
 //!   out-param `NULL` or unset (more or fewer than one curve flushed). On an error
 //!   no curve is returned (upstream may already have handed the caller a curve).
 //!   `FindInteriorCurves`' output arrays are a [`TsectCurves`] (part 2).
-//! - **Virtual calls.** `ComputeNextPoint`, `FlushCurve`, `ComputePointValues` and
-//!   `TestSpanAccuracy` are the basic intersector's (`SmFilletIntersector`'s
-//!   overrides belong to its own unit).
+//! - **Virtual calls.** `DoPointIntersection`, `TraceCurve` (and part 3's `TestPoint`
+//!   / `sm_UpdateTsectPoint`) are generic drivers ([`do_point_intersection_with`],
+//!   [`trace_curve_with`]) over an [`IntersectorVirtuals`] implementor, which supplies
+//!   the base part and the virtuals they call (`ComputePointValues`,
+//!   `ComputeNextPoint`, `FlushCurve`); the [`SurfaceIntersector`] methods run them on
+//!   the basic intersector, `blend::fillet_intersector::FilletDispatch` on the fillet
+//!   intersector's overrides. `FindInteriorCurves` and `DoLawIntersection` call the
+//!   basic bodies (`TestSpanAccuracy` included).
 //! - **Bounded loops.** `TraceCurve`'s step loops end on finite step sizes within a
 //!   few thousand halvings or growths, and the trace on its 5000th point (`SM_ERR`
 //!   upstream); a NaN step (from NaN tolerances) would loop forever upstream. Here
@@ -84,6 +90,7 @@ use super::p1::{
     TsectPnt,
 };
 use super::p2::{LawPointOptions, TsectCurves};
+use super::p3::{test_point_with, NextPoint};
 
 const OP_TRACE: &str = "intersect::surface_intersector::p4::SurfaceIntersector::trace_curve";
 const OP_FIC: &str = "intersect::surface_intersector::p4::SurfaceIntersector::find_interior_curves";
@@ -201,6 +208,99 @@ impl SolutionObject for SolveSurface {
     }
 }
 
+/// The `SmSurfaceIntersector` virtuals that `DoPointIntersection` reaches: its own
+/// `ComputePointValues` and `FlushCurve`, `TraceCurve`'s `ComputeNextPoint`, and
+/// `TestPoint`'s `ComputePointValues` (through `sm_UpdateTsectPoint`). The drivers
+/// [`do_point_intersection_with`], [`trace_curve_with`] and (part 3)
+/// `test_point_with` / `update_tsect_point_with` run on any implementor, calling
+/// these methods where upstream makes a virtual call and the
+/// [`SurfaceIntersector`] (the base class part) for everything else.
+///
+/// [`SurfaceIntersector`] implements it with the basic bodies (its inherent methods
+/// call the drivers on itself); `blend::fillet_intersector::FilletDispatch`
+/// implements it with the `SmFilletIntersector` overrides. The other virtuals are not
+/// reached from a derived intersector's overrides of these: `TestSpanAccuracy` and
+/// `ComputeSingularityPoint` are only called by the basic `ComputeNextPoint` /
+/// `ComputePointValues` bodies, so each implementor's overrides call their own.
+pub trait IntersectorVirtuals<'s> {
+    /// The `SmSurfaceIntersector` base part.
+    fn intersector(&self) -> &SurfaceIntersector<'s>;
+
+    /// The `SmSurfaceIntersector` base part, mutable.
+    fn intersector_mut(&mut self) -> &mut SurfaceIntersector<'s>;
+
+    /// `ComputePointValues(aUVValues, rTsectPnt, pOptPreviousPnt, pOptStepSize)`.
+    ///
+    /// # Errors
+    ///
+    /// The override's; `point` keeps what was computed before an error.
+    fn compute_point_values(
+        &mut self,
+        k: &Kernel,
+        uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+        previous: Option<&TsectPnt>,
+        step_size: Option<f64>,
+    ) -> Result<()>;
+
+    /// `ComputeNextPoint(rPrevTSP, dStepSize, rNextTSP, ..)`.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn compute_next_point(
+        &mut self,
+        k: &Kernel,
+        prev: TsectId,
+        step_size: f64,
+        next: TsectId,
+    ) -> Result<NextPoint>;
+
+    /// `FlushCurve(r3DCurves, rSurface1UVCurves, rSurface2UVCurves, rCurveTypes,
+    /// rDeviations)`.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()>;
+}
+
+/// The basic `SmSurfaceIntersector` bodies.
+impl<'s> IntersectorVirtuals<'s> for SurfaceIntersector<'s> {
+    fn intersector(&self) -> &SurfaceIntersector<'s> {
+        self
+    }
+
+    fn intersector_mut(&mut self) -> &mut SurfaceIntersector<'s> {
+        self
+    }
+
+    fn compute_point_values(
+        &mut self,
+        k: &Kernel,
+        uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+        previous: Option<&TsectPnt>,
+        step_size: Option<f64>,
+    ) -> Result<()> {
+        SurfaceIntersector::compute_point_values(self, k, uv_values, point, previous, step_size)
+    }
+
+    fn compute_next_point(
+        &mut self,
+        k: &Kernel,
+        prev: TsectId,
+        step_size: f64,
+        next: TsectId,
+    ) -> Result<NextPoint> {
+        SurfaceIntersector::compute_next_point(self, k, prev, step_size, next)
+    }
+
+    fn flush_curve(&mut self, _k: &Kernel, out: &mut TsectCurves) -> Result<()> {
+        SurfaceIntersector::flush_curve(self, out)
+    }
+}
+
 /// The outputs of `ComputeNextPoint` that `TraceCurve` keeps between calls.
 #[derive(Debug, Clone, Copy)]
 struct Step {
@@ -218,34 +318,6 @@ fn too_many(op: &'static str) -> SolidError {
 impl SurfaceIntersector<'_> {
     // ---- tracing -----------------------------------------------------------------------
 
-    /// One `ComputeNextPoint` call of `TraceCurve`: updates `step` (the deviation and
-    /// angle only when set); `Ok(false)` when the call failed (`Unported` propagates).
-    fn trace_step(
-        &mut self,
-        k: &Kernel,
-        prev: TsectId,
-        step_size: f64,
-        next: TsectId,
-        step: &mut Step,
-    ) -> Result<bool> {
-        match self.compute_next_point(k, prev, step_size, next) {
-            Ok(n) => {
-                step.found_good_point = n.found_good_point;
-                if let Some(d) = n.deviation_found {
-                    step.deviation = d;
-                }
-                if let Some(a) = n.angle_found_rad {
-                    step.angle_found = a;
-                }
-                step.clipped = n.clipped;
-                step.hit_boundary = n.boundary_hit;
-                Ok(true)
-            }
-            Err(e) if e.is_unported() => Err(e),
-            Err(_) => Ok(false),
-        }
-    }
-
     /// `SER(SM_ERR)` unless the UV points of `next` are in both domains (enlarged by
     /// `uv_tol`).
     fn check_in_domains(&self, next: TsectId, uv_tol: [f64; 2]) -> Result<()> {
@@ -255,14 +327,6 @@ impl SurfaceIntersector<'_> {
         }
         if !self.uv_domains[1].contains_point(p.uv_pos(SrfIndex::Second), uv_tol[1]) {
             return Err(SolidError::sm_err(OP_TRACE));
-        }
-        Ok(())
-    }
-
-    /// `TestPoint(next, bDone)`: `done` keeps its value when upstream leaves it.
-    fn trace_test(&mut self, k: &Kernel, next: TsectId, done: &mut bool) -> Result<()> {
-        if let Some(d) = self.test_point(k, next)? {
-            *done = d;
         }
         Ok(())
     }
@@ -294,283 +358,8 @@ impl SurfaceIntersector<'_> {
     /// list, an id is unknown, or a loop does not terminate; those of the curve
     /// reversal, the point tests and the curve predicates; [`SolidError::Unported`]
     /// from unported callees.
-    #[allow(clippy::too_many_lines)]
     pub fn trace_curve(&mut self, k: &Kernel, start: TsectId, curves_3d: &[Curve]) -> Result<()> {
-        // scale tolerances by UV domain size
-        let uv_tol = [
-            EFF_ZERO * (1.0 + self.uv_domains[0].max_dimension()),
-            EFF_ZERO * (1.0 + self.uv_domains[1].max_dimension()),
-        ];
-
-        // when there are no points on the curve: pick a walking direction from the
-        // start point
-        if self.curve_points.is_empty() {
-            let sp = self.point(start)?.clone();
-
-            // 1. a tangent or coincidence start point: a single point curve
-            if matches!(
-                sp.point_type,
-                IntersectionPointType::TangentPoint | IntersectionPointType::Coincidence
-            ) {
-                if !self.is_point_on_curve(k, sp.crv_pos(), curves_3d, None)? {
-                    let p = self.point_mut(start)?;
-                    p.curve_parameter = 0.0; // curves start at 0.0
-                    p.deviation = 0.0;
-                    self.add_point_to_curve(start)?;
-                    self.curve_is_closed = true; // Closed curve finishes the job
-                }
-                return Ok(());
-            }
-
-            // 2. place the start point on the curve
-            {
-                let p = self.point_mut(start)?;
-                p.curve_parameter = 0.0;
-                p.deviation = 0.0;
-            }
-            self.add_point_to_curve(start)?;
-
-            // 3. when a tiny first step is out of bounds: reverse the direction
-            let delta_0 =
-                sp.uv_pos(SrfIndex::First) + (10.0 * EFF_ZERO_SQRT) * sp.uv_deriv(SrfIndex::First);
-            let delta_1 = sp.uv_pos(SrfIndex::Second)
-                + (10.0 * EFF_ZERO_SQRT) * sp.uv_deriv(SrfIndex::Second);
-            if !self.uv_domains[0].contains_point(delta_0, uv_tol[0])
-                || !self.uv_domains[1].contains_point(delta_1, uv_tol[1])
-            {
-                if sp.is_bounded() && self.is_point_on_curve(k, sp.crv_pos(), curves_3d, None)? {
-                    // no curve to add here
-                    self.curve_points.clear();
-                    return Ok(());
-                }
-                self.curve_trace_direction *= -1.0; // Reverse curve tracing direction
-                self.reverse_curve_direction()?;
-            }
-        }
-
-        // Curve is not closed prior to tracing
-        self.curve_is_closed = false;
-
-        let mut point_count: u64 = 0;
-        let mut step_size = 0.0;
-        let mut done = false;
-        // (dAngleFound is uninitialised upstream; it is only read after a good point,
-        // whose span test set it)
-        let mut st = Step {
-            found_good_point: false,
-            deviation: 0.0,
-            angle_found: 0.0,
-            clipped: false,
-            hit_boundary: false,
-        };
-
-        // 4. iterate the trace, adding points to the curve
-        let mut iterations = 0usize;
-        while !done {
-            iterations += 1;
-            if iterations > MAX_TRACE_ITERATIONS {
-                return Err(too_many(OP_TRACE));
-            }
-
-            // 4a. the curve's last point
-            let tsp = *self
-                .curve_points
-                .last()
-                .ok_or_else(|| SolidError::invalid_input(OP_TRACE, "no curve point"))?;
-
-            // 4b. last step size if given, else 100 * this_approx_tol_3d
-            step_size = self.compute_step_size(step_size);
-
-            // 4c. a new point
-            let mut fresh = TsectPnt::zeroed();
-            fresh.point_type = IntersectionPointType::Unknown;
-            let next = self.alloc_point(fresh);
-
-            // 4d. the next point for the current step size
-            if !self.trace_step(k, tsp, step_size, next, &mut st)? {
-                // an error return indicates that it can never succeed
-                break;
-            }
-
-            // when the next guess steps out of bounds (with a modest step) - stop
-            if st.hit_boundary && step_size < self.this_approx_tol_3d * 100.0 {
-                break;
-            }
-
-            // a good next point must be in both domains
-            if st.found_good_point {
-                self.check_in_domains(next, uv_tol)?;
-            }
-
-            let mut decreased_step_size = false;
-
-            // try smaller and smaller steps until the point is good
-            let mut tries = 0usize;
-            while !st.found_good_point {
-                tries += 1;
-                if tries > MAX_STEP_TRIES {
-                    return Err(too_many(OP_TRACE));
-                }
-                step_size /= 1.5;
-                if step_size < EFF_ZERO * 100.0 {
-                    break;
-                }
-                decreased_step_size = true;
-                if !self.trace_step(k, tsp, step_size, next, &mut st)? {
-                    st.found_good_point = false;
-                    break;
-                }
-                if st.found_good_point {
-                    self.check_in_domains(next, uv_tol)?;
-                }
-            }
-
-            // no good point even with smaller steps - quit
-            if !st.found_good_point {
-                break;
-            }
-
-            // snap the good point to a through, start or end point it passed
-            let mut last_curve_param = self.point(next)?.curve_parameter;
-            self.trace_test(k, next, &mut done)?;
-            if done || self.point(next)?.curve_parameter != last_curve_param {
-                self.add_point_to_curve(next)?;
-                if done {
-                    break;
-                }
-                continue;
-            }
-
-            // try bigger steps when this one was easy
-            if !st.clipped
-                && !decreased_step_size
-                && st.deviation < self.this_approx_tol_3d / 8.0
-                && st.angle_found < self.this_ang_tol_rad / 4.0
-            {
-                last_curve_param = self.point(next)?.curve_parameter;
-
-                let mut tries = 0usize;
-                while st.found_good_point && !st.clipped {
-                    tries += 1;
-                    if tries > MAX_STEP_TRIES {
-                        return Err(too_many(OP_TRACE));
-                    }
-                    step_size *= 1.5;
-                    if !self.trace_step(k, tsp, step_size, next, &mut st)? {
-                        st.found_good_point = false;
-                        break;
-                    }
-
-                    // quit increasing after a point that is no good
-                    if !st.found_good_point {
-                        continue;
-                    }
-
-                    self.check_in_domains(next, uv_tol)?;
-
-                    // a refined step of zero: probably on a boundary
-                    let param = self.point(next)?.curve_parameter;
-                    if param <= last_curve_param + EFF_ZERO {
-                        st.found_good_point = false;
-                        break;
-                    }
-                    last_curve_param = param;
-
-                    // passed a through or end point, or a singularity
-                    self.trace_test(k, next, &mut done)?;
-                    if done || self.point(next)?.curve_parameter != last_curve_param {
-                        if done {
-                            // an end condition: done tracing
-                            self.add_point_to_curve(next)?;
-                            return Ok(());
-                        }
-                        break;
-                    }
-                }
-
-                // the last increase gave a bad point: step back to the last good one
-                if !st.found_good_point {
-                    step_size /= 1.5;
-                    let n = self.compute_next_point(k, tsp, step_size, next)?;
-                    st.found_good_point = n.found_good_point;
-                    if let Some(d) = n.deviation_found {
-                        st.deviation = d;
-                    }
-                    if let Some(a) = n.angle_found_rad {
-                        st.angle_found = a;
-                    }
-                    st.clipped = n.clipped;
-                    st.hit_boundary = n.boundary_hit;
-                    if st.found_good_point {
-                        self.check_in_domains(next, uv_tol)?;
-                    }
-                }
-            }
-
-            self.clipped_by_through_point = false;
-
-            // 4g. a step size this small: stop near the problem
-            if step_size < EFF_ZERO * 100.0 {
-                // (bDone = TRUE: done tracing)
-                break;
-            }
-
-            let (tsp_pos, tsp_deriv) = {
-                let p = self.point(tsp)?;
-                (p.crv_pos(), p.crv_deriv())
-            };
-            let (next_pos, next_deriv, next_type) = {
-                let p = self.point(next)?;
-                (p.crv_pos(), p.crv_deriv(), p.point_type)
-            };
-            let dist_moved = next_pos.distance(tsp_pos);
-            let tol = EFF_ZERO * 100.0 * (1.0 + tsp_pos.max_dimension());
-            if dist_moved < tol {
-                // (bDone = TRUE: done tracing)
-                break;
-            }
-
-            // the second point of the trace on a curve already found
-            if point_count == 0
-                && (next_type != IntersectionPointType::Singularity
-                    && self.is_point_on_curve(k, next_pos, curves_3d, None)?)
-            {
-                // unclipped points have to be on curves already traced
-                if !st.clipped {
-                    // (bDone = TRUE: done tracing)
-                    break;
-                }
-
-                // test the span's mid point
-                let herm = HermiteCurve::new(
-                    tsp_pos,
-                    tsp_deriv * step_size,
-                    next_pos,
-                    next_deriv * step_size,
-                    3,
-                );
-                let mid = herm.evaluate_point(0.5);
-                if self.is_point_on_curve(k, mid, curves_3d, None)? {
-                    // (bDone = TRUE: done tracing)
-                    break;
-                }
-            }
-
-            // snap to a through or end point passed, then add the point
-            if !done {
-                self.trace_test(k, next, &mut done)?;
-                self.point_mut(next)?.deviation = st.deviation;
-                self.add_point_to_curve(next)?;
-            }
-
-            // 4i. count the points
-            point_count += 1;
-            if point_count == 5000 {
-                // the tolerance is too small or a surface is poorly defined
-                return Err(SolidError::sm_err(OP_TRACE));
-            }
-        }
-        Ok(())
+        trace_curve_with(self, k, start, curves_3d)
     }
 
     // ---- interior curves ---------------------------------------------------------------
@@ -758,242 +547,7 @@ impl SurfaceIntersector<'_> {
         points: &[TsectId],
         opts: &PointIntersectionOptions,
     ) -> Result<IntersectionCurve> {
-        self.do_point_intersection_body(k, points, opts, false)
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn do_point_intersection_body(
-        &mut self,
-        k: &Kernel,
-        points: &[TsectId],
-        opts: &PointIntersectionOptions,
-        inside_me: bool,
-    ) -> Result<IntersectionCurve> {
-        // init output
-        self.curve_trace_direction = 1.0;
-
-        // no work - no through points specified
-        if points.is_empty() {
-            return Err(SolidError::sm_err(OP_DPI));
-        }
-
-        // Use supplied tolerances when given
-        if let Some(t) = opts.approx_tol_3d {
-            self.this_approx_tol_3d = t;
-        }
-        if let Some(a) = opts.ang_tol_rad {
-            self.this_ang_tol_rad = a;
-        }
-
-        let mut out = TsectCurves::default();
-
-        // init the through and start point lists
-        self.through_points.clear();
-        self.start_points.clear();
-
-        // an optional start direction as the 3D tangent of a previous point
-        let temp_tsp = opts.start_direction.map(|d| {
-            let mut t = TsectPnt::new();
-            t.point_type = IntersectionPointType::Unknown;
-            t.curve_pv[1] = d;
-            t
-        });
-        // an optional end direction likewise
-        let temp_end_tsp = opts.end_direction.map(|d| {
-            let mut t = TsectPnt::new();
-            t.curve_pv[1] = d;
-            t
-        });
-        let mut prev_tsp: Option<&TsectPnt> = temp_tsp.as_ref();
-
-        let n = points.len();
-        for (ii, &pid) in points.iter().enumerate() {
-            // initialize its values to unknown
-            let mut tsp = {
-                let p = self.point_mut(pid)?;
-                p.point_type = IntersectionPointType::Unknown;
-                p.curve_parameter = -1.0;
-                p.clone()
-            };
-            let uvs = [tsp.uv_pos(SrfIndex::First), tsp.uv_pos(SrfIndex::Second)];
-
-            // the start direction for the first point, the end direction for the last
-            if ii > 0 {
-                prev_tsp = None;
-            }
-            if ii == n - 1 {
-                prev_tsp = temp_end_tsp.as_ref();
-            }
-
-            let r = self.compute_point_values(k, uvs, &mut tsp, prev_tsp, None);
-            *self.point_mut(pid)? = tsp.clone();
-            match r {
-                Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => return Err(SolidError::sm_err(OP_DPI)),
-            }
-
-            // the first points must be on both surfaces
-            if ii == 0
-                && !tsp
-                    .srf_pos(SrfIndex::First)
-                    .closer_than(self.this_approx_tol_3d, tsp.srf_pos(SrfIndex::Second))
-            {
-                return Err(SolidError::sm_err(OP_DPI));
-            }
-
-            if ii == 0 {
-                // a copy of the first point is the start point
-                let mut start = TsectPnt::zeroed();
-                start.assign(&tsp);
-                let start_id = self.alloc_point(start);
-                // (status ignored)
-                ignored(self.add_start_point(k, start_id))?;
-                self.point_mut(pid)?.curve_parameter = 0.0;
-                if !(opts.start_direction.is_some() && n > 1) {
-                    self.start_point = Some(start_id);
-                }
-            } else if ii == n - 1 && opts.start_direction.is_some() && !opts.extend_after_end {
-                // the last point ends the curve
-                self.end_point = Some(pid);
-            } else {
-                // the points between are through points (status ignored, but linking
-                // a linked point is undefined upstream)
-                if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
-                    self.add_through_point(pid)
-                {
-                    return Err(e);
-                }
-            }
-        }
-
-        // trace from the last start point
-        let tsp_id = self
-            .start_points
-            .pop()
-            .ok_or_else(|| SolidError::null_pointer(OP_DPI))?;
-        self.curve_trace_direction = 1.0;
-
-        // tracing beyond the end: clip the extension
-        if self.extension_distance > 0.0 && opts.extend_after_end && self.end_point.is_none() {
-            self.doing_extension_clipping = true;
-        }
-
-        // Reverse direction of tracing if indicated by the start direction
-        if let Some(d) = opts.start_direction {
-            let p = self.point_mut(tsp_id)?;
-            if d.dot(p.crv_deriv()) < -EFF_ZERO {
-                p.curve_pv[1] = -p.curve_pv[1];
-                p.uv_curve_pv[0][1] = -p.uv_curve_pv[0][1];
-                p.uv_curve_pv[1][1] = -p.uv_curve_pv[1][1];
-                self.curve_trace_direction = -1.0;
-            }
-        }
-
-        // the last curve point of the trace
-        let mut final_tsp = None;
-
-        let input_trace_direction = self.curve_trace_direction;
-        let traced = match self.trace_curve(k, tsp_id, &out.curves_3d) {
-            Ok(()) => true,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => false,
-        };
-        if traced {
-            // trace backwards from the first point too
-            if opts.extend_before_start
-                && !self.curve_is_closed
-                && !self.curve_points.is_empty()
-                && input_trace_direction == self.curve_trace_direction
-            {
-                self.reverse_curve_direction()?;
-                self.curve_trace_direction *= -1.0;
-                self.trace_curve(k, tsp_id, &out.curves_3d)?;
-                self.reverse_curve_direction()?;
-                self.curve_trace_direction *= -1.0;
-            }
-
-            final_tsp = self.curve_points.last().copied();
-
-            // the curve points become curves
-            self.flush_curve(k, &mut out)?;
-        }
-
-        // a trace that stopped at a singular point before the last point
-        let last = *points
-            .last()
-            .ok_or_else(|| SolidError::invalid_input(OP_DPI, "no points"))?;
-        let mut is_singular = false;
-        if out.curves_3d.len() == 1 && self.point(last)?.curve_parameter < 0.0 && !inside_me {
-            if let Some(f) = final_tsp {
-                let (uv0, uv1) = {
-                    let p = self.point(f)?;
-                    (p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second))
-                };
-                is_singular = surface_is_singularity(k, self.surface(SrfIndex::First), uv0)?;
-                is_singular |= surface_is_singularity(k, self.surface(SrfIndex::Second), uv1)?;
-            }
-        }
-
-        let mut res = IntersectionCurve::from_single(out);
-        if is_singular {
-            self.join_from_singular_point(k, last, opts, &mut res)?;
-        }
-        Ok(res)
-    }
-
-    /// The singular-point retry of `DoPointIntersection`: the curve from the end of
-    /// `res` to the point `last` is joined onto `res` when its start is within
-    /// `this_approx_tol_3d` of that end.
-    fn join_from_singular_point(
-        &mut self,
-        k: &Kernel,
-        last: TsectId,
-        opts: &PointIntersectionOptions,
-        res: &mut IntersectionCurve,
-    ) -> Result<()> {
-        let no_curve = || SolidError::invalid_input(OP_DPI, "no flushed curve");
-        let ivl1 = res
-            .curve_3d
-            .as_ref()
-            .ok_or_else(no_curve)?
-            .natural_interval();
-
-        // the end point of the current curve
-        let mut end_tsp = TsectPnt::new();
-        let uv_curve0 = res.uv_curves[0].as_ref().ok_or_else(no_curve)?;
-        let pnt = uv_curve0.evaluate_point(k, ivl1.max())?;
-        *end_tsp.uv_pos_mut(SrfIndex::First) = Point2::new(pnt.x, pnt.y);
-        let uv_curve1 = res.uv_curves[1].as_ref().ok_or_else(no_curve)?;
-        let pnt = uv_curve1.evaluate_point(k, ivl1.max())?;
-        *end_tsp.uv_pos_mut(SrfIndex::Second) = Point2::new(pnt.x, pnt.y);
-        let end_id = self.alloc_point(end_tsp);
-
-        // init the lists for the nested call
-        self.curve_points.clear();
-        self.start_points.clear();
-        self.through_points.clear();
-
-        // the intersection from the other end to here
-        let second = self.do_point_intersection_body(k, &[end_id, last], opts, true)?;
-
-        if let Some(mut c2) = second.curve_3d {
-            let c1 = res.curve_3d.as_mut().ok_or_else(no_curve)?;
-            let crv1_pnt = c1.evaluate_point(k, ivl1.max())?;
-            let ivl2 = c2.natural_interval();
-            let crv2_pnt = c2.evaluate_point(k, ivl2.min())?;
-
-            // curve end points close enough: join the curves
-            if crv1_pnt.closer_than(self.this_approx_tol_3d, crv2_pnt) {
-                join_curves(k, c1, &mut c2)?;
-                let [u0, u1] = second.uv_curves;
-                let mut u0 = u0.ok_or_else(no_curve)?;
-                let mut u1 = u1.ok_or_else(no_curve)?;
-                join_curves(k, res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
-                join_curves(k, res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
-            }
-        }
-        Ok(())
+        do_point_intersection_with(self, k, points, opts)
     }
 
     /// Traces a fillet law curve between the two points of `points`
@@ -1179,6 +733,604 @@ impl SurfaceIntersector<'_> {
         self.flush_curve(k, &mut out)?;
         Ok(IntersectionCurve::from_single(out))
     }
+}
+
+/// One `ComputeNextPoint` call of `TraceCurve`: updates `step` (the deviation and
+/// angle only when set); `Ok(false)` when the call failed (`Unported` propagates).
+fn trace_step<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    prev: TsectId,
+    step_size: f64,
+    next: TsectId,
+    step: &mut Step,
+) -> Result<bool> {
+    match v.compute_next_point(k, prev, step_size, next) {
+        Ok(n) => {
+            step.found_good_point = n.found_good_point;
+            if let Some(d) = n.deviation_found {
+                step.deviation = d;
+            }
+            if let Some(a) = n.angle_found_rad {
+                step.angle_found = a;
+            }
+            step.clipped = n.clipped;
+            step.hit_boundary = n.boundary_hit;
+            Ok(true)
+        }
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(false),
+    }
+}
+
+/// `TestPoint(next, bDone)`: `done` keeps its value when upstream leaves it.
+fn trace_test<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    next: TsectId,
+    done: &mut bool,
+) -> Result<()> {
+    if let Some(d) = test_point_with(v, k, next)? {
+        *done = d;
+    }
+    Ok(())
+}
+
+/// [`SurfaceIntersector::trace_curve`] on the intersector of `v`, with
+/// `ComputeNextPoint` and `TestPoint`'s `ComputePointValues` dispatched to `v`.
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::trace_curve`].
+#[allow(clippy::too_many_lines)]
+pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    start: TsectId,
+    curves_3d: &[Curve],
+) -> Result<()> {
+    // scale tolerances by UV domain size
+    let uv_tol = [
+        EFF_ZERO * (1.0 + v.intersector().uv_domains[0].max_dimension()),
+        EFF_ZERO * (1.0 + v.intersector().uv_domains[1].max_dimension()),
+    ];
+
+    // when there are no points on the curve: pick a walking direction from the
+    // start point
+    if v.intersector().curve_points.is_empty() {
+        let sp = v.intersector().point(start)?.clone();
+
+        // 1. a tangent or coincidence start point: a single point curve
+        if matches!(
+            sp.point_type,
+            IntersectionPointType::TangentPoint | IntersectionPointType::Coincidence
+        ) {
+            if !v
+                .intersector()
+                .is_point_on_curve(k, sp.crv_pos(), curves_3d, None)?
+            {
+                let p = v.intersector_mut().point_mut(start)?;
+                p.curve_parameter = 0.0; // curves start at 0.0
+                p.deviation = 0.0;
+                v.intersector_mut().add_point_to_curve(start)?;
+                v.intersector_mut().curve_is_closed = true; // Closed curve finishes the job
+            }
+            return Ok(());
+        }
+
+        // 2. place the start point on the curve
+        {
+            let p = v.intersector_mut().point_mut(start)?;
+            p.curve_parameter = 0.0;
+            p.deviation = 0.0;
+        }
+        v.intersector_mut().add_point_to_curve(start)?;
+
+        // 3. when a tiny first step is out of bounds: reverse the direction
+        let delta_0 =
+            sp.uv_pos(SrfIndex::First) + (10.0 * EFF_ZERO_SQRT) * sp.uv_deriv(SrfIndex::First);
+        let delta_1 =
+            sp.uv_pos(SrfIndex::Second) + (10.0 * EFF_ZERO_SQRT) * sp.uv_deriv(SrfIndex::Second);
+        if !v.intersector().uv_domains[0].contains_point(delta_0, uv_tol[0])
+            || !v.intersector().uv_domains[1].contains_point(delta_1, uv_tol[1])
+        {
+            if sp.is_bounded()
+                && v.intersector()
+                    .is_point_on_curve(k, sp.crv_pos(), curves_3d, None)?
+            {
+                // no curve to add here
+                v.intersector_mut().curve_points.clear();
+                return Ok(());
+            }
+            v.intersector_mut().curve_trace_direction *= -1.0; // Reverse curve tracing direction
+            v.intersector_mut().reverse_curve_direction()?;
+        }
+    }
+
+    // Curve is not closed prior to tracing
+    v.intersector_mut().curve_is_closed = false;
+
+    let mut point_count: u64 = 0;
+    let mut step_size = 0.0;
+    let mut done = false;
+    // (dAngleFound is uninitialised upstream; it is only read after a good point,
+    // whose span test set it)
+    let mut st = Step {
+        found_good_point: false,
+        deviation: 0.0,
+        angle_found: 0.0,
+        clipped: false,
+        hit_boundary: false,
+    };
+
+    // 4. iterate the trace, adding points to the curve
+    let mut iterations = 0usize;
+    while !done {
+        iterations += 1;
+        if iterations > MAX_TRACE_ITERATIONS {
+            return Err(too_many(OP_TRACE));
+        }
+
+        // 4a. the curve's last point
+        let tsp = *v
+            .intersector()
+            .curve_points
+            .last()
+            .ok_or_else(|| SolidError::invalid_input(OP_TRACE, "no curve point"))?;
+
+        // 4b. last step size if given, else 100 * this_approx_tol_3d
+        step_size = v.intersector().compute_step_size(step_size);
+
+        // 4c. a new point
+        let mut fresh = TsectPnt::zeroed();
+        fresh.point_type = IntersectionPointType::Unknown;
+        let next = v.intersector_mut().alloc_point(fresh);
+
+        // 4d. the next point for the current step size
+        if !trace_step(v, k, tsp, step_size, next, &mut st)? {
+            // an error return indicates that it can never succeed
+            break;
+        }
+
+        // when the next guess steps out of bounds (with a modest step) - stop
+        if st.hit_boundary && step_size < v.intersector().this_approx_tol_3d * 100.0 {
+            break;
+        }
+
+        // a good next point must be in both domains
+        if st.found_good_point {
+            v.intersector().check_in_domains(next, uv_tol)?;
+        }
+
+        let mut decreased_step_size = false;
+
+        // try smaller and smaller steps until the point is good
+        let mut tries = 0usize;
+        while !st.found_good_point {
+            tries += 1;
+            if tries > MAX_STEP_TRIES {
+                return Err(too_many(OP_TRACE));
+            }
+            step_size /= 1.5;
+            if step_size < EFF_ZERO * 100.0 {
+                break;
+            }
+            decreased_step_size = true;
+            if !trace_step(v, k, tsp, step_size, next, &mut st)? {
+                st.found_good_point = false;
+                break;
+            }
+            if st.found_good_point {
+                v.intersector().check_in_domains(next, uv_tol)?;
+            }
+        }
+
+        // no good point even with smaller steps - quit
+        if !st.found_good_point {
+            break;
+        }
+
+        // snap the good point to a through, start or end point it passed
+        let mut last_curve_param = v.intersector().point(next)?.curve_parameter;
+        trace_test(v, k, next, &mut done)?;
+        if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
+            v.intersector_mut().add_point_to_curve(next)?;
+            if done {
+                break;
+            }
+            continue;
+        }
+
+        // try bigger steps when this one was easy
+        if !st.clipped
+            && !decreased_step_size
+            && st.deviation < v.intersector().this_approx_tol_3d / 8.0
+            && st.angle_found < v.intersector().this_ang_tol_rad / 4.0
+        {
+            last_curve_param = v.intersector().point(next)?.curve_parameter;
+
+            let mut tries = 0usize;
+            while st.found_good_point && !st.clipped {
+                tries += 1;
+                if tries > MAX_STEP_TRIES {
+                    return Err(too_many(OP_TRACE));
+                }
+                step_size *= 1.5;
+                if !trace_step(v, k, tsp, step_size, next, &mut st)? {
+                    st.found_good_point = false;
+                    break;
+                }
+
+                // quit increasing after a point that is no good
+                if !st.found_good_point {
+                    continue;
+                }
+
+                v.intersector().check_in_domains(next, uv_tol)?;
+
+                // a refined step of zero: probably on a boundary
+                let param = v.intersector().point(next)?.curve_parameter;
+                if param <= last_curve_param + EFF_ZERO {
+                    st.found_good_point = false;
+                    break;
+                }
+                last_curve_param = param;
+
+                // passed a through or end point, or a singularity
+                trace_test(v, k, next, &mut done)?;
+                if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
+                    if done {
+                        // an end condition: done tracing
+                        v.intersector_mut().add_point_to_curve(next)?;
+                        return Ok(());
+                    }
+                    break;
+                }
+            }
+
+            // the last increase gave a bad point: step back to the last good one
+            if !st.found_good_point {
+                step_size /= 1.5;
+                let n = v.compute_next_point(k, tsp, step_size, next)?;
+                st.found_good_point = n.found_good_point;
+                if let Some(d) = n.deviation_found {
+                    st.deviation = d;
+                }
+                if let Some(a) = n.angle_found_rad {
+                    st.angle_found = a;
+                }
+                st.clipped = n.clipped;
+                st.hit_boundary = n.boundary_hit;
+                if st.found_good_point {
+                    v.intersector().check_in_domains(next, uv_tol)?;
+                }
+            }
+        }
+
+        v.intersector_mut().clipped_by_through_point = false;
+
+        // 4g. a step size this small: stop near the problem
+        if step_size < EFF_ZERO * 100.0 {
+            // (bDone = TRUE: done tracing)
+            break;
+        }
+
+        let (tsp_pos, tsp_deriv) = {
+            let p = v.intersector().point(tsp)?;
+            (p.crv_pos(), p.crv_deriv())
+        };
+        let (next_pos, next_deriv, next_type) = {
+            let p = v.intersector().point(next)?;
+            (p.crv_pos(), p.crv_deriv(), p.point_type)
+        };
+        let dist_moved = next_pos.distance(tsp_pos);
+        let tol = EFF_ZERO * 100.0 * (1.0 + tsp_pos.max_dimension());
+        if dist_moved < tol {
+            // (bDone = TRUE: done tracing)
+            break;
+        }
+
+        // the second point of the trace on a curve already found
+        if point_count == 0
+            && (next_type != IntersectionPointType::Singularity
+                && v.intersector()
+                    .is_point_on_curve(k, next_pos, curves_3d, None)?)
+        {
+            // unclipped points have to be on curves already traced
+            if !st.clipped {
+                // (bDone = TRUE: done tracing)
+                break;
+            }
+
+            // test the span's mid point
+            let herm = HermiteCurve::new(
+                tsp_pos,
+                tsp_deriv * step_size,
+                next_pos,
+                next_deriv * step_size,
+                3,
+            );
+            let mid = herm.evaluate_point(0.5);
+            if v.intersector().is_point_on_curve(k, mid, curves_3d, None)? {
+                // (bDone = TRUE: done tracing)
+                break;
+            }
+        }
+
+        // snap to a through or end point passed, then add the point
+        if !done {
+            trace_test(v, k, next, &mut done)?;
+            v.intersector_mut().point_mut(next)?.deviation = st.deviation;
+            v.intersector_mut().add_point_to_curve(next)?;
+        }
+
+        // 4i. count the points
+        point_count += 1;
+        if point_count == 5000 {
+            // the tolerance is too small or a surface is poorly defined
+            return Err(SolidError::sm_err(OP_TRACE));
+        }
+    }
+    Ok(())
+}
+
+/// [`SurfaceIntersector::do_point_intersection`] on the intersector of `v`, its
+/// virtual calls (`ComputePointValues`, `FlushCurve`, and through `TraceCurve`
+/// `ComputeNextPoint`) dispatched to `v`: the base driver as a derived intersector
+/// runs it (`SmFilletIntersector` through `sFI.DoPointIntersection`).
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::do_point_intersection`].
+pub fn do_point_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    opts: &PointIntersectionOptions,
+) -> Result<IntersectionCurve> {
+    do_point_intersection_body(v, k, points, opts, false)
+}
+
+#[allow(clippy::too_many_lines)]
+fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    points: &[TsectId],
+    opts: &PointIntersectionOptions,
+    inside_me: bool,
+) -> Result<IntersectionCurve> {
+    // init output
+    v.intersector_mut().curve_trace_direction = 1.0;
+
+    // no work - no through points specified
+    if points.is_empty() {
+        return Err(SolidError::sm_err(OP_DPI));
+    }
+
+    // Use supplied tolerances when given
+    if let Some(t) = opts.approx_tol_3d {
+        v.intersector_mut().this_approx_tol_3d = t;
+    }
+    if let Some(a) = opts.ang_tol_rad {
+        v.intersector_mut().this_ang_tol_rad = a;
+    }
+
+    let mut out = TsectCurves::default();
+
+    // init the through and start point lists
+    v.intersector_mut().through_points.clear();
+    v.intersector_mut().start_points.clear();
+
+    // an optional start direction as the 3D tangent of a previous point
+    let temp_tsp = opts.start_direction.map(|d| {
+        let mut t = TsectPnt::new();
+        t.point_type = IntersectionPointType::Unknown;
+        t.curve_pv[1] = d;
+        t
+    });
+    // an optional end direction likewise
+    let temp_end_tsp = opts.end_direction.map(|d| {
+        let mut t = TsectPnt::new();
+        t.curve_pv[1] = d;
+        t
+    });
+    let mut prev_tsp: Option<&TsectPnt> = temp_tsp.as_ref();
+
+    let n = points.len();
+    for (ii, &pid) in points.iter().enumerate() {
+        // initialize its values to unknown
+        let mut tsp = {
+            let p = v.intersector_mut().point_mut(pid)?;
+            p.point_type = IntersectionPointType::Unknown;
+            p.curve_parameter = -1.0;
+            p.clone()
+        };
+        let uvs = [tsp.uv_pos(SrfIndex::First), tsp.uv_pos(SrfIndex::Second)];
+
+        // the start direction for the first point, the end direction for the last
+        if ii > 0 {
+            prev_tsp = None;
+        }
+        if ii == n - 1 {
+            prev_tsp = temp_end_tsp.as_ref();
+        }
+
+        let r = v.compute_point_values(k, uvs, &mut tsp, prev_tsp, None);
+        *v.intersector_mut().point_mut(pid)? = tsp.clone();
+        match r {
+            Ok(()) => {}
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Err(SolidError::sm_err(OP_DPI)),
+        }
+
+        // the first points must be on both surfaces
+        if ii == 0
+            && !tsp.srf_pos(SrfIndex::First).closer_than(
+                v.intersector().this_approx_tol_3d,
+                tsp.srf_pos(SrfIndex::Second),
+            )
+        {
+            return Err(SolidError::sm_err(OP_DPI));
+        }
+
+        if ii == 0 {
+            // a copy of the first point is the start point
+            let mut start = TsectPnt::zeroed();
+            start.assign(&tsp);
+            let start_id = v.intersector_mut().alloc_point(start);
+            // (status ignored)
+            ignored(v.intersector_mut().add_start_point(start_id))?;
+            v.intersector_mut().point_mut(pid)?.curve_parameter = 0.0;
+            if !(opts.start_direction.is_some() && n > 1) {
+                v.intersector_mut().start_point = Some(start_id);
+            }
+        } else if ii == n - 1 && opts.start_direction.is_some() && !opts.extend_after_end {
+            // the last point ends the curve
+            v.intersector_mut().end_point = Some(pid);
+        } else {
+            // the points between are through points (status ignored, but linking
+            // a linked point is undefined upstream)
+            if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
+                v.intersector_mut().add_through_point(pid)
+            {
+                return Err(e);
+            }
+        }
+    }
+
+    // trace from the last start point
+    let tsp_id = v
+        .intersector_mut()
+        .start_points
+        .pop()
+        .ok_or_else(|| SolidError::null_pointer(OP_DPI))?;
+    v.intersector_mut().curve_trace_direction = 1.0;
+
+    // tracing beyond the end: clip the extension
+    if v.intersector().extension_distance > 0.0
+        && opts.extend_after_end
+        && v.intersector().end_point.is_none()
+    {
+        v.intersector_mut().doing_extension_clipping = true;
+    }
+
+    // Reverse direction of tracing if indicated by the start direction
+    if let Some(d) = opts.start_direction {
+        let p = v.intersector_mut().point_mut(tsp_id)?;
+        if d.dot(p.crv_deriv()) < -EFF_ZERO {
+            p.curve_pv[1] = -p.curve_pv[1];
+            p.uv_curve_pv[0][1] = -p.uv_curve_pv[0][1];
+            p.uv_curve_pv[1][1] = -p.uv_curve_pv[1][1];
+            v.intersector_mut().curve_trace_direction = -1.0;
+        }
+    }
+
+    // the last curve point of the trace
+    let mut final_tsp = None;
+
+    let input_trace_direction = v.intersector().curve_trace_direction;
+    let traced = match trace_curve_with(v, k, tsp_id, &out.curves_3d) {
+        Ok(()) => true,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => false,
+    };
+    if traced {
+        // trace backwards from the first point too
+        if opts.extend_before_start
+            && !v.intersector().curve_is_closed
+            && !v.intersector().curve_points.is_empty()
+            && input_trace_direction == v.intersector().curve_trace_direction
+        {
+            v.intersector_mut().reverse_curve_direction()?;
+            v.intersector_mut().curve_trace_direction *= -1.0;
+            trace_curve_with(v, k, tsp_id, &out.curves_3d)?;
+            v.intersector_mut().reverse_curve_direction()?;
+            v.intersector_mut().curve_trace_direction *= -1.0;
+        }
+
+        final_tsp = v.intersector().curve_points.last().copied();
+
+        // the curve points become curves
+        v.flush_curve(k, &mut out)?;
+    }
+
+    // a trace that stopped at a singular point before the last point
+    let last = *points
+        .last()
+        .ok_or_else(|| SolidError::invalid_input(OP_DPI, "no points"))?;
+    let mut is_singular = false;
+    if out.curves_3d.len() == 1 && v.intersector().point(last)?.curve_parameter < 0.0 && !inside_me
+    {
+        if let Some(f) = final_tsp {
+            let (uv0, uv1) = {
+                let p = v.intersector().point(f)?;
+                (p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second))
+            };
+            is_singular = surface_is_singularity(k, v.intersector().surface(SrfIndex::First), uv0)?;
+            is_singular |=
+                surface_is_singularity(k, v.intersector().surface(SrfIndex::Second), uv1)?;
+        }
+    }
+
+    let mut res = IntersectionCurve::from_single(out);
+    if is_singular {
+        join_from_singular_point(v, k, last, opts, &mut res)?;
+    }
+    Ok(res)
+}
+
+/// The singular-point retry of `DoPointIntersection`: the curve from the end of
+/// `res` to the point `last` is joined onto `res` when its start is within
+/// `this_approx_tol_3d` of that end.
+fn join_from_singular_point<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    last: TsectId,
+    opts: &PointIntersectionOptions,
+    res: &mut IntersectionCurve,
+) -> Result<()> {
+    let no_curve = || SolidError::invalid_input(OP_DPI, "no flushed curve");
+    let ivl1 = res
+        .curve_3d
+        .as_ref()
+        .ok_or_else(no_curve)?
+        .natural_interval();
+
+    // the end point of the current curve
+    let mut end_tsp = TsectPnt::new();
+    let uv_curve0 = res.uv_curves[0].as_ref().ok_or_else(no_curve)?;
+    let pnt = uv_curve0.evaluate_point(ivl1.max())?;
+    *end_tsp.uv_pos_mut(SrfIndex::First) = Point2::new(pnt.x, pnt.y);
+    let uv_curve1 = res.uv_curves[1].as_ref().ok_or_else(no_curve)?;
+    let pnt = uv_curve1.evaluate_point(ivl1.max())?;
+    *end_tsp.uv_pos_mut(SrfIndex::Second) = Point2::new(pnt.x, pnt.y);
+    let end_id = v.intersector_mut().alloc_point(end_tsp);
+
+    // init the lists for the nested call
+    v.intersector_mut().curve_points.clear();
+    v.intersector_mut().start_points.clear();
+    v.intersector_mut().through_points.clear();
+
+    // the intersection from the other end to here
+    let second = do_point_intersection_body(v, k, &[end_id, last], opts, true)?;
+
+    if let Some(mut c2) = second.curve_3d {
+        let c1 = res.curve_3d.as_mut().ok_or_else(no_curve)?;
+        let crv1_pnt = c1.evaluate_point(ivl1.max())?;
+        let ivl2 = c2.natural_interval();
+        let crv2_pnt = c2.evaluate_point(ivl2.min())?;
+
+        // curve end points close enough: join the curves
+        if crv1_pnt.closer_than(v.intersector().this_approx_tol_3d, crv2_pnt) {
+            join_curves(c1, &mut c2)?;
+            let [u0, u1] = second.uv_curves;
+            let mut u0 = u0.ok_or_else(no_curve)?;
+            let mut u1 = u1.ok_or_else(no_curve)?;
+            join_curves(res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
+            join_curves(res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
+        }
+    }
+    Ok(())
 }
 
 // ---- callees ----------------------------------------------------------------------------------

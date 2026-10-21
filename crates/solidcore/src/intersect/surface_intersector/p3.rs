@@ -11,12 +11,17 @@
 //! |-------------------------------------------------------|--------------------------------------------|
 //! | [`SurfaceIntersector::find_boundary_start_points`], [`SurfaceIntersector::find_boundary_start_points_with_caches`] | `FindBoundaryStartPoints` |
 //! | [`SurfaceIntersector::compute_next_point`], [`NextPoint`] | `ComputeNextPoint`                     |
-//! | [`SurfaceIntersector::update_tsect_point`]            | `sm_UpdateTsectPoint` (static)             |
-//! | [`SurfaceIntersector::test_point`]                    | `TestPoint`                                |
+//! | [`SurfaceIntersector::update_tsect_point`], [`update_tsect_point_with`] | `sm_UpdateTsectPoint` (static) |
+//! | [`SurfaceIntersector::test_point`], [`test_point_with`] | `TestPoint`                              |
 //! | [`SurfaceIntersector::split_span`]                    | `SplitSpan`                                |
 //! | [`TsectPnt::zeroed`]                                  | a point fresh from `m_vTSPntMgr` (zero-filled) |
 //!
 //! Deviations:
+//! - **Virtual calls.** `TestPoint` and `sm_UpdateTsectPoint` are generic over the
+//!   intersector (`intersect::surface_intersector::p4::IntersectorVirtuals`), so the
+//!   `ComputePointValues` of `sm_UpdateTsectPoint` is the derived intersector's when
+//!   `TraceCurve` runs on one ([`test_point_with`], [`update_tsect_point_with`]); the
+//!   methods run them on the basic intersector.
 //! - **Points.** Points are arena ids ([`TsectId`]), as in part 1: `rNextTSP`, the
 //!   previous point and the snap targets of `TestPoint` / `sm_UpdateTsectPoint` are
 //!   points of the arena (`TraceCurve` takes `rNextTSP` from `m_vTSPntMgr` too). A next
@@ -1002,48 +1007,7 @@ impl SurfaceIntersector<'_> {
         next: TsectId,
         new: TsectId,
     ) -> Result<()> {
-        if prev == next {
-            return Err(SolidError::invalid_input(
-                OP_UPDATE,
-                "the next point is the previous point",
-            ));
-        }
-        let prev_tsp = self.point(prev)?.clone();
-        let new_tsp = self.point(new)?.clone();
-        let mut next_tsp = self.point(next)?.clone();
-
-        // get pPrev1/rNextTSP 3DCurve arcLength distance
-        let dist = prev_tsp.crv_pos().distance(next_tsp.crv_pos());
-
-        // get parameter Step between pPrev1 and rNextTSP
-        let step = next_tsp.curve_parameter - prev_tsp.curve_parameter;
-
-        // get NewTSP UV values
-        let uvs = [
-            new_tsp.uv_pos(SrfIndex::First),
-            new_tsp.uv_pos(SrfIndex::Second),
-        ];
-
-        // copy rNextTSP user values from pNewTSP
-        next_tsp.user_doubles = new_tsp.user_doubles;
-
-        // ComputePointValues with pNewTSP UV values and store results in rNextTSP
-        let r = self.compute_point_values(k, uvs, &mut next_tsp, Some(&prev_tsp), None);
-        *self.point_mut(next)? = next_tsp.clone();
-        r?;
-
-        // set parameter step size based on current curve parameterization
-        let new_dist = prev_tsp.crv_pos().distance(next_tsp.crv_pos());
-        let new_step = new_dist / dist * step;
-        let next_param = prev_tsp.curve_parameter + new_step;
-        self.point_mut(next)?.curve_parameter = next_param;
-
-        // set pNewTSP parameter value so that it knows if/where it was used
-        let p = self.point_mut(new)?;
-        if p.curve_parameter < 0.0 {
-            p.curve_parameter = next_param;
-        }
-        Ok(())
+        update_tsect_point_with(self, k, prev, next, new)
     }
 
     /// Tests the next traced point `next` against the targets of the trace and the
@@ -1073,237 +1037,8 @@ impl SurfaceIntersector<'_> {
     /// when the curve list is empty and the last curve point is needed (upstream
     /// dereferences null); those of the snapping; [`SolidError::Unported`] from
     /// unported callees.
-    #[allow(clippy::too_many_lines)]
     pub fn test_point(&mut self, k: &Kernel, next: TsectId) -> Result<Option<bool>> {
-        self.point(next)?;
-        let prev1 = self.curve_points.last().copied();
-        if prev1 == Some(next) {
-            return Err(SolidError::invalid_input(
-                OP_TEST,
-                "the next point is the last curve point",
-            ));
-        }
-        let need_prev =
-            || prev1.ok_or_else(|| SolidError::invalid_input(OP_TEST, "no curve point"));
-        let tol = self.this_approx_tol_3d;
-
-        // If we are given through points check the first one: they are in order
-        if let Some(&through) = self.through_points.first() {
-            let p1 = need_prev()?;
-
-            // if through point is on hermite curve from pPrev1 point to rNextTSP point
-            if is_point_on_tsect_curve(
-                k,
-                self.point(through)?,
-                self.point(p1)?,
-                self.point(next)?,
-                tol,
-            )? {
-                // modify the rNextTSP to correspond to the through point
-                self.update_tsect_point(k, p1, next, through)?;
-
-                // remove the through point from the list - we're done with it
-                unlink(&mut self.through_points, through);
-
-                // mark the last throughParameter distance when extension clipping
-                if self.doing_extension_clipping && self.through_points.is_empty() {
-                    self.last_through_parameter = self.point(through)?.curve_parameter;
-                }
-
-                // remember that a through point was hit
-                self.clipped_by_through_point = true;
-                return Ok(None);
-            }
-        }
-
-        // Check against Start Points, the better ones (at the end) first.
-        let starts = self.start_points.clone();
-        for &start in starts.iter().rev() {
-            // Skip pPrev1 if it's the same as m_pStartPoint.
-            if prev1 == self.start_point {
-                continue;
-            }
-            let p1 = need_prev()?;
-
-            // Also skip it if it's at the same place as pStartTSP, unless a seam
-            {
-                let prev_tsp = self.point(p1)?;
-                let start_tsp = self.point(start)?;
-                let dist = prev_tsp.crv_pos().distance(start_tsp.crv_pos());
-                if dist < tol {
-                    let dom1_size = self.uv_domains[0].size().length();
-                    let dom2_size = self.uv_domains[1].size().length();
-                    let dist1 = prev_tsp
-                        .uv_pos(SrfIndex::First)
-                        .distance(start_tsp.uv_pos(SrfIndex::First));
-                    let dist2 = prev_tsp
-                        .uv_pos(SrfIndex::Second)
-                        .distance(start_tsp.uv_pos(SrfIndex::Second));
-                    if dist1 < dom1_size / 2.0 && dist2 < dom2_size / 2.0 {
-                        continue;
-                    }
-                }
-            }
-
-            // if StartTsp is on xsect curve segment
-            if is_point_on_tsect_curve(
-                k,
-                self.point(start)?,
-                self.point(p1)?,
-                self.point(next)?,
-                tol,
-            )? {
-                // Modify the rNextTSP to correspond to that start point
-                self.update_tsect_point(k, p1, next, start)?;
-
-                // Remove the start point we just crossed (not singular or tangent ones)
-                let next_type = self.point(next)?.point_type;
-                let start_tsp = self.point(start)?.clone();
-                if next_type == IntersectionPointType::Crossing
-                    && start_tsp.tangent_plane_angle_rad > self.stepping_parallel_tol_radians
-                {
-                    unlink(&mut self.start_points, start);
-                }
-
-                // a crossing start point on a boundary the curve runs along is a
-                // through point
-                let done = if start_tsp.point_type == IntersectionPointType::Crossing {
-                    let along = |on: ExtentPointType, across: ExtentPointType, d: f64| {
-                        (on == ExtentPointType::Start || on == ExtentPointType::End)
-                            && across == ExtentPointType::Inside
-                            && is_zero(d)
-                    };
-                    let u0 = along(
-                        start_tsp.u_param_type(SrfIndex::First),
-                        start_tsp.v_param_type(SrfIndex::First),
-                        start_tsp.uv_deriv(SrfIndex::First).x,
-                    );
-                    let u1 = along(
-                        start_tsp.u_param_type(SrfIndex::Second),
-                        start_tsp.v_param_type(SrfIndex::Second),
-                        start_tsp.uv_deriv(SrfIndex::Second).x,
-                    );
-                    let v0 = along(
-                        start_tsp.v_param_type(SrfIndex::First),
-                        start_tsp.u_param_type(SrfIndex::First),
-                        start_tsp.uv_deriv(SrfIndex::First).y,
-                    );
-                    let v1 = along(
-                        start_tsp.v_param_type(SrfIndex::Second),
-                        start_tsp.u_param_type(SrfIndex::Second),
-                        start_tsp.uv_deriv(SrfIndex::Second).y,
-                    );
-                    !(u0 || u1 || v0 || v1)
-                } else {
-                    true
-                };
-                return Ok(Some(done));
-            }
-        }
-
-        // If we have a start point check for a closed curve situation
-        if let Some(sp) = self.start_point {
-            // Don't check if we are only starting the curve
-            if prev1 != Some(sp) {
-                let p1 = need_prev()?;
-                // the node before pPrev1 (circular list: itself when alone)
-                let n = self.curve_points.len();
-                let prev2 = self.curve_points.get(n.saturating_sub(2)).copied();
-                if prev2 != Some(sp)
-                    && is_point_on_tsect_curve(
-                        k,
-                        self.point(sp)?,
-                        self.point(p1)?,
-                        self.point(next)?,
-                        tol,
-                    )?
-                {
-                    // Have found loop around
-                    self.update_tsect_point(k, p1, next, sp)?;
-                    self.curve_is_closed = true;
-                    return Ok(Some(true));
-                }
-            }
-        }
-
-        // If we are given an ending point - check it
-        if let Some(ep) = self.end_point {
-            let p1 = need_prev()?;
-            if is_point_on_tsect_curve(k, self.point(ep)?, self.point(p1)?, self.point(next)?, tol)?
-            {
-                let mut on_seam = false;
-                if self.curve_points.first() == Some(&p1) {
-                    // a single span: the end point at its start is a seam
-                    let dist1 = self
-                        .point(p1)?
-                        .crv_pos()
-                        .distance(self.point(ep)?.crv_pos());
-                    if dist1 < tol {
-                        on_seam = true;
-                    }
-                }
-                if !on_seam {
-                    self.update_tsect_point(k, p1, next, ep)?;
-                    return Ok(Some(true));
-                }
-            }
-        } else if self.doing_extension_clipping
-            && self.last_through_parameter != 0.0
-            && self.point(next)?.curve_parameter
-                > self.last_through_parameter + self.extension_distance
-        {
-            return Ok(Some(true));
-        }
-
-        // Check whether the point is inside of the domain of the surfaces.
-        let next_tsp = self.point(next)?.clone();
-        let mut on_boundary = false;
-        for s in [SrfIndex::First, SrfIndex::Second] {
-            // let tol scale to surface domain size
-            let domain = at(&self.uv_domains, s);
-            let size = domain.max_dimension();
-            let tol = EFF_ZERO * (1.0 + size) * 100.0;
-            let ang_tol = EFF_ZERO_SQRT * (1.0 + size) * 10.0;
-
-            // check NextTSP to see if its crossing a boundary
-            let (on, bi_norm) = domain.is_point_on_boundary(next_tsp.uv_pos(s), tol);
-            let d = next_tsp.uv_deriv(s);
-            if on
-                && ((bi_norm.x != 0.0 && d.x.abs() > ang_tol)
-                    || (bi_norm.y != 0.0 && d.y.abs() > ang_tol))
-            {
-                on_boundary = true;
-            }
-
-            // done when point is on and heading out of any boundary
-            if on_boundary {
-                break;
-            }
-        }
-
-        // mark points not crossing boundaries as not done and return
-        if !on_boundary {
-            return Ok(Some(false));
-        }
-
-        // else this point is crossing a boundary: remove the start points at it
-        for id in self.start_points.clone() {
-            let tsp = self.point(id)?;
-            let mut same = true;
-            for s in [SrfIndex::First, SrfIndex::Second] {
-                let size = at(&self.uv_domains, s).max_dimension();
-                let tol = EFF_ZERO * (1.0 + size) * 100.0;
-                let dist = tsp.uv_pos(s).distance_squared(next_tsp.uv_pos(s));
-                if dist > tol {
-                    same = false;
-                    break;
-                }
-            }
-            if same {
-                unlink(&mut self.start_points, id);
-            }
-        }
-        Ok(Some(true))
+        test_point_with(self, k, next)
     }
 
     // ---- fillet law spans ------------------------------------------------------------------
@@ -1361,6 +1096,313 @@ impl SurfaceIntersector<'_> {
         }
         Ok(self.alloc_point(new_tsp))
     }
+}
+
+/// [`SurfaceIntersector::update_tsect_point`] on the intersector of `v`, its
+/// `ComputePointValues` dispatched to `v` (`sm_UpdateTsectPoint` calls the virtual).
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::update_tsect_point`].
+pub fn update_tsect_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    prev: TsectId,
+    next: TsectId,
+    new: TsectId,
+) -> Result<()> {
+    if prev == next {
+        return Err(SolidError::invalid_input(
+            OP_UPDATE,
+            "the next point is the previous point",
+        ));
+    }
+    let prev_tsp = v.intersector().point(prev)?.clone();
+    let new_tsp = v.intersector().point(new)?.clone();
+    let mut next_tsp = v.intersector().point(next)?.clone();
+
+    // get pPrev1/rNextTSP 3DCurve arcLength distance
+    let dist = prev_tsp.crv_pos().distance(next_tsp.crv_pos());
+
+    // get parameter Step between pPrev1 and rNextTSP
+    let step = next_tsp.curve_parameter - prev_tsp.curve_parameter;
+
+    // get NewTSP UV values
+    let uvs = [
+        new_tsp.uv_pos(SrfIndex::First),
+        new_tsp.uv_pos(SrfIndex::Second),
+    ];
+
+    // copy rNextTSP user values from pNewTSP
+    next_tsp.user_doubles = new_tsp.user_doubles;
+
+    // ComputePointValues with pNewTSP UV values and store results in rNextTSP
+    let r = v.compute_point_values(k, uvs, &mut next_tsp, Some(&prev_tsp), None);
+    *v.intersector_mut().point_mut(next)? = next_tsp.clone();
+    r?;
+
+    // set parameter step size based on current curve parameterization
+    let new_dist = prev_tsp.crv_pos().distance(next_tsp.crv_pos());
+    let new_step = new_dist / dist * step;
+    let next_param = prev_tsp.curve_parameter + new_step;
+    v.intersector_mut().point_mut(next)?.curve_parameter = next_param;
+
+    // set pNewTSP parameter value so that it knows if/where it was used
+    let p = v.intersector_mut().point_mut(new)?;
+    if p.curve_parameter < 0.0 {
+        p.curve_parameter = next_param;
+    }
+    Ok(())
+}
+
+/// [`SurfaceIntersector::test_point`] on the intersector of `v`, the snapping
+/// ([`update_tsect_point_with`]) dispatched to `v`.
+///
+/// # Errors
+///
+/// As [`SurfaceIntersector::test_point`].
+#[allow(clippy::too_many_lines)]
+pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
+    v: &mut V,
+    k: &Kernel,
+    next: TsectId,
+) -> Result<Option<bool>> {
+    v.intersector().point(next)?;
+    let prev1 = v.intersector().curve_points.last().copied();
+    if prev1 == Some(next) {
+        return Err(SolidError::invalid_input(
+            OP_TEST,
+            "the next point is the last curve point",
+        ));
+    }
+    let need_prev = || prev1.ok_or_else(|| SolidError::invalid_input(OP_TEST, "no curve point"));
+    let tol = v.intersector().this_approx_tol_3d;
+
+    // If we are given through points check the first one: they are in order
+    if let Some(&through) = v.intersector().through_points.first() {
+        let p1 = need_prev()?;
+
+        // if through point is on hermite curve from pPrev1 point to rNextTSP point
+        if is_point_on_tsect_curve(
+            v.intersector().point(through)?,
+            v.intersector().point(p1)?,
+            v.intersector().point(next)?,
+            tol,
+        )? {
+            // modify the rNextTSP to correspond to the through point
+            update_tsect_point_with(v, k, p1, next, through)?;
+
+            // remove the through point from the list - we're done with it
+            unlink(&mut v.intersector_mut().through_points, through);
+
+            // mark the last throughParameter distance when extension clipping
+            if v.intersector().doing_extension_clipping && v.intersector().through_points.is_empty()
+            {
+                let param = v.intersector().point(through)?.curve_parameter;
+                v.intersector_mut().last_through_parameter = param;
+            }
+
+            // remember that a through point was hit
+            v.intersector_mut().clipped_by_through_point = true;
+            return Ok(None);
+        }
+    }
+
+    // Check against Start Points, the better ones (at the end) first.
+    let starts = v.intersector().start_points.clone();
+    for &start in starts.iter().rev() {
+        // Skip pPrev1 if it's the same as m_pStartPoint.
+        if prev1 == v.intersector().start_point {
+            continue;
+        }
+        let p1 = need_prev()?;
+
+        // Also skip it if it's at the same place as pStartTSP, unless a seam
+        {
+            let prev_tsp = v.intersector().point(p1)?;
+            let start_tsp = v.intersector().point(start)?;
+            let dist = prev_tsp.crv_pos().distance(start_tsp.crv_pos());
+            if dist < tol {
+                let dom1_size = v.intersector().uv_domains[0].size().length();
+                let dom2_size = v.intersector().uv_domains[1].size().length();
+                let dist1 = prev_tsp
+                    .uv_pos(SrfIndex::First)
+                    .distance(start_tsp.uv_pos(SrfIndex::First));
+                let dist2 = prev_tsp
+                    .uv_pos(SrfIndex::Second)
+                    .distance(start_tsp.uv_pos(SrfIndex::Second));
+                if dist1 < dom1_size / 2.0 && dist2 < dom2_size / 2.0 {
+                    continue;
+                }
+            }
+        }
+
+        // if StartTsp is on xsect curve segment
+        if is_point_on_tsect_curve(
+            v.intersector().point(start)?,
+            v.intersector().point(p1)?,
+            v.intersector().point(next)?,
+            tol,
+        )? {
+            // Modify the rNextTSP to correspond to that start point
+            update_tsect_point_with(v, k, p1, next, start)?;
+
+            // Remove the start point we just crossed (not singular or tangent ones)
+            let next_type = v.intersector().point(next)?.point_type;
+            let start_tsp = v.intersector().point(start)?.clone();
+            if next_type == IntersectionPointType::Crossing
+                && start_tsp.tangent_plane_angle_rad > v.intersector().stepping_parallel_tol_radians
+            {
+                unlink(&mut v.intersector_mut().start_points, start);
+            }
+
+            // a crossing start point on a boundary the curve runs along is a
+            // through point
+            let done = if start_tsp.point_type == IntersectionPointType::Crossing {
+                let along = |on: ExtentPointType, across: ExtentPointType, d: f64| {
+                    (on == ExtentPointType::Start || on == ExtentPointType::End)
+                        && across == ExtentPointType::Inside
+                        && is_zero(d)
+                };
+                let u0 = along(
+                    start_tsp.u_param_type(SrfIndex::First),
+                    start_tsp.v_param_type(SrfIndex::First),
+                    start_tsp.uv_deriv(SrfIndex::First).x,
+                );
+                let u1 = along(
+                    start_tsp.u_param_type(SrfIndex::Second),
+                    start_tsp.v_param_type(SrfIndex::Second),
+                    start_tsp.uv_deriv(SrfIndex::Second).x,
+                );
+                let v0 = along(
+                    start_tsp.v_param_type(SrfIndex::First),
+                    start_tsp.u_param_type(SrfIndex::First),
+                    start_tsp.uv_deriv(SrfIndex::First).y,
+                );
+                let v1 = along(
+                    start_tsp.v_param_type(SrfIndex::Second),
+                    start_tsp.u_param_type(SrfIndex::Second),
+                    start_tsp.uv_deriv(SrfIndex::Second).y,
+                );
+                !(u0 || u1 || v0 || v1)
+            } else {
+                true
+            };
+            return Ok(Some(done));
+        }
+    }
+
+    // If we have a start point check for a closed curve situation
+    if let Some(sp) = v.intersector().start_point {
+        // Don't check if we are only starting the curve
+        if prev1 != Some(sp) {
+            let p1 = need_prev()?;
+            // the node before pPrev1 (circular list: itself when alone)
+            let n = v.intersector().curve_points.len();
+            let prev2 = v
+                .intersector()
+                .curve_points
+                .get(n.saturating_sub(2))
+                .copied();
+            if prev2 != Some(sp)
+                && is_point_on_tsect_curve(
+                    v.intersector().point(sp)?,
+                    v.intersector().point(p1)?,
+                    v.intersector().point(next)?,
+                    tol,
+                )?
+            {
+                // Have found loop around
+                update_tsect_point_with(v, k, p1, next, sp)?;
+                v.intersector_mut().curve_is_closed = true;
+                return Ok(Some(true));
+            }
+        }
+    }
+
+    // If we are given an ending point - check it
+    if let Some(ep) = v.intersector().end_point {
+        let p1 = need_prev()?;
+        if is_point_on_tsect_curve(
+            v.intersector().point(ep)?,
+            v.intersector().point(p1)?,
+            v.intersector().point(next)?,
+            tol,
+        )? {
+            let mut on_seam = false;
+            if v.intersector().curve_points.first() == Some(&p1) {
+                // a single span: the end point at its start is a seam
+                let dist1 = v
+                    .intersector()
+                    .point(p1)?
+                    .crv_pos()
+                    .distance(v.intersector().point(ep)?.crv_pos());
+                if dist1 < tol {
+                    on_seam = true;
+                }
+            }
+            if !on_seam {
+                update_tsect_point_with(v, k, p1, next, ep)?;
+                return Ok(Some(true));
+            }
+        }
+    } else if v.intersector().doing_extension_clipping
+        && v.intersector().last_through_parameter != 0.0
+        && v.intersector().point(next)?.curve_parameter
+            > v.intersector().last_through_parameter + v.intersector().extension_distance
+    {
+        return Ok(Some(true));
+    }
+
+    // Check whether the point is inside of the domain of the surfaces.
+    let next_tsp = v.intersector().point(next)?.clone();
+    let mut on_boundary = false;
+    for s in [SrfIndex::First, SrfIndex::Second] {
+        // let tol scale to surface domain size
+        let domain = at(&v.intersector().uv_domains, s);
+        let size = domain.max_dimension();
+        let tol = EFF_ZERO * (1.0 + size) * 100.0;
+        let ang_tol = EFF_ZERO_SQRT * (1.0 + size) * 10.0;
+
+        // check NextTSP to see if its crossing a boundary
+        let (on, bi_norm) = domain.is_point_on_boundary(next_tsp.uv_pos(s), tol);
+        let d = next_tsp.uv_deriv(s);
+        if on
+            && ((bi_norm.x != 0.0 && d.x.abs() > ang_tol)
+                || (bi_norm.y != 0.0 && d.y.abs() > ang_tol))
+        {
+            on_boundary = true;
+        }
+
+        // done when point is on and heading out of any boundary
+        if on_boundary {
+            break;
+        }
+    }
+
+    // mark points not crossing boundaries as not done and return
+    if !on_boundary {
+        return Ok(Some(false));
+    }
+
+    // else this point is crossing a boundary: remove the start points at it
+    for id in v.intersector().start_points.clone() {
+        let tsp = v.intersector().point(id)?;
+        let mut same = true;
+        for s in [SrfIndex::First, SrfIndex::Second] {
+            let size = at(&v.intersector().uv_domains, s).max_dimension();
+            let tol = EFF_ZERO * (1.0 + size) * 100.0;
+            let dist = tsp.uv_pos(s).distance_squared(next_tsp.uv_pos(s));
+            if dist > tol {
+                same = false;
+                break;
+            }
+        }
+        if same {
+            unlink(&mut v.intersector_mut().start_points, id);
+        }
+    }
+    Ok(Some(true))
 }
 
 // ---- callees ----------------------------------------------------------------------------------

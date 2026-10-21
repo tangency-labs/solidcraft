@@ -17,7 +17,7 @@
 //! | [`FilletBrep::make_face_brep`]                    | `SmFilletGeom::MakeFaceBrep`                 |
 //! | [`FilletBrep::rail_index_of_vertex`]              | `SmFilletGeom::GetRailIndexOfVertex`         |
 //! | [`FilletBrep::insert_intersection_topology`]      | `SmFilletGeom::InsertIntersectionTopology`   |
-//! | [`FilletBrep::calc_blending_geom`]                | `SmFilletGeom::CalcBlendingGeom`             |
+//! | [`FilletBrep::calc_blending_geom`], [`FilletBrep::calc_blending_geom_of_solver`] | `SmFilletGeom::CalcBlendingGeom` |
 //!
 //! Deviations:
 //! - **Object model.** As in `blend.fillet_geom_p1`, a fillet vertex, edge or geometry
@@ -2073,9 +2073,9 @@ impl FilletBrep {
     ///
     /// `SM_ERR` for a rail that is not a blending rail; `SM_ERR_NULL_POINTER` for a
     /// missing solver, rail, curve, UV curve, face, surface or cross-section edge;
-    /// those of the length, arc-length, interpolation, lift and surface creations and
-    /// of `SmFilletEdge::CalcBlendingRail`.
-    #[allow(clippy::too_many_lines)] // one upstream routine
+    /// those of the length, arc-length, interpolation, lift and surface creations;
+    /// [`SolidError::Unported`] for `SmFilletEdge::CalcBlendingRail`
+    /// (`blend.fillet_geom_p6`).
     pub fn calc_blending_geom(
         &mut self,
         k: &Kernel,
@@ -2086,6 +2086,32 @@ impl FilletBrep {
         let nul = || SolidError::null_pointer(OP_BLEND);
         let sid = self.geom(g)?.fillet_solver().ok_or_else(nul)?;
         let fil_solver = solver_of(solvers, sid, OP_BLEND)?;
+        self.calc_blending_geom_of_solver(k, g, fil_solver, target)
+    }
+
+    /// [`FilletBrep::calc_blending_geom`] with the geometry's solver
+    /// (`GetFilletSolver()`) given directly: for a caller that is that solver (the
+    /// fillet solver's `CalcFilletGeom`, unit `blend.fillet_solver_p4`, whose
+    /// geometries all name it). A geometry without a solver is still
+    /// `SM_ERR_NULL_POINTER`.
+    ///
+    /// # Errors
+    ///
+    /// As [`FilletBrep::calc_blending_geom`].
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn calc_blending_geom_of_solver(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        fil_solver: &FilletSolver,
+        target: &Brep,
+    ) -> Result<()> {
+        let nul = || SolidError::null_pointer(OP_BLEND);
+        if self.geom(g)?.fillet_solver().is_none() {
+            return Err(nul());
+        }
+        let rail1 = self.geom(g)?.rail(0).ok_or_else(nul)?;
+        let rail2 = self.geom(g)?.rail(1).ok_or_else(nul)?;
         let approx_tol_3d = fil_solver.approx_tol_3d;
         let tangency_tol_radians = fil_solver.tangency_tolerance;
 

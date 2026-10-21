@@ -2463,7 +2463,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **How found:** read during porting (static scan, `plan/closure.md`).
 - **Confirmed:** no. The fillet units are not ported yet.
 - **Severity:** nondeterminism (order-dependent results).
-- **Rust port:** Not ported yet. The plan is to compute the step per call.
+- **Rust port:** `Kernel::fillet_point_step` latch (per kernel). The `blend.fillet_solver_p4` difftest probes the C++ static (`sc_blend_fillet_solver_p4_static_step`) before every case that can reach the finite-difference block and seeds the latch with it; see `plan/findings.md` (blend.fillet_solver_p4).
 
 ## Wrong result
 

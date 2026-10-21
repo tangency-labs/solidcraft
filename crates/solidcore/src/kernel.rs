@@ -18,12 +18,21 @@
 //! | [`Tolerances::large_small_size_ratio`] | `SM_LARGE_SMALL_SIZE_RATIO`               |
 //! | [`Rng`]                                | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
+//! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //!
 //! Upstream seeds `rand()` from the clock in a few places; the port replaces that with
 //! [`Rng`], seeded from [`KernelOptions::seed`], so runs are reproducible. Results that
 //! depend on random draws therefore cannot match the C++ bit for bit; difftests of such
 //! code must compare outcomes that are invariant to the draw (and say so in
 //! `plan/findings.md`).
+//!
+//! Upstream also keeps a few process-global function statics whose first use fixes
+//! their value for the rest of the process; those that change results live on the
+//! [`Kernel`] as latches (e.g. [`Kernel::fillet_point_step`]), so each kernel starts
+//! unlatched and a difftest runner can seed the latch with the value the C++ process
+//! already holds.
+
+use core::cell::Cell;
 
 use crate::geom::context::Context;
 
@@ -161,6 +170,15 @@ pub struct Kernel {
     /// The session's modeling context (marks, Boolean flag, callbacks, its own
     /// model size estimate); created with the defaults, as `SmApiGetOrCreateContext`.
     pub context: Context,
+    /// The function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues`
+    /// (`SmFilletSolver.cpp`, unit `blend.fillet_solver_p4`): `None` until the first
+    /// finite-difference step of a fillet point evaluation latches it (to `1e-3` when
+    /// that first point is a tangent point, else `1e-5`); every later evaluation on
+    /// this kernel reuses the latched value, as upstream does for the whole process.
+    /// A [`Cell`] so the latch can be set through the `&Kernel` the solvers take
+    /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
+    /// process has latched; see [`Kernel::latch_fillet_point_step`].
+    pub fillet_point_step: Cell<Option<f64>>,
 }
 
 impl Default for Kernel {
@@ -178,7 +196,19 @@ impl Kernel {
             rng: Rng::new(options.seed),
             caches: Caches::default(),
             context: Context::default(),
+            fillet_point_step: Cell::new(None),
         }
+    }
+
+    /// `static double sdStaticStep = first;`: the latched value of
+    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet.
+    #[must_use]
+    pub fn latch_fillet_point_step(&self, first: f64) -> f64 {
+        if let Some(step) = self.fillet_point_step.get() {
+            return step;
+        }
+        self.fillet_point_step.set(Some(first));
+        first
     }
 }
 
@@ -190,6 +220,16 @@ mod tests {
     fn kernel_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<Kernel>();
+    }
+
+    #[test]
+    fn fillet_point_step_latches_once() {
+        let k = Kernel::default();
+        assert_eq!(k.fillet_point_step.get(), None);
+        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-5);
+        assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
+        k.fillet_point_step.set(Some(1.0e-3));
+        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
     }
 
     #[test]
