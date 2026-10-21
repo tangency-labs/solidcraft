@@ -246,6 +246,20 @@ pub struct Line {
     inside_out: bool,
 }
 
+impl Line {
+    /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            base: self.base.clone_exact(),
+            point: self.point,
+            vector: self.vector,
+            anal_domain: self.anal_domain,
+            scale: self.scale,
+            inside_out: self.inside_out,
+        }
+    }
+}
+
 impl Default for Line {
     /// The empty line read into by `ReadFromDB` (`SmLine()`): 3D, no NURB, undefined
     /// point, vector and scale, an "inside out" domain.

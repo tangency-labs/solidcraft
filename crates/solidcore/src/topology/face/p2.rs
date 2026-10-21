@@ -61,10 +61,8 @@
 //!   UV trim curves (a line's NURB is made first and its analytic data refreshed
 //!   after, as `SmLine::RefreshAnalytics`); a UV trim curve of another kind is
 //!   [`SolidError::InvalidInput`].
-//! - **`SmCrvOnSurf`** holds an `SmBSplineSurface` in the port: [`find_best_uv_curve`]
-//!   on a surface of another kind returns [`SolidError::Unported`] for unit
-//!   `curve.crv_on_surf` (dispatch gap of that partial unit, as in
-//!   `intersect::curve_class::p1`).
+//! - **`SmCrvOnSurf`** preserves a face surface's concrete dispatch in
+//!   [`find_best_uv_curve`].
 //! - **`sm_FindBestUVCurve`** edits the chosen candidate in place and then moves it out
 //!   of its slot (upstream: returns the pointer and nulls the slot).
 //! - **`SmRescueSurfaceOwner`** is a value holding the saved owner; its destructor is
@@ -2371,8 +2369,7 @@ pub fn fix_uv_trim_curves(
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for missing
 /// topology or curves upstream dereferences, or an orientation missing for a
-/// candidate; those of the evaluations and edits; [`SolidError::Unported`] for a
-/// surface that is not a B-spline surface (`SmCrvOnSurf`).
+/// candidate; those of the evaluations and edits.
 pub fn find_best_uv_curve(
     k: &Kernel,
     b: &Brep,
@@ -2410,15 +2407,13 @@ pub fn find_best_uv_curve(
         let Some(uv_curve) = slot else { continue };
 
         // project UVTrimCurve into 3D space
-        let SurfaceKind::BSpline(bs) = surface.kind() else {
-            // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-            // partial; no UNPORTED marker, as in intersect::curve_class::p1)
-            return Err(SolidError::unported(
-                "SmSurface (non-B-spline) in SmCrvOnSurf",
-                "curve.crv_on_surf",
-            ));
-        };
-        let crv_on_surf = CrvOnSurf::new(k, uv_curve.clone(), bs.clone(), None, 0)?;
+        let crv_on_surf = CrvOnSurf::new(
+            k,
+            uv_curve.clone_for_evaluation()?,
+            surface.clone_for_evaluation()?,
+            None,
+            0,
+        )?;
 
         // get UVTrimCurve->3DMidPoint and orientation adjusted Tangent
         let interval = crv_on_surf.natural_interval();

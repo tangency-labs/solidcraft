@@ -63,18 +63,11 @@
 //! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
 //!
 //! Deviations:
-//! - **Owner tolerance.** A surface holds only an owner handle, never its B-rep, so the
-//!   face tolerance upstream reads through `GetFace()->GetTolerance()` is cached on the
-//!   surface by the B-rep ([`Surface::owner_zone_tol_3d`], kept in step where a face
-//!   record's surface or tolerance changes) together with the face it belongs to; an
-//!   owner change drops it, the copy constructor resets it and a bare face handle
-//!   without it returns [`SolidError::Unported`] (`SmFace::GetTolerance`).
-//! - Evaluation dispatch and copies check all owned surface, curve and volume branches against a
-//!   64-level depth bound before invoking recursive copies. The surface evaluator
-//!   also bounds its wrapper traversal to 64 levels and retains B-spline output
-//!   written before zero-tangent correction fails, as upstream accessors do.
-//!   Leaf B-spline and plane checks avoid allocating a traversal stack, while
-//!   preserving the same depth-limit rejection.
+//! - Evaluation dispatch and copies check all owned surface, curve and volume branches,
+//!   including curve-on-surface children, against a 64-level depth bound before invoking
+//!   recursive copies. The surface evaluator also bounds its wrapper traversal to 64
+//!   levels and retains B-spline output written before zero-tangent correction fails,
+//!   as upstream accessors do.
 //! - **Object model.** `SmSurface` is not abstract upstream, but every ported surface
 //!   is a derived class: the [`SurfaceKind`] variants. The ported kinds are
 //!   [`BSplineSurface`], [`CurveBoundedSurface`] (unit
@@ -335,8 +328,7 @@ impl Clone for Surface {
     }
 }
 
-/// The owned geometry branches checked before recursive evaluation copies.
-enum EvaluationCopyGeometry<'a> {
+enum EvaluationGeometry<'a> {
     Surface(&'a Surface),
     Curve(&'a Curve),
     Volume(&'a crate::surface::volume::Volume),
@@ -350,54 +342,23 @@ impl Surface {
     }
 
     /// Check every owned geometry branch before invoking recursive `Clone` impls.
-    /// This includes trim curves and volume chains, not only the surface basis.
+    /// This includes trim curves, curve-on-surface children and volume chains, not only
+    /// the surface basis.
     pub(crate) fn check_evaluation_copy_depth(&self, initial_depth: usize) -> Result<()> {
-        // These variants own no nested geometry. Preserve the depth-limit error
-        // through the general walker, but avoid its stack allocation for leaves.
-        if initial_depth < 64
-            && matches!(self.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_))
-        {
-            return Ok(());
-        }
-        Self::check_owned_evaluation_copy_depth(
-            EvaluationCopyGeometry::Surface(self),
-            initial_depth,
-            "surface::surface::p2::clone_for_evaluation",
-        )
+        Self::check_geometry_depth(EvaluationGeometry::Surface(self), initial_depth)
     }
 
-    /// The same nesting bound for a temporary curve evaluation copy.
     pub(crate) fn check_curve_evaluation_copy_depth(
         curve: &Curve,
         initial_depth: usize,
     ) -> Result<()> {
-        Self::check_owned_evaluation_copy_depth(
-            EvaluationCopyGeometry::Curve(curve),
-            initial_depth,
-            "curve::curve::p2::clone_for_evaluation",
-        )
+        Self::check_geometry_depth(EvaluationGeometry::Curve(curve), initial_depth)
     }
 
-    /// Bound a volume chain before its field-wise, exact recursive `Clone`.
-    pub(crate) fn check_volume_evaluation_copy_depth(
-        volume: &crate::surface::volume::Volume,
-        initial_depth: usize,
-    ) -> Result<()> {
-        Self::check_owned_evaluation_copy_depth(
-            EvaluationCopyGeometry::Volume(volume),
-            initial_depth,
-            "surface::surface::p2::clone_for_evaluation",
-        )
-    }
-
-    fn check_owned_evaluation_copy_depth(
-        geometry: EvaluationCopyGeometry<'_>,
-        initial_depth: usize,
-        operation: &'static str,
-    ) -> Result<()> {
+    fn check_geometry_depth(root: EvaluationGeometry<'_>, initial_depth: usize) -> Result<()> {
         use crate::curve::curve::CurveKind;
-        use EvaluationCopyGeometry as Geometry;
-        let mut pending = vec![(geometry, initial_depth)];
+        use EvaluationGeometry as Geometry;
+        let mut pending = vec![(root, initial_depth)];
         while let Some((geometry, depth)) = pending.pop() {
             if depth >= 64 {
                 return Err(SolidError::invalid_input(
@@ -468,7 +429,10 @@ impl Surface {
                         push(Geometry::Volume(c.volume()));
                         push(Geometry::Curve(c.curve()));
                     }
-                    CurveKind::CrvOnSurf(c) => push(Geometry::Curve(c.uv_curve())),
+                    CurveKind::CrvOnSurf(c) => {
+                        push(Geometry::Curve(c.uv_curve()));
+                        push(Geometry::Surface(c.surface()));
+                    }
                     CurveKind::Composite(c) => {
                         for segment in c.segments() {
                             push(Geometry::Curve(&segment.curve));
@@ -495,6 +459,11 @@ impl Surface {
     /// Bounded traversal of compound surfaces for an evaluation copy (at most 64).
     pub(crate) fn clone_for_evaluation_depth(&self, depth: usize) -> Result<Self> {
         self.check_evaluation_copy_depth(depth)?;
+        Ok(self.clone_exact_bounded())
+    }
+
+    /// Exact recursive copy after the caller has validated the complete geometry graph.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
         let kind = match &self.kind {
             SurfaceKind::BSpline(s) => SurfaceKind::BSpline(s.clone_exact()),
             SurfaceKind::Plane(s) => SurfaceKind::Plane(s.clone_exact()),
@@ -523,23 +492,18 @@ impl Surface {
             SurfaceKind::SurfOfExtrusion(s) => {
                 SurfaceKind::SurfOfExtrusion(Box::new(s.clone_for_evaluation(depth + 1)?))
             }
-            SurfaceKind::Step(s) => SurfaceKind::Step(s.clone_for_evaluation(depth + 1)?),
-            SurfaceKind::CurveBounded(s) => {
-                SurfaceKind::CurveBounded(s.clone_for_evaluation(depth + 1)?)
-            }
+            SurfaceKind::Step(s) => SurfaceKind::Step(s.clone_for_evaluation()),
+            SurfaceKind::CurveBounded(s) => SurfaceKind::CurveBounded(s.clone_for_evaluation()),
             SurfaceKind::SrfInVolume(s) => {
-                SurfaceKind::SrfInVolume(Box::new(s.clone_for_evaluation(depth + 1)?))
+                SurfaceKind::SrfInVolume(Box::new(s.clone_for_evaluation()))
             }
-            SurfaceKind::OffsetSurface(s) => {
-                SurfaceKind::OffsetSurface(s.clone_for_evaluation(depth + 1)?)
-            }
+            SurfaceKind::OffsetSurface(s) => SurfaceKind::OffsetSurface(s.clone_for_evaluation()),
         };
-        Ok(Self {
+        Self {
             kind,
             owner: self.owner,
             owner_chain_face: self.owner_chain_face,
-            owner_zone_tol_3d: self.owner_zone_tol_3d,
-        })
+        }
     }
 }
 
@@ -1762,23 +1726,34 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the kind's override (the base default is `SM_ERR`).
+    /// Those of the kind's override (the base default is `SM_ERR`), including
+    /// `InvalidInput` if a volume append would exceed 64 whole-geometry levels.
     pub fn transform(
         &mut self,
         k: &Kernel,
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
+        self.transform_at_depth(k, rotate_n_move, scale, 0)
+    }
+
+    /// Carry geometry depth through only the branches the native transform visits.
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::Cone(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::Sphere(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::Torus(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::SurfOfRevolution(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::SurfOfExtrusion(s) => s.transform(k, rotate_n_move, scale),
+            SurfaceKind::SurfOfRevolution(s) => {
+                s.transform_at_depth(k, rotate_n_move, scale, depth)
+            }
             SurfaceKind::BSpline(s) => s.transform(rotate_n_move, scale),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
-            SurfaceKind::OffsetSurface(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::SrfInVolume(s) => s.transform(rotate_n_move, scale),
+            SurfaceKind::OffsetSurface(s) => s.transform_at_depth(k, rotate_n_move, scale, depth),
+            SurfaceKind::SrfInVolume(s) => s.transform_at_depth(rotate_n_move, scale, depth),
             SurfaceKind::Plane(s) => s.transform(k, rotate_n_move, scale),
         }
     }
@@ -5605,6 +5580,44 @@ mod tests {
             .unwrap(),
         );
         assert!(surface.clone_for_evaluation().is_err());
+    }
+
+    #[test]
+    fn curve_on_surface_rejects_surface_depth_before_domain_and_owned_copy() {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        let k = Kernel::default();
+        let mut surface = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+        for _ in 0..63 {
+            surface = Surface::from(StepSurface::new(surface, true));
+        }
+        assert!(surface.clone_for_evaluation().is_ok());
+        for owner_flag in 0..=3 {
+            assert!(matches!(
+                CrvOnSurf::new(
+                    &k,
+                    Curve::from(BSplineCurve::new(2)),
+                    surface.clone_for_evaluation().unwrap(),
+                    None,
+                    owner_flag,
+                ),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        assert!(matches!(
+            CrvOnSurf::from_uv_line(
+                &k,
+                Point2::new(0.0, 0.0),
+                Point2::new(1.0, 1.0),
+                surface.clone_for_evaluation().unwrap(),
+                None,
+                2,
+            ),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            CrvOnSurf::empty(Curve::from(BSplineCurve::new(2)), surface),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     /// An offset chain is walked into its base by the evaluation copy (and bounded).

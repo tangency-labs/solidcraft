@@ -4405,7 +4405,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn) -> Result<Vec<f64>, Fail> {
                 &k,
                 Point2::new(a[0], a[1]),
                 Point2::new(bb[0], bb[1]),
-                bs,
+                Surface::from(bs),
                 None,
                 0,
             )

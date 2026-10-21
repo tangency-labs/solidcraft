@@ -66,9 +66,7 @@
 //!   `SmSurface::DropPoint` / `LocalPointSolve` that reach `LocalPointSolve_1`
 //!   (`surface.surface_point_solve_p3`) return [`SolidError::Unported`];
 //!   `GlobalPointSolve` of a non-plane surface is `surface.surface_point_solve_p3`
-//!   inside. `SmCrvOnSurf` is
-//!   ported for B-spline base surfaces only (`curve.crv_on_surf`): a face on another
-//!   surface kind returns [`SolidError::Unported`] naming that unit.
+//!   inside.
 //! - **Recursion.** None: `EvaluateBinormal` calls `CreateUVTrimCurve` and
 //!   `CreateUVTrimCurve` calls `EvaluateBinormal` only with `bUse3DOnly = TRUE`, so
 //!   the depth is bounded by one level (as upstream comments).
@@ -94,7 +92,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::surface::surface::p2::{CreateUvTrimCurvePathType, DropCurveFail, DropCurveFailArgs};
 use crate::surface::surface::p4::NoObject;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1::{
     are_seam_curves, brep_handle, calc_dist_and_dev, delete_uv_trim_curve, drop_curve_fail, edge,
     faceuse, faceuse_face, max_edge_face_gap, orientation, primary_edgeuse, set_uv_trim_curve,
@@ -306,15 +304,13 @@ fn handle(kind: ObjectKind, index: u32) -> ObjectHandle {
 /// The length of the UV curve mapped through the surface (`SmCrvOnSurf::ApproximateLength`
 /// over the curve's natural interval with 5 samples).
 fn crv_on_surf_length(k: &Kernel, surface: &Surface, uv_curve: &Curve) -> Result<f64> {
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-        // partial; no UNPORTED marker: the ported CrvOnSurf holds an SmBSplineSurface)
-        return Err(SolidError::unported(
-            "SmSurface (non-B-spline) in SmCrvOnSurf",
-            "curve.crv_on_surf",
-        ));
-    };
-    let cos = CrvOnSurf::new(k, uv_curve.clone(), bs.clone(), None, 0)?;
+    let cos = CrvOnSurf::new(
+        k,
+        uv_curve.clone_for_evaluation()?,
+        surface.clone_for_evaluation()?,
+        None,
+        0,
+    )?;
     let ivl = uv_curve.natural_interval();
     Ok(Curve::from(cos).approximate_length(k, &ivl, 5, false)?.0)
 }
@@ -377,14 +373,16 @@ pub fn create_uv_trim_curve(
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
-        .clone()
-        .ok_or_else(|| null("CreateUVTrimCurve: face without surface"))?;
+        .as_ref()
+        .ok_or_else(|| null("CreateUVTrimCurve: face without surface"))?
+        .clone_for_evaluation()?;
     let face_domain = face_rec.uv_domain;
     let edge_rec = b.edge(e)?;
     let curve = edge_rec
         .curve
-        .clone()
-        .ok_or_else(|| null("CreateUVTrimCurve: edge without curve"))?;
+        .as_ref()
+        .ok_or_else(|| null("CreateUVTrimCurve: edge without curve"))?
+        .clone_for_evaluation()?;
     let mut edge_domain = edge_rec.interval;
     let uv_trim_at_start = uv_trim_curve(b, eu)?.0.is_some();
     let surface_handle = handle(ObjectKind::Surface, f.index());
@@ -400,10 +398,10 @@ pub fn create_uv_trim_curve(
     let mut have_curves = false;
 
     if let CurveKind::CrvOnSurf(cos) = curve.kind() {
-        let base = Surface::from(cos.surface().clone());
+        let base = cos.surface();
         // `pSurface == base || *pSurface == *base` (identity is lost in the port: value
         // equality only) && same orientation as the primary edge use
-        if face_surface.approx_eq(k, &base)?
+        if face_surface.approx_eq(k, base)?
             && orientation(b, eu)?
                 == orientation(
                     b,

@@ -1874,15 +1874,14 @@ impl Surface {
     /// per segment between the surface's C0 knot lines (unless
     /// `skip_continuity_checks`) and joined into one curve.
     ///
-    /// Dispatch: `GetKnots` of the surface's own kind; the curve on surface holds a
-    /// B-spline surface.
+    /// Dispatch: `GetKnots` of the surface's own kind; the curve on surface preserves
+    /// that concrete surface dispatch.
     ///
     /// # Errors
     ///
     /// `SM_ERR` when no segment could be lifted or a segment's continuous domain is
     /// empty; `SM_ERR_NULL_POINTER` without a surface cache; those of the checked
-    /// (`SER`) calls; [`SolidError::Unported`] for a curve on a surface that is not a
-    /// B-spline (`SmCrvOnSurf` holds an `SmBSplineSurface` here).
+    /// (`SER`) calls.
     #[allow(clippy::too_many_lines)]
     pub fn lift_curve(
         &self,
@@ -2047,29 +2046,7 @@ impl Surface {
             }
         }
 
-        let bss = match self.kind() {
-            SurfaceKind::BSpline(b) => b,
-            SurfaceKind::Cone(_)
-            | SurfaceKind::Sphere(_)
-            | SurfaceKind::Torus(_)
-            | SurfaceKind::Plane(_)
-            | SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-            | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::SrfInVolume(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::OffsetSurface(_) => {
-                // DISPATCH GAP: SmCrvOnSurf over a surface that is not a B-spline (the
-                // ported CrvOnSurf holds an SmBSplineSurface and would drop the kind's
-                // evaluation overrides). SmCrvOnSurf is ported, so this is a dispatch gap
-                // rather than a missing unit; the marker keeps it greppable.
-                // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)
-                return Err(SolidError::unported(
-                    "SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)",
-                    "curve.crv_on_surf",
-                ));
-            }
-        };
+        let surface = self.clone_for_evaluation()?;
 
         let mut curves_3d: Vec<Curve> = Vec::new();
 
@@ -2118,7 +2095,13 @@ impl Surface {
             }
 
             // define 3DCurve = SmCrvOnSurf(segment, thisSurface)
-            let mut trace = CrvOnSurf::new(k, uv_curve.clone(), bss.copy(), Some(seg_domain), 0)?;
+            let mut trace = CrvOnSurf::new(
+                k,
+                uv_curve.clone_for_evaluation()?,
+                surface.clone_for_evaluation()?,
+                Some(seg_domain),
+                0,
+            )?;
 
             // Check for degenerate curve segment (SER: checked)
             let pnt1 = trace.evaluate_point(k, ivl.min())?;

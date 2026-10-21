@@ -47,7 +47,7 @@ use solidcore::intersect::curve_class::{
 use solidcore::intersect::point_class::{ClassObjectKind, PointClassType, PointClassification};
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Vec3};
-use solidcore::surface::surface::SurfaceKind;
+
 use solidcore_ffi::units::intersect_curve_class_p1::kind;
 use solidcore_ffi::units::intersect_curve_class_p2::{self as ffi, op};
 
@@ -363,10 +363,8 @@ fn build_all(k: &Kernel, s: &Script) -> Result<Pool, Fail> {
     for [uv, sf] in &s.cos {
         let uv_curve = pool.curve_at(Some(*uv))?.ok_or_else(|| harness("no uv curve"))?.clone();
         let surface = pool.surface_at(Some(*sf))?.ok_or_else(|| harness("no surface"))?;
-        let SurfaceKind::BSpline(bs) = surface.kind() else {
-            return Err(harness("curve on a surface that is not a B-spline").into());
-        };
-        let c = must(CrvOnSurf::new(k, uv_curve, bs.clone(), None, 0))?;
+
+        let c = must(CrvOnSurf::new(k, uv_curve, surface.clone(), None, 0))?;
         let i = pool.objs.len();
         pool.objs.push(PoolObj::Curve(Curve::from(c)));
         pool.handles.push(H(i, ClassObjectKind::Curve));

@@ -52,10 +52,8 @@
 //!   own deferred callees remain) and
 //!   `SmVertex::SetTolerance` (unit `topology.vertex`, reached through
 //!   `SmEdge::SetTolerance`) return [`SolidError::Unported`].
-//!   `SmCrvOnSurf` is ported for B-spline base surfaces only (unit `curve.crv_on_surf`,
-//!   partial): on a face of another surface kind `CheckAndSetUVTrimCurve` returns
-//!   [`SolidError::Unported`] naming that unit (a dispatch gap, as in
-//!   `intersect::curve_class::p1`).
+//!   `SmCrvOnSurf` preserves the face surface's concrete dispatch in
+//!   `CheckAndSetUVTrimCurve`.
 //! - **Notification.** [`notify`] runs the edge use's own part and then
 //!   [`topo::notify`] (`SmTopology::Notify`) with the caller's records, attribute
 //!   store and context; it propagates errors upstream does not report (`Notify`
@@ -77,7 +75,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::DropCurveFail;
 use crate::surface::surface::p7::drop_points_to_tangent_plane;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1::{
     brep_handle, drop_curve_fail, edge, edge_brep, edge_is_lamina, face, faceuse, mate, radial,
     set_uv_trim_curve, uv_trim_curve, FindStepOff, UvTrimCurveArg,
@@ -648,7 +646,6 @@ pub fn check_and_set_uv_trim_curve(
     };
 
     // attach pUVTrimCurve to this Edgeuse (FALSE = don't delete existing UVTrimCurve)
-    let uv_copy = uv_trim_curve_in.clone();
     let old_uv_trim_curve = set_uv_trim_curve(
         b,
         eu,
@@ -657,6 +654,10 @@ pub fn check_and_set_uv_trim_curve(
         false,
         opt_drop_curve_fail,
     )?;
+    let uv_copy = uv_trim_curve(b, eu)?
+        .0
+        .ok_or_else(|| null("CheckAndSetUVTrimCurve: attached curve missing"))?
+        .clone_for_evaluation()?;
 
     // define the 3D curve for the UVCurve projected through the Surface
     let surface = b
@@ -664,16 +665,7 @@ pub fn check_and_set_uv_trim_curve(
         .surface
         .as_ref()
         .ok_or_else(|| null("CheckAndSetUVTrimCurve: face without surface"))?;
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-        // partial; no UNPORTED marker: the ported CrvOnSurf holds an SmBSplineSurface,
-        // not any Surface, as recorded in curve/crv_on_surf.rs and plan/findings.md)
-        return Err(SolidError::unported(
-            "SmSurface (non-B-spline) in SmCrvOnSurf",
-            "curve.crv_on_surf",
-        ));
-    };
-    let map_3d = CrvOnSurf::new(k, uv_copy, bs.clone(), None, 0)?;
+    let map_3d = CrvOnSurf::new(k, uv_copy, surface.clone_for_evaluation()?, None, 0)?;
     let natural = map_3d.natural_interval();
     let map_3d = Curve::from(map_3d);
     let edge_rec = b.edge(e)?;

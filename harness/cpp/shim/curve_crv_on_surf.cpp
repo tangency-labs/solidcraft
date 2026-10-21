@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `curve.crv_on_surf`: the SmCrvOnSurf members owned by the unit
 // (source/SMLib/src/SmCrvOnSurf.cpp, source/SMLib/inc/SmCrvOnSurf.h), called on objects
-// built from a 2D SmBSplineCurve UV curve (or the UV-line constructor) on an
-// SmBSplineSurface.
+// built from a 2D SmBSplineCurve UV curve (or the UV-line constructor) over a
+// SmBSplineSurface or an SmOffsetSurface wrapping one.
 //
 // One entry point, sc_curve_crv_on_surf_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/curve_crv_on_surf.rs, which validates every
@@ -19,6 +19,7 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
+#include <SmOffsetSurface.h>
 #include <SmCrvOnSurf.h>
 #include <SmCurve.h>
 #include <SmCurveTypes.h>
@@ -68,6 +69,7 @@ enum : int32_t
     OP_DROP = 18,
     OP_GAP = 19,
     OP_STATE = 20,
+    OP_COPY_EVAL = 21,
     OP_READ_DB = 40,
     OP_WRITE_DB = 41,
 };
@@ -107,6 +109,14 @@ struct Peek : public SmCrvOnSurf
     static SmBoolean matches(const SmCrvOnSurf* p)
     {
         return ((const Peek*)p)->m_bParametrizationMatches;
+    }
+};
+
+struct OffsetPeek : public SmOffsetSurface
+{
+    static SmBoolean owns_base(const SmOffsetSurface* p)
+    {
+        return ((const OffsetPeek*)p)->m_bOwnsSurface;
     }
 };
 
@@ -193,6 +203,17 @@ void put_curve(std::vector<double>& o, const SmCurve* c)
 
 void put_surface(std::vector<double>& o, const SmSurface* s)
 {
+    o.push_back((double)s->GetType());
+    if (s->GetType() == SmOffsetSurface_TYPE)
+    {
+        const SmOffsetSurface* off = (const SmOffsetSurface*)s;
+        o.push_back(off->GetOffsetDistance());
+        o.push_back(flg(OffsetPeek::owns_base(off)));
+        put_surface(o, off->GetBaseSurface());
+        return;
+    }
+    if (s->GetType() != SmBSplineSurface_TYPE)
+        return;
     const SmBSplineSurface* b = (const SmBSplineSurface*)s;
     const gw_SURFACE* sur = b->GetGwNurbPointer();
     if (sur == NULL)
@@ -218,7 +239,9 @@ void put_surface(std::vector<double>& o, const SmSurface* s)
         o.push_back(sur->knv->U[i]);
 }
 
-// State: owner domain(4) need nb B[nb] gap matches has_approx [approx nurb] uv curve surface.
+// State: owner domain(4) need nb B[nb] gap matches has_approx [approx nurb], UV curve,
+// then a recursive surface state (`type [n m cpts u v]` or
+// `type distance owns_base base`).
 void put_state(std::vector<double>& o, const SmCrvOnSurf* c)
 {
     o.push_back((double)Peek::owner(c));
@@ -246,19 +269,31 @@ void put_state(std::vector<double>& o, const SmCrvOnSurf* c)
 struct Built
 {
     SmCurve* uv = NULL; // NULL for the UV-line constructor (the object owns its line)
-    SmBSplineSurface* srf = NULL;
+    gw_CURVE* borrowed_uv_nurb = NULL;
+    SmSurface* srf = NULL;
+    SmBSplineSurface* base_srf = NULL;
+    gw_SURFACE* borrowed_nurb = NULL;
+    bool offset_owns_base = false;
     ScCos* cos = NULL;
 };
 
-// Block: uv kind (0: n p m cpts knots, a 2D SmBSplineCurve; 1: x0 y0 x1 y1, the UV-line
-// constructor), surface, has_domain [umin vmin umax vmax], owner, has_cache [need nb B].
+// Block: uv kind (0: borrow_uv_nurb n p m cpts knots, a 2D SmBSplineCurve;
+// 1: x0 y0 x1 y1, the UV-line constructor), is_offset, borrow_surface_nurb, base surface,
+// offset distance and ownership when wrapped, has_domain [umin vmin umax vmax], owner,
+// has_cache [need nb B].
 Built read_cos(Rd& rd, const SmContext& ctx)
 {
     Built b;
     int64_t kind = rd.idx();
     SmPoint2d p0, p1;
     if (kind == 0)
-        b.uv = new (ctx) SmBSplineCurve(read_nurb_curve(rd), 2, FALSE);
+    {
+        const bool borrow_uv_nurb = rd.flag();
+        gw_CURVE* uv_nurb = read_nurb_curve(rd);
+        if (borrow_uv_nurb)
+            b.borrowed_uv_nurb = uv_nurb;
+        b.uv = new (ctx) SmBSplineCurve(uv_nurb, 2, borrow_uv_nurb ? TRUE : FALSE);
+    }
     else
     {
         double x0 = rd.num();
@@ -268,7 +303,20 @@ Built read_cos(Rd& rd, const SmContext& ctx)
         p0.Set(x0, y0);
         p1.Set(x1, y1);
     }
-    b.srf = new (ctx) SmBSplineSurface(read_nurb_surface(rd), FALSE, NULL);
+    bool is_offset = rd.flag();
+    const bool borrow_nurb = rd.flag();
+    gw_SURFACE* nurb = read_nurb_surface(rd);
+    if (borrow_nurb)
+        b.borrowed_nurb = nurb;
+    b.base_srf = new (ctx) SmBSplineSurface(nurb, borrow_nurb ? TRUE : FALSE, NULL);
+    b.srf = b.base_srf;
+    if (is_offset)
+    {
+        const double distance = rd.num();
+        b.offset_owns_base = rd.flag();
+        b.srf = new (ctx)
+            SmOffsetSurface(distance, *b.base_srf, b.offset_owns_base ? TRUE : FALSE);
+    }
     bool has_dom = rd.flag();
     double d0 = rd.num();
     double d1 = rd.num();
@@ -292,7 +340,9 @@ Built read_cos(Rd& rd, const SmContext& ctx)
     return b;
 }
 
-// Frees the shim's parts the object does not delete itself, then the object.
+// Frees the shim's parts the object does not delete itself, then the object. A wrapped
+// offset either owns its B-spline base or borrows it until the wrapper is gone.
+// Raw borrowed UV and surface NURBs outlive every referencing object and temporary copy.
 void free_cos(Built& b)
 {
     const SmCurve* cu = b.cos->GetUVCurve();
@@ -300,9 +350,19 @@ void free_cos(Built& b)
     ULONG owner = Peek::owner(b.cos);
     if (b.uv != NULL && !(cu == b.uv && owner > 0))
         delete b.uv;
-    if (!(cs == b.srf && owner > 1))
+    if (cs == b.srf && owner > 1)
+        delete b.cos;
+    else
+    {
         delete b.srf;
-    delete b.cos;
+        delete b.cos;
+    }
+    if (b.base_srf != b.srf && !b.offset_owns_base)
+        delete b.base_srf;
+    if (b.borrowed_nurb != NULL)
+        smos_Free(b.borrowed_nurb);
+    if (b.borrowed_uv_nurb != NULL)
+        smos_Free(b.borrowed_uv_nurb);
 }
 
 // Deletes a copy made by the copy constructor, with the parts it does not delete itself.
@@ -351,6 +411,29 @@ void cos_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
     {
         o.push_back(0.0);
         put_state(o, c);
+        break;
+    }
+    case OP_COPY_EVAL:
+    {
+        const double t = rd.num();
+        const ULONG n = (ULONG)rd.idx();
+        const bool left = rd.flag();
+        const bool nz = rd.flag();
+        SmCurve* copy = NULL;
+        SmStatus s = c->Copy(ctx, copy);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            SmCrvOnSurf* cp = (SmCrvOnSurf*)copy;
+            put_state(o, cp);
+            std::vector<SmVector3d> v(n + 1);
+            s = cp->Evaluate(t, n, left ? TRUE : FALSE, v.data(), nz ? TRUE : FALSE);
+            o.push_back(st(s));
+            if (s == SM_SUCCESS)
+                for (ULONG i = 0; i <= n; i++)
+                    put_vec(o, v[i]);
+            free_copy(cp, c);
+        }
         break;
     }
     case OP_EVAL:

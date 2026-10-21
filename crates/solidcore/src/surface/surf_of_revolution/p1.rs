@@ -398,20 +398,17 @@ impl SurfOfRevolution {
     /// knots up, while upstream works on the original objects.
     #[must_use]
     pub fn clone_exact(&self) -> Self {
-        let mut copy = Self {
+        Self {
             base: self.base.clone_exact(),
-            ..self.clone()
-        };
-        if let (Some(dst), Some(src)) = (
-            copy.gen_curve.as_mut().and_then(gen_base_mut),
-            self.gen_curve.as_ref().and_then(|g| gen_base(g).ok()),
-        ) {
-            *dst = src.clone_exact();
+            gen_curve: self.gen_curve.as_ref().map(Curve::clone_exact_bounded),
+            make_nurb_gen_curve: self.make_nurb_gen_curve,
+            planar_generator: self.planar_generator,
+            position: self.position,
+            anal_uv_domain: self.anal_uv_domain,
+            swap_uv: self.swap_uv,
+            polar: self.polar.clone(),
+            polar_curve: self.polar_curve.as_ref().map(Ellipse::clone_exact_bounded),
         }
-        if let (Some(dst), Some(src)) = (copy.polar_curve.as_mut(), self.polar_curve.as_ref()) {
-            dst.base = src.base.clone_exact();
-        }
-        copy
     }
 
     // ---- construction ---------------------------------------------------------------

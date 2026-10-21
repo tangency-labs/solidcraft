@@ -34,7 +34,7 @@
 //! invalid-input error at its first insertion. Solutions passed to part 5 name the
 //! classification curve for its curve (and analytic replacement) and the temporary for
 //! the boundary (and its analytic replacement); collapsed ranges are copied back.
-//! Generic `CrvOnSurf` construction defers to `curve.crv_on_surf`.
+//! Curve-on-surface construction preserves concrete surface dispatch.
 //! No input-driven recursion: dimension forwarding dispatches once through shared helpers.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
@@ -258,18 +258,7 @@ fn pv(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
 }
 
 fn iso_curve(k: &Kernel, surface: &Surface, line: Line) -> Result<Curve> {
-    match surface.kind() {
-        SurfaceKind::BSpline(s) => {
-            Ok(CrvOnSurf::new(k, line.into(), s.clone_exact(), None, 0)?.into())
-        }
-        _ => {
-            // DISPATCH GAP (curve.crv_on_surf): CrvOnSurf stores only BSplineSurface.
-            Err(SolidError::unported(
-                "SmCrvOnSurf on a generic SmSurface",
-                "curve.crv_on_surf",
-            ))
-        }
-    }
+    Ok(CrvOnSurf::new(k, line.into(), surface.clone_for_evaluation()?, None, 0)?.into())
 }
 
 fn ends(knots: &[f64]) -> Result<(f64, f64)> {
@@ -366,7 +355,7 @@ impl<O: ClassObject> CurveClassification<O> {
         uv: bool,
     ) -> Result<()> {
         let mut detached = surface.clone_for_evaluation()?;
-        *detached.owner_mut() = None;
+        let _ = detached.set_owner(None);
         let surface = &detached;
         let curve = self.curve_geometry(geometry)?;
         let domain = surface.natural_uv_domain();
@@ -589,7 +578,7 @@ impl<O: ClassObject> CurveClassification<O> {
         uv: bool,
     ) -> Result<()> {
         let mut detached = surface.clone_for_evaluation()?;
-        *detached.owner_mut() = None;
+        let _ = detached.set_owner(None);
         let surface = &detached;
         let curve = self.curve_geometry(geometry)?;
         let domain = surface.natural_uv_domain();

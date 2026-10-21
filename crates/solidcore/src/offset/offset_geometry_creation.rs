@@ -49,9 +49,9 @@
 //!   [`ReplaceEdgeCurves`], the trim interval of `TrimExtendedEdge` as an `Option`,
 //!   the surface and self-intersections of `FaceuseOffset`). The `NotUsed`
 //!   parameters are kept.
-//! - **Deleted objects.** Upstream deletes the curves it does not keep; here the
-//!   handles simply stay unreferenced in the owner's store ([`ReplaceEdgeCurves`]
-//!   reports the `rbDelete*` flags).
+//! - **Deleted objects.** Geometry retained by handle stays in the owner's store
+//!   when upstream deletes it ([`ReplaceEdgeCurves`] reports the `rbDelete*` flags).
+//!   Trimmed UV and approximated offset-rail temporaries instead stay locally owned.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`:
 //!   `SmCircularCrossSectionFSG::CreateSurfaceFromCurves` is
@@ -61,10 +61,9 @@
 //!   through [`OffsetBrep`]), `SmBrep::MateLaminaEdgeToSurface` / `ReplaceSurface`
 //!   (`topology.brep_p2`, through [`OffsetBrep`]), `SmSurface::GlobalCurveIntersect` (`surface.surface_p8`) and
 //!   `SmSurface::CreateOffsetSurface` / the `SmOffsetSurface` constructor
-//!   (`surface.offset_surface`) are real calls. The offset-surface rail of
-//!   `EdgeuseOffset` defers at `SmCrvOnSurf` over that offset surface
-//!   (`UNPORTED(curve.crv_on_surf)`, main's label for the ported curve on surface
-//!   holding B-spline surfaces only).
+//!   (`surface.offset_surface`) are real calls. `EdgeuseOffset` approximates its
+//!   missing rails through [`crate::curve::crv_on_surf::CrvOnSurf`] on the actual
+//!   offset surface, retaining its concrete evaluation and supplied knot sequence.
 //! - `SM_CAST_PTR(SmOffsetSurface, ..)` on an analytic copy: an offset surface gets
 //!   `SetAllowExtension(FALSE)`, as upstream.
 //! - **Undefined behaviour upstream** (null objects dereferenced, a curve that is
@@ -769,44 +768,41 @@ fn surface_global_curve_intersect<O: ClassObject + SolutionObject>(
     )
 }
 
-/// `SmOffsetSurface sOffset(dSign * dist, *pSurface, FALSE)` followed by
-/// `SmCrvOnSurf sOffCurve(*pUVCurve, sOffset, NULL, 0, NULL)` and
-/// `sOffCurve.ApproximateCurve(ctx, sKnots, tol, dAchievedTol, pRail, TRUE, FALSE,
-/// FALSE)`: the rail curve made by approximating the offset of an edge use's UV trim
-/// curve. The offset surface is built (a base upstream shares is a copy here, see
-/// [`OffsetSurface::new`]); the curve on it is not: the ported `SmCrvOnSurf` holds a
-/// B-spline surface only, so the call defers at its constructor with main's label for
-/// that gap, and the approximation after it is reached once it is lifted.
+/// Approximates a trimmed UV curve on a temporary offset surface, as
+/// `SmCrvOnSurf::ApproximateCurve` in `EdgeuseOffset`. The opposite rail supplies
+/// the breaks when present; otherwise the UV curve supplies them. Both temporary
+/// curves stay owned here rather than being inserted into the caller's store.
 fn offset_surface_rail<O: ClassObject>(
     k: &Kernel,
-    brep: &mut impl OffsetBrep<O>,
+    geometry: &impl ClassGeometry<O>,
     surface: O,
-    uv_curve: O,
+    uv_curve: Curve,
     signed_distance: f64,
     owns_surface: bool,
-    knots: &[f64],
+    knots_source: Option<&BSplineCurve>,
     tol: f64,
     approximation: ApproximateCurveFlags,
-) -> Result<O> {
-    let base = surface_of(brep, surface)?.clone();
+) -> Result<BSplineCurve> {
+    let base = surface_of(geometry, surface)?.clone_for_evaluation()?;
     let offset = OffsetSurface::new(k, signed_distance, base, owns_surface, OFFSET_SS_UNKNOWN)?;
-    // (the arguments the curve on surface and its approximation will take)
-    let _ = (
-        offset,
+    let mut rail = crate::curve::crv_on_surf::CrvOnSurf::new(
+        k,
         uv_curve,
-        knots,
-        tol,
+        Surface::new(SurfaceKind::OffsetSurface(offset)),
+        None,
+        0,
+    )?;
+    let knots = match knots_source {
+        Some(curve) => curve.knots(None)?.0,
+        None => rail.uv_curve().knots(None)?.0,
+    };
+    // SmCrvOnSurf::ApproximateCurve explicitly ignores these two flags upstream.
+    let _ = (
         approximation.create_analytics,
-        approximation.match_parameterization,
         approximation.just_copy_b_splines,
     );
-    // DISPATCH GAP: SmCrvOnSurf over a surface that is not a B-spline (the ported
-    // CrvOnSurf holds an SmBSplineSurface).
-    // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)
-    Err(SolidError::unported(
-        "SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)",
-        "curve.crv_on_surf",
-    ))
+    rail.approximate_curve(k, &knots, tol, approximation.match_parameterization)
+        .map(|(curve, _)| curve)
 }
 
 /// The three trailing flags of `SmCurve::ApproximateCurve(.., bOptCreateAnalytics,
@@ -3138,7 +3134,6 @@ impl OffsetGeometryCreation {
                 .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
             let mut uv_copy = curve_of(brep, uv)?.copy(k)?;
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
-            let uv_h = store_curve(brep, uv_copy)?;
 
             // make an offset surface from origEU->Face->Surface
             let surface = brep
@@ -3153,34 +3148,22 @@ impl OffsetGeometryCreation {
                 -1.0
             };
 
-            // get OtherRailCurve knots (or UVCurve knots if unavailable)
-            let knots: Vec<f64> = match &rail2 {
-                Some(r2) => r2.knots(None)?.0,
-                None => {
-                    b_spline_part(curve_of(brep, uv_h)?)?
-                        .ok_or(dangling("UV trim curve is not a B-spline curve"))?
-                        .knots(None)?
-                        .0
-                }
-            };
-
             // let pRail1Curve = approximation of the 3dCurve on the offset surface
-            let h = offset_surface_rail(
+            rail1 = Some(offset_surface_rail(
                 k,
                 brep,
                 surface,
-                uv_h,
+                uv_copy,
                 sign * self.offset_distance,
                 false,
-                &knots,
+                rail2.as_ref(),
                 self.this_approx_tol_3d,
                 ApproximateCurveFlags {
                     create_analytics: true,
                     match_parameterization: false,
                     just_copy_b_splines: false,
                 },
-            )?;
-            rail1 = Some(b_spline_of(brep, h)?.ok_or(SolidError::null_pointer(OP_EDGEUSE))?);
+            )?);
         } // end not given an OffsetEdgeuse check
 
         // When not given an OtherOffsetEdgeuse - make a Rail2Curve by approximating OtherOrigEU->UVTrimCurve Offset
@@ -3190,7 +3173,6 @@ impl OffsetGeometryCreation {
                 .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
             let mut uv_copy = curve_of(brep, uv)?.copy(k)?;
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?;
-            let uv_h = store_curve(brep, uv_copy)?;
 
             let surface = brep
                 .face_surface(other_orig_face)?
@@ -3204,25 +3186,21 @@ impl OffsetGeometryCreation {
                 -1.0
             };
 
-            // get RailCurve knots
-            let knots: Vec<f64> = rail1.as_ref().ok_or(dangling("rail 1"))?.knots(None)?.0;
-
-            let h = offset_surface_rail(
+            rail2 = Some(offset_surface_rail(
                 k,
                 brep,
                 surface,
-                uv_h,
+                uv_copy,
                 sign * self.offset_distance,
                 false,
-                &knots,
+                Some(rail1.as_ref().ok_or(dangling("rail 1"))?),
                 self.this_approx_tol_3d,
                 ApproximateCurveFlags {
                     create_analytics: true,
                     match_parameterization: false,
                     just_copy_b_splines: false,
                 },
-            )?;
-            rail2 = Some(b_spline_of(brep, h)?.ok_or(SolidError::null_pointer(OP_EDGEUSE))?);
+            )?);
         } // end not given an OtherOffsetEdgeuse check
 
         // Make sure intervals of rail curves are the same

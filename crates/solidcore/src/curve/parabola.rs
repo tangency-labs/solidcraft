@@ -134,6 +134,18 @@ pub struct Parabola {
     focal_dist: f64,
 }
 
+impl Parabola {
+    /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            base: self.base.clone_exact(),
+            position: self.position,
+            anal_domain: self.anal_domain,
+            focal_dist: self.focal_dist,
+        }
+    }
+}
+
 /// `[max(min, -SM_INFINITE_PARAMETER_SQRT), min(max, SM_INFINITE_PARAMETER_SQRT)]`
 /// (`SetMinMax`, whose status is ignored).
 fn trim_infinite(domain: &mut Extent1d) {

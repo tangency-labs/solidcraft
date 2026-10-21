@@ -433,20 +433,6 @@ impl Volume {
         Some(map)
     }
 
-    /// Mutable [`Volume::last_map`].
-    fn last_map_mut(&mut self) -> Option<&mut Self> {
-        match self.next_map.as_deref_mut() {
-            None => None,
-            Some(next) => {
-                if next.next_map.is_some() {
-                    next.last_map_mut()
-                } else {
-                    Some(next)
-                }
-            }
-        }
-    }
-
     /// The orient map (`GetOrientMap`).
     #[must_use]
     pub const fn orient_map(&self) -> Option<&Transform> {
@@ -1115,8 +1101,19 @@ impl Volume {
     ///
     /// # Errors
     ///
-    /// Those of [`Volume::transform_simple`].
+    /// Those of [`Volume::transform_simple`]. Appending a map is refused when it
+    /// would exceed 64 geometry levels (including the enclosing curve/surface).
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        self.transform_at_depth(rotate_n_move, scale, 0)
+    }
+
+    /// Transform with this volume's depth in the enclosing geometry graph.
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        mut depth: usize,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -1125,13 +1122,23 @@ impl Volume {
             return Ok(());
         }
 
-        // save on m_pNextMap linked list length - try to build the Transform into
-        // the last NextMap
-        if let Some(last) = self.last_map_mut() {
-            return last.transform_simple(rotate_n_move, scale);
+        // Build into the terminal map, carrying its actual geometry depth. Only
+        // the fallback that appends a map consumes another level.
+        let mut last = self;
+        loop {
+            match last {
+                Self {
+                    next_map: Some(next),
+                    ..
+                } => {
+                    last = next;
+                    depth += 1;
+                }
+                terminal => {
+                    return terminal.transform_simple_at_depth(rotate_n_move, scale, depth);
+                }
+            }
         }
-        // build the Transform into this map
-        self.transform_simple(rotate_n_move, scale)
     }
 
     /// Mirrors the volume's final out-space image about the XY plane of
@@ -1400,10 +1407,20 @@ impl Volume {
     ///
     /// `SM_ERR` for a B-spline volume (its control points cannot be transformed
     /// without `USE_VOLUMES`; [`BSplineVolume::transform_simple`]).
+    /// [`SolidError::InvalidInput`] if appending would exceed 64 geometry levels.
     pub fn transform_simple(
         &mut self,
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
+    ) -> Result<()> {
+        self.transform_simple_at_depth(rotate_n_move, scale, 0)
+    }
+
+    fn transform_simple_at_depth(
+        &mut self,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        mut depth: usize,
     ) -> Result<()> {
         match &mut self.kind {
             VolumeKind::Transform(t) => {
@@ -1419,6 +1436,20 @@ impl Volume {
                 );
             }
             _ => {}
+        }
+        // Check at the actual growing branch, after the native Transform and
+        // BSpline overrides. TransformSimple can also be called on a compounded
+        // non-terminal map, whose append still goes at the end of the chain.
+        let mut last = &*self;
+        while let Some(next) = last.next_map() {
+            last = next;
+            depth += 1;
+        }
+        if depth >= 63 {
+            return Err(SolidError::invalid_input(
+                "surface::volume::p1::Volume::transform_simple",
+                "owned geometry nesting exceeds 64",
+            ));
         }
         // Create a Transform SmTransform to compound with current mapping
         let mut transform = Transform::IDENTITY;

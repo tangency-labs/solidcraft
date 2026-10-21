@@ -319,7 +319,17 @@ impl SurfOfRevolution {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
-        self.transform_using(k, rotate_n_move, scale, &Self::own_sweep_iso)
+        self.transform_at_depth(k, rotate_n_move, scale, 0)
+    }
+
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
+        self.transform_using_at_depth(k, rotate_n_move, scale, &Self::own_sweep_iso, depth)
     }
 
     /// [`Self::transform`] with the polar converter rebuilt from the sweep iso curves
@@ -331,6 +341,17 @@ impl SurfOfRevolution {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
         iso: SweepIsoFn<'_>,
+    ) -> Result<()> {
+        self.transform_using_at_depth(k, rotate_n_move, scale, iso, 0)
+    }
+
+    fn transform_using_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        iso: SweepIsoFn<'_>,
+        depth: usize,
     ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
@@ -365,7 +386,7 @@ impl SurfOfRevolution {
             .gen_curve
             .as_mut()
             .ok_or(SolidError::null_pointer(OP_GEN))?;
-        ignore_status(gen.transform(k, rotate_n_move, scale))?;
+        ignore_status(gen.transform_at_depth(k, rotate_n_move, scale, depth + 1))?;
 
         // apply transformation to underlying Nurb
         if self.base.nurb.is_some() {

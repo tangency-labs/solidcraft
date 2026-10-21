@@ -2112,17 +2112,14 @@ pub fn make_vertex_split_uv_trim_curve(
     // copy UVTrimCurve
     let mut new_uv_curve = uv_trim_curve.copy(k)?;
 
-    // make a 3dCurve from the UVTrimCurve (SmCrvOnSurf(*pNewUVCurve, *pSurface)): its
-    // point evaluation is the UV curve point lifted by the face surface; the Rust
-    // SmCrvOnSurf is built over a B-spline surface only, so the lift goes through the
-    // face surface itself and the local solve of the tessellation branch needs the
-    // B-spline one (DISPATCH GAP as curve.crv_on_surf elsewhere)
+    // make a 3dCurve from the UVTrimCurve (SmCrvOnSurf(*pNewUVCurve, *pSurface)):
+    // its point evaluation is the UV curve point lifted by the face surface.
     let edge_to_split = eu1::edge(b, eu_orig)?
         .ok_or_else(|| null("sm_MakeVertexSplitUVTrimCurve: edge use without edge"))?;
     let face = eu1::face(b, eu_orig)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER
     let surface = face2::surface(b, face)?
         .ok_or_else(|| SolidError::null_pointer(OP))?
-        .clone(); // NER
+        .clone_for_evaluation()?; // NER
     let lift = |t: f64| -> Result<Point3> {
         let p = new_uv_curve.evaluate_point(k, t)?;
         surface.evaluate_point(k, Point2::new(p.x, p.y))
@@ -2135,19 +2132,10 @@ pub fn make_vertex_split_uv_trim_curve(
     if p3d.distance(split_pnt) > edge::tolerance(b, edge_to_split)? / 100.0 {
         let mut reuse_trim_curve = false;
         if for_tesselation {
-            let SurfaceKind::BSpline(bs) = surface.kind() else {
-                // the port of SmCrvOnSurf takes a B-spline surface only: that partial
-                // unit's own unported part
-                // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::SmCrvOnSurf over a non-B-spline SmSurface
-                return Err(SolidError::unported(
-                    "SmSurface (non-B-spline) in SmCrvOnSurf",
-                    "curve.crv_on_surf",
-                ));
-            };
             let uv_3d_curve = Curve::from(CrvOnSurf::new(
                 k,
-                new_uv_curve.clone(),
-                bs.clone(),
+                new_uv_curve.clone_for_evaluation()?,
+                surface.clone_for_evaluation()?,
                 None,
                 0,
             )?);

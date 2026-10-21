@@ -91,8 +91,8 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::surface::surface::{Surface, SurfaceKind};
-use crate::topology::{edge, vertex, Brep, EdgeId, VertexId};
+use crate::surface::surface::Surface;
+use crate::topology::edge as topo_edge;
 
 use super::p1::{
     get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -1651,18 +1651,10 @@ fn crv_on_surf(k: &Kernel, uv_curve: &Curve, surface: Option<&Surface>) -> Resul
     let Some(surface) = surface else {
         return Err(SolidError::invalid_input(OP_COIN, "no surface 1"));
     };
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // UNPORTED(curve.crv_on_surf): SmCrvOnSurf over a non-B-spline surface (the
-        // Rust CrvOnSurf holds only B-spline surfaces)
-        return Err(SolidError::unported(
-            "SmCrvOnSurf (non-B-spline surface)",
-            "curve.crv_on_surf",
-        ));
-    };
     Ok(Curve::from(CrvOnSurf::new(
         k,
-        uv_curve.clone(),
-        bs.clone(),
+        uv_curve.clone_for_evaluation()?,
+        surface.clone_for_evaluation()?,
         None,
         0,
     )?))

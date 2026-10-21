@@ -39,25 +39,21 @@
 //! | `SetContext` (dropped)                          | `SetContext`                                   |
 //!
 //! Deviations:
-//! - **Surface.** `m_pSurface` is an `SmSurface*`; the only ported surface class is
-//!   [`BSplineSurface`], so the curve holds one, by value. The surface virtuals resolve
-//!   to its overrides (`GetNaturalUVDomain`, `Evaluate`, `EvaluatePoint`,
-//!   `operator==`, `Copy`, `Transform`); the base-class `SmSurface` methods it needs
-//!   (`EvaluateNormal`, `Evaluate2ndDerivatives`) are those of `surface::surface::p7`;
-//!   `ReadFromDB` reads the
-//!   surface through `SmSurface::ReadFromDB` ([`Surface::read_from_db`]), whose other
-//!   surface types are unported. The derivative lifts are those of
+//! - **Surface.** `m_pSurface` is an `SmSurface*`, held by value as a [`Surface`].
+//!   Its concrete virtual dispatch (`GetNaturalUVDomain`, `Evaluate`, `EvaluatePoint`,
+//!   `EvaluateNormal`, `Evaluate2ndDerivatives`, `operator==`, `Copy`, and
+//!   `Transform`) is retained. `ReadFromDB` reads through
+//!   [`Surface::read_from_db`]. The derivative lifts are those of
 //!   [`crate::surface::surface::p2`].
 //! - **Ownership.** The UV curve and the surface are held by value. Upstream shares or
 //!   owns (and maybe copies) them as the owner flag says; the flag is kept as data and
-//!   decides what upstream observes: the copies made for flags 1 and 2 (`Copy`, which
-//!   for a B-spline fixes up its knots), whether `Trim` and
-//!   `ReverseParameterization` are allowed, whether `Transform` moves the surface,
-//!   and the owner flag of a copy. The UV-line constructor copies the surface for
-//!   flag 2 and then discards the copy, as upstream. The copy constructor copies both
-//!   parts when it owns the curve (upstream shares the unowned parts; the geometry is
-//!   the same). Owner links (`SetOwner`), notifications (`Notify`) and contexts
-//!   (`SetContext`, the `SmContext` arguments) are not modelled.
+//!   decides what upstream observes: the copies made for flags 1 and 2 (`Copy`), whether
+//!   `Trim` and `ReverseParameterization` are allowed, whether `Transform` moves the
+//!   surface, and the owner flag of a copy. The UV-line constructor copies the surface
+//!   for flag 2 and then discards the copy, as upstream. The copy constructor copies both
+//!   parts when it owns the curve. Unowned parts and temporary `this` copies use
+//!   exact snapshots, retaining their NURBS data and owner chains; native owned
+//!   branches still use virtual `Copy`. Notifications and contexts are not modelled.
 //! - **Caches.** `GetKnots`, `GetOrCreateBSApproxPointer` and the `const` methods that
 //!   call them (`CalculateContinuities`, `GetNumberNaturalKnots`,
 //!   `CalculateBoundingBox`, `DropPoint`, `ApproximateCurve`) update the break and
@@ -75,6 +71,12 @@
 //!   `EvaluateSurfaceNormal` returns the UV point and tangent with the normal.
 //!   Derivatives `Evaluate` cannot compute (the surface gave fewer) are
 //!   [`Vec3::UNDEF`] (upstream leaves the caller's values).
+//! - **Requested derivative storage.** `Evaluate` accepts orders through 4096
+//!   (98,328 bytes of output), retaining zero derivatives above third order.
+//!   Larger requests return [`SolidError::InvalidInput`] after the bounded UV
+//!   and surface evaluations, preserving their error precedence. Upstream writes
+//!   into caller-owned storage without a bound; the port must bound allocation
+//!   and zero-filling work, well above the native fixture orders (at most six).
 //! - **Ignored statuses.** Where upstream ignores a status (`GetKnots` of the UV curve
 //!   and of this curve in `CalculateContinuities`, `GetNumberNaturalKnots`,
 //!   `GetOrCreateBSApproxPointer` and `SurfaceCurveMaxDistanceBetween`, the
@@ -100,10 +102,11 @@
 //!   `CreatePlaneProjection`, `FindContext`, `SetBaseSurface`, `SetUVDomain`,
 //!   `SetOwnerFlag`, `GetRootCurve`, `GetMemoryUsed`, `WriteToDB`, `Dump` and
 //!   `AssertValid` belong to other units or are out of scope.
-//! - **Derivative order bound.** `Evaluate` returns [`SolidError::InvalidInput`] when
-//!   `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`] (upstream fills a
-//!   caller-supplied array of any length; the port's output `Vec` must not be sized by
-//!   an unbounded caller value).
+//! - **Geometry depth.** Every construction path, including `empty`, database
+//!   loading and `set_uv_curve`, checks both children with the shared 64-level
+//!   geometry visitor before any recursive domain or copy operation. The children
+//!   are private and exposed only immutably, so infallible `Clone` and temporary
+//!   evaluation snapshots can safely copy this validated graph exactly.
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::{
@@ -125,13 +128,13 @@ use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest, BoundingBoxes};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
-use crate::surface::surface::p2::{Surface, SurfaceKind};
+use crate::surface::surface::p2::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType};
 
 const OP: &str = "curve::crv_on_surf::CrvOnSurf";
+const OP_EVAL: &str = "curve::crv_on_surf::CrvOnSurf::evaluate";
 const OP_KNOTS: &str = "curve::crv_on_surf::CrvOnSurf::knots";
 const OP_CONTS: &str = "curve::crv_on_surf::CrvOnSurf::calculate_continuities";
 const OP_APPROX: &str = "curve::crv_on_surf::CrvOnSurf::get_or_create_bs_approx";
@@ -139,6 +142,10 @@ const OP_READ: &str = "curve::crv_on_surf::CrvOnSurf::read_from_db";
 
 /// `MAX_DERIVS` of `Evaluate`: the surface lifts go up to third derivatives.
 const MAX_DERIVS: usize = 3;
+
+/// Requested output bound, not the computed order: at most 4097 `Vec3`s (96 KiB + 24).
+/// Unlike a fallible reserve alone, this also bounds successful zero-filling work.
+const MAX_REQUESTED_DERIVS: usize = 4096;
 
 /// `SM_APPROX_TOL_3D` (`SM_ZONE_TOL_3D / 2`): the default approximation tolerance of
 /// `GetOrCreateBSApproxPointer`.
@@ -149,77 +156,14 @@ pub const CONTINUITY_ANGLE: f64 = 0.5;
 
 // ---- back-edges ----------------------------------------------------------------------
 
-/// `SmSurface::EvaluateNormal(uv, from_left, from_left, normal)` (not overridden by
-/// `SmBSplineSurface`).
-fn surface_evaluate_normal(
-    k: &Kernel,
-    srf: &BSplineSurface,
-    uv: Point2,
-    from_left: bool,
-) -> Result<Vec3> {
-    let side = if from_left { Side::Left } else { Side::Right };
-    crate::surface::surface::p7::base_evaluate_normal(k, srf, uv, side, side)
-}
-
-/// The second derivatives of `SmSurface::Evaluate2ndDerivatives(uv, from_left,
-/// from_left, S, Su, Sv, Suv, Suu, Svv)`: `[S, Su, Sv, Suv, Suu, Svv]`.
-fn surface_evaluate_2nd_derivatives(
-    k: &Kernel,
-    srf: &BSplineSurface,
-    uv: Point2,
-    from_left: bool,
-) -> Result<[Vec3; 6]> {
-    let side = if from_left { Side::Left } else { Side::Right };
-    let d = crate::surface::surface::p1::evaluate_2nd_derivatives(k, srf, uv, side, side)?;
-    Ok([d.point, d.du, d.dv, d.duv, d.duu, d.dvv])
-}
-
-/// `SmSurface::ReadFromDB(type, db, .., version)`: the surface of the record (the
-/// only ported surface kind is the B-spline; the other types are unported in the
-/// reader).
+/// `SmSurface::ReadFromDB(type, db, .., version)`: the concrete surface of the record.
 fn surface_read_from_db(
     k: &Kernel,
     surface_type: i64,
     db: &mut DatabaseReader,
     version: u64,
-) -> Result<BSplineSurface> {
-    match Surface::read_from_db(k, surface_type, db, version)?.into_kind() {
-        SurfaceKind::BSpline(s) => Ok(s),
-        // DISPATCH GAP: the SmSurface virtuals (surface.surface_p1, ported; no UNPORTED
-        // marker: the ported SmCrvOnSurf holds an SmBSplineSurface here, not any Surface)
-        SurfaceKind::CurveBounded(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmCurveBoundedSurface",
-            "curve.crv_on_surf",
-        )),
-        SurfaceKind::Plane(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmPlane",
-            "curve.crv_on_surf",
-        )),
-        SurfaceKind::Step(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSTEPSurface",
-            "curve.crv_on_surf",
-        )),
-
-        SurfaceKind::Cone(_)
-        | SurfaceKind::Sphere(_)
-        | SurfaceKind::Torus(_)
-        | SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSurfOfRevolution",
-            "curve.crv_on_surf",
-        )),
-        SurfaceKind::SurfOfExtrusion(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSurfOfExtrusion",
-            "curve.crv_on_surf",
-        )),
-        SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmOffsetSurface",
-            "curve.crv_on_surf",
-        )),
-        SurfaceKind::SrfInVolume(_) => Err(SolidError::unported(
-            "SmSurface virtuals of an SmSrfInVolume",
-            "curve.crv_on_surf",
-        )),
-    }
+) -> Result<Surface> {
+    Surface::read_from_db(k, surface_type, db, version)
 }
 
 /// The parameter intervals of the `SmCurveClassification` of `curve` over `interval`
@@ -230,7 +174,7 @@ fn classify_against_surface(
     _curve: &Curve,
     _interval: &Extent1d,
     _tol: f64,
-    _surface: &BSplineSurface,
+    _surface: &Surface,
 ) -> Result<Vec<Extent1d>> {
     // The call is `intersect::curve_class::p8::uv_discontinuity_intervals(k, curve,
     // *interval, tol, &Surface::from(surface.clone()))`. It stays a stub because upstream
@@ -322,12 +266,12 @@ pub struct SurfaceNormalEval {
 /// curve `uv` and a surface `S`. Its "knots" are the UV curve's knots plus the
 /// parameters where it crosses the surface's knot lines (cached once computed); a
 /// B-spline approximation of the 3D curve is cached on demand.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CrvOnSurf {
     /// `m_pUVCurve`: the parameter-space curve (image dimension 2).
     uv_curve: Box<Curve>,
     /// `m_pSurface`: the base surface.
-    surface: Box<BSplineSurface>,
+    surface: Box<Surface>,
     /// `m_vUVDomain`: the domain of interest on the surface.
     uv_domain: Extent2d,
     /// `m_bNeedBreaks`: the break cache is not computed.
@@ -343,6 +287,23 @@ pub struct CrvOnSurf {
     max_gap_3d: f64,
     /// `m_bParametrizationMatches`: the approximation matches the parameterisation.
     parametrization_matches: bool,
+}
+
+impl Clone for CrvOnSurf {
+    fn clone(&self) -> Self {
+        // All factories and replacement paths validate the complete graph first.
+        Self {
+            uv_curve: Box::new(self.uv_curve.clone_exact_bounded()),
+            surface: Box::new(self.surface.clone_exact_bounded()),
+            uv_domain: self.uv_domain,
+            need_breaks: self.need_breaks,
+            breaks: self.breaks.clone(),
+            owner_flag: self.owner_flag,
+            bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
+            max_gap_3d: self.max_gap_3d,
+            parametrization_matches: self.parametrization_matches,
+        }
+    }
 }
 
 impl CrvOnSurf {
@@ -366,8 +327,10 @@ impl CrvOnSurf {
     pub const TYPE: i64 = CRV_ON_SURF_TYPE;
 
     /// The empty object of `ReadFromDB` (`SmCrvOnSurf()`), on the given parts.
-    fn bare(uv_curve: Curve, surface: BSplineSurface, owner_flag: u64) -> Self {
-        Self {
+    fn bare(uv_curve: Curve, surface: Surface, owner_flag: u64) -> Result<Self> {
+        Surface::check_curve_evaluation_copy_depth(&uv_curve, 1)?;
+        surface.check_evaluation_copy_depth(1)?;
+        Ok(Self {
             uv_curve: Box::new(uv_curve),
             surface: Box::new(surface),
             uv_domain: Extent2d::new(),
@@ -377,7 +340,7 @@ impl CrvOnSurf {
             bs_approx: None,
             max_gap_3d: BIG_DOUBLE,
             parametrization_matches: false,
-        }
+        })
     }
 
     /// The curve `uv_curve` on `surface` (the constructor, `SetAll`): the domain of
@@ -386,15 +349,17 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// Those of the UV curve's `Copy` (owner flags 1 and 2).
+    /// `InvalidInput` if the complete geometry would exceed 64 levels, checked
+    /// before querying the domain or copying either part; otherwise those of the
+    /// UV curve's `Copy` (owner flags 1 and 2) and surface's `Copy` (owner flag 2).
     pub fn new(
         k: &Kernel,
         uv_curve: Curve,
-        surface: BSplineSurface,
+        surface: Surface,
         uv_domain: Option<Extent2d>,
         owner_flag: u64,
     ) -> Result<Self> {
-        let mut c = Self::bare(uv_curve, surface, owner_flag);
+        let mut c = Self::bare(uv_curve, surface, owner_flag)?;
 
         // set m_vUVDomain
         c.uv_domain = match uv_domain {
@@ -409,7 +374,7 @@ impl CrvOnSurf {
 
         // m_lOwnerFlag 2: Copy Surface to be deleted when SmCrvOnSurf is destructed
         if owner_flag == 2 {
-            *c.surface = c.surface.copy();
+            *c.surface = c.surface.copy(k)?;
         }
         Ok(c)
     }
@@ -422,12 +387,12 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// `InvalidInput` when the two points coincide (upstream then dereferences a
-    /// null line).
+    /// null line), or the complete geometry would exceed 64 levels.
     pub fn from_uv_line(
         k: &Kernel,
         start_uv: Point2,
         end_uv: Point2,
-        surface: BSplineSurface,
+        surface: Surface,
         uv_domain: Option<Extent2d>,
         owner_flag: u64,
     ) -> Result<Self> {
@@ -453,8 +418,11 @@ impl CrvOnSurf {
 
     /// An empty object as `ReadFromDB` makes before reading (`SmCrvOnSurf()`), on the
     /// given parts: owner flag 0, the "inside out" domain, no caches.
-    #[must_use]
-    pub fn empty(uv_curve: Curve, surface: BSplineSurface) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` if the complete geometry would exceed 64 levels.
+    pub fn empty(uv_curve: Curve, surface: Surface) -> Result<Self> {
         Self::bare(uv_curve, surface, 0)
     }
 
@@ -474,15 +442,15 @@ impl CrvOnSurf {
         let uv_curve = if owns_curve {
             self.uv_curve.copy(k)?
         } else {
-            self.uv_curve.as_ref().clone()
+            self.uv_curve.clone_exact_bounded()
         };
         let surface = if owns_curve || owns_surface {
-            self.surface.copy()
+            self.surface.copy(k)?
         } else {
-            self.surface.as_ref().clone()
+            self.surface.clone_exact_bounded()
         };
 
-        let mut c = Self::bare(uv_curve, surface, 0);
+        let mut c = Self::bare(uv_curve, surface, 0)?;
         c.uv_domain = self.uv_domain;
         c.need_breaks = self.need_breaks;
 
@@ -516,7 +484,7 @@ impl CrvOnSurf {
 
     /// The base surface (`GetBaseSurface`).
     #[must_use]
-    pub fn surface(&self) -> &BSplineSurface {
+    pub fn surface(&self) -> &Surface {
         &self.surface
     }
 
@@ -570,8 +538,15 @@ impl CrvOnSurf {
     }
 
     /// Replaces the UV curve (`SetUVCurve`); the caches are kept, as upstream.
-    pub fn set_uv_curve(&mut self, uv_curve: Curve) {
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` if the replacement would exceed 64 geometry levels; leaves
+    /// the curve and its caches unchanged on failure.
+    pub fn set_uv_curve(&mut self, uv_curve: Curve) -> Result<()> {
+        Surface::check_curve_evaluation_copy_depth(&uv_curve, 1)?;
         *self.uv_curve = uv_curve;
+        Ok(())
     }
 
     /// `IsAnalytic`: never.
@@ -643,7 +618,7 @@ impl CrvOnSurf {
         // check equivalence of these objects
         let mut rtn = true;
         rtn &= self.uv_curve.approx_eq(k, &other.uv_curve)?;
-        rtn &= self.surface.approx_eq(&other.surface);
+        rtn &= self.surface.approx_eq(k, &other.surface)?;
         rtn &= self.uv_domain.are_same(&other.uv_domain);
         Ok(rtn)
     }
@@ -658,6 +633,7 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// Those of the UV curve's evaluation; the surface's last failure.
+    /// `InvalidInput` for requested orders above 4096, after those geometry errors.
     pub fn evaluate(
         &self,
         k: &Kernel,
@@ -689,7 +665,7 @@ impl CrvOnSurf {
         // Surface eval
         let mut srf = self
             .surface
-            .evaluate(uv, n_eval, n_eval, flags(non_zero_tangents));
+            .evaluate(k, uv, n_eval, n_eval, flags(non_zero_tangents));
 
         // If the surface can't handle this many derivatives (default bNonZeroTangents)
         while let Err(e) = &srf {
@@ -697,9 +673,19 @@ impl CrvOnSurf {
                 break;
             }
             n_eval -= 1;
-            srf = self.surface.evaluate(uv, n_eval, n_eval, flags(true));
+            srf = self.surface.evaluate(k, uv, n_eval, n_eval, flags(true));
         }
         let srf = srf?;
+
+        // The children only see orders <= 3. Check the requested output size after
+        // their native error paths, but before any caller-sized arithmetic/storage.
+        let output_len = num_derivs
+            .checked_add(1)
+            .filter(|&len| len <= MAX_REQUESTED_DERIVS + 1)
+            .ok_or(SolidError::InvalidInput {
+                operation: OP_EVAL,
+                reason: "requested derivative order exceeds 4096",
+            })?;
 
         // For subscripting into the surface pt/deriv array
         let ss = |u: usize, v: usize| {
@@ -709,7 +695,7 @@ impl CrvOnSurf {
                 .unwrap_or(Vec3::UNDEF)
         };
 
-        let mut out = vec![Vec3::UNDEF; num_derivs + 1];
+        let mut out = vec![Vec3::UNDEF; output_len];
         let mut put = |i: usize, v: Vec3| {
             if let Some(o) = out.get_mut(i) {
                 *o = v;
@@ -770,7 +756,7 @@ impl CrvOnSurf {
         let p = self.uv_curve.evaluate_point(k, t)?;
 
         // surface eval
-        self.surface.evaluate_point(Point2::new(p.x, p.y))
+        self.surface.evaluate_point(k, Point2::new(p.x, p.y))
     }
 
     /// The UV point at `t` (`EvaluateUVPoint`).
@@ -805,8 +791,9 @@ impl CrvOnSurf {
         let uv = Point2::new(p.x, p.y);
         let uv_tangent = Point2::new(d.x, d.y);
 
-        // Surface eval
-        let normal = surface_evaluate_normal(k, &self.surface, uv, from_left)?;
+        let normal = self
+            .surface
+            .evaluate_normal(k, uv, side(from_left), side(from_left))?;
         Ok(SurfaceNormalEval {
             uv,
             uv_tangent,
@@ -833,9 +820,9 @@ impl CrvOnSurf {
         let uv = Point2::new(p.x, p.y);
         let uvt = at(&crv, 1);
 
-        // Surface eval
-        let [_s, su, sv, suv, suu, svv] =
-            surface_evaluate_2nd_derivatives(k, &self.surface, uv, from_left)?;
+        let [_s, su, sv, suv, suu, svv] = self
+            .surface
+            .evaluate_2nd_derivatives(k, uv, from_left, from_left)?;
 
         // set outputs
         Ok((
@@ -1415,8 +1402,24 @@ impl CrvOnSurf {
     ///
     /// # Errors
     ///
-    /// Those of the surface's transform.
-    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+    /// Those of the surface's transform, including `InvalidInput` when a growing
+    /// volume map would exceed 64 whole-geometry levels. Earlier cache edits remain.
+    pub fn transform(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+    ) -> Result<()> {
+        self.transform_at_depth(k, rotate_n_move, scale, 0)
+    }
+
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -1436,7 +1439,8 @@ impl CrvOnSurf {
         }
 
         // pass the call along to the surface
-        self.surface.transform(rotate_n_move, scale)
+        self.surface
+            .transform_at_depth(k, rotate_n_move, scale, depth + 1)
     }
 
     // ---- gaps -----------------------------------------------------------------------
@@ -1465,7 +1469,7 @@ impl CrvOnSurf {
         // Evaluate surface point and normal at the given parameter.
         let sn = self.evaluate_surface_normal(k, param, true)?;
         let norm = sn.normal;
-        let surf_pt = self.surface.evaluate_point(sn.uv)?;
+        let surf_pt = self.surface.evaluate_point(k, sn.uv)?;
 
         // Find point on 3d curve that would drop here: Intersect it with Surface Pt/Normal.
         let line = Line::infinite(surf_pt, norm, 3, false);
@@ -1773,7 +1777,7 @@ impl CrvOnSurf {
         }
 
         // load obj
-        let mut c = Self::bare(uv_curve, surface, 2);
+        let mut c = Self::bare(uv_curve, surface, 2)?;
         // (SetMinMax's status is ignored: an inverted domain keeps the empty one)
         let _ = c.uv_domain.set_min_max(min, max);
         c.need_breaks = need_breaks;
@@ -1814,6 +1818,7 @@ impl CurveEvaluate for CrvOnSurf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
     /// A bilinear patch over `[0, 1]^2`: `S(u, v) = (u, v, u * v)`.
@@ -1843,9 +1848,329 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_request_bound_preserves_lifted_derivatives() {
+        use crate::surface::offset_surface::OffsetSurface;
+
+        let k = Kernel::default();
+        let surface = OffsetSurface::new(&k, 0.15, patch().into(), true, 0).unwrap();
+        let curve = CrvOnSurf::new(&k, uv(), surface.into(), None, 0).unwrap();
+        let expected = curve.evaluate(&k, 0.3, 3, true, false).unwrap();
+        for n in [0, 1, 2, 3, 4, 6, MAX_REQUESTED_DERIVS] {
+            let values = curve.evaluate(&k, 0.3, n, true, false).unwrap();
+            assert_eq!(values.len(), n + 1);
+            let computed = n.min(3) + 1;
+            assert_eq!(&values[..computed], &expected[..computed]);
+            assert!(values.iter().skip(4).all(|v| *v == Vec3::ZERO));
+        }
+        // Include every fuzzed giant order and the architecture's own maximum.
+        let excessive = [
+            (MAX_REQUESTED_DERIVS + 1) as u64,
+            2_147_483_648,
+            4_294_967_296,
+            9_223_372_036_854_775_807,
+        ];
+        for n in excessive
+            .into_iter()
+            .filter_map(|n| usize::try_from(n).ok())
+            .chain(std::iter::once(usize::MAX))
+        {
+            assert!(matches!(
+                curve.evaluate(&k, 0.3, n, true, false),
+                Err(SolidError::InvalidInput {
+                    operation: OP_EVAL,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn evaluate_excessive_request_preserves_uv_error_precedence() {
+        let k = Kernel::default();
+        let curve = CrvOnSurf::empty(BSplineCurve::new(2).into(), patch().into()).unwrap();
+        let expected = curve.evaluate(&k, 0.3, 3, true, false).unwrap_err();
+        assert_eq!(
+            curve
+                .evaluate(&k, 0.3, usize::MAX, true, false)
+                .unwrap_err(),
+            expected
+        );
+    }
+
+    #[test]
+    fn shared_surface_copies_preserve_the_face_owner_chain() {
+        use crate::geom::attribute::ObjectKey;
+        use crate::geom::object::ObjectRef;
+        use crate::surface::offset_surface::OffsetSurface;
+
+        let k = Kernel::default();
+        let face = ObjectRef {
+            type_code: crate::geom::assert_array::labels::FACE_TYPE,
+            key: ObjectKey(19),
+        };
+        let offset = OffsetSurface::new(&k, 0.15, patch().into(), true, 0).unwrap();
+        let mut surface = Surface::new(crate::surface::surface::SurfaceKind::OffsetSurface(offset));
+        surface.set_surface_owner(face, None);
+        let curve = CrvOnSurf::new(&k, uv(), surface, None, 0).unwrap();
+
+        for copy in [curve.copy(&k).unwrap(), curve.clone()] {
+            assert_eq!(copy.surface().reached_face(), Some(face));
+            let crate::surface::surface::SurfaceKind::OffsetSurface(offset) = copy.surface().kind()
+            else {
+                panic!("copy lost the concrete offset surface");
+            };
+            assert_eq!(offset.base_surface().reached_face(), Some(face));
+        }
+    }
+
+    #[test]
+    fn direct_curve_depth_boundary_rejects_construction_and_replacement() {
+        use crate::surface::plane::Plane;
+        let k = Kernel::default();
+        let plane = || Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+        let mut nested = uv();
+        for _ in 0..63 {
+            nested = Curve::from(CrvOnSurf::new(&k, nested, plane(), None, 0).unwrap());
+        }
+        let expected = nested.evaluate_point(&k, 0.25).unwrap();
+        assert_eq!(nested.clone().evaluate_point(&k, 0.25).unwrap(), expected);
+        assert_eq!(
+            nested.copy(&k).unwrap().evaluate_point(&k, 0.25).unwrap(),
+            expected
+        );
+        assert!(matches!(
+            CrvOnSurf::new(&k, nested.clone(), plane(), None, 0),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            CrvOnSurf::empty(nested.clone(), plane()),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let mut target = CrvOnSurf::new(&k, uv(), plane(), None, 0).unwrap();
+        target.set_breaks_cache(false, vec![0.0, 1.0]);
+        let before = target.evaluate_point(&k, 0.25).unwrap();
+        assert!(matches!(
+            target.set_uv_curve(nested),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(target.evaluate_point(&k, 0.25).unwrap(), before);
+        assert_eq!(target.breaks(), &[0.0, 1.0]);
+    }
+
+    /// Shared next maps retain the complete chain across native virtual copies.
+    fn volume_mapped_curve(
+        k: &Kernel,
+        tail: crate::surface::volume::Volume,
+        prefix_maps: usize,
+        offset: bool,
+    ) -> CrvOnSurf {
+        use crate::geom::transform::Transform;
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::plane::Plane;
+        use crate::surface::srf_in_volume::SrfInVolume;
+        use crate::surface::volume::{Volume, VolumeKind};
+
+        let mut volume = tail;
+        for _ in 0..prefix_maps {
+            let mut prefix = Volume::new(VolumeKind::Transform(Transform::IDENTITY));
+            prefix.add_next_map(volume, 0).unwrap();
+            volume = prefix;
+        }
+        let mut surface: Surface = SrfInVolume::new(
+            k,
+            Plane::from_normal(Vec3::ZERO, Vec3::Z).into(),
+            true,
+            volume,
+            0,
+            3,
+        )
+        .unwrap()
+        .into();
+        if offset {
+            surface = OffsetSurface::new(k, 0.125, surface, true, 0)
+                .unwrap()
+                .into();
+        }
+        CrvOnSurf::new(k, uv(), surface, None, 3).unwrap()
+    }
+
+    #[test]
+    fn transform_rejects_volume_growth_without_undoing_the_earlier_cache_edit() {
+        use crate::surface::twist_volume::TwistVolume;
+
+        let k = Kernel::default();
+        let translation = Vec3::new(2.0, -3.0, 4.0);
+        let motion = Axis2Placement::new(translation, Vec3::X, Vec3::Y);
+        // Exercise both direct SrfInVolume and the owned OffsetSurface path.
+        for offset in [false, true] {
+            let twist = TwistVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, 1e-6);
+            // Crv depth 0, surface depth 1 (+1 for an offset), volume tail 63.
+            let mut curve = volume_mapped_curve(&k, twist, 61 - usize::from(offset), offset);
+            let sample = 0.25;
+            let before = curve.evaluate(&k, sample, 1, true, false).unwrap();
+            curve
+                .transform(&k, &Axis2Placement::IDENTITY, None)
+                .unwrap();
+            assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
+            let approx = curve
+                .get_or_create_bs_approx(&k, 1e-5, Some(&[0.0, 1.0]), Some(true))
+                .unwrap();
+            let cached_before = approx.evaluate_point(sample).unwrap();
+            let gap = curve.bs_approx_max_gap_3d();
+            let breaks = curve.breaks().to_vec();
+
+            assert!(matches!(
+                curve.transform(&k, &motion, None),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            // The native cache edit precedes the failed surface transform.
+            let cached_after = curve.bs_approx().unwrap().evaluate_point(sample).unwrap();
+            assert!((cached_after - cached_before - translation).length() < 1e-12);
+            assert_eq!(curve.bs_approx_max_gap_3d(), gap);
+            assert_eq!(curve.breaks(), breaks);
+            assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
+            for copy in [curve.copy(&k).unwrap(), curve.clone()] {
+                assert_eq!(copy.evaluate(&k, sample, 1, true, false).unwrap(), before);
+                assert_eq!(
+                    copy.bs_approx().unwrap().evaluate_point(sample).unwrap(),
+                    cached_after
+                );
+            }
+            if offset {
+                // Offset's native nonuniform-scale refusal precedes reaching the
+                // full volume chain and must not become a depth refusal.
+                assert!(matches!(
+                    curve.transform(&k, &motion, Some(Vec3::new(2.0, 3.0, 4.0))),
+                    Err(SolidError::Upstream { code: 1001, .. })
+                ));
+                assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn boundary_transform_allows_absorption_and_an_append_with_one_level_left() {
+        use crate::geom::transform::Transform;
+        use crate::surface::twist_volume::TwistVolume;
+        use crate::surface::volume::{Volume, VolumeKind};
+
+        let k = Kernel::default();
+        let translation = Vec3::new(2.0, -3.0, 4.0);
+        let motion = Axis2Placement::new(translation, Vec3::X, Vec3::Y);
+        for offset in [false, true] {
+            let depth_adjustment = usize::from(offset);
+            let absorb = volume_mapped_curve(
+                &k,
+                Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
+                61 - depth_adjustment,
+                offset,
+            );
+            let append = volume_mapped_curve(
+                &k,
+                TwistVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 10.0, 1e-6),
+                60 - depth_adjustment,
+                offset,
+            );
+            for mut curve in [absorb, append] {
+                let sample = 0.25;
+                let before = curve.evaluate(&k, sample, 1, true, false).unwrap();
+                curve.transform(&k, &motion, None).unwrap();
+                let after = curve.evaluate(&k, sample, 1, true, false).unwrap();
+                assert!((after[0] - before[0] - translation).length() < 1e-12);
+                assert_eq!(after[1], before[1]);
+                for copy in [curve.copy(&k).unwrap(), curve.clone()] {
+                    assert_eq!(copy.evaluate(&k, sample, 1, true, false).unwrap(), after);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shared_close_knots_remain_exact_through_evaluation_and_approximation() {
+        use crate::nurbs::nurbs_srf::allocate_nurb_surface;
+        let k = Kernel::default();
+        let delta = 1.0e-9;
+        let sample = 0.75;
+        let mut raw = allocate_nurb_surface(2, 1, 1, 1, 4, 3).unwrap();
+        raw.u_knots_mut()
+            .copy_from_slice(&[0.0, 0.0, delta, 1.0, 1.0]);
+        raw.v_knots_mut().copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        for i in 0..3 {
+            for j in 0..2 {
+                let p = raw.cpt_mut(i, j).unwrap();
+                p.x = i as f64;
+                p.y = j as f64;
+                p.z = 0.0;
+                p.w = 1.0;
+            }
+        }
+        let surface = BSplineSurface::from_nurb(raw, true);
+        let direct = surface
+            .evaluate_point(Point2::new(delta * sample, 0.25))
+            .unwrap();
+        let normalized = surface
+            .copy()
+            .evaluate_point(Point2::new(delta * sample, 0.25))
+            .unwrap();
+        assert!((normalized - direct).length() > 0.5);
+        let mut raw_uv = allocate_nurb_curve(1, 1, 3).unwrap();
+        raw_uv.knots_mut().copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        for (p, u) in raw_uv.cpts_mut().iter_mut().zip([0.0, delta]) {
+            p.x = u;
+            p.y = 0.25;
+            p.z = f64::MAX;
+            p.w = -f64::MAX;
+        }
+        let mut curve = CrvOnSurf::new(
+            &k,
+            Curve::from(BSplineCurve::from_nurb(raw_uv, 2, false)),
+            surface.into(),
+            None,
+            0,
+        )
+        .unwrap();
+        for copy in [curve.copy(&k).unwrap(), curve.clone()] {
+            assert_eq!(copy.evaluate_point(&k, sample).unwrap(), direct);
+            assert_eq!(
+                copy.evaluate(&k, sample, 1, true, false).unwrap(),
+                curve.evaluate(&k, sample, 1, true, false).unwrap()
+            );
+        }
+        // Native owned Crv copies still call virtual Surface::copy; an offset
+        // with an unowned base must keep that base's original raw geometry.
+        for owner_flag in 1..=3 {
+            let offset = crate::surface::offset_surface::OffsetSurface::new(
+                &k,
+                0.15,
+                curve.surface().clone_for_evaluation().unwrap(),
+                false,
+                0,
+            )
+            .unwrap();
+            let owned = CrvOnSurf::new(
+                &k,
+                curve.uv_curve().clone_exact_bounded(),
+                offset.into(),
+                None,
+                owner_flag,
+            )
+            .unwrap();
+            let expected = direct + Vec3::Z * 0.15;
+            for copy in [owned.clone(), owned.copy(&k).unwrap()] {
+                assert!((copy.evaluate_point(&k, sample).unwrap() - expected).length() < 1e-12);
+            }
+        }
+        let (approximation, gap) = curve
+            .approximate_curve(&k, &[0.0, 1.0], 1e-6, true)
+            .unwrap();
+        assert!(gap <= 1e-6);
+        assert!((approximation.evaluate_point(sample).unwrap() - direct).length() <= 1e-6);
+    }
+
+    #[test]
     fn construct_and_query() {
         let k = &Kernel::default();
-        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 1).unwrap();
+        let c = CrvOnSurf::new(k, uv(), patch().into(), None, 1).unwrap();
         assert_eq!(c.owner_flag(), 1);
         assert!(c.need_breaks());
         assert!(c.is_kind_of(CrvOnSurf::TYPE) && c.is_kind_of(crate::curve::curve::p2::TYPE));
@@ -1858,7 +2183,7 @@ mod tests {
             &Kernel::default(),
             Point2::new(0.0, 0.0),
             Point2::new(1.0, 1.0),
-            patch(),
+            patch().into(),
             None,
             7,
         )
@@ -1883,7 +2208,7 @@ mod tests {
     #[test]
     fn evaluate_lifts_derivatives() {
         let k = &Kernel::default();
-        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
+        let c = CrvOnSurf::new(k, uv(), patch().into(), None, 0).unwrap();
         let d = c.evaluate(k, 0.3, 5, true, false).unwrap();
         assert_eq!(d.len(), 6);
         let p = c.evaluate_point(k, 0.3).unwrap();
@@ -1900,11 +2225,8 @@ mod tests {
     #[test]
     fn cached_knots_and_edits() {
         let k = Kernel::default();
-        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
-        assert!(matches!(
-            c.knots(&k, None),
-            Err(SolidError::Unported { .. })
-        ));
+        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch().into(), None, 0).unwrap();
+        assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
         c.set_breaks_cache(false, vec![0.0, 0.25, 1.0]);
         let (kn, m) = c.knots(&k, None).unwrap();
         assert_eq!(kn, vec![0.0, 0.25, 1.0]);
@@ -1925,7 +2247,7 @@ mod tests {
 
     #[test]
     fn approximation_cache() {
-        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 1).unwrap();
+        let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch().into(), None, 1).unwrap();
         let (bs, gap) = c
             .approximate_curve(&Kernel::default(), &[0.0, 1.0], 1e-6, false)
             .unwrap();
@@ -1967,5 +2289,25 @@ mod tests {
         let text = "0 0 1 1 SmCrvOnSurf Domain of interest \n1 SmCrvOnSurf Has breaks flag \n";
         let mut db = DatabaseReader::with_stream(FileType::Ascii, InputStream::new(text.into()));
         assert!(CrvOnSurf::read_from_db(&Kernel::default(), &mut db, 0).is_err());
+    }
+
+    #[test]
+    fn offset_approximation_keeps_duplicate_supplied_breaks_and_reuses_the_cache() {
+        use crate::surface::offset_surface::OffsetSurface;
+
+        let k = Kernel::default();
+        let surface = OffsetSurface::new(&k, -0.1, patch().into(), true, 0).unwrap();
+        let mut curve = CrvOnSurf::new(&k, uv(), surface.into(), None, 0).unwrap();
+        let breaks = [0.0, 0.5, 0.5, 1.0];
+        let (approximation, gap) = curve.approximate_curve(&k, &breaks, 1e-4, true).unwrap();
+        assert_eq!(curve.breaks(), &breaks);
+        let point = approximation.evaluate_point(0.4).unwrap();
+        assert!(point.distance(curve.evaluate_point(&k, 0.4).unwrap()) <= 1e-4);
+        let reused = curve
+            .get_or_create_bs_approx(&k, gap, Some(&breaks), Some(true))
+            .unwrap();
+        assert_eq!(reused.evaluate_point(0.4).unwrap(), point);
+        assert_eq!(curve.bs_approx_max_gap_3d(), gap);
+        assert_eq!(curve.breaks(), &breaks);
     }
 }

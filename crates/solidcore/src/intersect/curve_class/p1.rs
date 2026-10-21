@@ -123,12 +123,10 @@
 //!   `AssertValid` and `Draw` are not reachable from the in-scope entry points.
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: every
 //!   topology member (`SmEdge`, `SmVertex`, `SmFace`, `SmEdgeuse`), the surface point
-//!   solves (`surface.surface_p4`, `surface.surface_p5`), the 3D-curve
-//!   branch of `SmTol::MapTo2d(.., SmCurve, SmSurface)` (`SmSurface::DropPoint`,
+//!   solves (`surface.surface_p4`, `surface.surface_p5`), and the 3D-curve branch of
+//!   `SmTol::MapTo2d(.., SmCurve, SmSurface)` (`SmSurface::DropPoint`,
 //!   `surface.surface_p5`; its UV-curve branch is co-ported as
-//!   [`map_to_2d_on_curve`]), and an `SmCrvOnSurf` over a
-//!   surface that is not a B-spline (a dispatch gap of `curve.crv_on_surf`, whose
-//!   `CrvOnSurf` holds only an `SmBSplineSurface`).
+//!   [`map_to_2d_on_curve`]).
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -1979,9 +1977,7 @@ pub fn get_curve_curve_angle(
 ///
 /// # Errors
 ///
-/// Those of the 3D intersection and distance computations;
-/// [`SolidError::Unported`] for a surface that is not a B-spline surface (the ported
-/// `SmCrvOnSurf` holds only an `SmBSplineSurface`, unit `curve.crv_on_surf`).
+/// Those of the 3D intersection and distance computations.
 pub fn cull_or_refine_cci_in_3d<S: SolutionObject>(
     k: &Kernel,
     surface: &Surface,
@@ -1993,16 +1989,13 @@ pub fn cull_or_refine_cci_in_3d<S: SolutionObject>(
     solutions: &mut SolutionArray<S>,
 ) -> Result<()> {
     // project UVCurve into 3d space
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-        // partial; no UNPORTED marker: the ported CrvOnSurf holds an SmBSplineSurface,
-        // not any Surface, as recorded in curve/crv_on_surf.rs and plan/findings.md)
-        return Err(SolidError::unported(
-            "SmSurface (non-B-spline) in SmCrvOnSurf",
-            "curve.crv_on_surf",
-        ));
-    };
-    let curve_1 = Curve::from(CrvOnSurf::new(k, uv_curve_1.clone(), bs.clone(), None, 0)?);
+    let curve_1 = Curve::from(CrvOnSurf::new(
+        k,
+        uv_curve_1.clone_for_evaluation()?,
+        surface.clone_for_evaluation()?,
+        None,
+        0,
+    )?);
 
     // for every solution
     let mut i = 0;

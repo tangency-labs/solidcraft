@@ -196,20 +196,17 @@ pub struct CrvInVolume {
 }
 
 impl CrvInVolume {
-    /// An exact evaluation copy retaining owners, raw flags and cached breaks.
-    /// Check the entire volume chain against the shared 64-level bound before
-    /// the volume's field-wise recursive `Clone`.
-    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
-        crate::surface::surface::Surface::check_volume_evaluation_copy_depth(&self.volume, depth)?;
-        Ok(Self {
-            curve: self.curve.clone_for_evaluation_depth(depth)?,
+    /// Exact evaluation copy after the caller validates the geometry depth.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            curve: self.curve.clone_exact_bounded(),
             in_param_space: self.in_param_space,
             volume: self.volume.clone(),
             need_breaks: self.need_breaks,
             breaks: self.breaks.clone(),
             conts: self.conts.clone(),
             owner_flag: self.owner_flag,
-        })
+        }
     }
 
     /// `SmCrvInVolume_TYPE`.
@@ -1094,8 +1091,18 @@ impl CrvInVolume {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the volume.
+    /// Those of [`Volume::transform`], including `InvalidInput` if appending a
+    /// volume map would exceed 64 whole-geometry levels.
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        self.transform_at_depth(rotate_n_move, scale, 0)
+    }
+
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -1105,7 +1112,8 @@ impl CrvInVolume {
         }
 
         // compound the Transform onto the contained volume
-        self.volume.transform(rotate_n_move, scale)
+        self.volume
+            .transform_at_depth(rotate_n_move, scale, depth + 1)
     }
 
     // ---- persistence ----------------------------------------------------------------

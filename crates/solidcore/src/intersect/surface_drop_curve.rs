@@ -72,9 +72,7 @@
 //! - **Unported callees** return [`SolidError::Unported`] (see the `UNPORTED`
 //!   markers): `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) except the
 //!   plane override. The surface point solves defer inside their own units
-//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`). An
-//!   `SmCrvOnSurf` over a surface that is not a B-spline surface is a dispatch gap
-//!   of `curve.crv_on_surf` (the ported curve holds an `SmBSplineSurface`).
+//!   (`LocalPointSolve_1`, `GlobalPointSolve_1`).
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. No recursion
 //!   depends on input; the seam search loop is bounded (19 steps) as upstream.
 
@@ -1131,19 +1129,10 @@ impl<'s> SurfaceDropCurve<'s> {
                     Err(_) => continue,
                 };
 
-                let SurfaceKind::BSpline(bs) = surface.kind() else {
-                    // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface
-                    // (curve.crv_on_surf, partial; no UNPORTED marker, as in
-                    // intersect::curve_class::p1)
-                    return Err(SolidError::unported(
-                        "SmSurface (non-B-spline) in SmCrvOnSurf",
-                        "curve.crv_on_surf",
-                    ));
-                };
                 let srf_crv = Curve::from(CrvOnSurf::new(
                     k,
                     Curve::from(uv_line),
-                    bs.clone(),
+                    surface.clone_for_evaluation()?,
                     Some(uv_domain),
                     0,
                 )?);

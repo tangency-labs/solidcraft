@@ -58,8 +58,7 @@
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
-//! - **`SmCrvOnSurf`** holds a B-spline surface in the port: a 2D curve on a face whose
-//!   surface is no B-spline is [`SolidError::Unported`] (`curve.crv_on_surf`).
+//! - **`SmCrvOnSurf`** preserves a face surface's concrete dispatch.
 //! - **`FindElementInMaskedArray`** tests `lBitMask & (1<ii)` upstream (a comparison,
 //!   not a shift); the port keeps that test, so only elements `2..` are searched and only
 //!   when bit 0 of the mask is set (`plan/upstream-issues.md`).
@@ -1145,17 +1144,14 @@ pub fn find_and_classify_loop_bisector_into<O: LoopObject + PartialEq>(
             );
 
             // Map UVClassificationCurve to 3d through the Face->Surface
-            let SurfaceKind::BSpline(bs) = surface.kind() else {
-                // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-                // partial; no UNPORTED marker)
-                return Err(SolidError::unported(
-                    "SmSurface (non-B-spline) in SmCrvOnSurf",
-                    "curve.crv_on_surf",
-                ));
-            };
             let uv_curve = Curve::from(uv_trim_line);
-            let crv_on_surf =
-                CrvOnSurf::new(k, uv_curve.clone(), bs.clone(), Some(surf_uv_domain), 0)?;
+            let crv_on_surf = CrvOnSurf::new(
+                k,
+                uv_curve.clone_for_evaluation()?,
+                surface.clone_for_evaluation()?,
+                Some(surf_uv_domain),
+                0,
+            )?;
             let crv_ivl = crv_on_surf.natural_interval();
             let (start_pt, end_pt) = (
                 crv_on_surf.evaluate_point(k, crv_ivl.min()),
@@ -1410,15 +1406,13 @@ pub fn sector_classify_curve_on(
     let surf_curve;
     let cp_curve: &Curve = if input.curve.dim() == 2 {
         let surface = face_surface(b, f, OP_SECTOR)?;
-        let SurfaceKind::BSpline(bs) = surface.kind() else {
-            // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface (curve.crv_on_surf,
-            // partial; no UNPORTED marker)
-            return Err(SolidError::unported(
-                "SmSurface (non-B-spline) in SmCrvOnSurf",
-                "curve.crv_on_surf",
-            ));
-        };
-        surf_curve = Curve::from(CrvOnSurf::new(k, input.curve.clone(), bs.clone(), None, 0)?);
+        surf_curve = Curve::from(CrvOnSurf::new(
+            k,
+            input.curve.clone_for_evaluation()?,
+            surface.clone_for_evaluation()?,
+            None,
+            0,
+        )?);
         &surf_curve
     } else {
         input.curve

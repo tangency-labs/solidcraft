@@ -76,12 +76,10 @@
 //!   whatever it set before failing, and its in/out step size is honoured.
 //!   Statuses upstream ignores are ignored, except [`SolidError::Unported`], which
 //!   always propagates.
-//! - **Curves on surfaces.** The span tests map Hermite UV curves through
-//!   `SmCrvOnSurf`, whose port ([`CrvOnSurf`]) holds a B-spline surface. A plane,
-//!   whose `SmPlane::Evaluate` overrides the B-spline evaluation, or another kind is a
-//!   DISPATCH GAP: [`SolidError::Unported`] (`curve.crv_on_surf`, partial; no
-//!   UNPORTED marker, as in `intersect::surface_drop_curve`). A surface of
-//!   revolution evaluates as its B-spline base, as upstream.
+//! - **Curves on surfaces.** Span tests map Hermite UV curves through [`CrvOnSurf`]
+//!   on an exact evaluation copy of the concrete [`Surface`]. Plane and offset
+//!   overrides are retained; a surface of revolution evaluates as its B-spline
+//!   base, as upstream.
 //! - **Dead code.** Step 11 of `FlushCurve` (the self-intersection blending) is
 //!   guarded by the constant `bTempTrySelfIntHandler = FALSE` and never runs; it is
 //!   not ported.
@@ -116,9 +114,7 @@ use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
-use crate::surface::surface::{Surface, SurfaceKind};
-use crate::topology::edgeuse::p1 as eu1;
-use crate::topology::{edge, EdgeId};
+use crate::surface::surface::Surface;
 
 const OP_VALUES: &str = "blend::fillet_intersector::FilletIntersector::compute_point_values";
 const OP_DELTA: &str = "blend::fillet_intersector::FilletIntersector::compute_point_values_delta";
@@ -672,21 +668,13 @@ fn crv_on_surf(
     surface: &Surface,
     domain: &Extent2d,
 ) -> Result<CrvOnSurf> {
-    let bs = match surface.kind() {
-        SurfaceKind::BSpline(s) => s.clone(),
-        SurfaceKind::SurfOfRevolution(s) => s.base().clone(),
-        SurfaceKind::SurfOfExtrusion(s) => s.base().clone(),
-        _ => {
-            // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface whose Evaluate
-            // overrides the B-spline one (curve.crv_on_surf, partial; no UNPORTED
-            // marker, as in intersect::surface_drop_curve)
-            return Err(SolidError::unported(
-                "SmSurface (non-B-spline) in SmCrvOnSurf",
-                "curve.crv_on_surf",
-            ));
-        }
-    };
-    CrvOnSurf::new(k, Curve::from(uv_curve), bs, Some(*domain), 0)
+    CrvOnSurf::new(
+        k,
+        Curve::from(uv_curve),
+        surface.clone_for_evaluation()?,
+        Some(*domain),
+        0,
+    )
 }
 
 /// `sMap.Evaluate(t, 1, TRUE, aPV)`: the position and first derivative.

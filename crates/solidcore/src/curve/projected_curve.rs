@@ -117,17 +117,16 @@ pub struct ProjectedCurve {
 }
 
 impl ProjectedCurve {
-    /// An exact evaluation copy; `depth` is the base curve's depth in the shared
-    /// 64-level curve/surface/volume traversal.
-    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
-        Ok(Self {
-            curve: Box::new(self.curve.clone_for_evaluation_depth(depth)?),
+    /// Exact evaluation copy after the caller validates the geometry depth.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            curve: Box::new(self.curve.clone_exact_bounded()),
             proj_point: self.proj_point,
             proj_vec: self.proj_vec,
             aux_data: self.aux_data,
             proj_type: self.proj_type,
             owns_curve: self.owns_curve,
-        })
+        }
     }
 
     /// `SmProjectedCurve_TYPE`.
@@ -462,6 +461,16 @@ impl ProjectedCurve {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
+        self.transform_at_depth(k, rotate_n_move, scale, 0)
+    }
+
+    pub(crate) fn transform_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -476,7 +485,8 @@ impl ProjectedCurve {
         }
 
         // pass the call along to the curve
-        self.curve.transform(k, rotate_n_move, scale)?;
+        self.curve
+            .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
 
         // apply rotations and moves to points and vecs
         self.proj_point = rotate_n_move.transform_point(self.proj_point);

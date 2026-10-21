@@ -819,6 +819,20 @@ pub struct Ellipse {
 }
 
 impl Ellipse {
+    /// Exact evaluation copy without the B-spline copy constructor's knot fix-up.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        Self {
+            base: self.base.clone_exact(),
+            position: self.position,
+            anal_domain: self.anal_domain,
+            radius_x: self.radius_x,
+            radius_y: self.radius_y,
+            polar: self.polar.clone(),
+            inside_out: self.inside_out,
+            circle: self.circle,
+        }
+    }
+
     /// `SmEllipse_TYPE` (`CURV_BASE_TYPE + 22`).
     pub const TYPE: i64 = ELLIPSE_TYPE;
 

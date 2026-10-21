@@ -10,9 +10,9 @@
 //! Deviations: topology is supplied as borrowed views resolved from arena ids, and
 //! the caller supplies the face's trim cache. Cached marks are local ordered lists
 //! of visited handles. No input-driven recursion is added. Temporary surface-owner
-//! clearing is represented by a private copy for a lifted 2D source. Missing generic
-//! curve-on-surface dispatch and mutable edge insertion retain their dependency
-//! deferrals; no synthetic classification is inserted. Ignored native evaluation
+//! clearing is represented by a private copy for a lifted 2D source. Concrete
+//! curve-on-surface dispatch is preserved; mutable edge insertion retains its dependency
+//! deferral. Ignored native evaluation
 //! and drop statuses preserve initialized outputs; unported errors propagate. The
 //! native checked-drop guess aliases its output and is reset to zero before solving;
 //! the Rust call explicitly uses that zero guess. A 3D trim-boundary source returns
@@ -38,7 +38,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::surface::surface::p1::{map_to_2d, map_to_2d_on_curve};
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
 use crate::surface::surface_cache::p1::FaceContainment;
 use crate::surface::trim_srf_cache::TrimSrfCache;
 
@@ -146,17 +146,10 @@ fn curve<O: ClassObject>(g: &impl ClassGeometry<O>, handle: O) -> Result<&Curve>
     g.curve(handle).ok_or(SolidError::null_pointer(OP))
 }
 fn lifted(k: &Kernel, uv: &Curve, surface: &Surface) -> Result<Curve> {
-    let SurfaceKind::BSpline(bs) = surface.kind() else {
-        // DISPATCH GAP(curve.crv_on_surf): owned generic Surface in SmCrvOnSurf.
-        return Err(SolidError::unported(
-            "SmCrvOnSurf over a generic Surface",
-            "curve.crv_on_surf",
-        ));
-    };
     Ok(Curve::from(CrvOnSurf::new(
         k,
-        uv.clone(),
-        bs.clone(),
+        uv.clone_for_evaluation()?,
+        surface.clone_for_evaluation()?,
         Some(surface.natural_uv_domain()),
         0,
     )?))
@@ -204,7 +197,7 @@ impl<O: ClassObject> CurveClassification<O> {
     /// A shared curve uses the exact interval-overlap shortcut before insertion.
     ///
     /// # Errors
-    /// Missing geometry fails; unavailable generic surface lifting or mutable edge
+    /// Missing geometry fails; unavailable surface evaluation or mutable edge
     /// insertion defers to its dependency. Earlier successful insertions are retained.
     pub fn intersect_edges(
         &mut self,
@@ -218,8 +211,8 @@ impl<O: ClassObject> CurveClassification<O> {
         let source = curve(geometry, source_handle)?;
         let lift;
         let working = if !options.uv_space_okay && source.dim() == 2 {
-            let mut unowned = surface.clone();
-            *unowned.owner_mut() = None;
+            let mut unowned = surface.clone_for_evaluation()?;
+            let _ = unowned.set_owner(None);
             lift = lifted(k, source, &unowned)?;
             &lift
         } else {

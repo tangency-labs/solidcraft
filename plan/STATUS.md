@@ -49,24 +49,19 @@ Latest unit: `surface.cone_p3` UB-154 native guard ([PR #292](https://github.com
 Latest unit: `boolean.merge_p2` ([PR #229](https://github.com/tangency-labs/solidcore/pull/229)) is partial: 45 differential cases, 30 bit-identical passes, 15 dependency deferrals, zero failures (`--seeds 1000`: 631 passes, 398 deferrals). It ports the `SmMerge` B-rep constructor, `MergeEdge`, `MakeFaceuse`, `MergeAddedFace` and `MergeAddedTopology`, with its stitch (`heal.stitch_p1` / `_p2`), intersector (`boolean.topology_intersector_p2`), `MakeFace` (`topology.brep_p7`), region and `topology.brep_p2` calls wired, and wires the `boolean.merge_p2` back-edges of `boolean.merge_p3`, `boolean.merge_p4`, `boolean.merge_p5`, `boolean.api_brep`, `heal.stitch_p1` and `topology.brep_p7`; its constructor builds `boolean.merge_p3`'s `MergeEngine` (#287), so the two-B-rep API booleans now run `ManifoldBoolean` (`boolean.merge_p4`) and stop at `query.brep`. It confirms UB-176 on the reference build (through `MergeAddedTopology`) and adds WR-197. The manifest has 235 ported units (114 green, 121 partial).
 
 
-## Handoff: `query.brep` (2026-10-21, PR #329)
+Latest offset integration follow-up: `CrvOnSurf` retains the existing concrete
+`Surface`, including offset wrappers, and the offset creator now constructs and
+approximates real rails rather than stopping at the B-spline-only type gate.
+Exact shared snapshots and bounded geometry/approximation work are documented in
+[`findings.md`](findings.md#concrete-surface-integration-follow-up); per-unit native
+evidence remains in `reports/difftest/`.
 
-`query.brep` is partial (B-rep boxes, `LockBoundingBox`, `Point3DClassify`, the
-decimation attributes and `SmApiEvaluateSurface*`); `geom.a_object` and
-`topology.brep_cache` were promoted to green. Coverage and the remaining deferrals are in
-`plan/modules.toml` and `plan/findings.md` (section `query.brep`). For callers:
+No unit is promoted solely from a clean fixture corpus. In particular,
+`intersect.curve_class_p5` stays partial while its owned SSS/mutable-ownership
+branch is unported and unexercised. The offset rail path still reaches genuine
+face-owner/tolerance and classification dependencies; the production
+offset-executive/SSI bridge is separate work.
 
-- **Classify through a `BrepQuery`.** It holds the B-rep's identities and builds the
-  `SM_OC_BREP` cache on the first solve that needs it. Keep one per B-rep state (a loop
-  that does not edit the B-rep shares one) and make a fresh one after an edit. Callers that
-  hold the B-rep shared use `BrepClassifier`, which copies it on the first ray fire only.
-  The merge passes go through `boolean::merge::p1::classify_point_editing_disabled`.
-- **Lone B-reps** use `BrepIdentity::default()`; B-reps in a store pass their own
-  `BrepIdentity`.
-- **Shapes:** `geom::object::Shape::new` takes a `BrepStore` (`(BrepId, &Brep)` for one
-  B-rep, `NoBreps` for an empty shape) and is fully ported; `geom.object` is green.
-- **Open follow-up:** `topology::brep::p10::merge_curves_world` is a `DISPATCH GAP` until
-  the merge-curves world can own the B-rep (`topology.brep_p2`; PR #348).
 
 ## Port review note (2026-10-18, issue #210)
 
@@ -275,7 +270,7 @@ Every non-deferred difftest case passes; deferred cases wait on the listed unit 
 | `curve.curve_p4` | `curve::curve::p4` | 3259 cases (259 fixture: SM_API_test rectangle / polygon edges (also the far 1e-9 / 1.5e-6 ones), my_test_reversed_line_join line pairs, the my_test_drop_point unit circle through every curve property + 3000 generated: chains, closed / degenerate tests, polar boxes, AssertValid, solution filter, projected distance, Newton evaluators, analytic intersections), 3210 bit-identical; a 30,259-case run was also clean; `--perturb` SENSITIVE | 49 (`surface.surface_p8` 49: `SmSurface::GlobalCurveIntersect` in `HasPlaneCrossings`); ellipse intersections wired by curve.ellipse_p1 |
 | `curve.curve_p3` | `curve::curve::p3` | 3076 cases (76 fixture: SM_API_test rectangle / hexagon loops (normals, gap fixing, linearity, plane intersections), smCurveTest line at-distance and circle drop-point / extrema solves + 3000 generated), 2334 bit-identical; `--perturb` SENSITIVE | 742 (`curve.curve_p5`: `LocalPropertyAnalysis` 385, `SmCCIntersectENFO::Evaluate` 136, base `SmCurve::Length` 120, `SmFindCCNormalENFO::Evaluate` 101) |
 | `curve.curve_p1` | `curve::curve::p1` | 3083 cases (83 fixture: smCurveTest my_test_point_extrema / my_test_drop_point line and circle solves, the circle centre, SM_API_test rectangle / hexagon edges through every op, edge cases + 3000 generated), 2493 bit-identical; a 12,083-case run was also clean; `--perturb` SENSITIVE | 590 (`curve.curve_p5`: `LocalPropertyAnalysis` 310, `SmFindCCNormalENFO::Evaluate` 163, `SmCCIntersectENFO::Evaluate` 73, `IsArc` 44) |
-| `curve.crv_on_surf` | `curve::crv_on_surf` | 2094 cases (94 fixture: smTopoTest loop UV-gap edges on the bulge patch, smMergeTest plane boundary via the UV-line constructor, face trim curves on Surface.sms / DropCurveSurface.sms + 2000 generated op programs incl. upstream WriteToDB records), 1598 bit-identical; `--perturb` SENSITIVE; `CurveKind::CrvOnSurf`; `ApproximateCurve` / `DropPoint` / `CalculateBoundingBox` dispatch to the override | 496 (`intersect.curve_class_p4` 294: uncached breaks; `surface.surface_p7` 147: `EvaluateNormal`; `surface.surface_p1` 50: `Evaluate2ndDerivatives`; `curve.curve_p5` 5; `SmSurface::ReadFromDB` wired by surface.surface_p2) |
+| `curve.crv_on_surf` | `curve::crv_on_surf` | 2107 cases, 1800 bit-identical passes; `--perturb` SENSITIVE 1800/1800. Concrete `Surface` retained through construction/read/evaluation; 13 real offset-backed fixtures cover owner flags, raw shared knots, supplied-knot approximation and post-error transform state. Exact snapshots and bounded geometry/approximation work preserve native semantics within the documented safety bounds. | 307 (`intersect.curve_class_p2`: uncached classification breaks); remains partial |
 | `surface.surface_p2` | `surface::surface::p2` | 869 cases (69 fixture: the three pt_TestFiles .sms surfaces through queries / Evaluate / knots / edits / copies / `SmSurfaceEval` / `ReadFromDB`, base `SmSurface()` defaults, TestSmPrincipalDirectionPairing + 800 generated), 756 bit-identical; `--perturb` SENSITIVE; introduces `Surface` / `SurfaceKind` (B-spline only) and `SurfaceEvaluate` | 113 (`surface.surface_p5` 36: extensions; `curve.curve_p5` 33: CC local solves and plane splits; `surface.surface_p7` 18: `GetMaxAnalyticDomain`; `surface.surface_p1` 13: STEP inversion solves; `surface.plane_p2` 11: `CopyAndAddAnalytics`; `intersect.adv_surface_intersector` 1; `topology.trimming_tools` 1) |
 | `surface.curve_bounded_surface` | `surface::curve_bounded_surface` | 535 cases (135 fixture: Surface.sms / DropCurveSurface.sms / offset_nurb.sms bases with the pt_TestFiles .smc boundaries through state / queries / Evaluate / SmSurface defaults / operator== / SetContext, WriteToDB-layout ReadFromDB records incl. the dropped implicit flag and the UV-read-with-3D-type bug + 400 generated), 359 bit-identical; `--perturb` SENSITIVE; `SurfaceKind::CurveBounded` | 176 (`surface.surface_p1` 85: `EvaluateSimple` / `EvaluateSTEP` / `EvaluateSTEPPoint` / `operator==`; `surface.surface_p3` 56: `EvaluateGeometric` / `EvaluateNormalSection`; `surface.surface_p7` 25: `EvaluateNormal`; `surface.surface_p5` 10: `EvaluateNormalAtSingularity`) |
 | `surface.surface_cache_p1` | `surface::surface_cache::p1` | 872 cases (72 fixture: the three pt_TestFiles .sms surfaces through boundary bounding planes, Bezier approximation, size tolerances, corners, iso boundary curves, knot continuity, BuildTreeTop over their knot spans and polar boxes, hand-built decompositions through FindUnmarkedLeafNode / GetConnectedRegion / MarkFaceContainment / GetFirstBezierPatch, alternate cache matching, static helper edge cases + 800 generated), 709 bit-identical; a 20,072-case run was also clean; `--perturb` SENSITIVE; `SurfaceCache` keeps the patch / aux arenas, tree nodes carry the arena slot (`SurfaceAux::slot`) | 163 (`surface.surface_p7` 107: `EvaluateNormal` in every polar box and at collinear boundary samples; `surface.surface_p5` 37: `IsSingularity` in every Bezier approximation; `surface.surface_p1` 19: `GetFace`) |
@@ -1045,13 +1040,12 @@ perturbation also pass (6,463/6,463 detected). Committed reports total 435,272 c
 
 ## Independent curve-classification part 5
 
-The p5 implementation and oracle remain independent of the open p2/p7 PRs.
-Part 6 landed independently through PR #138 and is inherited from main; all four
-p6 call sites are wired. Fresh validation on 9e495b12 compares 275/1,081 cases
-exactly, with zero failures and 806 explicit deferrals (p2 493, p7 312,
-curve.crv_on_surf 1). Perturbation detects all 275 compared cases. All nine affected
-native runners, plain/native Clippy, 1,215 kernel tests, WASM and the focused FFI
-regression pass. The eight other reports are unchanged.
+Historical PR #150 validation on 9e495b12 compared 275/1,081 cases exactly,
+with zero failures and 806 explicit deferrals. After the independent p2/p7/p6
+integration and this concrete-Surface follow-up, all 1,081 current cases pass
+bit-identically with zero deferrals; perturbation detects 1,081/1,081.
+The manifest remains **partial**: a clean fixture corpus does not certify the
+owned SSS/mutable-ownership and edge-target insertion branches below.
 The edge-target insertion and SSS blocks remain unported; nonempty large-gap
 projection and tangent-flag behavior remain uncertified. Shared interfaces are
 recorded as CO-PORTED. The proto-topology p3 extraction back-edge is wired and the

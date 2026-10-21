@@ -57,13 +57,16 @@
 //!   just-copy branch (upstream returns a null curve with success) are errors.
 //!   Option vectors an operation reads without a `NULL` check are `InvalidInput`
 //!   when missing.
-//! - **Unbounded approximation.** `ApproximateCurve` returns `InvalidInput` where
-//!   upstream never finishes: when a span that fails the accuracy test can no
-//!   longer be split (its midpoint rounds onto an end and evaluates to that end's
-//!   data, so upstream repeats the same state forever), and past
-//!   [`MAX_APPROX_SPANS`] appended spans (upstream grows its control polygon until
-//!   memory runs out, e.g. for a break at `1e300`; fuzz `curve.curve_p1`
-//!   fuzz01255 aborted on a 6 GiB allocation).
+//! - **Approximation work.** The Hermite approximation keeps upstream's depth-first
+//!   span order, but stops with `SM_ERR` after 8192 subdivisions or when the native
+//!   midpoint formula cannot produce a finite, distinct parameter. The subdivision
+//!   count is total across break intervals: upstream's natural-interval / 1500
+//!   stopping rule permits at most 2047 subdivisions for one in-domain interval.
+//!   Across a partition of the natural interval, the total stays below roughly
+//!   2 x 1500 plus the break count, rather than 2047 per break, leaving margin under
+//!   the 8192 cap. Far-outside breaks can otherwise require trillions of
+//!   spans. The bound limits the pending stack and generated polygon growth, not
+//!   the supplied breaks (including duplicates), which are still visited in order.
 //! - `SM_ASSERT`, `WARN` and the `SM_DEBUG_CODE` drawing blocks are not ported;
 //!   `TessellateByBisection`'s unused `GetDegree` (its only consumer,
 //!   `sm_FindTestParams`, ignores it) is not called.
@@ -116,6 +119,9 @@ const OP_GLOBAL: &str = "curve::curve::p1::Curve::global_point_solve";
 
 /// `SM_CONTINUITY_ANGLE` (`SM_ANG_TOL_DEG`, degrees): `EvaluateContinuity`'s default.
 const CONTINUITY_ANGLE: f64 = 0.5;
+
+/// Maximum adaptive Hermite subdivisions in one approximation (see deviations).
+const MAX_APPROXIMATION_SUBDIVISIONS: usize = 8192;
 
 /// Entry `i` of a three-slot sample array (`d` past its end).
 fn at3<T: Copy>(a: &[T; 3], i: usize, d: T) -> T {
@@ -420,8 +426,9 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for fewer than 2 breaks; those of the evaluations, the degenerate
-    /// curve, [`flush_crv`] and `Copy`; `InvalidInput` when nothing is built.
+    /// `SM_ERR` for fewer than 2 breaks, exhausted subdivision work or a midpoint
+    /// that cannot progress; those of the evaluations, the degenerate curve,
+    /// [`flush_crv`] and `Copy`; `InvalidInput` when nothing is built.
     pub fn approximate_curve(
         &self,
         k: &Kernel,
@@ -505,6 +512,7 @@ impl Curve {
         let mut ctrl_poly: Vec<Point3> = Vec::with_capacity(256);
         let mut knots: Vec<f64> = Vec::with_capacity(256);
         let mut max_deviation = 0.0;
+        let mut subdivisions = 0;
 
         // for every interval defined by input BreakParams array
         for w in breaks.windows(2) {
@@ -588,21 +596,15 @@ impl Curve {
                     // for next iteration - pop stack
                     pop_stack(&mut stack)?;
                 } else {
+                    if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
+                        return Err(SolidError::sm_err(OP_APPROX));
+                    }
+                    subdivisions += 1;
+
                     // get param mid point and associated curve pos and tan
                     let mid_t = (last_t + curr_t) / 2.0;
-                    let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
-
-                    // (not upstream) the span cannot be split: the midpoint rounds onto
-                    // an end and evaluates to that end's data, so upstream repeats this
-                    // state forever (growing its stack or control polygon until memory
-                    // runs out)
-                    if (mid_t == curr_t && mid_pv == curr_pv)
-                        || (mid_t == last_t && mid_pv == last_pv)
-                    {
-                        return Err(SolidError::invalid_input(
-                            OP_APPROX,
-                            "break interval cannot be bisected further (upstream loops forever)",
-                        ));
+                    if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
+                        return Err(SolidError::sm_err(OP_APPROX));
                     }
                     curr_t = mid_t;
                     curr_pv = mid_pv;
@@ -2159,6 +2161,48 @@ mod tests {
         assert!(r.achieved_tol.unwrap() <= 1e-3);
         let p = r.curve.evaluate_point(k, 0.5).unwrap();
         assert!(p.distance(c.evaluate_point(k, 0.5).unwrap()) < 1e-2);
+    }
+
+    #[test]
+    fn approximation_bounds_outside_domain_refinement_without_rejecting_tolerance() {
+        let k = Kernel::default();
+        let c = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        let opts = ApproximateCurveOptions {
+            create_analytics: false,
+            match_parameterization: true,
+            just_copy_bsplines: false,
+        };
+        // A negative tolerance still follows native subdivision and force-pass
+        // semantics over the natural interval; it is not replaced or rejected.
+        let natural = c
+            .approximate_curve_base(&k, &[0.0, 1.0], -1e300, &opts)
+            .unwrap();
+        assert_eq!(natural.curve.natural_interval(), c.natural_interval());
+        assert_eq!(
+            natural.curve.evaluate_point(&k, 0.5).unwrap(),
+            Vec3::X * 0.5
+        );
+
+        // The same stopping rule over an enormous clamped interval would need
+        // trillions of spans, despite this curve having only two control points.
+        assert!(matches!(
+            c.approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts),
+            Err(SolidError::Upstream { code: 1001, .. })
+        ));
+    }
+
+    #[test]
+    fn approximation_fails_when_native_midpoint_overflows() {
+        let c = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        let opts = ApproximateCurveOptions {
+            create_analytics: false,
+            match_parameterization: true,
+            just_copy_bsplines: false,
+        };
+        assert!(matches!(
+            c.approximate_curve_base(&Kernel::default(), &[f64::MAX * 0.75, f64::MAX], 0.0, &opts,),
+            Err(SolidError::Upstream { code: 1001, .. })
+        ));
     }
 
     #[test]

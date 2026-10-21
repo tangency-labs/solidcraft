@@ -52,9 +52,9 @@
 //! - **Statuses.** `smsurf_IsPointOnNormal` returns its `SmStatus` reasons as
 //!   [`NormalTestReason`] and always succeeds, as upstream; its deviation output is `0` when
 //!   the surface could not be evaluated (upstream leaves it unset).
-//! - **`CreateSeamCurve`** returns `None` for a surface that is not closed and fails with
-//!   [`SolidError::InvalidInput`] for a closed one that is not a B-spline surface
-//!   ([`CrvOnSurf`] is built on a [`BSplineSurface`](crate::nurbs::b_spline_surface::BSplineSurface)).
+//! - **`CreateSeamCurve`** returns `None` for a surface that is not closed and builds
+//!   its [`CrvOnSurf`] on the concrete [`Surface`], retaining its virtual evaluation
+//!   and native owning-copy behavior.
 //! - **Classification** (`sm_ClassifyCurveSurfaceXSectPoint`) returns the outputs as
 //!   [`XsectClassification`]; an out-of-domain guess keeps its unclamped values, as
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
@@ -107,7 +107,7 @@ use super::p1::{
 use super::p2::{
     convert_to_parameter_delta, evaluate_geometric, LocalSurfaceType, SurfaceEval, TsectCurveType,
 };
-use super::{Surface, SurfaceKind};
+use super::Surface;
 
 const OP_CS_INTERSECT: &str = "surface::surface::p4::CsIntersectEnfo::evaluate";
 const OP_CS_NORMALIZE: &str = "surface::surface::p4::CsNormalizeEnfo::evaluate";
@@ -115,7 +115,6 @@ const OP_SSP_INTERSECT: &str = "surface::surface::p4::SspIntersectEnfo::evaluate
 const OP_SSI_NORMALIZE: &str = "surface::surface::p4::SsiNormalizeEnfo::evaluate";
 const OP_SS_NORMALIZE: &str = "surface::surface::p4::SsNormalizeEnfo::evaluate";
 const OP_EVAL_NORMAL: &str = "surface::surface::p4::SurfaceEval::eval_normal";
-const OP_SEAM: &str = "surface::surface::p4::Surface::create_seam_curve";
 const OP_CLASSIFY: &str = "surface::surface::p4::classify_curve_surface_xsect_point";
 
 /// Entry `i` of an evaluation result.
@@ -1134,11 +1133,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of [`Surface::is_closed`] and of the curve construction;
-    /// [`SolidError::Unported`] for a closed surface of revolution, sphere or torus (the dispatch gap of
-    /// a [`CrvOnSurf`] over a non-B-spline surface); [`SolidError::InvalidInput`] for
-    /// any other closed surface that is not a B-spline surface (a [`CrvOnSurf`] lives
-    /// on a [`BSplineSurface`]).
+    /// Those of [`Surface::is_closed`], the surface's [`Surface::copy`] and the curve
+    /// construction, including its documented geometry-nesting bound.
     pub fn create_seam_curve(
         &self,
         kernel: &Kernel,
@@ -1168,31 +1164,14 @@ impl Surface {
                 Point3::new(uv_max.x, uv_min.y, 0.0),
             )
         };
-        let base = match self.kind() {
-            SurfaceKind::BSpline(base) => base,
-            SurfaceKind::SurfOfRevolution(_)
-            | SurfaceKind::SurfOfExtrusion(_)
-            | SurfaceKind::Cone(_)
-            | SurfaceKind::Sphere(_)
-            | SurfaceKind::Torus(_) => {
-                // DISPATCH GAP: SmCrvOnSurf over an SmSurfOfRevolution (or a cone, sphere, torus or extrusion) (the ported
-                // CrvOnSurf holds an SmBSplineSurface and would drop the revolution's
-                // evaluation overrides), as in surface::surface::p11.
-                // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)
-                return Err(SolidError::unported(
-                    "SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)",
-                    "curve.crv_on_surf",
-                ));
-            }
-            _ => {
-                return Err(SolidError::invalid_input(
-                    OP_SEAM,
-                    "a curve on a surface needs a B-spline surface",
-                ))
-            }
-        };
         let line = Line::from_points(start, end, 2); // Line Ivl:[0, 1]
-        let seam = CrvOnSurf::new(kernel, Curve::from(line), base.clone(), Some(uv_domain), 2)?;
+        let seam = CrvOnSurf::new(
+            kernel,
+            Curve::from(line),
+            self.clone_for_evaluation()?,
+            Some(uv_domain),
+            2,
+        )?;
         Ok(Some(seam))
     }
 
