@@ -57,6 +57,9 @@ parts): every issue and PR looked at that did not become a case, with one line e
 [{"source": "tangency-labs/solidcraft#123", "why": "UI only: the selection highlight, no geometry"}]
 ```
 
+`sources.json` says what kind each source number is (an open or closed issue, a merged PR, one of
+the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage by source.
+
 ## expected.json
 
 ```json

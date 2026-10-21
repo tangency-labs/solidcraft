@@ -213,6 +213,32 @@ fn link(source: &str) -> String {
     }
 }
 
+/// Coverage by kind of source (issue, merged PR, a frozen truck-geometry PR...), from
+/// `sources.json`: how many were looked at, how many became cases, how many were skipped.
+fn source_kinds(dir: &Path, cited: &BTreeMap<String, Vec<String>>) -> Result<String, String> {
+    let kinds = read(&dir.join("sources.json"));
+    let Some(kinds) = kinds.as_object() else { return Ok(String::new()) };
+    let cited: std::collections::BTreeSet<u64> = cited.keys().map(|s| source_number(s)).collect();
+    let mut table: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for (n, kind) in kinds {
+        let row = table.entry(kind.as_str().unwrap_or("?").to_string()).or_default();
+        if n.parse::<u64>().is_ok_and(|n| cited.contains(&n)) {
+            row.0 += 1;
+        } else {
+            row.1 += 1;
+        }
+    }
+    let mut md = String::from("\n## Coverage by source\n\n| Source | Looked at | Became cases | Skipped |\n|---|---|---|---|\n");
+    let (mut a, mut b) = (0, 0);
+    for (kind, (cases, skipped)) in &table {
+        md += &format!("| {kind} | {} | {cases} | {skipped} |\n", cases + skipped);
+        a += cases;
+        b += skipped;
+    }
+    md += &format!("| **all** | {} | {a} | {b} |\n", a + b);
+    Ok(md)
+}
+
 fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) -> Result<String, String> {
     let key = |r: &Value| (r["area"].as_str().unwrap_or("").to_string(), r["case"].as_str().unwrap_or("").to_string());
     let mut by_case: BTreeMap<(String, String), BTreeMap<String, Value>> = BTreeMap::new();
@@ -284,6 +310,7 @@ fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) ->
     for (s, cs) in &per_source {
         md += &format!("| {} | {} |\n", link(s), cs.join(", "));
     }
+    md += &source_kinds(dir, &per_source)?;
     // What was looked at and skipped, area by area (`<area>/skipped.json`).
     md += "\n## Looked at and skipped\n\n";
     let mut skipped = 0;
