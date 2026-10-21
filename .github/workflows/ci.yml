@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue tests each PR merged with the latest main (and the PRs ahead of it).
+  merge_group:
   workflow_dispatch:
 
 # Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored

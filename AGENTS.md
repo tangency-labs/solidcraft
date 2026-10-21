@@ -212,8 +212,12 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    pushed branch), re-verify, set the unit's `status` to `"green"` or `"partial"` in
    `plan/modules.toml` with case/deferred counts in `notes` (plus any units you
    promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
-   the PR description. CI runs fmt, clippy, tests, wasm and difftest on every green or
-   partial unit; a maintainer merges when CI is green.
+   the PR description. CI runs fmt, clippy, tests, wasm, difftest on every green or
+   partial unit, and the difftest runner tests. **CI is the merge gate.** Once CI is
+   green, a maintainer adds the PR to the merge queue after a quick check (stub tags,
+   no loosened tolerance, no case dropped), and the queue re-runs CI on the PR merged
+   with the latest `main`. Deep adversarial review happens after merge; anything it
+   finds comes back as a follow-up issue or PR, so keep the step-5 checklist honest.
 
 **Blocked** (gate cannot be met, upstream behaviour unclear): record details in
 `plan/findings.md`, set `status = "blocked"` with a reason in `notes`, and open the PR

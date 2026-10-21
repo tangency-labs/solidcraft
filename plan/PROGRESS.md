@@ -2,7 +2,7 @@
 
 Generated from `plan/modules.toml` and `reports/difftest/*.json` by `harness/plan/progress.py`; do not edit by hand.
 
-**236 / 261 units ported** (116 green, 120 partial), **344,573 / 387,903 upstream lines (88.8%)**. 25 claimed, 0 blocked, 0 todo.
+**238 / 261 units ported** (116 green, 122 partial), **348,352 / 387,903 upstream lines (89.8%)**. 23 claimed, 0 blocked, 0 todo.
 
 Legend: ✅ green (identical to C++) · 🟡 partial (passes; some cases wait on unported code) · 🔨 claimed · ▶️ ready (all dependencies done) · ⏳ claimable, dependencies still missing · ⛔ blocked.
 
@@ -19,7 +19,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 
 - [ ] 🔨 `intersect.surface_drop_lib_p3` (2062 lines) — in progress: #136 @froglemonade2 (ready for review)
 - [ ] 🔨 `topology.brep_p8` (1768 lines) — in progress: #72 @bherbruck (ready for review)
-- [ ] 🔨 `topology.face_p4` (1812 lines) — in progress: #239 @denelson1-dot (ready for review)
 - [ ] 🔨 `topology.brep_p4` (2113 lines) — in progress: #173 @froglemonade2 (ready for review)
 - [ ] 🔨 `query.brep` (517 lines) — in progress: #329 @PixelSoftwareStudios (ready for review)
 - [ ] 🔨 `topology.brep_p3` (2503 lines) — in progress: #204 @bluecmd (ready for review)
@@ -29,7 +28,6 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `sweep.topology_sweep` (2456 lines) — in progress: #222 @damgru (ready for review)
 - [ ] 🔨 `boolean.topology_intersector_p3` (1849 lines) — in progress: #211 @oursland (ready for review)
 - [ ] 🔨 `primitive.primitive_creation_p3` (1842 lines) — in progress: #233 @damgru (ready for review)
-- [ ] 🔨 `boolean.merge_p2` (1967 lines) — in progress: #229 @Pluto-XI (ready for review)
 - [ ] 🔨 `blend.fillet_executive_p1` (2063 lines) — in progress: #260 @H1D (draft)
 - [ ] 🔨 `primitive.primitive_creation_p2` (2258 lines) — in progress: #250 @CamWight (ready for review)
 - [ ] 🔨 `blend.fillet_corner_p1` (1971 lines) — in progress: #266 @bluecmd (ready for review)
@@ -39,8 +37,8 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🔨 `blend.fillet_geom_p6` (1813 lines) — in progress: #247 @brett19 (ready for review)
 - [ ] 🔨 `blend.fillet_standard_solver_p2` (1989 lines) — in progress: #265 @froglemonade2 (draft)
 - [ ] 🔨 `offset.offset_executive_p2` (1846 lines) — in progress: #201 @altvnk (ready for review)
-- [ ] 🔨 `blend.fillet_geom_p5` (1952 lines) — in progress: #264 @froglemonade2 (draft)
-- [ ] 🔨 `blend.fillet_corner_p2` (1892 lines) — in progress: #268 @bluecmd (draft)
+- [ ] 🔨 `blend.fillet_geom_p5` (1952 lines) — in progress: #264 @froglemonade2 (ready for review)
+- [ ] 🔨 `blend.fillet_corner_p2` (1892 lines) — in progress: #268 @bluecmd (ready for review)
 - [ ] 🔨 `audit.recursion` (0 lines) — in progress: #273 @Karl-VonRichter (draft)
 
 ## By module
@@ -199,7 +197,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [x] ✅ `surface.surface_point_solve_p2` (1882 lines) — green, 1345 cases
 - [x] ✅ `surface.surface_point_solve_p3` (1282 lines) — green, 1365 cases
 
-### topology (27/31)
+### topology (28/31)
 
 - [x] ✅ `topology.database_io` (363 lines) — green, 2059 cases
 - [x] ✅ `topology.topology` (389 lines) — green, 657 cases
@@ -216,7 +214,7 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `topology.edge` (2213 lines) — partial, 1787 cases
 - [ ] 🟡 `topology.edgeuse_p3` (2273 lines) — partial, 4789 cases
 - [ ] 🟡 `topology.trimming_tools` (2878 lines) — partial, 3263 cases
-- [ ] 🔨 `topology.face_p4` (1812 lines) — in progress: #239 @denelson1-dot (ready for review)
+- [ ] 🟡 `topology.face_p4` (1812 lines) — partial, 5506 cases
 - [ ] 🟡 `topology.brep_p10` (1890 lines) — partial, 1404 cases
 - [ ] 🟡 `topology.face_p3` (1881 lines) — partial, 1781 cases
 - [ ] 🟡 `topology.topology_traverser` (784 lines) — partial, 909 cases
@@ -310,13 +308,13 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `offset.offset_executive_p1` (2107 lines) — partial, 1032 cases
 - [ ] 🔨 `offset.offset_executive_p2` (1846 lines) — in progress: #201 @altvnk (ready for review)
 
-### boolean (7/9)
+### boolean (8/9)
 
 - [ ] 🟡 `boolean.topology_intersector_p1` (2491 lines) — partial, 830 cases
 - [ ] 🟡 `boolean.topology_intersector_p2` (2195 lines) — partial, 841 cases
 - [ ] 🔨 `boolean.topology_intersector_p3` (1849 lines) — in progress: #211 @oursland (ready for review)
 - [ ] 🟡 `boolean.merge_p1` (993 lines) — partial, 248 cases
-- [ ] 🔨 `boolean.merge_p2` (1967 lines) — in progress: #229 @Pluto-XI (ready for review)
+- [ ] 🟡 `boolean.merge_p2` (1967 lines) — partial, 45 cases
 - [ ] 🟡 `boolean.merge_p5` (475 lines) — partial, 140 cases
 - [ ] 🟡 `boolean.merge_p4` (2590 lines) — partial, 311 cases
 - [ ] 🟡 `boolean.merge_p3` (1152 lines) — partial, 387 cases
@@ -344,8 +342,8 @@ Anything `todo` can be claimed. These need stubs for, or co-porting of, the list
 - [ ] 🟡 `blend.fillet_corner_p3` (1697 lines) — partial, 1005 cases
 - [ ] 🟡 `blend.fillet_executive_p2` (1152 lines) — partial, 274 cases
 - [ ] 🟡 `blend.fillet_geom_p2` (2077 lines) — partial, 350 cases
-- [ ] 🔨 `blend.fillet_geom_p5` (1952 lines) — in progress: #264 @froglemonade2 (draft)
-- [ ] 🔨 `blend.fillet_corner_p2` (1892 lines) — in progress: #268 @bluecmd (draft)
+- [ ] 🔨 `blend.fillet_geom_p5` (1952 lines) — in progress: #264 @froglemonade2 (ready for review)
+- [ ] 🔨 `blend.fillet_corner_p2` (1892 lines) — in progress: #268 @bluecmd (ready for review)
 
 ### (crate-wide) (0/1)
 
