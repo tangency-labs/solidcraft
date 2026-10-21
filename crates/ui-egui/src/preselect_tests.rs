@@ -3118,3 +3118,44 @@ fn coincident_takes_a_selected_line_midpoint() {
         }
     }
 }
+
+/// #3683: a multi-pick field lists its picked items on request, and one of them can be removed
+/// from the dialog without clearing the others.
+#[test]
+fn one_picked_edge_is_removed_from_the_dialog_list() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let edge = |h: &crate::scenario::Harness, p: Vec3| {
+        let st = h.app.session.world_state();
+        let m = st.body("Body1").unwrap().mesh();
+        let i = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("an edge there");
+        Sel::Edge { body: "Body1".into(), index: i, point: p }
+    };
+    let picks = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)].map(|p| edge(&h, p));
+    h.app.session.selection = picks.to_vec();
+    h.app.start("solid.fillet");
+    h.frames(3);
+    let items = |h: &crate::scenario::Harness| h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default();
+    assert_eq!(items(&h).len(), 3);
+    let label = h.app.dialog.as_ref().unwrap().inputs[0].label;
+    assert!(crate::scenario::handle_at(&format!("dialog:list:{label}:1:remove")).is_none(), "the list starts folded");
+
+    h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at(&format!("dialog:list:{label}:2:remove")).is_some(), "every pick is listed");
+    h.step(&json!({"click": {"handle": format!("dialog:list:{label}:1:remove")}})).unwrap();
+    h.frames(2);
+    let left = items(&h);
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(
+        crate::selection::same_item(&left[0], &picks[0]) && crate::selection::same_item(&left[1], &picks[2]),
+        "only the second edge went: {left:?}"
+    );
+
+    // The clear button still clears them all, and folds the list.
+    h.step(&json!({"click": {"handle": format!("dialog:clear:{label}")}})).unwrap();
+    h.frames(2);
+    assert!(items(&h).is_empty());
+    assert_eq!(h.app.dialog.as_ref().unwrap().listed, None);
+}
