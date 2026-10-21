@@ -2097,7 +2097,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     // Check interior of Edge (the status is not checked upstream; bInterior
                     // is FALSE on trouble)
                     let mut interior =
-                        ignore_soft(check_interior_edge(brep, edge, t, this_tol))?.unwrap_or(false);
+                        ignore_soft(check_interior_edge(k, brep, edge, t, this_tol))?
+                            .unwrap_or(false);
 
                     if !interior {
                         reason = Reason::CloseToBoundary;
@@ -2170,12 +2171,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let f_brep = face_brep(face)?.ok_or(dangling("face without B-rep"))?;
 
             // Find the point -- make sure they're the same. Can err if pEdge was edited by prior loop iteration
-            let mut edge_pt = eval_curve_point(brep, curve, param)?;
+            let mut edge_pt = eval_curve_point(k, brep, curve, param)?;
             // (the status is ignored upstream: UNDEF on failure)
             let face_pt = ignore_soft(
                 brep.surface(surf)
                     .ok_or(dangling("surface handle cannot be resolved"))?
-                    .evaluate_point(uv),
+                    .evaluate_point(k, uv),
             )?
             .unwrap_or(Point3::UNDEF);
 
@@ -2197,7 +2198,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         .edge_curve(this_edge)
                         .ok_or(dangling("edge handle is unknown"))?
                         .ok_or(dangling("edge without curve"))?;
-                    edge_pt = eval_curve_point(brep, c, param)?;
+                    edge_pt = eval_curve_point(k, brep, c, param)?;
 
                     let new_deviation = edge_pt.distance(face_pt);
 
@@ -2250,9 +2251,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let mut this_split_edge = edge;
             for &split_edge in &edges_split_from_this {
                 this_split_edge = split_edge;
-                interior =
-                    ignore_soft(check_interior_edge(brep, this_split_edge, param, this_tol))?
-                        .unwrap_or(false);
+                interior = ignore_soft(check_interior_edge(
+                    k,
+                    brep,
+                    this_split_edge,
+                    param,
+                    this_tol,
+                ))?
+                .unwrap_or(false);
                 if interior {
                     break;
                 }
@@ -2454,7 +2460,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .face_uv_domain(face1)
                 .ok_or(dangling("face handle is unknown"))?;
             let v1s = face_vertices(face1, None, false, None)?;
-            let intersect_f1 = Self::surface_is_closed(brep, surf1, &uv1)?;
+            let intersect_f1 = Self::surface_is_closed(k, brep, surf1, &uv1)?;
 
             let mut jj = 0usize;
             while jj < faces2.len() {
@@ -2468,7 +2474,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .face_uv_domain(face2)
                     .ok_or(dangling("face handle is unknown"))?;
                 let v2s = face_vertices(face2, None, false, None)?;
-                let intersect_f2 = Self::surface_is_closed(brep, surf2, &uv2)?;
+                let intersect_f2 = Self::surface_is_closed(k, brep, surf2, &uv2)?;
 
                 // Do these 2 faces share 2 or more common vertices?
                 let common_vs = find_common_elements(&v1s, &v2s);
@@ -2735,15 +2741,20 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     }
 
     /// `pSurf->IsClosed(sUV, SM_SP_U) || pSurf->IsClosed(sUV, SM_SP_V)`.
-    fn surface_is_closed(brep: &impl IntersectorBrep<O>, surf: O, uv: &Extent2d) -> Result<bool> {
+    fn surface_is_closed(
+        k: &Kernel,
+        brep: &impl IntersectorBrep<O>,
+        surf: O,
+        uv: &Extent2d,
+    ) -> Result<bool> {
         let s = brep
             .surface(surf)
             .ok_or(dangling("surface handle cannot be resolved"))?;
-        let closed_u = s.is_closed(uv, SurfParamType::U, None, false)?.0;
+        let closed_u = s.is_closed(k, uv, SurfParamType::U, None, false)?.0;
         if closed_u {
             return Ok(true);
         }
-        Ok(s.is_closed(uv, SurfParamType::V, None, false)?.0)
+        Ok(s.is_closed(k, uv, SurfParamType::V, None, false)?.0)
     }
 
     /// The imprint of an interval end that classifies to both faces (the `m_vStart`
@@ -2770,7 +2781,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .face_object()
             .ok_or(dangling("classification without face"))?;
         // (FindObjPoint3d's status is ignored: the point stays UNDEF on failure)
-        let mut pt = ignore_soft(pc1.find_obj_point_3d(brep))?.unwrap_or(Point3::UNDEF);
+        let mut pt = ignore_soft(pc1.find_obj_point_3d(k, brep))?.unwrap_or(Point3::UNDEF);
 
         // This classification may be outdated. Check and update. Will either be face or vertex
         let mut uv1 = pc1.uv_param();
@@ -2842,7 +2853,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         if pc1.point_class() == PointClassType::Face {
             let v1 = ignore_soft(brep.make_vertex_loop(this_brep, f1, pt))?.map(|(_loop1, v)| v);
 
-            pt = ignore_soft(pc2.find_obj_point_3d(brep))?.unwrap_or(Point3::UNDEF);
+            pt = ignore_soft(pc2.find_obj_point_3d(k, brep))?.unwrap_or(Point3::UNDEF);
             let v2 = ignore_soft(brep.make_vertex_loop(this_brep, f2, pt))?.map(|(_loop2, v)| v);
 
             // (two null vertices are equal: GlueVertices returns SM_SUCCESS at once; one
@@ -2950,7 +2961,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let ci = cc.at_mut(nn)?;
                 let this_face = ci.mid.face_object();
                 let this_curve = this_curve.ok_or(dangling("classification without curve"))?;
-                let pt = eval_curve_point(brep, this_curve, ci.interval.mid())?;
+                let pt = eval_curve_point(k, brep, this_curve, ci.interval.mid())?;
 
                 if let Some(this_face) = this_face {
                     let uv = ci.mid.uv_param();
@@ -3102,7 +3113,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         let pt_3d1 = ignore_soft(
                             brep.surface(s1)
                                 .ok_or(dangling("surface handle cannot be resolved"))?
-                                .evaluate_point(guess_uv1),
+                                .evaluate_point(k, guess_uv1),
                         )?
                         .unwrap_or(Point3::UNDEF);
                         let dropped: Option<DropPoint<O>> = ignore_soft(
@@ -3524,6 +3535,7 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
 /// `EvaluatePoint` of the curve behind `curve` at `t`; `SM_UNDEF` when the
 /// evaluation fails (the status is not checked upstream).
 pub(super) fn eval_curve_point<O: ClassObject>(
+    k: &Kernel,
     geometry: &impl IntersectorBrep<O>,
     curve: O,
     t: f64,
@@ -3531,7 +3543,7 @@ pub(super) fn eval_curve_point<O: ClassObject>(
     let c = geometry
         .curve(curve)
         .ok_or(dangling("curve handle cannot be resolved"))?;
-    Ok(ignore_soft(c.evaluate_point(t))?.unwrap_or(Point3::UNDEF))
+    Ok(ignore_soft(c.evaluate_point(k, t))?.unwrap_or(Point3::UNDEF))
 }
 
 /// `sm_SetEdgeClass(rCurveClass, pEdge)`: sets the first interval of a classification
@@ -3593,8 +3605,8 @@ pub fn set_edge_class<O: ClassObject + SolutionObject + Ord>(
     let c = geometry
         .curve(class_curve)
         .ok_or(dangling("curve handle cannot be resolved"))?;
-    let start = c.evaluate_point(class_interval.min())?;
-    let end = c.evaluate_point(class_interval.max())?;
+    let start = c.evaluate_point(k, class_interval.min())?;
+    let end = c.evaluate_point(k, class_interval.max())?;
 
     // Note that the curve on the curve class may be trimmed - take
     // care of that here by replacing the vertex by edge classifications
@@ -3675,6 +3687,7 @@ pub fn set_edge_class<O: ClassObject + SolutionObject + Ord>(
 /// out-param; here the error); [`SolidError::InvalidInput`] for an edge without
 /// curve or vertices (upstream dereferences null).
 pub fn check_interior_edge<O: ClassObject>(
+    k: &Kernel,
     geometry: &impl IntersectorBrep<O>,
     edge: O,
     t: f64,
@@ -3696,7 +3709,7 @@ pub fn check_interior_edge<O: ClassObject>(
     let curve = geometry
         .curve(curve_h)
         .ok_or(dangling("curve handle cannot be resolved"))?;
-    let crv_pt = curve.evaluate(t, 1, false, true)?;
+    let crv_pt = curve.evaluate(k, t, 1, false, true)?;
     let param_len = crv_pt.get(1).map_or(0.0, |d| d.length());
     if param_len > 0.1 {
         let mut param_tol = tol / param_len;
@@ -3825,13 +3838,15 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
 
         // Check for internal to both edges.
         let t1 = sol.start.param(0)?;
-        let interior = ignore_soft(check_interior_edge(geometry, edge1, t1, tol))?.unwrap_or(false);
+        let interior =
+            ignore_soft(check_interior_edge(k, geometry, edge1, t1, tol))?.unwrap_or(false);
         if !interior {
             continue;
         }
 
         let t2 = sol.start.param(1)?;
-        let interior = ignore_soft(check_interior_edge(geometry, edge2, t2, tol))?.unwrap_or(false);
+        let interior =
+            ignore_soft(check_interior_edge(k, geometry, edge2, t2, tol))?.unwrap_or(false);
         if !interior {
             continue;
         }
@@ -3852,8 +3867,8 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
             }
             Err(_) => {
                 // SM_ASSERT(FALSE): Maybe because of tolerance.  Check that.
-                let pt1 = eval_curve_point(geometry, curve1, t1)?;
-                let pt2 = eval_curve_point(geometry, curve2, t2)?;
+                let pt1 = eval_curve_point(k, geometry, curve1, t1)?;
+                let pt2 = eval_curve_point(k, geometry, curve2, t2)?;
                 if pt1.closer_than(out.min_unstitched, pt2) {
                     out.min_unstitched = pt1.distance(pt2);
                 }

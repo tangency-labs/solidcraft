@@ -250,7 +250,7 @@ impl SurfPtSolveStepper<'_> {
         }
         self.set_nr_suspect(false);
         let mut nr = Self::copy_of(k, previous);
-        let mut reason = nr.step(previous, false)?;
+        let mut reason = nr.step(k, previous, false)?;
         if reason == Converged {
             self.assign(&nr);
             return Ok(NextStep::success(reason));
@@ -301,7 +301,7 @@ impl SurfPtSolveStepper<'_> {
         }
         self.set_nr_suspect(true);
         let mut plane = Self::copy_of(k, previous);
-        reason = plane.step(previous, true)?;
+        reason = plane.step(k, previous, true)?;
         if reason == Converged {
             // Upstream deliberately assigns sNREval here, even after the plane step.
             self.assign(&nr);

@@ -569,7 +569,7 @@ impl Sphere {
     ///
     /// `InvalidInput` without converter circle (upstream dereferences it) or for a
     /// generator that is not a circle; those of the conversions.
-    pub fn convert_uv_from_step_to_nurbs(&self, step_uv: Point2) -> Result<Point2> {
+    pub fn convert_uv_from_step_to_nurbs(&self, k: &Kernel, step_uv: Point2) -> Result<Point2> {
         // convert sweep coordinate
         let polar_curve = self
             .base
@@ -582,14 +582,14 @@ impl Sphere {
         let (mut nurbs_x, _exact) =
             self.base
                 .polar
-                .convert_to_nurbs_parameter(polar_curve, step_uv.x, 0.0)?;
+                .convert_to_nurbs_parameter(k, polar_curve, step_uv.x, 0.0)?;
 
         // (Sphere GenCurves are centred on 0: the PolarParam is the StepParam)
         let polar_param = step_uv.y;
 
         // convert GenCurve PolarParam to NurbsParam
         let circle = gen_circle(self.base.gen_curve.as_ref(), OP_CONVERT)?;
-        let mut nurbs_y = circle.convert_t_from_step_to_nurbs(polar_param)?;
+        let mut nurbs_y = circle.convert_t_from_step_to_nurbs(k, polar_param)?;
 
         // m_bSwapUV - Nurb and STEP parameters are swapped
         if self.base.swap_uv {
@@ -812,7 +812,7 @@ impl Sphere {
     /// The bounding box of the NURB over `uv_domain` (`CalculateBoundingBox`, the
     /// inherited `SmBSplineSurface` override with its default zone-tolerance
     /// expansion). The NURB has no owner, so the expansion finds no face.
-    fn normal_box(&self, uv_domain: &Extent2d) -> Result<Extent3d> {
+    fn normal_box(&self, k: &Kernel, uv_domain: &Extent2d) -> Result<Extent3d> {
         let req = BoundingBoxRequest {
             normal: true,
             expand_by_zone_tol: true,
@@ -820,7 +820,7 @@ impl Sphere {
         };
         self.base
             .base
-            .calculate_bounding_box(uv_domain, &req)?
+            .calculate_bounding_box(k, uv_domain, &req)?
             .normal
             .ok_or(SolidError::null_pointer(OP_PLANE))
     }
@@ -856,8 +856,15 @@ impl Sphere {
                 need_nurb_intersection = more;
                 out = found;
             }
+            // (an SmCylinder is not SmCone_TYPE: the default branch)
+            SurfaceKind::Cone(c) if c.type_code() == crate::surface::surface::p2::CONE_TYPE => {
+                let (more, found) =
+                    self.intersect_with_cone(k, uv_domain, c, other_uv_domain, approx_tol_3d)?;
+                need_nurb_intersection = more;
+                out = found;
+            }
             SurfaceKind::SurfOfRevolution(o) => {
-                // (SmCone_TYPE and SmSphere_TYPE others have no SurfaceKind yet)
+                // (SmSphere_TYPE others have no SurfaceKind yet)
                 let (more, mut found) =
                     o.intersect_with_sphere(k, other_uv_domain, self, uv_domain, approx_tol_3d)?;
                 // the surface of revolution's first surface is the other one
@@ -866,6 +873,7 @@ impl Sphere {
                 out = found;
             }
             SurfaceKind::BSpline(_)
+            | SurfaceKind::Cone(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::SrfInVolume(_)
@@ -888,9 +896,9 @@ impl Sphere {
 
     /// The associated outputs of every 3D curve of `out`: no UV curves, a touching
     /// type for a degenerate curve and a crossing one otherwise, deviation `0`.
-    fn associate_outputs(out: &mut SurfaceIntersection) -> Result<()> {
+    fn associate_outputs(k: &Kernel, out: &mut SurfaceIntersection) -> Result<()> {
         for curve in &out.curves_3d {
-            let degenerate = ignored(curve.is_degenerate(EFF_ZERO, None))?.unwrap_or(false);
+            let degenerate = ignored(curve.is_degenerate(k, EFF_ZERO, None))?.unwrap_or(false);
             out.surface1_uv_curves.push(None);
             out.surface2_uv_curves.push(None);
             out.curve_types.push(if degenerate {
@@ -944,7 +952,7 @@ impl Sphere {
         // Do a little bounding box computation to see if things really intersect.
         if plane.is_bounded() {
             // get min distance from sphereOrigin to planeBoundingBox
-            let (bbox, _) = plane.bounding_boxes(other_uv_domain, false)?;
+            let (bbox, _) = plane.bounding_boxes(k, other_uv_domain, false)?;
             let sph_point = Extent3d::from_points(sph_origin, sph_origin);
             let dist = bbox.min_distance(&sph_point);
 
@@ -954,7 +962,7 @@ impl Sphere {
             }
 
             // get shpere bounding box
-            let mut bbox2 = self.normal_box(uv_domain)?;
+            let mut bbox2 = self.normal_box(k, uv_domain)?;
             bbox2.expand_absolute(tol);
 
             // skip planeBox/SphereBox cases that don't intersect
@@ -1007,7 +1015,7 @@ impl Sphere {
         }
 
         // set associated output for each trimmed intersection curve
-        Self::associate_outputs(&mut out)?;
+        Self::associate_outputs(k, &mut out)?;
 
         // all done
         Ok((false, out))
@@ -1055,8 +1063,8 @@ impl Sphere {
         }
 
         // check bounding boxes to eliminate candidate intersections
-        let bbox1 = self.normal_box(uv_domain)?;
-        let mut bbox2 = other.normal_box(other_uv_domain)?;
+        let bbox1 = self.normal_box(k, uv_domain)?;
+        let mut bbox2 = other.normal_box(k, other_uv_domain)?;
         bbox2.expand_absolute(tol);
 
         // when bounding boxes don't intersect - no intersection
@@ -1149,7 +1157,7 @@ impl Sphere {
                 // curve is degenerate
                 _ => {
                     // see if degenerateCurvePoint is inside of other surface
-                    let test_point = curve.evaluate_point(curve.natural_interval().min())?;
+                    let test_point = curve.evaluate_point(k, curve.natural_interval().min())?;
                     let location = if other.is_closed_u() && other.is_closed_v() {
                         // Every point is interior.
                         LocationType::Interior
@@ -1168,7 +1176,7 @@ impl Sphere {
         }
 
         // set output
-        Self::associate_outputs(&mut out)?;
+        Self::associate_outputs(k, &mut out)?;
 
         // all done
         Ok((false, out))
@@ -1610,7 +1618,7 @@ impl Sphere {
         }
 
         // eliminate intersections using bounding boxes.
-        let bbox1 = self.normal_box(uv_domain)?;
+        let bbox1 = self.normal_box(k, uv_domain)?;
         let req = BoundingBoxRequest {
             normal: true,
             expand_by_zone_tol: true,
@@ -1619,7 +1627,7 @@ impl Sphere {
         let mut bbox2 = cone
             .rev
             .base
-            .calculate_bounding_box(other_uv_domain, &req)?
+            .calculate_bounding_box(k, other_uv_domain, &req)?
             .normal
             .ok_or(SolidError::null_pointer(OP_CONE))?;
         bbox2.expand_absolute(tol);
@@ -1716,7 +1724,7 @@ impl Sphere {
                 }
                 // curve is degenerate
                 _ => {
-                    let point = curve.evaluate_point(0.0)?;
+                    let point = curve.evaluate_point(k, 0.0)?;
                     let scaled_zero = EFF_ZERO * (1.0 + point.max_dimension());
 
                     // get UV point for Sphere
@@ -1733,7 +1741,7 @@ impl Sphere {
         }
 
         // set associated output for each trimmed intersection curve
-        Self::associate_outputs(&mut out)?;
+        Self::associate_outputs(k, &mut out)?;
 
         // all done
         Ok((false, out))
@@ -2453,7 +2461,7 @@ fn iso_curve(
     )?;
 
     // low work - when curve is degenerate don't bother making a circle
-    if iso.curve.is_degenerate(EFF_ZERO, None)? {
+    if iso.curve.is_degenerate(k, EFF_ZERO, None)? {
         return Ok(RevolutionIsoCurve {
             curve: Curve::from(iso.curve),
             max_gap_3d: iso.max_gap_3d,
@@ -2643,7 +2651,7 @@ mod tests {
                 let step = Point2::new(u, v);
                 let p = s.evaluate_step_point(step).expect("eval");
                 assert!(((p - frame().origin()).length() - 2.0).abs() < 1e-12);
-                let nurb = s.convert_uv_from_step_to_nurbs(step).expect("to nurbs");
+                let nurb = s.convert_uv_from_step_to_nurbs(&k, step).expect("to nurbs");
                 let q = s.base.base.evaluate_point(nurb).expect("nurb eval");
                 assert!((p - q).length() < 1e-9, "{radius} {u} {v}");
                 let back = s.convert_uv_from_nurbs_to_step(&k, nurb).expect("to step");
@@ -2672,7 +2680,7 @@ mod tests {
             .expect("surface");
         assert!((off.radius() - 2.5).abs() < 1e-15);
         let nurb = off
-            .convert_uv_from_step_to_nurbs(Point2::new(30.0, 40.0))
+            .convert_uv_from_step_to_nurbs(&k, Point2::new(30.0, 40.0))
             .expect("uv");
         let p = off.base.base.evaluate_point(nurb).expect("eval");
         assert!(((p - frame().origin()).length() - 2.5).abs() < 1e-9);

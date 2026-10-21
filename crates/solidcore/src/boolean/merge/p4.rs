@@ -792,11 +792,11 @@ fn classify_remaining(
                 };
                 let e = source.edge(selected)?;
                 let curve = required(e.curve.as_ref())?;
-                let point = curve.evaluate_point(e.interval.evaluate(if reverse {
-                    0.456789
-                } else {
-                    0.45678
-                }))?;
+                let point = curve.evaluate_point(
+                    source_k,
+                    e.interval
+                        .evaluate(if reverse { 0.456789 } else { 0.45678 }),
+                )?;
                 let mut classification = PointClassification::new(e.tolerance);
                 let edit = opposite.editing_enabled();
                 opposite.set_editing_enabled(false);

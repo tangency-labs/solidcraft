@@ -630,12 +630,12 @@ fn rust_off(k: &Kernel, o: &OffIn) -> Result<solidcore::Result<OffsetSurface>, H
 }
 
 /// The 3x3 `EvaluatePoint` grid over the natural domain.
-fn put_grid(o: &mut Vec<f64>, s: &Surface) -> Result<(), Fail> {
+fn put_grid(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<(), Fail> {
     let d = s.natural_uv_domain();
     for i in 0..3 {
         for j in 0..3 {
             let uv = d.evaluate(f64::from(i) / 2.0, f64::from(j) / 2.0);
-            push_res(o, s.evaluate_point(uv), |o, p| {
+            push_res(o, s.evaluate_point(k, uv), |o, p| {
                 pv(o, p);
                 Ok(())
             })?;
@@ -644,7 +644,7 @@ fn put_grid(o: &mut Vec<f64>, s: &Surface) -> Result<(), Fail> {
     Ok(())
 }
 
-fn put_state(o: &mut Vec<f64>, s: &OffsetSurface) -> Result<(), Fail> {
+fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &OffsetSurface) -> Result<(), Fail> {
     put_dom(o, &s.natural_uv_domain());
     o.push(s.offset_distance());
     o.push(flag(s.allow_extension()));
@@ -665,16 +665,16 @@ fn put_state(o: &mut Vec<f64>, s: &OffsetSurface) -> Result<(), Fail> {
     o.push(b.type_code() as f64);
     put_dom(o, &b.natural_uv_domain());
     o.push(s.type_code() as f64);
-    put_grid(o, &Surface::from(s.clone()))
+    put_grid(k, o, &Surface::from(s.clone()))
 }
 
-fn put_result(o: &mut Vec<f64>, r: &Surface) -> Result<(), Fail> {
+fn put_result(k: &Kernel, o: &mut Vec<f64>, r: &Surface) -> Result<(), Fail> {
     o.push(r.type_code() as f64);
     if let SurfaceKind::OffsetSurface(off) = r.kind() {
-        put_state(o, off)
+        put_state(k, o, off)
     } else {
         put_dom(o, &r.natural_uv_domain());
-        put_grid(o, r)
+        put_grid(k, o, r)
     }
 }
 
@@ -720,7 +720,7 @@ fn run_step(
     match step {
         StepIn::State => {
             o.push(0.0);
-            put_state(o, s)
+            put_state(k, o, s)
         }
         StepIn::Eval {
             uv,
@@ -734,9 +734,9 @@ fn run_step(
         } => {
             let f = flags([*ul, *vl, *upper, *nzt]);
             let r = if *via {
-                Surface::from(s.clone()).evaluate(p2(*uv), *hu, *hv, f)
+                Surface::from(s.clone()).evaluate(k, p2(*uv), *hu, *hv, f)
             } else {
-                s.evaluate_extending(p2(*uv), *hu, *hv, f)
+                s.evaluate_extending(k, p2(*uv), *hu, *hv, f)
             };
             push_res(o, r, |o, m| put_matrix(o, &m, *hu, *hv, *upper))
         }
@@ -751,17 +751,17 @@ fn run_step(
         } => {
             let f = flags([*ul, *vl, *upper, false]);
             let r = if *via {
-                Surface::from(s.clone()).evaluate_simple(p2(*uv), *hu, *hv, f)
+                Surface::from(s.clone()).evaluate_simple(k, p2(*uv), *hu, *hv, f)
             } else {
-                s.evaluate_simple_extending(p2(*uv), *hu, *hv, f)
+                s.evaluate_simple_extending(k, p2(*uv), *hu, *hv, f)
             };
             push_res(o, r, |o, m| put_matrix(o, &m, *hu, *hv, *upper))
         }
         StepIn::EvalPt { uv, via } => {
             let r = if *via {
-                Surface::from(s.clone()).evaluate_point(p2(*uv))
+                Surface::from(s.clone()).evaluate_point(k, p2(*uv))
             } else {
-                s.evaluate_point_extending(p2(*uv))
+                s.evaluate_point_extending(k, p2(*uv))
             };
             push_res(o, r, |o, p| {
                 pv(o, p);
@@ -770,9 +770,9 @@ fn run_step(
         }
         StepIn::Normal { uv, ul, vl, via } => {
             let r = if *via {
-                Surface::from(s.clone()).evaluate_normal(p2(*uv), side(*ul), side(*vl))
+                Surface::from(s.clone()).evaluate_normal(k, p2(*uv), side(*ul), side(*vl))
             } else {
-                s.evaluate_normal_extending(p2(*uv), side(*ul), side(*vl))
+                s.evaluate_normal_extending(k, p2(*uv), side(*ul), side(*vl))
             };
             push_res(o, r, |o, n| {
                 pv(o, n);
@@ -793,7 +793,7 @@ fn run_step(
                 },
             )
         }
-        StepIn::MaxAnal => push_res(o, s.max_analytic_domain(), |o, d| {
+        StepIn::MaxAnal => push_res(o, s.max_analytic_domain(k), |o, d| {
             put_dom(o, &d);
             Ok(())
         }),
@@ -862,32 +862,32 @@ fn run_step(
         StepIn::Split { t, param } => {
             let p = param_of(*param)?;
             push_res(o, s.split_at(k, *t, p), |o, (l, r)| {
-                put_result(o, &l)?;
-                put_result(o, &r)
+                put_result(k, o, &l)?;
+                put_result(k, o, &r)
             })
         }
         StepIn::CreateOffset { d } => {
-            push_res(o, s.create_offset_surface(k, *d), |o, r| put_result(o, &r))
+            push_res(o, s.create_offset_surface(k, *d), |o, r| put_result(k, o, &r))
         }
         StepIn::Extend { dist, cont } => {
             let c = continuity_of(*cont)?;
             push_res(o, s.create_extended_surface(k, *dist, c), |o, r| {
-                put_result(o, &r)
+                put_result(k, o, &r)
             })
         }
         StepIn::ExtendDir { param, dist, cont } => {
             let (p, c) = (param_of(*param)?, continuity_of(*cont)?);
             push_res(o, s.create_extended_surface_dir(k, p, *dist, c), |o, r| {
-                put_result(o, &r)
+                put_result(k, o, &r)
             })
         }
-        StepIn::Copy => push_res(o, s.copy(k), |o, c| put_result(o, &Surface::from(c))),
+        StepIn::Copy => push_res(o, s.copy(k), |o, c| put_result(k, o, &Surface::from(c))),
         StepIn::Eq { other } => match rust_off(k, other)? {
             Ok(other) => {
                 o.push(0.0);
-                let eq = s.approx_eq(&Surface::from(other));
+                let eq = s.approx_eq(k, &Surface::from(other));
                 let w = Surface::from(s.clone());
-                let self_eq = w.approx_eq(&w);
+                let self_eq = w.approx_eq(k, &w);
                 for r in [eq, self_eq] {
                     match r {
                         Ok(b) => o.push(flag(b)),
@@ -940,7 +940,8 @@ fn run_step(
         StepIn::BaseOffset { d, tol } => push_res(
             o,
             s.base_surface().create_offset_surface(k, *d, *tol),
-            |o, r| put_result(o, &r),
+            // (a NULL result writes only the status, as the shim)
+            |o, r| r.as_ref().map_or(Ok(()), |r| put_result(k, o, r)),
         ),
     }
 }
@@ -977,7 +978,7 @@ fn rust_read(binary: bool, version: u32, bytes: &[u8]) -> Result<Vec<f64>, Fail>
     push_res(
         &mut o,
         OffsetSurface::read_from_db(&k, &mut db, u64::from(version)),
-        |o, s| put_state(o, &s),
+        |o, s| put_state(&k, o, &s),
     )?;
     Ok(o)
 }
@@ -1269,7 +1270,7 @@ fn base_info(k: &Kernel, off: &OffIn) -> Option<([f64; 4], f64)> {
     if !(r.iter().all(|c| c.is_finite() && c.abs() < 1e5) && r[0] < r[2] && r[1] < r[3]) {
         return None;
     }
-    let size = match (s.evaluate_point(d.min()), s.evaluate_point(d.max())) {
+    let size = match (s.evaluate_point(k, d.min()), s.evaluate_point(k, d.max())) {
         (Ok(a), Ok(b)) => a.distance(b),
         _ => 0.0,
     };
@@ -1608,7 +1609,10 @@ fn degree_1_directions(k: &Kernel, off: &OffIn) -> Option<[bool; 2]> {
             SurfaceKind::OffsetSurface(o) => o.base_surface(),
             SurfaceKind::CurveBounded(c) => c.basis(),
             SurfaceKind::Step(st) => st.surface()?,
-            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_) => {
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_) => {
                 let d = [
                     s.degree(SurfParamType::U) == 1,
                     s.degree(SurfParamType::V) == 1,
@@ -1691,7 +1695,7 @@ fn fill_placeholders(case: &mut Case) -> Result<(), HarnessError> {
         };
         let s = rust_off(&k, &plain)?.map_err(|e| bad(&format!("offset: {e}")))?;
         let p = s
-            .evaluate_point(Point2::new(u0 + 0.4 * lu, v0 + 0.6 * lv))
+            .evaluate_point(&k, Point2::new(u0 + 0.4 * lu, v0 + 0.6 * lv))
             .map_err(|e| bad(&format!("point: {e}")))?;
         Ok([p.x, p.y, p.z])
     };

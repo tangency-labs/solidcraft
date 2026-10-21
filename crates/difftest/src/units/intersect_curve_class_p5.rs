@@ -259,7 +259,7 @@ fn setup(k: &Kernel, pool: &Pool, i: &Input, other: bool) -> ScResult<CurveClass
     Ok(cc)
 }
 
-fn put_curve(out: &mut Vec<f64>, curve: &Curve) {
+fn put_curve(k: &Kernel, out: &mut Vec<f64>, curve: &Curve) {
     let domain = curve.natural_interval();
     out.extend([
         curve.type_code() as f64,
@@ -268,7 +268,7 @@ fn put_curve(out: &mut Vec<f64>, curve: &Curve) {
         domain.max(),
     ]);
     for j in 0..=4 {
-        match curve.evaluate_point(domain.evaluate(f64::from(j) / 4.0)) {
+        match curve.evaluate_point(k, domain.evaluate(f64::from(j) / 4.0)) {
             Ok(p) => out.extend([0., p.x, p.y, p.z]),
             Err(e) => out.extend([status(&e), -f64::MAX, -f64::MAX, -f64::MAX]),
         }
@@ -458,7 +458,7 @@ fn rust(i: &Input) -> ScResult<Output> {
                     g.points_3d.len() as f64,
                 ]);
                 for c in g.curves_3d.iter().chain(&g.uv_curves1).chain(&g.uv_curves2) {
-                    put_curve(&mut out, c);
+                    put_curve(&k, &mut out, c);
                 }
                 for p in &g.points_3d {
                     out.extend([p.x, p.y, p.z]);

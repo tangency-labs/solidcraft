@@ -260,8 +260,8 @@ impl TranslationalSweepGeometry {
             Surface::from(surface)
         };
         let domain = output_surface.natural_uv_domain();
-        let p00 = output_surface.evaluate_point(domain.min())?;
-        let p01 = output_surface.evaluate_point(domain.evaluate(0.0, 1.0))?;
+        let p00 = output_surface.evaluate_point(k, domain.min())?;
+        let p01 = output_surface.evaluate_point(k, domain.evaluate(0.0, 1.0))?;
         let start_point = vertex::point(b, start_id)?;
         let d00 = (p00 - start_point).length();
         let d01 = (p01 - start_point).length();
@@ -275,7 +275,7 @@ impl TranslationalSweepGeometry {
         if distance > brep_tol {
             return Err(SolidError::sm_err(OP));
         }
-        let normal = output_surface.evaluate_normal(uv, Side::Left, Side::Left)?;
+        let normal = output_surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         let iso = |param, value| {
             output_surface
                 .create_iso_parametric_curve(k, param, value, tol, None, false)

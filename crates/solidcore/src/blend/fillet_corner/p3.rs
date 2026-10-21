@@ -602,7 +602,7 @@ impl FilletCorner {
     /// # Errors
     ///
     /// Those of [`FilletCorner::create_corner_patch`].
-    pub fn calc_corner_geom(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn calc_corner_geom(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         let total_edges = self.edges.len();
         let fillet_edges = self.solver_eus.as_ref().map_or(0, Vec::len);
 
@@ -612,7 +612,7 @@ impl FilletCorner {
         }
 
         // Otherwise, pass the call along to build a Corner->FilletSurface and store it in m_vSurfaces
-        self.create_corner_patch(env)
+        self.create_corner_patch(k, env)
     }
 
     // ---- CreateCornerPatch -----------------------------------------------------------
@@ -623,12 +623,14 @@ impl FilletCorner {
     /// # Errors
     ///
     /// Those of the selected implementation.
-    pub fn create_corner_patch(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn create_corner_patch(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         match self.kind {
-            FilletCornerKind::ThreeByTwoMixed => self.create_corner_patch_3x2(env),
-            FilletCornerKind::NByOne | FilletCornerKind::Open => self.create_corner_patch_nx1(env),
-            FilletCornerKind::NByTwo => self.create_corner_patch_nx2(env),
-            _ => self.create_corner_patch_default(env),
+            FilletCornerKind::ThreeByTwoMixed => self.create_corner_patch_3x2(k, env),
+            FilletCornerKind::NByOne | FilletCornerKind::Open => {
+                self.create_corner_patch_nx1(k, env)
+            }
+            FilletCornerKind::NByTwo => self.create_corner_patch_nx2(k, env),
+            _ => self.create_corner_patch_default(k, env),
         }
     }
 
@@ -644,7 +646,11 @@ impl FilletCorner {
     /// geometry where one is needed; [`SolidError::InvalidInput`] where upstream
     /// dereferences null or indexes past the corner's arrays; those of the point curves
     /// and `CreateCornerBlend`.
-    pub fn create_corner_patch_default(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn create_corner_patch_default(
+        &mut self,
+        k: &Kernel,
+        env: &mut CornerEnv<'_>,
+    ) -> Result<()> {
         // if an AnalyticSurface can approx FilletCorner->Curves to tol,
         //   Make and store that AnalyticSurface in m_vSurfaces, and return TRUE
         // else return FALSE.
@@ -842,6 +848,7 @@ impl FilletCorner {
                 });
             }
             let blends = BSplineSurface::create_corner_blend(
+                k,
                 &curves_3d,
                 &orients,
                 &ordered_uv,
@@ -885,7 +892,7 @@ impl FilletCorner {
     /// corner; `SM_ERR_NULL_POINTER` for a missing on-edge / on-extended-edge edge, a
     /// non-B-spline curve or a missing original face; those of `JoinWith`;
     /// [`SolidError::Unported`] (`SmSurface::DropCurve`).
-    pub fn create_corner_patch_3x2(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn create_corner_patch_3x2(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         // check state - 4 edges
         if self.edges.len() != 4 {
             // SM_DBG_WARN: Failed state check: 3x2 FilletCorner with other than 4 edges
@@ -998,7 +1005,7 @@ impl FilletCorner {
             .set_edgeuse_uv_curve(mate_eu, Some(Curve::from(new_ps_curve)), true, true)?;
 
         // Create a 3-sided corner patch
-        self.create_corner_patch_default(env)
+        self.create_corner_patch_default(k, env)
     }
 
     /// `SmFilletNx1Corner::CreateCornerPatch`: with three fillet edges an end patch
@@ -1008,12 +1015,12 @@ impl FilletCorner {
     /// # Errors
     ///
     /// Those of the patch builders; [`SolidError::Unported`] (`CreateEndPatch`).
-    pub fn create_corner_patch_nx1(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn create_corner_patch_nx1(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         if self.edges.len() == 3 {
             if self.extended_surface_patch {
                 self.create_end_patch(env)?;
             } else {
-                self.create_corner_patch_default(env)?;
+                self.create_corner_patch_default(k, env)?;
             }
         }
         // else SM_DBG_WARN: Unexpected SmFilletNx1Corner endFace construction case
@@ -1028,7 +1035,7 @@ impl FilletCorner {
     ///
     /// Those of the patch builders; [`SolidError::InvalidInput`] for more than three
     /// edges and no vertex (module docs).
-    pub fn create_corner_patch_nx2(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn create_corner_patch_nx2(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         let total_edges = self.edges.len();
 
         let mut first_three_edges: Vec<EdgeId> = Vec::new();
@@ -1067,7 +1074,7 @@ impl FilletCorner {
         }
 
         // Create a 3-sided corner patch
-        self.create_corner_patch_default(env)?;
+        self.create_corner_patch_default(k, env)?;
 
         // Put the end patch back
         if let Some(p) = end_patch {
@@ -1091,9 +1098,9 @@ impl FilletCorner {
     ///
     /// Those of [`FilletCorner::adjust_topology_nx2`]; [`SolidError::Unported`]
     /// (`SmFilletConvexNxNCorner::AdjustTopology`).
-    pub fn adjust_topology(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn adjust_topology(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         match self.kind {
-            FilletCornerKind::NByTwo => self.adjust_topology_nx2(env),
+            FilletCornerKind::NByTwo => self.adjust_topology_nx2(k, env),
             FilletCornerKind::ConvexNByN | FilletCornerKind::ConcaveNByN => {
                 // UNPORTED(blend.fillet_corner_p2): SmFilletConvexNxNCorner::AdjustTopology
                 Err(unported(
@@ -1117,7 +1124,7 @@ impl FilletCorner {
     /// [`SolidError::InvalidInput`] for an unset `m_pAllEUs`, a classification object
     /// that is not an edge use, a missing rail vertex use or side edge curve (upstream
     /// dereferences them); [`SolidError::Unported`] (module docs).
-    pub fn adjust_topology_nx2(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn adjust_topology_nx2(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         // Can't do it if more than four total edges
         let all_eus = self
             .all_eus
@@ -1191,8 +1198,8 @@ impl FilletCorner {
                 .as_ref()
                 .ok_or_else(|| invalid(OP_TOPO, "side edge without curve"))?;
 
-            let pnt1 = unchecked_point(side_edge_curve.evaluate_point(edge_param1))?;
-            let pnt2 = unchecked_point(side_edge_curve.evaluate_point(edge_param2))?;
+            let pnt1 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param1))?;
+            let pnt2 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param2))?;
 
             let dist = pnt1.distance(pnt2);
 
@@ -1315,9 +1322,9 @@ impl FilletCorner {
     ///
     /// Those of [`FilletCorner::adjust_tangent_corner_nx2`];
     /// [`SolidError::Unported`] (`SmFilletNx1ClosedCorner::AdjustTangentCorner`).
-    pub fn adjust_tangent_corner(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn adjust_tangent_corner(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         match self.kind {
-            FilletCornerKind::NByTwo => self.adjust_tangent_corner_nx2(env),
+            FilletCornerKind::NByTwo => self.adjust_tangent_corner_nx2(k, env),
             FilletCornerKind::NByOneClosed => {
                 // UNPORTED(blend.fillet_corner_p2): SmFilletNx1ClosedCorner::AdjustTangentCorner
                 Err(unported(
@@ -1339,7 +1346,7 @@ impl FilletCorner {
     /// [`SolidError::InvalidInput`] / `SM_ERR_NULL_POINTER` where upstream dereferences
     /// null (a missing rail, rail vertex use or intersection surface);
     /// [`SolidError::Unported`] (module docs); those of the evaluations.
-    pub fn adjust_tangent_corner_nx2(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn adjust_tangent_corner_nx2(&mut self, k: &Kernel, env: &mut CornerEnv<'_>) -> Result<()> {
         // First check that this is the appropriate type.
         // Must be Nx2 tangent corner, and currently N must be 4.
         let Some(&[eu_a, eu_b]) = self.solver_eus.as_deref() else {
@@ -1428,6 +1435,9 @@ impl FilletCorner {
                     SurfaceKind::SurfOfRevolution(r) => {
                         *r.base_mut().out_of_bounds_enabled_mut() = true;
                     }
+                    SurfaceKind::Cone(c) => {
+                        *c.base_mut().out_of_bounds_enabled_mut() = true;
+                    }
                     SurfaceKind::CurveBounded(_)
                     | SurfaceKind::Step(_)
                     | SurfaceKind::OffsetSurface(_)
@@ -1440,8 +1450,10 @@ impl FilletCorner {
             let srf2a = user_surface(vu2, 0)?;
             let srf2b = user_surface(vu2, 1)?;
 
-            let srf1_pt = unchecked_point(srf1a.evaluate_point(int_pt1.uv_pos(SrfIndex::First)))?;
-            let srf2_pt = unchecked_point(srf2a.evaluate_point(int_pt2.uv_pos(SrfIndex::First)))?;
+            let srf1_pt =
+                unchecked_point(srf1a.evaluate_point(k, int_pt1.uv_pos(SrfIndex::First)))?;
+            let srf2_pt =
+                unchecked_point(srf2a.evaluate_point(k, int_pt2.uv_pos(SrfIndex::First)))?;
 
             if srf1_pt.distance(srf2_pt) > self.approx_tol_3d {
                 close_enough = false;
@@ -1449,8 +1461,10 @@ impl FilletCorner {
             }
 
             // The mates must agree as well for 4x2
-            let srf1_pt = unchecked_point(srf1b.evaluate_point(int_pt1.uv_pos(SrfIndex::Second)))?;
-            let srf2_pt = unchecked_point(srf2b.evaluate_point(int_pt2.uv_pos(SrfIndex::Second)))?;
+            let srf1_pt =
+                unchecked_point(srf1b.evaluate_point(k, int_pt1.uv_pos(SrfIndex::Second)))?;
+            let srf2_pt =
+                unchecked_point(srf2b.evaluate_point(k, int_pt2.uv_pos(SrfIndex::Second)))?;
 
             if srf1_pt.distance(srf2_pt) > self.approx_tol_3d {
                 close_enough = false;
@@ -1721,7 +1735,7 @@ fn join_with(
                 bspline_part_mut(kind).ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
             let other_base = bspline_part_mut(other.kind_mut())
                 .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
-            this_base.join_with(this_at_end, other_base, other_at_end, None)
+            this_base.join_with(k, this_at_end, other_base, other_at_end, None)
         }
     }
 }
@@ -1811,7 +1825,7 @@ mod tests {
             tsect_surfaces: &surfaces,
         };
         let mut c = FilletCorner::new(FilletCornerKind::FourByThree, None, None, None, 1e-3, 0.1);
-        assert!(c.calc_corner_geom(&mut env).is_ok());
+        assert!(c.calc_corner_geom(&k, &mut env).is_ok());
     }
 
     #[test]

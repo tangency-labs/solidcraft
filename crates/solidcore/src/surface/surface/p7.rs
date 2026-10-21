@@ -763,7 +763,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Only [`SolidError::Unported`].
+    /// [`SolidError::Unported`]; those of
+    /// [`OffsetSurface::evaluate_normal`](crate::surface::offset_surface::OffsetSurface::evaluate_normal).
     pub fn evaluate_normal(
         &self,
         k: &Kernel,
@@ -779,7 +780,7 @@ impl Surface {
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(k, uv, u_side, v_side),
             SurfaceKind::SrfInVolume(s) => s.evaluate_normal(k, uv, u_side, v_side),
             SurfaceKind::Plane(p) => Ok(p.evaluate_normal()),
-            SurfaceKind::OffsetSurface(s) => s.evaluate_normal(uv, u_side, v_side),
+            SurfaceKind::OffsetSurface(s) => s.evaluate_normal(k, uv, u_side, v_side),
         }
     }
 
@@ -823,7 +824,9 @@ impl Surface {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the bounding box (the base
-    /// `SmSurface::CalculateBoundingBox` of a curve-bounded surface).
+    /// `SmSurface::CalculateBoundingBox` of a curve-bounded surface); `Unported` errors
+    /// of an offset surface's bounding box (its other failures are ignored, as
+    /// upstream).
     pub fn is_planar(&self, k: &Kernel, tol_3d: f64) -> Result<Planar> {
         match self.kind() {
             SurfaceKind::Plane(p) => {
@@ -1123,9 +1126,8 @@ impl Surface {
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
 
         // instance global Surface/Point solver
-        let mut gs = SpGlobalSolver::new(&point_tree, surface_tree, Some(self), *uv_domain);
+        let mut gs = SpGlobalSolver::new(k, &point_tree, surface_tree, Some(self), *uv_domain);
         gs.surface_cache = Some(&cache);
-        gs.kernel = Some(k);
 
         // init solver.dBestAnswerSoFarSq to properly handle SM_SR_SINGLE requests
         let best = point_solve_best_answer_sq(op, opt_target_distance)?;
@@ -2300,9 +2302,9 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
 /// fields are public.
 #[derive(Debug, Clone)]
 pub struct SpGlobalSolver<'t, 's, O> {
-    /// Caller context for virtual evaluations.
+    /// Caller context for virtual evaluations and the leaf solve (upstream reaches
+    /// the context through the surface).
     pub kernel: &'s Kernel,
-
     /// The `SmGlobalSolver` state.
     pub base: GlobalSolver<'t, O>,
     /// `m_pSurf`.
@@ -2312,9 +2314,6 @@ pub struct SpGlobalSolver<'t, 's, O> {
     /// The cache holding the patches of the surface tree's nodes, read by the leaf
     /// solve (upstream reaches it through the node's tree owner).
     pub surface_cache: Option<&'s SurfaceCache<O>>,
-    /// The kernel for the leaf solve's evaluations (upstream reaches the context
-    /// through the surface).
-    pub kernel: Option<&'s Kernel>,
 }
 
 impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
@@ -2327,6 +2326,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
     /// `SM_ERR_NULL_POINTER` without `surface_cache`; `InvalidInput` for a node that is
     /// not a patch node of that cache; those of the polar box build.
     pub fn may_contain_answers(&self, branch: &Branch) -> Result<bool> {
+        let k = self.kernel;
         // When point testing is on and node is known to be outside of Surface->Face
         let surface_node = self.base.branch_node(branch, 1)?;
         let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_MAY))?;
@@ -2363,7 +2363,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                     }
 
                     // when the polar boxes are disjoint
-                    if tmp_polar.are_disjoint(&cache.polar_box_unstored(surface_id)?) {
+                    if tmp_polar.are_disjoint(&cache.polar_box_unstored(k, surface_id)?) {
                         return Ok(false); // No answer
                     }
                 }

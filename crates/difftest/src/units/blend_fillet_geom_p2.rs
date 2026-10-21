@@ -677,7 +677,7 @@ fn standing(mut s: Srf, shift: f64) -> Srf {
 }
 
 /// A pair of surfaces that (mostly) intersect.
-fn gen_pair(rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
+fn gen_pair(k: &Kernel, rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
     match rng.below(20) {
         // plane / plane: crossing, sometimes parallel or coincident
         0..=6 => {
@@ -705,7 +705,7 @@ fn gen_pair(rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
                 .ok()
                 .and_then(|rs| {
                     let d = rs.natural_uv_domain();
-                    rs.evaluate_point(d.evaluate(rng.uniform(0.2, 0.8), rng.uniform(0.2, 0.8)))
+                    rs.evaluate_point(k, d.evaluate(rng.uniform(0.2, 0.8), rng.uniform(0.2, 0.8)))
                         .ok()
                 })
                 .map_or([0.5 * scale, 0.5 * scale, 0.0], v3a);
@@ -773,9 +773,9 @@ fn probe_curve(s1: &SurfIn, s2: &SurfIn, tol: f64, ang: f64) -> Option<Curve> {
         .curve_3d
 }
 
-fn gen_srf_srf(rng: &mut Rng) -> Inputs {
+fn gen_srf_srf(k: &Kernel, rng: &mut Rng) -> Inputs {
     let scale = scale_of(rng);
-    let (s1, s2) = gen_pair(rng, scale);
+    let (s1, s2) = gen_pair(k, rng, scale);
     let tol = scale * *rng.choose(&[1e-6, 1e-6, 1e-4, 1e-8, 1e-3, 1e-12, 1e-2]).unwrap_or(&1e-6);
     let ang = *rng
         .choose(&[0.5235987755982988, 0.1, 0.5, 0.01, 1.2])
@@ -795,7 +795,7 @@ fn gen_srf_srf(rng: &mut Rng) -> Inputs {
         _ => {
             if let Some(c) = probe_curve(&s1, &s2, tol, ang) {
                 let ivl = c.natural_interval();
-                let at = |t: f64| c.evaluate(ivl.evaluate(t), 1, true, true).ok();
+                let at = |t: f64| c.evaluate(k, ivl.evaluate(t), 1, true, true).ok();
                 let (t0, t1) = match rng.below(5) {
                     0 => (0.0, 1.0),
                     1 => (0.8, 0.2), // reversed
@@ -953,7 +953,7 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
     let d = rs.natural_uv_domain();
     let at = |a: f64, b: f64| -> Option<([f64; 3], [f64; 2])> {
         let uv = d.evaluate(a, b);
-        rs.evaluate_point(uv).ok().map(|p| (v3a(p), [uv.x, uv.y]))
+        rs.evaluate_point(&k, uv).ok().map(|p| (v3a(p), [uv.x, uv.y]))
     };
     // the edge's two vertices and the rails' far ends
     // fractions of the domain (the planes' domains are large: points near the middle)
@@ -1120,10 +1120,11 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         // keep only inputs the shim runs
         for _ in 0..64 {
             let inputs = match rng.below(20) {
-                0..=12 => gen_srf_srf(rng),
+                0..=12 => gen_srf_srf(k, rng),
                 13 | 14 => gen_vertex_calc(rng),
                 15..=18 => match gen_rail_rail(rng) {
                     Some(i) => i,

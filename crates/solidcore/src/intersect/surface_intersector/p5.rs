@@ -315,8 +315,8 @@ pub fn do_intersection(
     opt_approx_tol_3d: Option<f64>,
     opt_ang_tol_rad: Option<f64>,
 ) -> Result<SurfaceIntersection> {
-    let mut caches: Vec<SurfaceCache<NoSurfaceHandle>>;
-    let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+    let mut caches: Vec<SurfaceCache<IntersectionSurface>>;
+    let mut ssi: AdvSurfaceIntersector<'_, '_, IntersectionSurface> =
         AdvSurfaceIntersector::new(k, surface1, uv_domain1, surface2, uv_domain2, false)?;
     ssi.base
         .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);

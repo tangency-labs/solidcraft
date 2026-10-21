@@ -6,7 +6,7 @@ Latest unit: `topology.face_p4` partial (port: topology.face_p4, taking over the
 
 Latest topology integration: `topology.brep_p6` partial (PR #169, after its dependency #154: 498 cases, 450 pass, 48 deferred, 0 failed; 206 units, 113 green and 93 partial); before: `topology.shell` partial (PR #154, continuing @0xlillith's PR #80: 192 ported units, 109 green and 83 partial); before: `surface.surface_p11` partial (PR #120: 176 ported units, 98 green and 78 partial; `intersect.surface_silhouette` promoted to green); before: `mass.integrator` partial and `curve.curve_p3` green (PR #119); PR #115 (`topology.brep_cache` partial). Update a summary line here when your unit changes it; per-unit state lives in `plan/modules.toml` and evidence in `reports/difftest/`.
 
-Latest main integration: `surface.surface_p11` partial (PR #120: 176 ported units, 98 green and 78 partial; `intersect.surface_silhouette` promoted to green).
+Latest main integration: issue #76 kernel-aware Surface dispatch (PR #313, #133 revived, `SurfaceKind::Cone`): 234 units, 117 green / 117 partial, 0 failed; 534,436 cases, 510,383 pass, 23,933 deferred (before 493,865 / 24,694); `intersect.surface_intersector_p1`, `intersect.surface_intersector_p4`, `surface.surface_p11` promoted to green. Before: `surface.surface_p11` partial (PR #120: 176 ported units, 98 green and 78 partial; `intersect.surface_silhouette` promoted to green).
 
 Latest unit: `boolean.merge_p2` ([PR #229](https://github.com/tangency-labs/solidcore/pull/229)) is partial: 45 differential cases, 30 bit-identical passes, 15 dependency deferrals, zero failures (`--seeds 1000`: 631 passes, 398 deferrals). It ports the `SmMerge` B-rep constructor, `MergeEdge`, `MakeFaceuse`, `MergeAddedFace` and `MergeAddedTopology`, with its stitch (`heal.stitch_p1` / `_p2`), intersector (`boolean.topology_intersector_p2`), `MakeFace` (`topology.brep_p7`), region and `topology.brep_p2` calls wired, and wires the `boolean.merge_p2` back-edges of `boolean.merge_p3`, `boolean.merge_p4`, `boolean.merge_p5`, `boolean.api_brep`, `heal.stitch_p1` and `topology.brep_p7`; its constructor builds `boolean.merge_p3`'s `MergeEngine` (#287), so the two-B-rep API booleans now run `ManifoldBoolean` (`boolean.merge_p4`) and stop at `query.brep`. It confirms UB-176 on the reference build (through `MergeAddedTopology`) and adds WR-197. The manifest has 235 ported units (114 green, 121 partial).
 
@@ -988,84 +988,56 @@ suite passes 173 units
 perturbation also pass (6,463/6,463 detected). Committed reports total 435,272 cases:
 422,654 compared, 12,618 deferred, zero failed.
 
+## Independent curve-classification part 5
 
-## Kernel-aware Surface dispatch (2026-10-16, issue #76, draft PR #133)
+The p5 implementation and oracle remain independent of the open p2/p7 PRs.
+Part 6 landed independently through PR #138 and is inherited from main; all four
+p6 call sites are wired. Fresh validation on 9e495b12 compares 275/1,081 cases
+exactly, with zero failures and 806 explicit deferrals (p2 493, p7 312,
+curve.crv_on_surf 1). Perturbation detects all 275 compared cases. All nine affected
+native runners, plain/native Clippy, 1,215 kernel tests, WASM and the focused FFI
+regression pass. The eight other reports are unchanged.
+The edge-target insertion and SSS blocks remain unported; nonempty large-gap
+projection and tangent-flag behavior remain uncertified. Shared interfaces are
+recorded as CO-PORTED. The proto-topology p3 extraction back-edge is wired and the
+lazy-UV issue remains UB-134.
 
-Common Surface evaluation and callbacks now retain the caller's Kernel. The context
-also follows implicit iso curves through generic Curve evaluation and its solvers;
-concrete B-spline/plane arithmetic is unchanged. SurfaceKind retains real Cone and
-Cylinder objects using the existing cone part 1 code. Common database reads,
-NURB/STEP evaluations, UV conversion, inversion subdomains, copies, adjustment and
-transform no longer discard their analytic class. Fallible copying/evaluation
-preflights 64-level geometry nesting; polymorphic reads balance the bounded reader
-counter even on errors. Successful null offsets remain representable by the
-`Result<Option<Surface>>` API.
+## Curve-classification interval integration (2026-10-16, PR #138)
 
-The Apple Clang native comparison passes cone part 1's 20,694 cases and the common
-unit's 16,615 compared cases, with zero failures and maximum relative error
-2.0125611729577195e-15. The common unit has 11 explicit deferrals: cone part 2 (10)
-and surface part 8 (1). Its 15,757 new Cone/Cylinder cases include 10,771 with numerical
-output beyond statuses and 4,986 status-only cases; guarded native recipes are
-excluded from that added coverage. Both units have no absolute floors. Primary
-sensitivity detects all 37,309 perturbations. Another 32 manual lazy-evaluator
-apex/adjacent-float probes compare bit-identically (separate from default totals).
-The 16 database recipes compare both readers on identical native-written records;
-a native ASCII stream may round the original geometry, so serialization is not
-claimed to be lossless.
+`intersect.curve_class_p6` is partial: 4438 cases: 3927 bit-identical kernel comparisons,
+6 expected FFI rejection checks, zero failures and 505 explicit deferrals, without absolute floors. Insertion,
+homogenization and endpoint repair follow the upstream control flow, retaining
+explicit dependency boundaries. `MergeInterval` implements its early exits;
+its topology mutation remains deferred at the p2 boundary-tolerance lookup.
+Nonempty homogenization/repair and 2D classification are not certified.
 
-[Final GNU/Linux validation](https://github.com/Karl-VonRichter/solidcore/actions/runs/38870779906) on code `ce56aae6`
-passes all 182 selected units: 99 green, 83 partial, 465,289 total cases,
-452,754 compared, 12,535 deferred and zero failed. Both primary units are
-bit-identical on GNU C++. Full sensitivity detects 452,672/452,672 perturbations;
-82 empty outputs are unperturbed and 12,535 cases are deferred. All affected
-units are included. No tolerance or absolute floor changed.
+The oracle uses concrete native geometric types and real box topology, records
+point-classification state and created-entity outputs, and compares actual curve
+evaluations. Native FFI regressions include 27440 isolated combinations of
+operations, geometric kinds, flags and classifications, plus 96 partition/SSS/boundary
+probes and 660 mismatched fillet-partner probes. They run locally with the project CI workflow unchanged. The unit remains partial.
 
-Formatting, strict plain/C++ Clippy, 1,215 workspace tests (including 1,193 core),
-two native FFI contract tests (27 filtered), WASM, license/source checks and the
-locked publish dry-run pass. The committed default reports come from this run.
-Seven `topology.brep_data` cone/cylinder read deferrals now compare (2,331 passed,
-48 deferred of 2,379). The topology solver keeps its 2,396 passed / 33 deferred;
-12 old iso-curve deferrals now name `surface.surface_p2`'s `GetNaturalUVDomain` gap.
+## Boolean wire/shell-vertex stage (2026-10-16, PR #161)
 
-GNU validation uses Release/O2 kernel and shims, the normal difftest profile and
-unchanged floating-point flags. Default and sensitivity run as independent
-processes after one build. The fork's validation tree differs from `ce56aae6`
-only in its workflow; final PR changes after that code commit are reports/docs.
-Canonical CI awaits maintainer approval. Mac comparisons also use O2 for
-kernel/shims. The local 4 GB Linux VM could not complete the full runner build
-under memory pressure; its temporary validation container was removed.
+`boolean.merge_p5` is partial: 140 cases, 108 bit-identical comparisons, zero
+failures, and 32 explicit deferrals on `query.brep::SmBrep::Point3DClassify`.
+No absolute floors. The real `SmMerge::ProcessWiresAndShellVertices` oracle checks
+native topology order, mate retention, complete arena connectivity, established
+marks, geometry and output resetting across all 11 operations. Classification,
+deletion and copying retain explicit dependency boundaries; their mutation paths
+are not certified. No incoming back-edges or new dependency types were co-ported.
 
-This integration leaves offsets/rebuilds with #71, sphere with #100 and cone
-intersections/dependency integrations with #131's owner.
-The merged #120 implementation is retained, with caller Kernel propagation through
-its new shared solver paths. #71's head c9aa85de has 26 reported failures; no
-older pass certifies that head. Cone
-trim/fast-drop virtual callbacks, part 9 iso/tessellation, torus/extrusion,
-curve-on-surface and B-spline cache-storage adapters remain explicit gaps. No cone
-null-offset numerical result is certified by this PR.
+The FFI guard rejects part-container headers before the B-rep reader (UB-1,
+reconfirmed with GDB); actual B-rep files supply the solid fixtures. Both shared
+mark types and marked non-wire edges without mates remain valid and covered.
 
+PR #161 review fixes: mate validation is limited to the four keep operations;
+unmated marked wires pass for all seven other operations. Eighteen added fixtures
+cover missing mates and nonidentity mate order. Both runners reject conflicting
+`Relate` mappings, generated operands/marks/mates vary independently, and the
+module header records the future need for mutable relation state when wiring copy
+adapters.
 
-## Paused at user request (2026-10-16)
-
-Draft PR: https://github.com/bherbruck/solidcore/pull/133. Branch
-`t3/kernel-surface-dispatch`, latest implementation `8cb9ff44`, merged main
-through `8f6a9378` (#120/#131/#128/#142). No additional implementation should
-continue until requested. The active 185-unit GNU run 38889088718 was cancelled
-to pause work; it does not certify the final merged source.
-
-Completed on 8cb9ff44: fmt, strict plain/C++ Clippy, 1,230 workspace tests
-(1,208 core), WASM, license/source checks and publish dry-run. Native full gate,
-sensitivity and focused FFI tests still need to finish on this revision.
-
-Last completed full GNU validation is f804bc5f, run 38884360383: 183 units,
-99 green / 84 partial, 466,597 total cases, 453,941 compared, 12,656 deferred,
-zero failed; sensitivity 453,859 detected / 453,859 perturbed, 82 empty outputs
-unperturbed; 1,218 workspace tests and eight focused FFI tests pass. Reports
-for that run are retained in `/tmp/sc133-premerge-ci-reports`, with its log in
-`/tmp/sc133-premerge-ci.log`; they have not replaced newer main's reports.
-
-Resume by checking live claims and main, finishing the current revision's native
-gate/sensitivity/FFI checks, verifying all fixed tolerances and floor policies,
-then refreshing reports, modules, findings, STATUS and the draft description.
-Never hand-edit PROGRESS. Remaining cone_p2/sphere/analytic callback and storage
-adapter gaps are recorded above; do not duplicate their numerical owners.
+Review verification: the extended 256-seed run has 380 cases, 291 bit-identical
+passes, zero failures and 89 query deferrals. Perturbation detects every compared
+case (108/108 default, 291/291 extended).

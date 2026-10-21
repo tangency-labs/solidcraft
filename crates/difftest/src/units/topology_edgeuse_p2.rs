@@ -361,7 +361,7 @@ fn output_of(op: &OpIn, body: &[f64]) -> Output {
 // ---- Rust side --------------------------------------------------------------------------
 
 /// The state of an edge use as the shim's `put_eu_state`.
-fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<EdgeuseId>) -> Result<(), SolidError> {
+pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<EdgeuseId>) -> Result<(), SolidError> {
     let Some(eu) = eu else {
         o.push(-1.0);
         return Ok(());
@@ -494,15 +494,10 @@ fn run_rust_op(
             };
             status.and_then(|s| {
                 let mut v = vec![s];
-                put_eu_state(&mut v, b, Some(eu))?;
+                put_eu_state(&k, &mut v, b, Some(eu))?;
                 Ok(v)
             })
         }
-        OpIn::Rebuild { .. } => eu2::rebuild_uv_trim_curve(&k, b, eu).and_then(|()| {
-            let mut v = vec![0.0];
-            put_eu_state(&k, &mut v, b, Some(eu))?;
-            Ok(v)
-        }),
         OpIn::CheckSet {
             uv, adjust, fail, ..
         } => {

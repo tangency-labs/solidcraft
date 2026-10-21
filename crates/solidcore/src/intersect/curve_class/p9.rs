@@ -392,13 +392,13 @@ impl<O: ClassObject> CurveClassification<O> {
         let lift;
         let (drop_curve, point, distance_tol) = if singular {
             lift = lifted(k, source, surface)?;
-            let point = ignored(surface.evaluate_point(vertex.uv))?.unwrap_or(Point3::UNDEF);
+            let point = ignored(surface.evaluate_point(k, vertex.uv))?.unwrap_or(Point3::UNDEF);
             (&lift, point, tolerance)
         } else {
             (
                 source,
                 Point3::from(vertex.uv),
-                xsect_tol3d(k, map_to_2d(tolerance, vertex.uv, surface)?),
+                xsect_tol3d(k, map_to_2d(k, tolerance, vertex.uv, surface)?),
             )
         };
         let mut found = drop_curve.drop_point(
@@ -421,7 +421,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // A failed checked solve must not retain the earlier UV success.
             found = checked_vertex_drop(k, &lift, &self.interval(), point, tolerance)?;
             let on_surface =
-                ignored(lift.evaluate_point(found.parameter))?.unwrap_or(Point3::UNDEF);
+                ignored(lift.evaluate_point(k, found.parameter))?.unwrap_or(Point3::UNDEF);
             distance_3d = point.distance(on_surface);
         }
         if found.success && (!do_check_3d || distance_3d < tolerance) {

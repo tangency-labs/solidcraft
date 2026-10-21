@@ -2621,7 +2621,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     pub fn proto_vertex_final_vertex(
         &self,
         k: &Kernel,
-        geometry: &impl ClassGeometry<O>,
+        geometry: &(impl ClassGeometry<O> + ProtoTopology<O>),
         pv: ProtoVertexId,
         which: i32,
         ed: EdgeDefId,
@@ -2637,7 +2637,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         let d = self.ed(ed)?;
         let brep_topo_ed = d.src_topo(which);
-        let _ed_pos = d.end_position(k, geometry, at_start)?;
+        let ed_pos = d.end_position(k, geometry, at_start)?;
 
         for &vd in vds {
             let Some(vtx) = self.vd(vd)?.final_vertex(which) else {

@@ -576,9 +576,9 @@ impl<O: LoopObject> HealData<O> {
                 let zone = face::tolerance(b, f)?;
                 let tol = xsect_tol_3d_from_zones(k, zone, zone);
                 let (closed_u, _) =
-                    surface.is_closed(&domain, SurfParamType::U, Some(tol), false)?;
+                    surface.is_closed(k, &domain, SurfParamType::U, Some(tol), false)?;
                 let (closed_v, _) =
-                    surface.is_closed(&domain, SurfParamType::V, Some(tol), false)?;
+                    surface.is_closed(k, &domain, SurfParamType::V, Some(tol), false)?;
                 let poles = u64::from(surface.get_singularities(k, false, false)?.singular);
                 if (closed_u && closed_v)
                     || (closed_v && poles & SS_UMIN != 0 && poles & SS_UMAX != 0)

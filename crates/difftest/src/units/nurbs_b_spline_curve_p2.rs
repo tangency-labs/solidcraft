@@ -1481,7 +1481,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }

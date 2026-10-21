@@ -375,7 +375,7 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     let ivl = c.natural_interval();
     out.extend([ivl.min(), ivl.max()]);
     for k in 0..=2u8 {
-        match c.evaluate_point(ivl.evaluate(f64::from(k) / 2.0)) {
+        match c.evaluate_point(&Kernel::default(), ivl.evaluate(f64::from(k) / 2.0)) {
             Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
             Err(SolidError::Upstream { code, .. }) => out.extend([f64::from(code), 0.0, 0.0, 0.0]),
             Err(e) => return Err(e),

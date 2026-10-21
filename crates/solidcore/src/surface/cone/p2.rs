@@ -100,10 +100,11 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
 }
 
 /// `pIsoCrv->IsArc(5, dScaledZero, ..)` of a plain B-spline iso curve.
-fn iso_arc(curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
     let arc = crate::curve::curve::p5::is_arc_base(
+        k,
         curve,
-        |c, tol| c.is_degenerate(tol, None),
+        |c, tol| c.is_degenerate(k, tol, None),
         5,
         scaled_zero,
     )?;
@@ -141,17 +142,17 @@ fn end_circles(
         .curve;
 
     // classify IsoparamCurves
-    let top_degenerate = top_iso.is_degenerate(scaled_zero, None)?;
-    let bot_degenerate = bot_iso.is_degenerate(scaled_zero, None)?;
+    let top_degenerate = top_iso.is_degenerate(k, scaled_zero, None)?;
+    let bot_degenerate = bot_iso.is_degenerate(k, scaled_zero, None)?;
     let top_arc = if top_degenerate {
         None
     } else {
-        iso_arc(&top_iso, scaled_zero)?
+        iso_arc(k, &top_iso, scaled_zero)?
     };
     let bot_arc = if bot_degenerate {
         None
     } else {
-        iso_arc(&bot_iso, scaled_zero)?
+        iso_arc(k, &bot_iso, scaled_zero)?
     };
 
     //  2 Arcs                       = were good, continue
@@ -584,7 +585,7 @@ impl Cone {
             .curve;
 
         // It must be circular.
-        let Some(mid) = iso_arc(&mid_iso, scaled_zero)? else {
+        let Some(mid) = iso_arc(k, &mid_iso, scaled_zero)? else {
             return Ok(None);
         };
 

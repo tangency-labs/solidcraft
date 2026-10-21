@@ -710,7 +710,7 @@ fn rust_op(
             .convert_uv_from_nurbs_to_step(k, Point2::new(*u, *v))
             .map(|p| o.extend([0.0, p.x, p.y])),
         OpIn::ToNurbs { u, v } => t
-            .convert_uv_from_step_to_nurbs(Point2::new(*u, *v))
+            .convert_uv_from_step_to_nurbs(k, Point2::new(*u, *v))
             .map(|p| o.extend([0.0, p.x, p.y])),
         OpIn::Normal { u, v } => t.evaluate_normal(Point2::new(*u, *v)).map(|n| {
             o.push(0.0);

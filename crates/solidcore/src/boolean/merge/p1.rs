@@ -255,7 +255,8 @@ pub fn find_brep_region_of_other_face(
             .curve
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let Some(_point) = ignore_failure(curve.evaluate_point(edge.interval.evaluate(0.456789)))?
+        let Some(_point) =
+            ignore_failure(curve.evaluate_point(k, edge.interval.evaluate(0.456789)))?
         else {
             continue;
         };

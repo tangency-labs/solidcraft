@@ -842,13 +842,13 @@ impl RotationalSweepGeometry {
         let mut new_surf = Surface::from(new_surf);
 
         let start_uv = new_surf.natural_uv_domain().min();
-        let normal = new_surf.evaluate_normal(start_uv, Side::Left, Side::Left)?;
+        let normal = new_surf.evaluate_normal(k, start_uv, Side::Left, Side::Left)?;
         out.normal = Some(normal);
 
         let mut flip_orients = false;
         if let Some(to_trim) = &surf_to_trim {
             let start_param = to_trim.natural_uv_domain().min();
-            let plane_normal = to_trim.evaluate_normal(start_param, Side::Left, Side::Left)?;
+            let plane_normal = to_trim.evaluate_normal(k, start_param, Side::Left, Side::Left)?;
             let dot = normal.dot(plane_normal);
             if dot.abs() < 0.8 {
                 return Err(SolidError::sm_err(OP_EDGE_HIGHER));
@@ -889,7 +889,10 @@ impl RotationalSweepGeometry {
                 .and_then(Option::as_ref)
                 .ok_or_else(|| SolidError::sm_err(OP_EDGE_HIGHER))?;
             let ivl = ec.natural_interval();
-            (ec.evaluate_point(ivl.min())?, ec.evaluate_point(ivl.max())?)
+            (
+                ec.evaluate_point(k, ivl.min())?,
+                ec.evaluate_point(k, ivl.max())?,
+            )
         };
 
         // The edge curve may be oriented arbitrarily wrt edge
@@ -959,7 +962,7 @@ impl RotationalSweepGeometry {
         let mut end_vert_curve = None;
         let c = take(&mut a3d, 1)?;
         let uv = take_uv(&mut a_uv, 1)?;
-        let side = if c.is_degenerate(out.start_curve_tol, None)? {
+        let side = if c.is_degenerate(k, out.start_curve_tol, None)? {
             is_degenerate = true;
             None
         } else {
@@ -995,7 +998,7 @@ impl RotationalSweepGeometry {
         //----3----- the second side curve (NULL if degenerate)
         let c = take(&mut a3d, 3)?;
         let uv = take_uv(&mut a_uv, 3)?;
-        let side = if c.is_degenerate(out.start_curve_tol, None)? {
+        let side = if c.is_degenerate(k, out.start_curve_tol, None)? {
             is_degenerate = true;
             None
         } else {
@@ -1277,12 +1280,13 @@ mod tests {
 
     #[test]
     fn vertex_sweeps() {
+        let k = &Kernel::default();
         let (b, e) = wire(Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
         let g = z_sweep(90.0);
         let [v0, v1] = b.edge(e).unwrap().vertices;
         let (arc, tol) = g.vertex_sweep_higher(&b, v0).unwrap().unwrap();
         assert_eq!(tol, 1e-6);
-        let end = arc.evaluate_point(arc.natural_interval().max()).unwrap();
+        let end = arc.evaluate_point(k, arc.natural_interval().max()).unwrap();
         assert!((end - Vec3::Y).length() < 1e-12);
         assert!(g.vertex_sweep_higher(&b, v1).unwrap().is_none());
         let (p, _) = g.vertex_sweep_same(&b, v0).unwrap();
@@ -1305,7 +1309,7 @@ mod tests {
         assert!(s.normal.is_some());
         let (c, tol) = g.edge_sweep_same(&k, &b, e).unwrap();
         assert_eq!(tol, 1e-6);
-        let p = c.evaluate_point(c.natural_interval().min()).unwrap();
+        let p = c.evaluate_point(&k, c.natural_interval().min()).unwrap();
         assert!((p - Vec3::Y).length() < 1e-12);
 
         // a line perpendicular to the axis from the axis, full turn: a disc

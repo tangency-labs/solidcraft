@@ -269,7 +269,7 @@ impl<O: ClassObject> CurveClassification<O> {
             let xsect_tol_3d = xsect_tol_3d_from_zones(k, zone_tol_3d, zone_tol_3d);
 
             let curve = self.curve_geometry(geometry)?;
-            if curve.is_closed(&self.interval(), xsect_tol_3d)? && index == 0 {
+            if curve.is_closed(k, &self.interval(), xsect_tol_3d)? && index == 0 {
                 if size == 0 {
                     return Err(bad_boundary());
                 }
@@ -326,7 +326,7 @@ impl<O: ClassObject> CurveClassification<O> {
         )?;
 
         // no work and an error - CurveClassification interval is not degenerate
-        if !curve_is_degenerate(Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
+        if !curve_is_degenerate(k, Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
             return Err(SolidError::sm_err(OP_COLLAPSE));
         }
 
@@ -764,12 +764,17 @@ impl<O: ClassObject> CurveClassification<O> {
                 } else {
                     Cow::Borrowed(tgt_curve_3d)
                 };
-                let edge_len = edge_curve.approximate_length(&edge_ivl, 4, false)?.0;
-                let cm_len = tgt_curve.approximate_length(&tgt_ivl.interval, 4, false)?.0;
-                let total_cc_len = tgt_curve.approximate_length(&self.interval(), 4, false)?.0;
+                let edge_len = edge_curve.approximate_length(k, &edge_ivl, 4, false)?.0;
+                let cm_len = tgt_curve
+                    .approximate_length(k, &tgt_ivl.interval, 4, false)?
+                    .0;
+                let total_cc_len = tgt_curve
+                    .approximate_length(k, &self.interval(), 4, false)?
+                    .0;
 
                 // curve/edge angle at curve/edge intersection
                 let angle_rad = get_curve_curve_angle(
+                    k,
                     Some(edge_curve),
                     edge_param,
                     Some(&tgt_curve),
@@ -873,7 +878,7 @@ impl<O: ClassObject> CurveClassification<O> {
             uv_space_okay,
             face_index,
         };
-        let r = classify_face_interval_on(geometry, &ctx, &mut ivl);
+        let r = classify_face_interval_on(k, geometry, &ctx, &mut ivl);
         *self.at_mut(index)? = ivl;
         r
     }
@@ -917,7 +922,7 @@ impl<O: ClassObject> CurveClassification<O> {
             ))?),
             None => None,
         };
-        if tol_is_closed_curve(curve, xsect_tol_3d)? {
+        if tol_is_closed_curve(k, curve, xsect_tol_3d)? {
             return Ok(none);
         }
 
@@ -1124,7 +1129,7 @@ pub fn set_do_filleting_geometry<O: ClassObject>(
 
         // this and other edge end point samples (statuses ignored)
         let sample = |c: &Curve, t: f64| -> Result<[Vec3; 2]> {
-            Ok(match ignored(c.evaluate(t, 1, true, true))? {
+            Ok(match ignored(c.evaluate(k, t, 1, true, true))? {
                 Some(v) => [
                     v.first().copied().unwrap_or(Vec3::UNDEF),
                     v.get(1).copied().unwrap_or(Vec3::UNDEF),
@@ -1243,6 +1248,7 @@ struct EndInside {
 /// The body of [`CurveClassification::classify_face_interval`] on a copy of the
 /// interval.
 fn classify_face_interval_on<O: ClassObject>(
+    k: &Kernel,
     geometry: &impl ClassGeometry<O>,
     ctx: &FaceIntervalContext<O>,
     ivl: &mut CurveInterval<O>,
@@ -1377,7 +1383,7 @@ fn classify_face_interval_on<O: ClassObject>(
         let uv1 = uv_curve1()?;
         match uv1 {
             Some(uv_curve) if ctx.uv_space_okay => {
-                let pnt = uv_curve.evaluate_point(param)?;
+                let pnt = uv_curve.evaluate_point(k, param)?;
                 let uv = Point2::new(pnt.x, pnt.y);
 
                 // Don't put this face's classification directly into m_vMid [B97]
@@ -1388,7 +1394,7 @@ fn classify_face_interval_on<O: ClassObject>(
                 }
             }
             _ => {
-                let pnt = curve()?.evaluate_point(param)?;
+                let pnt = curve()?.evaluate_point(k, param)?;
 
                 // Don't put this face's classification directly into m_vMid [B97]
                 let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
@@ -1591,10 +1597,10 @@ fn connected_any<O: ClassObject>(
 
 /// `SmTol::IsClosed(const SmObject*, SmXSectTol3d*)` for a curve with the tolerance
 /// given: closed over its natural interval; false for no curve.
-fn tol_is_closed_curve(curve: Option<&Curve>, xsect_tol_3d: f64) -> Result<bool> {
+fn tol_is_closed_curve(k: &Kernel, curve: Option<&Curve>, xsect_tol_3d: f64) -> Result<bool> {
     match curve {
         None => Ok(false),
-        Some(c) => c.is_closed(&c.natural_interval(), xsect_tol_3d),
+        Some(c) => c.is_closed(k, &c.natural_interval(), xsect_tol_3d),
     }
 }
 

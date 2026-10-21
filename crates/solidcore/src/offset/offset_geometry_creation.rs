@@ -799,24 +799,21 @@ fn distance(a: Point3, b: Point3) -> f64 {
 /// surface of revolution and offset surface overrides, else `SmSurface`'s, which
 /// `SmBSplineSurface`'s calls: an `SmOffsetSurface` owning a copy). `None` is
 /// upstream's success with `rNewSurface == NULL` (the `SmTorus` override, whose minor
-/// radius vanishes; no [`SurfaceKind`] is a torus yet, so it is not reached).
+/// radius vanishes, not reached: no [`SurfaceKind`] is a torus yet; the `SmCone`
+/// override when both offset radii collapse).
 fn create_offset_surface(
     k: &Kernel,
     s: &Surface,
     signed_distance: f64,
     approx_tol_3d: f64,
 ) -> Result<Option<Surface>> {
-    Ok(Some(s.create_offset_surface(
-        k,
-        signed_distance,
-        approx_tol_3d,
-    )?))
+    s.create_offset_surface(k, signed_distance, approx_tol_3d)
 }
 
 /// `IsArc(samples, tol, ..)` of a plain B-spline curve (a rail or an arc this module
 /// built).
-fn is_arc(c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
-    Curve::from(c.clone()).is_arc(num_samples, tol)
+fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+    Curve::from(c.clone()).is_arc(k, num_samples, tol)
 }
 
 // ---- the geometry creation --------------------------------------------------------------------
@@ -1115,10 +1112,10 @@ impl OffsetGeometryCreation {
                 let blend = b_spline_kind_of(brep, c)?
                     .ok_or(dangling("bounding curve is not a B-spline curve"))?;
                 let ivl = brep.edge_interval(e)?;
-                if blend.is_closed(&ivl, 0.0)? {
+                if blend.is_closed(k, &ivl, 0.0)? {
                     let mut ref_frame = Axis2Placement::IDENTITY;
                     if let Some((frame, _arc_rad, _start_ang, _end_ang)) =
-                        blend.is_arc(10, tolerance)?
+                        blend.is_arc(k, 10, tolerance)?
                     {
                         ref_frame = frame;
                         let mut z_axis = ref_frame.z_axis();
@@ -1127,7 +1124,7 @@ impl OffsetGeometryCreation {
                         if vec_to_edge.dot(z_axis) < 0.0 {
                             z_axis = -z_axis;
                         }
-                        let point1 = blend.evaluate_point(blend.natural_interval().min())?;
+                        let point1 = blend.evaluate_point(k, blend.natural_interval().min())?;
                         let point2 = center + self.offset_distance * z_axis;
                         arc = Some(BSplineCurve::create_arc_from_points(
                             center,
@@ -1201,11 +1198,11 @@ impl OffsetGeometryCreation {
                     let mut line_count = 0usize;
                     let mut frame = Axis2Placement::IDENTITY;
                     for (jj, line) in curves.iter().enumerate() {
-                        if let Some((f, _radius, _start, _end)) = line.is_arc(10, tolerance)? {
+                        if let Some((f, _radius, _start, _end)) = line.is_arc(k, 10, tolerance)? {
                             frame = f;
                             shell_arc = Some(jj);
                         }
-                        if line.is_line(10, tolerance)?.is_some() {
+                        if line.is_line(k, 10, tolerance)?.is_some() {
                             line_count += 1;
                         }
                     }
@@ -1237,12 +1234,12 @@ impl OffsetGeometryCreation {
                 for j in 0..curves.len() {
                     let arc = curves.get(j).ok_or(dangling("curve index"))?;
                     // If we have a line then we probably are shelling
-                    let Some((frame, _radius, _start, _end)) = arc.is_arc(10, tol)? else {
+                    let Some((frame, _radius, _start, _end)) = arc.is_arc(k, 10, tol)? else {
                         return Err(sm_err(OP_VERTEX));
                     };
                     let next = (j + 1) % curves.len();
                     let other = curves.get(next).ok_or(dangling("curve index"))?;
-                    let mid = other.evaluate_point(other.natural_interval().evaluate(0.5))?;
+                    let mid = other.evaluate_point(k, other.natural_interval().evaluate(0.5))?;
                     let pp = frame.origin();
                     let mut pn = frame.z_axis();
                     let vec = pp - mid;
@@ -1264,7 +1261,7 @@ impl OffsetGeometryCreation {
                     // of sCurves[k] inside the loop does not change what the next kk reads)
                     let orig_arc = curves.get(kidx).ok_or(dangling("curve index"))?.clone();
                     let (start, end) = {
-                        let ends = orig_arc.ends()?;
+                        let ends = orig_arc.ends(k)?;
                         (ends.start, ends.end)
                     };
                     for kk in 0..curves.len() {
@@ -1289,10 +1286,11 @@ impl OffsetGeometryCreation {
                             let arc = &orig_arc;
                             // the status of IsArc is not checked here; a non-arc leaves the
                             // frame and radius uninitialised upstream
-                            let Some((frame, radius, _, _)) = arc.is_arc(10, tol)? else {
+                            let Some((frame, radius, _, _)) = arc.is_arc(k, 10, tol)? else {
                                 return Err(dangling("arc data of a non-arc read"));
                             };
-                            let mid = arc.evaluate_point(arc.natural_interval().evaluate(0.5))?;
+                            let mid =
+                                arc.evaluate_point(k, arc.natural_interval().evaluate(0.5))?;
 
                             let closest_pt1 =
                                 Self::closest_circle_plane_point(tol, radius, &frame, pp, pn, mid)?;
@@ -1320,7 +1318,7 @@ impl OffsetGeometryCreation {
             } // end exactly 3 curves check
 
             // (any failure is SM_ERR; an unported callee stays unported)
-            let sphere = match BSplineSurface::create_sphere_from_arcs(&curves, tolerance) {
+            let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
                 Err(e @ SolidError::Unported { .. }) => return Err(e),
                 Err(_) => return Err(sm_err(OP_VERTEX)),
@@ -1491,13 +1489,13 @@ impl OffsetGeometryCreation {
             let edge_tol = brep.edge_tolerance(edge)?;
 
             // Edgesuse->Curve Start and End pts
-            let edgeuse_start = curve_of(brep, eu_curve)?.evaluate_point(edge_ivl.min())?;
-            let edgeuse_end = curve_of(brep, eu_curve)?.evaluate_point(edge_ivl.max())?;
+            let edgeuse_start = curve_of(brep, eu_curve)?.evaluate_point(k, edge_ivl.min())?;
+            let edgeuse_end = curve_of(brep, eu_curve)?.evaluate_point(k, edge_ivl.max())?;
 
             // input 3DCurve- Start and End pts
             let c3_ivl = curve_of(brep, c3)?.natural_interval();
-            let curve_start = curve_of(brep, c3)?.evaluate_point(c3_ivl.min())?;
-            let curve_end = curve_of(brep, c3)?.evaluate_point(c3_ivl.max())?;
+            let curve_start = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.min())?;
+            let curve_end = curve_of(brep, c3)?.evaluate_point(k, c3_ivl.max())?;
 
             // low work - Edgesuse->Curve and 3DCurve start and end Points are within tol
             if distance(edgeuse_start, curve_start) < edge_tol
@@ -1523,7 +1521,7 @@ impl OffsetGeometryCreation {
             let pv = match opt_orig_edgeuse {
                 None => {
                     let param = edge_ivl.evaluate(0.5);
-                    curve_of(brep, eu_curve)?.evaluate(param, 1, true, true)?
+                    curve_of(brep, eu_curve)?.evaluate(k, param, 1, true, true)?
                 }
                 Some(orig) => {
                     let orig_edge = brep
@@ -1533,12 +1531,12 @@ impl OffsetGeometryCreation {
                         .edge_curve(orig_edge)?
                         .ok_or(dangling("edge without curve"))?;
                     let param = brep.edge_interval(orig_edge)?.evaluate(0.5);
-                    curve_of(brep, orig_curve)?.evaluate(param, 1, true, true)?
+                    curve_of(brep, orig_curve)?.evaluate(k, param, 1, true, true)?
                 }
             };
 
             // input 3DCurve midPoint
-            let pv2 = curve_of(brep, c3)?.evaluate(c3_ivl.evaluate(0.5), 1, true, true)?;
+            let pv2 = curve_of(brep, c3)?.evaluate(k, c3_ivl.evaluate(0.5), 1, true, true)?;
 
             // when input and existing edge curves run in opposite directions - reverse 3DCurve and UVCurve
             let t1 = pv.get(1).copied().ok_or(dangling("tangent missing"))?;
@@ -1948,6 +1946,7 @@ impl OffsetGeometryCreation {
                     // output at SmPoint3d's SM_UNDEF_DOUBLE default)
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
                     let pv = ignore_soft(curve_of(brep, curve_3d)?.evaluate(
+                        k,
                         sol.start.param(0)?,
                         1,
                         true,
@@ -1955,6 +1954,7 @@ impl OffsetGeometryCreation {
                     ))?;
                     let uv = Point2::new(sol.start.param(1)?, sol.start.param(2)?);
                     let normal = ignore_soft(surface_of(brep, ext_surface)?.evaluate_normal(
+                        k,
                         uv,
                         Side::Left,
                         Side::Left,
@@ -1998,7 +1998,7 @@ impl OffsetGeometryCreation {
             let base_point = brep.vertex_point(base_vertex)?;
             for sol in solutions.as_slice() {
                 let t = sol.start.param(0)?;
-                let pnt = curve_of(brep, curve_3d)?.evaluate_point(t)?;
+                let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
                 // search for the best solution
                 let dist_moved = distance(pnt, base_point);
@@ -2011,7 +2011,7 @@ impl OffsetGeometryCreation {
                 // If solution is a range, e.g. coincident curves, check m_vEnd
                 if sol.solution_type == SolutionType::RangeOfValues {
                     let t = sol.end.param(0)?;
-                    let pnt = curve_of(brep, curve_3d)?.evaluate_point(t)?;
+                    let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                     let dist_moved = distance(pnt, base_point);
 
                     if dist_moved < found_dist && !are_same(t, trim_ivl.min()) {
@@ -2201,7 +2201,7 @@ impl OffsetGeometryCreation {
             // refresh locals
             let other = other_uv_curve.ok_or(dangling("other UV curve"))?;
             let orig_ivl = curve_of(brep, other)?.natural_interval();
-            other_mid = curve_of(brep, other)?.evaluate_point(orig_ivl.evaluate(0.5))?;
+            other_mid = curve_of(brep, other)?.evaluate_point(k, orig_ivl.evaluate(0.5))?;
         } // end edgeuse is not lamina check
 
         // Create a greatly extended curve and trim it to the bounding box of the extended surface.
@@ -2568,7 +2568,7 @@ impl OffsetGeometryCreation {
             let c3 = *curves_3d.get(ii).ok_or(dangling("curve index"))?;
 
             // skip degenerate curve solutions
-            if curve_of(brep, c3)?.is_degenerate(EFF_ZERO, None)? {
+            if curve_of(brep, c3)?.is_degenerate(k, EFF_ZERO, None)? {
                 continue;
             }
 
@@ -2607,7 +2607,7 @@ impl OffsetGeometryCreation {
                 // when there is more than 1 intersection curve to check
                 if curves_3d.len() > 1 {
                     // save the trimmed XSectCurve that has the smallest change from the original 3DCurve.
-                    let mid_pnt = curve_of(brep, c3)?.evaluate_point(my_trim.evaluate(0.5))?;
+                    let mid_pnt = curve_of(brep, c3)?.evaluate_point(k, my_trim.evaluate(0.5))?;
                     let orig_mid =
                         edgeuse_normalized_evaluate(k, brep, edgeuse, 0.5, false, false, true)?; // FALSE = 3d Eval
 
@@ -3077,7 +3077,7 @@ impl OffsetGeometryCreation {
 
         // get CenterLine StartPoint
         let mut center_ivl = center_line.natural_interval();
-        let mut pnt2 = center_line.evaluate_point(center_ivl.min())?;
+        let mut pnt2 = center_line.evaluate_point(k, center_ivl.min())?;
 
         // When StartPoints Gap != OffsetDistance to within tolerance
         if (distance(pnt1, pnt2) - self.offset_distance).abs() > self.this_approx_tol_3d {
@@ -3106,7 +3106,7 @@ impl OffsetGeometryCreation {
 
         // get Rail1 and CenterLine EndPoints
         pnt1 = rail1.evaluate_point(rail1_ivl.max())?;
-        pnt2 = center_line.evaluate_point(center_ivl.max())?;
+        pnt2 = center_line.evaluate_point(k, center_ivl.max())?;
 
         // When EndPoints Gap != OffsetDistance to within tolerance
         if (distance(pnt1, pnt2) - self.offset_distance).abs() > self.this_approx_tol_3d {
@@ -3181,18 +3181,18 @@ impl OffsetGeometryCreation {
         // First do a quick check for the self intersecting torus situation.
         if new_surface.is_none() {
             if let Some((ref_frame, major_radius, start_angle, end_angle)) =
-                center_line.is_arc(10, self.this_approx_tol_3d)?
+                center_line.is_arc(k, 10, self.this_approx_tol_3d)?
             {
                 // (`&&`: the second IsArc runs only when the first succeeds)
-                let rails = match is_arc(&rail1, 10, self.this_approx_tol_3d)? {
-                    Some((_, radius_r1, _, _)) => is_arc(&rail2, 10, self.this_approx_tol_3d)?
+                let rails = match is_arc(k, &rail1, 10, self.this_approx_tol_3d)? {
+                    Some((_, radius_r1, _, _)) => is_arc(k, &rail2, 10, self.this_approx_tol_3d)?
                         .map(|(_, radius_r2, _, _)| (radius_r1, radius_r2)),
                     None => None,
                 };
                 if let Some((radius_r1, radius_r2)) = rails {
                     // Have a torus situation
-                    let cl_point =
-                        center_line.evaluate_point(center_line.natural_interval().evaluate(0.0))?;
+                    let cl_point = center_line
+                        .evaluate_point(k, center_line.natural_interval().evaluate(0.0))?;
                     let mut r1_point =
                         rail1.evaluate_point(rail1.natural_interval().evaluate(0.0))?;
                     let mut r2_point =
@@ -3266,12 +3266,14 @@ impl OffsetGeometryCreation {
 
         // Check for case of cone or cylinder
         if new_surface.is_none() {
-            if let Some((_line_pt, line_vec)) = center_line.is_line(10, self.this_approx_tol_3d)? {
+            if let Some((_line_pt, line_vec)) =
+                center_line.is_line(k, 10, self.this_approx_tol_3d)?
+            {
                 if rail1.is_line(10, self.this_approx_tol_3d)?.is_some()
                     && rail2.is_line(10, self.this_approx_tol_3d)?.is_some()
                 {
-                    let cl_point =
-                        center_line.evaluate_point(center_line.natural_interval().evaluate(0.0))?;
+                    let cl_point = center_line
+                        .evaluate_point(k, center_line.natural_interval().evaluate(0.0))?;
                     let r1_point = rail1.evaluate_point(rail1.natural_interval().evaluate(0.0))?;
                     let r2_point = rail2.evaluate_point(rail2.natural_interval().evaluate(0.0))?;
                     let rad1 = distance(cl_point, r1_point);
@@ -3283,7 +3285,7 @@ impl OffsetGeometryCreation {
                             r1_point,
                             NurbCircleParam::Quadratic,
                         )?;
-                        if is_arc(&arc, 10, self.this_approx_tol_3d)?.is_some() {
+                        if is_arc(k, &arc, 10, self.this_approx_tol_3d)?.is_some() {
                             new_surface =
                                 Some(BSplineSurface::create_linear_sweep(&mut arc, line_vec)?);
                         }

@@ -671,7 +671,7 @@ pub fn create_oriented_trim_boundary(
                 let ivl = uv_curve.natural_interval();
 
                 // get trim curve's start UV point
-                let pnt = uv_curve.evaluate_point(ivl.min())?;
+                let pnt = uv_curve.evaluate_point(k, ivl.min())?;
 
                 // get dist from this start pt to last curve's end-point
                 let diff = pnt - last_pnt;
@@ -683,7 +683,7 @@ pub fn create_oriented_trim_boundary(
                 }
 
                 // Get UVCurve->End UVPoint
-                last_pnt = uv_curve.evaluate_point(ivl.max())?;
+                last_pnt = uv_curve.evaluate_point(k, ivl.max())?;
                 edges_in_loop += 1;
                 if parameter_space {
                     // (status ignored upstream; only NER(pOrig))
@@ -715,7 +715,7 @@ pub fn create_oriented_trim_boundary(
 
                 let ivl = bsc.natural_interval();
                 let ivl = bsc.reverse_parameterization(k, &ivl)?;
-                let pnt = bsc.evaluate_point(ivl.min())?;
+                let pnt = bsc.evaluate_point(k, ivl.min())?;
                 let diff = pnt - last_pnt;
                 let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
                 if diff.length_squared() > scaled_zero && parameter_space && fill_singularities {
@@ -723,7 +723,7 @@ pub fn create_oriented_trim_boundary(
                     edges_in_loop += 1;
                     out.curves.push(gap_line(last_pnt, pnt)?);
                 }
-                last_pnt = bsc.evaluate_point(ivl.max())?;
+                last_pnt = bsc.evaluate_point(k, ivl.max())?;
                 edges_in_loop += 1;
                 out.curves.push(bsc);
             }
@@ -1276,7 +1276,7 @@ fn sample_uv(
     param: f64,
     pv: &mut [Vec3; 2],
 ) -> Result<Point2> {
-    if let Some(v) = ignored(evaluate_geometric(curve, param, 1, true))? {
+    if let Some(v) = ignored(evaluate_geometric(k, curve, param, 1, true))? {
         if let [p, d, ..] = v.as_slice() {
             *pv = [*p, *d];
         }
@@ -1289,6 +1289,7 @@ fn sample_uv(
     }
     // DropVectors of the tangent (its output is never read)
     ignore_status(drop_vectors_at(
+        k,
         surface,
         uv,
         Side::Left,
@@ -1851,8 +1852,8 @@ fn split_at_seam_depth<O: LoopObject>(
         Some(p) => (p.closed_u != Tri::False, p.closed_v != Tri::False),
         // (IsPeriodic returns a flag upstream; its SER inside makes a failure TRUE)
         None => (
-            ignored(surface.is_periodic(&uv_domain, Sp::U))?.unwrap_or(true),
-            ignored(surface.is_periodic(&uv_domain, Sp::V))?.unwrap_or(true),
+            ignored(surface.is_periodic(k, &uv_domain, Sp::U))?.unwrap_or(true),
+            ignored(surface.is_periodic(k, &uv_domain, Sp::V))?.unwrap_or(true),
         ),
     };
     if !periodic_u && !periodic_v {

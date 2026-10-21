@@ -815,7 +815,7 @@ fn idx(i: Option<u32>) -> f64 {
 }
 
 /// The Rust topology op; `Err(SolidError)` for the gap's own failures.
-fn topo_rust(k: &Kernel, b: &Brep, args: &[f64]) -> Result<Vec<f64>, SolidError> {
+fn topo_rust(k: &Kernel, b: &mut Brep, args: &[f64]) -> Result<Vec<f64>, SolidError> {
     let a = |i: usize| args.get(i).copied().unwrap_or(0.0);
     let kind = a(0) as u8;
     let s0 = a(1);
@@ -1071,7 +1071,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             };
             let (mut b, _) = import(&ex)?;
             let args = topo_args(&b, c, *kind, *sel0, *sel1, *f0, *f1, *uv)?;
-            match topo_rust(&k, &b, &args) {
+            match topo_rust(&k, &mut b, &args) {
                 Ok(v) => o = v,
                 Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
                 Err(e) => return rust_fail(&e),

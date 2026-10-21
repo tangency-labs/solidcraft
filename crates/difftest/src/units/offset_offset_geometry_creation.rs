@@ -1251,11 +1251,12 @@ impl OffsetBrep<H> for Two {
         e2: H,
         ang_tol_deg: f64,
     ) -> solidcore::Result<bool> {
+        let k = &Kernel::default();
         if e1.b != vertex.b || e2.b != vertex.b {
             return Err(invalid("edges of another B-rep"));
         }
         vx::are_edges_tangent(
-            self.brep_r(vertex)?,
+            k, self.brep_r(vertex)?,
             vid(vertex),
             eid(e1),
             eid(e2),
@@ -1570,7 +1571,7 @@ fn status_code(e: &SolidError) -> f64 {
 /// The shim's `put_srf`: type, natural domain, a 3x3 point sample and, for a plain
 /// B-spline surface or a surface of revolution, the NURB (`has_nurb [n m p q r s net
 /// u_knots v_knots]`).
-fn put_srf(o: &mut Vec<f64>, s: Option<&Surface>) {
+fn put_srf(k: &Kernel, o: &mut Vec<f64>, s: Option<&Surface>) {
     let Some(s) = s else {
         o.push(-1.0);
         return;
@@ -1584,7 +1585,7 @@ fn put_srf(o: &mut Vec<f64>, s: Option<&Surface>) {
                 d.u_min() + (d.u_max() - d.u_min()) * (f64::from(i) / 2.0),
                 d.v_min() + (d.v_max() - d.v_min()) * (f64::from(j) / 2.0),
             );
-            match s.evaluate_point(uv) {
+            match s.evaluate_point(k, uv) {
                 Ok(p) => {
                     o.push(0.0);
                     put_vec(o, p);
@@ -2307,7 +2308,7 @@ fn put_ssi(o: &mut Vec<f64>, two: &Two, s: &SsiData<H>) -> Result<(), HarnessErr
 
 /// Whether `ReplaceEdgeCurves(eu, c3, NULL, orig)` would reverse the curves (the shim's
 /// replica of the function's shape test).
-fn would_reverse(two: &Two, eu: H, c3: H, orig: Option<H>) -> Result<bool, Fail> {
+fn would_reverse(k: &Kernel, two: &Two, eu: H, c3: H, orig: Option<H>) -> Result<bool, Fail> {
     let edge = two
         .edgeuse_edge(eu)?
         .ok_or_else(|| invalid("edge use without edge"))?;
@@ -2317,11 +2318,11 @@ fn would_reverse(two: &Two, eu: H, c3: H, orig: Option<H>) -> Result<bool, Fail>
     let ivl = two.edge_interval(edge)?;
     let tol = two.edge_tolerance(edge)?;
     let cv = |h: H| ClassGeometry::curve(two, h).ok_or_else(|| invalid("curve"));
-    let es = cv(euc)?.evaluate_point(ivl.min())?;
-    let ee = cv(euc)?.evaluate_point(ivl.max())?;
+    let es = cv(euc)?.evaluate_point(k, ivl.min())?;
+    let ee = cv(euc)?.evaluate_point(k, ivl.max())?;
     let civl = cv(c3)?.natural_interval();
-    let cs = cv(c3)?.evaluate_point(civl.min())?;
-    let ce = cv(c3)?.evaluate_point(civl.max())?;
+    let cs = cv(c3)?.evaluate_point(k, civl.min())?;
+    let ce = cv(c3)?.evaluate_point(k, civl.max())?;
     if es.distance(cs) < tol && ee.distance(ce) < tol {
         return Ok(false);
     }
@@ -2329,7 +2330,7 @@ fn would_reverse(two: &Two, eu: H, c3: H, orig: Option<H>) -> Result<bool, Fail>
         return Ok(false);
     }
     let pv = match orig {
-        None => cv(euc)?.evaluate(ivl.evaluate(0.5), 1, true, true)?,
+        None => cv(euc)?.evaluate(k, ivl.evaluate(0.5), 1, true, true)?,
         Some(orig) => {
             let oe = two
                 .edgeuse_edge(orig)?
@@ -2338,10 +2339,10 @@ fn would_reverse(two: &Two, eu: H, c3: H, orig: Option<H>) -> Result<bool, Fail>
                 .edge_curve(oe)?
                 .ok_or_else(|| invalid("edge without curve"))?;
             let oivl = two.edge_interval(oe)?;
-            cv(oc)?.evaluate(oivl.evaluate(0.5), 1, true, true)?
+            cv(oc)?.evaluate(k, oivl.evaluate(0.5), 1, true, true)?
         }
     };
-    let pv2 = cv(c3)?.evaluate(civl.evaluate(0.5), 1, true, true)?;
+    let pv2 = cv(c3)?.evaluate(k, civl.evaluate(0.5), 1, true, true)?;
     let t1 = pv.get(1).copied().ok_or_else(|| invalid("tangent"))?;
     let t2 = pv2.get(1).copied().ok_or_else(|| invalid("tangent"))?;
     Ok(t1.dot(t2) < 0.0)
@@ -2584,7 +2585,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                 };
                 o.push(flag(ns.is_some()));
                 if let Some(ns) = ns {
-                    put_srf(&mut o, ClassGeometry::surface(&two, ns));
+                    put_srf(&k, &mut o, ClassGeometry::surface(&two, ns));
                 }
                 put_ssi(&mut o, &two, &ssi)?;
             }
@@ -2623,7 +2624,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                 put_orients(&mut o, &out.orients);
                 o.push(flag(out.surface.is_some()));
                 if let Some(s) = out.surface {
-                    put_srf(&mut o, ClassGeometry::surface(&two, s));
+                    put_srf(&k, &mut o, ClassGeometry::surface(&two, s));
                 }
             }
             OpIn::UpdateFaceDomain { f, s } => {
@@ -2653,7 +2654,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                 let d = two.face_uv_domain(f)?;
                 o.extend([d.u_min(), d.u_max(), d.v_min(), d.v_max()]);
                 let sh = two.face_surface(f)?;
-                put_srf(&mut o, sh.and_then(|h| ClassGeometry::surface(&two, h)));
+                put_srf(&k, &mut o, sh.and_then(|h| ClassGeometry::surface(&two, h)));
             }
             OpIn::ReplaceEdgeCurves { eu, c3, uv, orig } => {
                 o.push(10.0);
@@ -2688,7 +2689,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                             };
                         }
                     }
-                    if !bad && uv.is_none() && would_reverse(&two, eu, c3, orig)? {
+                    if !bad && uv.is_none() && would_reverse(&k, &two, eu, c3, orig)? {
                         bad = true;
                     }
                 }
@@ -2945,7 +2946,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
                     // the out-parameters: only after success
                     o.push(flag(out.surface.is_some()));
                     if let Some(s) = out.surface {
-                        put_srf(&mut o, ClassGeometry::surface(&two, s));
+                        put_srf(&k, &mut o, ClassGeometry::surface(&two, s));
                     }
                     put_hcurves(&mut o, &two, &out.trimming_curves)?;
                     put_orients(&mut o, &out.trim_orientations);

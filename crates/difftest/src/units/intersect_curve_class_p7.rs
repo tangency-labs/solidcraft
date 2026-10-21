@@ -373,7 +373,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     }) => {
                         o.extend([0.0, max_partial_coin_gap, b(new_curve_to_test.is_some())]);
                         if let Some(c) = new_curve_to_test {
-                            put_curve(&mut o, &Curve::from(c));
+                            put_curve(&k, &mut o, &Curve::from(c));
                         }
                     }
                     Err(code) => o.extend([code, 0.0, 0.0]),

@@ -1377,7 +1377,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &solidcore::Kernel::default();
+        let k = &solidcore::Kernel::default();
         rust(k, &case.parse()?)
     }
 }
@@ -1390,7 +1390,7 @@ mod tests {
     /// The generators reach success and failure of every op on the Rust side.
     #[test]
     fn generated_cases_cover_every_op() {
-let k = &solidcore::Kernel::default();
+        let k = &solidcore::Kernel::default();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..600u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);

@@ -747,7 +747,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &solidcore::Kernel::default();
+        let k = &solidcore::Kernel::default();
         let i: Inputs = case.parse()?;
         Ok(match rust_record(k, &i)? {
             Ok(r) => Output::new().values("r", r),

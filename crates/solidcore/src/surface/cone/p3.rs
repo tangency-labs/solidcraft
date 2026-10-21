@@ -12,6 +12,8 @@
 //! Deviations: output arrays are returned together and always requested; unused
 //! edge/angle arguments of the analytic routines are omitted. Ignored statuses
 //! propagate Unported; errors which would leave an uninitialised output propagate.
+//! A default `SmPoint2d` is `SM_UNDEF_DOUBLE`, not uninitialised, so an ignored
+//! `ConvertUVFromSTEPToNURBS` failure keeps the converter-written U and that V.
 //! The general intersection is supplied as a callback until the common Surface intersection
 //! adapters retain cone virtual methods. It receives every original
 //! argument. Sphere dispatch awaits the sphere type. Bounding boxes are those of
@@ -777,7 +779,7 @@ fn nurbs_uv_status_ignored(cone: &Cone, k: &Kernel, step_uv: Point2) -> Result<P
             let x = cone
                 .rev()
                 .polar
-                .convert_to_nurbs_parameter_or_written(circle, step_uv.x, 0.0)?;
+                .convert_to_nurbs_parameter_or_written(k, circle, step_uv.x, 0.0)?;
             Ok(Point2::new(x.unwrap_or(UNDEF_DOUBLE), UNDEF_DOUBLE))
         }
     }
@@ -891,6 +893,7 @@ impl Cone {
             IntersectTarget::Surface(s) => match s.kind() {
                 SurfaceKind::Plane(p) => IntersectTarget::Plane(p),
                 SurfaceKind::SurfOfRevolution(r) => IntersectTarget::Revolution(r),
+                SurfaceKind::Cone(c) => IntersectTarget::Cone(c.as_ref()),
                 _ => other,
             },
             _ => other,

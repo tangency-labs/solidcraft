@@ -726,6 +726,7 @@ impl Lsi3LocalSolver {
 
             // SmSurface::LocalLineIntersect (SER)
             let hit = surface.local_line_intersect(
+                k,
                 uv_domain,
                 self.line_point,
                 self.line_vector,

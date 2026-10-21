@@ -741,7 +741,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             .edge_interval(test)
                             .ok_or(invalid(OP_FIX_GAPS, "edge handle is unknown"))?;
                         let edge_leng = curve_of(brep, curve)?
-                            .approximate_length(&ivl, 10, false)?
+                            .approximate_length(k, &ivl, 10, false)?
                             .0;
                         if edge_leng > tol {
                             found_common_edge = true;
@@ -1247,7 +1247,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             // check for short intervals that split matched vertices; skip closed
             // intervals - both ends will often map to mated vertex pairs
-            if !curve.is_closed(&ivl_b.interval, 0.0)?
+            if !curve.is_closed(k, &ivl_b.interval, 0.0)?
                 && ((ivl_b.start.point_class() == PointClassType::Vertex
                     && ivl_o.end.point_class() == PointClassType::Vertex
                     && self.is_mated_pair(ivl_b.start.object(), ivl_o.end.object()))
@@ -1332,7 +1332,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let ivl = cc_brep.interval().union(&cc_other.interval());
 
         // no work - don't fix closed intervals
-        if curve.is_closed(&ivl_b.interval, 0.0)? {
+        if curve.is_closed(k, &ivl_b.interval, 0.0)? {
             return Ok(false);
         }
 
@@ -1700,7 +1700,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     // The curve may lie in the surface but not in the Face: test two
                     // points.
                     let mut pt_class = PointClassification::new(edge_zone_tol);
-                    let crv_pt = eval_curve_point(brep, curve_h, edge_dom.evaluate(0.38))?;
+                    let crv_pt = eval_curve_point(k, brep, curve_h, edge_dom.evaluate(0.38))?;
                     // Allow any part of the Face: including Edges and Vertices
                     // (status unchecked).
                     ignore_soft(face_point_3d_classify(
@@ -1724,7 +1724,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         continue;
                     }
 
-                    let crv_pt = eval_curve_point(brep, curve_h, edge_dom.evaluate(0.71))?;
+                    let crv_pt = eval_curve_point(k, brep, curve_h, edge_dom.evaluate(0.71))?;
                     ignore_soft(face_point_3d_classify(
                         f,
                         crv_pt,
@@ -1748,9 +1748,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
                     // Merge this edge into this face: make it go from pV to pOtherV.
                     let vtx_pt = brep.vertex_point(v)?;
-                    let pt = eval_curve_point(brep, curve_h, edge_dom.min())?;
+                    let pt = eval_curve_point(k, brep, curve_h, edge_dom.min())?;
                     let dist1 = vtx_pt.distance(pt);
-                    let pt = eval_curve_point(brep, curve_h, edge_dom.max())?;
+                    let pt = eval_curve_point(k, brep, curve_h, edge_dom.max())?;
                     let dist2 = vtx_pt.distance(pt);
                     let orient = if dist1 < dist2 {
                         OrientType::Same

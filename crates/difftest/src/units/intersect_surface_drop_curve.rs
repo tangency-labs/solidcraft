@@ -1303,7 +1303,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..16 {
             if let Some(i) = gen_inputs(k, rng) {
                 return serde_json::to_value(i).ok();

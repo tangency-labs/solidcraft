@@ -559,7 +559,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Step { uv0, tight, plane } => {
                 let mut prev = stepper(*uv0, *tight)?;
                 let mut next = SurfPtSolveStepper::copy_of(&k, &prev);
-                let r = next.step(&mut prev, *plane)?;
+                let r = next.step(&k, &mut prev, *plane)?;
                 o.extend([0.0, f64::from(r.code())]);
                 push_state(&mut o, &next);
             }

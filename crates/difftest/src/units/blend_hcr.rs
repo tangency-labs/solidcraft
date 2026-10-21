@@ -420,11 +420,11 @@ fn put_cc(o: &mut Vec<f64>, cc: &CurveClassification<HcrObject>) {
     }
 }
 
-fn put_piece(o: &mut Vec<f64>, c: &Curve) {
+fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let n = c.natural_interval();
     o.extend([n.min(), n.max()]);
     for i in 0..5 {
-        match c.evaluate_point(n.evaluate(f64::from(i) / 4.0)) {
+        match c.evaluate_point(k, n.evaluate(f64::from(i) / 4.0)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
             Err(e) => o.extend([
                 match e {
@@ -513,11 +513,11 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
             }
             rec.push(h.visible_curves().len() as f64);
             for c in h.visible_curves() {
-                put_piece(&mut rec, c);
+                put_piece(&k, &mut rec, c);
             }
             rec.push(h.invisible_curves().len() as f64);
             for c in h.invisible_curves() {
-                put_piece(&mut rec, c);
+                put_piece(&k, &mut rec, c);
             }
         }
         OpIn::SilhouetteEdges => {

@@ -322,7 +322,7 @@ fn param(b: &Brep, e: EdgeId, s: f64) -> Result<f64, HarnessError> {
     Ok(ivl.min() + (ivl.max() - ivl.min()) * s)
 }
 
-fn resolve(op: &OpIn, b: &Brep) -> Result<Option<Resolved>, HarnessError> {
+fn resolve(k: &Kernel, op: &OpIn, b: &Brep) -> Result<Option<Resolved>, HarnessError> {
     let ne = b.edges().len();
     Ok(Some(match op {
         OpIn::Export => Resolved::Export,
@@ -360,7 +360,7 @@ fn resolve(op: &OpIn, b: &Brep) -> Result<Option<Resolved>, HarnessError> {
                 .map_err(|e| harness(e.to_string()))?
                 .ok_or_else(|| harness("edge without curve"))?;
             let on = c
-                .evaluate_point(t)
+                .evaluate_point(k, t)
                 .map_err(|e| harness(format!("split point: {e}")))?;
             let p = Point3::new(on.x + offset[0], on.y + offset[1], on.z + offset[2]);
             Resolved::Split {
@@ -612,13 +612,13 @@ fn guarded_output(o: Vec<f64>) -> Output {
     }
 }
 
-fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
+fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let ex = export(&i.brep)?;
     let Some((_, graph_at)) = counts(&ex) else {
         return Ok(build_failure(&ex));
     };
     let (b, types) = super::topology_brep_p1::import(&ex, graph_at)?;
-    let Some(op) = resolve(&i.op, &b)? else {
+    let Some(op) = resolve(k, &i.op, &b)? else {
         return Ok(no_entity());
     };
     if evaluates_geometry(&op) {
@@ -714,7 +714,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             )
         }
         Resolved::Interior { edge, t, tol } => {
-            status_or(st::check_interior_edge(b, *edge, *t, *tol), |r| {
+            status_or(st::check_interior_edge(k, b, *edge, *t, *tol), |r| {
                 vec![flag(r)]
             })
         }
@@ -880,13 +880,13 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
     }
 }
 
-fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let ex = export(&i.brep)?;
     let Some((_, graph_at)) = counts(&ex) else {
         return Ok(build_failure(&ex));
     };
     let (mut b, types) = super::topology_brep_p1::import(&ex, graph_at)?;
-    let Some(op) = resolve(&i.op, &b)? else {
+    let Some(op) = resolve(k, &i.op, &b)? else {
         return Ok(no_entity());
     };
     if evaluates_geometry(&op) {
@@ -1069,11 +1069,13 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
-        run_cpp(&case.parse::<Inputs>()?)
+        let k = &Kernel::default();
+        run_cpp(k, &case.parse::<Inputs>()?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        run_rust(&case.parse::<Inputs>()?)
+        let k = &Kernel::default();
+        run_rust(k, &case.parse::<Inputs>()?)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

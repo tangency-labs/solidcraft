@@ -19572,10 +19572,10 @@
   "cases_passed": 2396,
   "cases_total": 2429,
   "deferred_by_unit": {
+    "geom.tol": 6,
+    "intersect.curve_class_p2": 4,
     "intersect.surface_tracer": 8,
     "surface.surface_p2": 12,
-    "surface.surface_p8": 6,
-    "topology.brep_p1": 4,
     "topology.edge": 3
   },
   "max_rel_err": 0.0,

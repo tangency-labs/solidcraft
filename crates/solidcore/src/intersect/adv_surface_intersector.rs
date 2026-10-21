@@ -1151,7 +1151,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
 
             // turn m_vCurvePoints into an intersection curve
-            flush_curve(&mut self.base, out)?;
+            flush_curve(k, &mut self.base, out)?;
             self.base.start_point = None;
         }
 
@@ -1512,7 +1512,11 @@ fn trace_curve(
 /// rDeviations)`: the base `SmSurfaceIntersector::FlushCurve` (not overridden). The
 /// output arrays are moved in and back, not cleared: its uniqueness test reads the 3D
 /// curves already flushed.
-fn flush_curve(si: &mut SurfaceIntersector<'_>, out: &mut InteriorCurves) -> Result<()> {
+fn flush_curve(
+    k: &Kernel,
+    si: &mut SurfaceIntersector<'_>,
+    out: &mut InteriorCurves,
+) -> Result<()> {
     let mut curves = crate::intersect::surface_intersector::p2::TsectCurves {
         curves_3d: core::mem::take(&mut out.curves_3d),
         uv_curves: [
@@ -1522,7 +1526,7 @@ fn flush_curve(si: &mut SurfaceIntersector<'_>, out: &mut InteriorCurves) -> Res
         curve_types: core::mem::take(&mut out.curve_types),
         deviations: core::mem::take(&mut out.deviations),
     };
-    let r = si.flush_curve(&mut curves);
+    let r = si.flush_curve(k, &mut curves);
     let crate::intersect::surface_intersector::p2::TsectCurves {
         curves_3d,
         uv_curves: [surface1_uv_curves, surface2_uv_curves],

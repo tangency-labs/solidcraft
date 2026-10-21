@@ -1679,7 +1679,10 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::Tangent { v, e1, e2, tol_deg } => {
             let e = |x: i64| EdgeId::from_index(x as u32);
             let mut q = Vec::new();
-            put_flag(&mut q, vx::are_edges_tangent(&k, b, vid(*v), e(*e1), e(*e2), *tol_deg))?;
+            put_flag(
+                &mut q,
+                vx::are_edges_tangent(&k, b, vid(*v), e(*e1), e(*e2), *tol_deg),
+            )?;
             return Ok(Output::new().ints("q", q));
         }
         OpIn::Topological { v } => match or_null(vx::is_topological_vertex(&k, b, vid(*v)))? {

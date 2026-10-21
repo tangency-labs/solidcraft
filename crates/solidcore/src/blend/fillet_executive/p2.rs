@@ -1288,8 +1288,8 @@ where
         let uv_curve2 = uv(&uv_curves2, kk)?;
         let ivl2 = uv_curve2.natural_interval();
 
-        let pnt1 = uv_curve1.evaluate_point(ivl1.evaluate(0.4567))?;
-        let pnt2 = uv_curve2.evaluate_point(ivl2.evaluate(0.4567))?;
+        let pnt1 = uv_curve1.evaluate_point(k, ivl1.evaluate(0.4567))?;
+        let pnt2 = uv_curve2.evaluate_point(k, ivl2.evaluate(0.4567))?;
         let guess1 = Vec2::new(pnt1.x, pnt1.y);
         let guess2 = Vec2::new(pnt2.x, pnt2.y);
 

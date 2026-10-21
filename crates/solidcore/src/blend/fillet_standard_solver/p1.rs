@@ -639,6 +639,7 @@ impl ConstantRadiusAssistedFs {
     /// out of bounds) or a missing surface.
     pub fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         rail_index: usize,
@@ -673,7 +674,7 @@ impl ConstantRadiusAssistedFs {
 
         // get offsetSurface1 F Point values for given crX values
         let uv = uv_at(x, surf1_off, OP)?;
-        let (p_f, du_f, dv_f) = offset_evaluate_1st(self.surface_mut(0)?, uv)?;
+        let (p_f, du_f, dv_f) = offset_evaluate_1st(k, self.surface_mut(0)?, uv)?;
 
         // get lSurf2Off index into crX array for lSurf2 parameters
         let mut surf2_off = *num_parameters;
@@ -703,7 +704,7 @@ impl ConstantRadiusAssistedFs {
 
         // get offsetSurface2 G Point values for given crX values
         let uv2 = uv_at(x, surf2_off, OP)?;
-        let (p_g, du_g, dv_g) = offset_evaluate_1st(self.surface_mut(1)?, uv2)?;
+        let (p_g, du_g, dv_g) = offset_evaluate_1st(k, self.surface_mut(1)?, uv2)?;
 
         // check surface tangent magnitudes
         // failure: zero length tangents
@@ -812,10 +813,10 @@ impl SurfaceSurfaceFs {
         // Do not extend if periodic.
         let periodic_extension_factor = 0.0;
 
-        if surf.is_periodic(domain, SurfParamType::U)? {
+        if surf.is_periodic(k, domain, SurfParamType::U)? {
             size.x *= periodic_extension_factor;
         }
-        if surf.is_periodic(domain, SurfParamType::V)? {
+        if surf.is_periodic(k, domain, SurfParamType::V)? {
             size.y *= periodic_extension_factor;
         }
 
@@ -989,6 +990,7 @@ impl ConstantDistanceFs {
     /// (upstream reads or writes out of bounds) or a missing surface.
     pub fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         rail_index: usize,
@@ -1029,13 +1031,13 @@ impl ConstantDistanceFs {
         let uv = uv_at(x, surf1_off, OP)?;
         self.solver.surface_mut(0)?.set_offset_distance(0.0);
         let [p_f, du_f, dv_f, duv_f, duu_f, dvv_f] =
-            offset_evaluate_2nd(self.solver.surface_mut(0)?, uv)?;
+            offset_evaluate_2nd(k, self.solver.surface_mut(0)?, uv)?;
 
         // get baseSurface2 G point values for given crX values
         let uv2 = uv_at(x, surf2_off, OP)?;
         self.solver.surface_mut(1)?.set_offset_distance(0.0);
         let [p_g, du_g, dv_g, duv_g, duu_g, dvv_g] =
-            offset_evaluate_2nd(self.solver.surface_mut(1)?, uv2)?;
+            offset_evaluate_2nd(k, self.solver.surface_mut(1)?, uv2)?;
 
         // get current radius value
         let radius = x_at(x, *num_parameters, OP)?;
@@ -1194,7 +1196,8 @@ impl ConstantDistanceFs {
         if do_surf2_calcs {
             // Now find the UV guess on the other Rail's surface
             let uv = uv_at(guess_t, surface1_index, OP)?;
-            let pnt = offset_evaluate_point(initial_surface(&mut self.solver, &mut surface1)?, uv)?;
+            let pnt =
+                offset_evaluate_point(k, initial_surface(&mut self.solver, &mut surface1)?, uv)?;
 
             if rail_index > 1 {
                 return Err(SolidError::invalid_input(OP, "rail index out of range"));
@@ -1356,10 +1359,13 @@ impl ConstantDistanceFs {
             // end point, snap the solution to whichever end (start or finish)
             // such that the direction that moves towards the interior of the
             // curve also moves generally towards the interior of the surface.
-            if curve.is_closed(&ivl, 0.0)? {
-                let p3 = curve.evaluate_point(t)?;
-                let inward =
-                    offset_compute_inward_vector(initial_surface(&mut self.solver, surface1)?, uv)?;
+            if curve.is_closed(k, &ivl, 0.0)? {
+                let p3 = curve.evaluate_point(k, t)?;
+                let inward = offset_compute_inward_vector(
+                    k,
+                    initial_surface(&mut self.solver, surface1)?,
+                    uv,
+                )?;
                 let dropped = curve.drop_point(
                     k,
                     &ivl,
@@ -1379,7 +1385,7 @@ impl ConstantDistanceFs {
             let (uv_curve, _) = edgeuse::uv_trim_curve(b, eu)?;
             let uv_curve = uv_curve
                 .ok_or_else(|| SolidError::invalid_input(OP, "edge use without UV curve"))?;
-            let p2d = uv_curve.evaluate_point(t)?;
+            let p2d = uv_curve.evaluate_point(k, t)?;
             uv2 = Point2::new(p2d.x, p2d.y);
             found_uv = true;
             let surface2 = self.solver.surface(other_rail)?;
@@ -1400,7 +1406,7 @@ impl ConstantDistanceFs {
                 non_zero_tangents: true,
             };
             let base2 = self.solver.surface(other_rail)?.base_surface();
-            let mat = base2.evaluate(uv2, 1, 1, flags)?;
+            let mat = base2.evaluate(k, uv2, 1, 1, flags)?;
             let du = mat
                 .get(1)
                 .and_then(|r| r.first())
@@ -1550,7 +1556,12 @@ impl CurveBasedFs {
     /// B-spline based extended; those of the extension and the evaluation;
     /// [`SolidError::InvalidInput`] without original curve (upstream dereferences
     /// `NULL`).
-    pub fn evaluate_base_curve(&mut self, parameter: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
+    pub fn evaluate_base_curve(
+        &mut self,
+        k: &Kernel,
+        parameter: f64,
+        num_derivs: usize,
+    ) -> Result<Vec<Vec3>> {
         const OP: &str = OP_BASE;
         let original = self
             .original
@@ -1626,7 +1637,7 @@ impl CurveBasedFs {
                 .original
                 .as_ref()
                 .ok_or_else(|| SolidError::invalid_input(OP, "no original curve"))?
-                .evaluate(parameter, num_derivs, true, true),
+                .evaluate(k, parameter, num_derivs, true, true),
         }
     }
 }
@@ -1837,7 +1848,8 @@ impl VariableRadiusFs {
     /// [`SolidError::Unported`] (`SmFilletSolver::SetExtensionFlags`,
     /// `blend.fillet_solver_p1`); [`SolidError::InvalidInput`] without original curve or
     /// when the first extension fails (upstream then dereferences `NULL`).
-    pub fn set_extension_flags(&mut self) -> Result<()> {
+    pub fn set_extension_flags(&mut self, k: &Kernel) -> Result<()> {
+        let _ = k;
         // UNPORTED(blend.fillet_solver_p1): SmFilletSolver::SetExtensionFlags
         return Err(SolidError::unported(
             "SmFilletSolver::SetExtensionFlags",
@@ -1845,11 +1857,11 @@ impl VariableRadiusFs {
         ));
 
         #[allow(unreachable_code)]
-        self.extend_edge_curve()
+        self.extend_edge_curve(k)
     }
 
     /// The `SmVariableRadiusFS` part of `SetExtensionFlags`.
-    fn extend_edge_curve(&mut self) -> Result<()> {
+    fn extend_edge_curve(&mut self, k: &Kernel) -> Result<()> {
         // In order to help out computing fillet radius outside the curve boundary
         // when the filleted edge is not linear. Let's extend the edge.
         let original = self
@@ -1862,7 +1874,7 @@ impl VariableRadiusFs {
         };
         if self.law.extended_edge_curve().is_none()
             && original.degree()? > 1
-            && original.is_line(5, ANALYTIC_TOL)?.is_none()
+            && original.is_line(k, 5, ANALYTIC_TOL)?.is_none()
         {
             // Should come in here only once.
             let ivl = original.natural_interval();
@@ -2011,10 +2023,11 @@ impl Default for CircularCrossSectionFsg {
 
 /// The arc a curve is (`IsArc(11, 1e-8, ..)`, the `SmCurve` base: B-spline curves do
 /// not override it).
-fn bspline_is_arc(c: &BSplineCurve) -> Result<Option<(Axis2Placement, f64, f64, f64)>> {
+fn bspline_is_arc(k: &Kernel, c: &BSplineCurve) -> Result<Option<(Axis2Placement, f64, f64, f64)>> {
     is_arc_base(
+        k,
         c,
-        |c, tol| c.is_degenerate(tol, None),
+        |c, tol| c.is_degenerate(k, tol, None),
         ANALYTIC_SAMPLES,
         ANALYTIC_TOL,
     )
@@ -2326,10 +2339,10 @@ impl CircularCrossSectionFsg {
         }
 
         // see if NewSurf == SurfaceOfRevolution
-        let arc = bspline_is_arc(center_line)?;
+        let arc = bspline_is_arc(k, center_line)?;
         if let Some((ref_frame, _, _, end_ang)) = &arc {
             revolve = true;
-            match bspline_is_arc(rail1)? {
+            match bspline_is_arc(k, rail1)? {
                 None => revolve = false,
                 Some((ref_frame2, radius2, _, end_ang2)) => {
                     if (end_ang2 - end_ang).abs() * radius2 > approx_tol_3d
@@ -2338,7 +2351,7 @@ impl CircularCrossSectionFsg {
                         revolve = false;
                     }
                     if revolve {
-                        match bspline_is_arc(rail2)? {
+                        match bspline_is_arc(k, rail2)? {
                             None => revolve = false,
                             Some((ref_frame3, radius3, _, end_ang3)) => {
                                 // Also check against 1s Rail curve.
@@ -2484,7 +2497,7 @@ impl CircularCrossSectionFsg {
             deriv_surfs: Some([d0.as_ref(), d1.as_ref()]),
             degree: 3,
         };
-        let fillet_surface = BSplineSurface::create_skinned_surface(&sections, opts)?;
+        let fillet_surface = BSplineSurface::create_skinned_surface(k, &sections, opts)?;
 
         // We have a case where the rail curves start off in the same direction,
         // because the surfaces are not only tangent at one end but also both locally
@@ -2862,6 +2875,7 @@ impl BlendCurveCrossSectionFsg {
                     continue; // Only do first point first time through
                 }
                 let section = self.cross_section_at(
+                    k,
                     t,
                     center_line,
                     rail1,
@@ -2900,14 +2914,14 @@ impl BlendCurveCrossSectionFsg {
             return Ok(surface);
         }
 
-        let arc = bspline_is_arc(center_line)?;
+        let arc = bspline_is_arc(k, center_line)?;
         let mut revolve = false;
         if arc.is_some() {
             revolve = true;
-            if bspline_is_arc(rail1)?.is_none() {
+            if bspline_is_arc(k, rail1)?.is_none() {
                 revolve = false;
             }
-            if bspline_is_arc(rail2)?.is_none() {
+            if bspline_is_arc(k, rail2)?.is_none() {
                 revolve = false;
             }
         }
@@ -2949,8 +2963,8 @@ impl BlendCurveCrossSectionFsg {
             }
             insert_end_span_knots(rail1, rail2, OP)?;
         }
-        if is_closed_base(&*rail1, &rail1.natural_interval(), 0.0)?
-            && is_closed_base(&*rail2, &rail2.natural_interval(), 0.0)?
+        if is_closed_base(k, &*rail1, &rail1.natural_interval(), 0.0)?
+            && is_closed_base(k, &*rail2, &rail2.natural_interval(), 0.0)?
         {
             let copy_first = cross_sections
                 .first()
@@ -2971,13 +2985,14 @@ impl BlendCurveCrossSectionFsg {
             deriv_surfs: Some([d0.as_ref(), d1.as_ref()]),
             degree: 3,
         };
-        BSplineSurface::create_skinned_surface(&cross_sections, opts)
+        BSplineSurface::create_skinned_surface(k, &cross_sections, opts)
     }
 
     /// The blend curve cross section at `t` (the body of the loops of
     /// `CreateSurfaceFromCurves`).
     fn cross_section_at(
         &self,
+        k: &Kernel,
         t: f64,
         center_line: &BSplineCurve,
         rail1: &BSplineCurve,
@@ -3071,7 +3086,7 @@ impl BlendCurveCrossSectionFsg {
             let uv1 = Point2::new(uv_pnt1.x, uv_pnt1.y);
             let uv2 = Point2::new(uv_pnt2.x, uv_pnt2.y);
             let drop1 = |s: &Surface, uv: Point2, v: Vec3| -> Result<Vec2> {
-                drop_vectors_at(s, uv, Side::Left, Side::Left, &[v])?
+                drop_vectors_at(k, s, uv, Side::Left, Side::Left, &[v])?
                     .first()
                     .copied()
                     .ok_or_else(|| SolidError::sm_err(OP))
@@ -3080,24 +3095,24 @@ impl BlendCurveCrossSectionFsg {
             let uv_tan2 = drop1(surf2, uv2, tan_3d_2)?;
             let mut vecs = Vec::new();
             if self.continuity == 2 {
-                let g2 = compute_higher_order_derivs(surf1, uv1, uv_tan1, false, false)?.g2;
-                surf1.evaluate_point(uv1)?;
+                let g2 = compute_higher_order_derivs(k, surf1, uv1, uv_tan1, false, false)?.g2;
+                surf1.evaluate_point(k, uv1)?;
                 vecs.push(g2);
 
-                let g2b = compute_higher_order_derivs(surf2, uv2, uv_tan2, false, false)?.g2;
+                let g2b = compute_higher_order_derivs(k, surf2, uv2, uv_tan2, false, false)?.g2;
                 vecs.push(g2b);
 
-                surf2.evaluate_point(uv2)?;
+                surf2.evaluate_point(k, uv2)?;
             }
             if self.continuity == 3 {
-                let d1 = compute_higher_order_derivs(surf1, uv1, uv_tan1, true, false)?;
-                surf1.evaluate_point(uv1)?;
+                let d1 = compute_higher_order_derivs(k, surf1, uv1, uv_tan1, true, false)?;
+                surf1.evaluate_point(k, uv1)?;
                 vecs.push(d1.g2);
 
-                let d2 = compute_higher_order_derivs(surf2, uv2, uv_tan2, true, false)?;
+                let d2 = compute_higher_order_derivs(k, surf2, uv2, uv_tan2, true, false)?;
                 vecs.push(d2.g2);
 
-                surf2.evaluate_point(uv2)?;
+                surf2.evaluate_point(k, uv2)?;
 
                 vecs.push(d1.g3.ok_or_else(|| SolidError::sm_err(OP))?);
                 vecs.push(d2.g3.ok_or_else(|| SolidError::sm_err(OP))?);
@@ -3216,11 +3231,13 @@ mod tests {
 
     #[test]
     fn constant_radius_jacobian_of_parallel_planes() {
+        let k = &Kernel::default();
         let mut fs = cr();
         let (mut ne, mut np) = (0, 0);
         let mut offs = [0, 0];
         let mut f = vec![0.0; 3];
         let r = fs.load_jacobian(
+            k,
             &mut ne,
             &mut np,
             0,
@@ -3342,16 +3359,17 @@ mod tests {
 
     #[test]
     fn base_curve_snaps_extends_and_keeps_the_extension() {
+        let k = &Kernel::default();
         let mut fs = CurveBasedFs::new(1e-6, 0.5, 0.03);
         assert!(matches!(
-            fs.evaluate_base_curve(0.5, 1),
+            fs.evaluate_base_curve(k, 0.5, 1),
             Err(SolidError::InvalidInput { .. })
         ));
         fs.set_original_curve(Some(Curve::from(line(p(0.0, 0.0, 0.0), p(2.0, 0.0, 0.0)))));
-        let v = fs.evaluate_base_curve(1.0 + 1e-12, 0).expect("snap");
+        let v = fs.evaluate_base_curve(k, 1.0 + 1e-12, 0).expect("snap");
         assert_eq!(v.first().copied(), Some(p(2.0, 0.0, 0.0)));
         assert!(fs.extended.is_none());
-        let v = fs.evaluate_base_curve(1.5, 1).expect("extend");
+        let v = fs.evaluate_base_curve(k, 1.5, 1).expect("extend");
         assert!((v[0].x - 3.0).abs() < 1e-12);
         let ext = fs.extended.as_ref().expect("extended").natural_interval();
         assert!(ext.max() >= 2.0 - 1e-12);
@@ -3367,7 +3385,7 @@ mod tests {
             ),
         )));
         assert!(matches!(
-            h.evaluate_base_curve(2.0, 0),
+            h.evaluate_base_curve(k, 2.0, 0),
             Err(SolidError::Upstream { .. })
         ));
         assert_eq!(fs.type_string(), "SmCurveBasedFS_TYPE");
@@ -3395,6 +3413,7 @@ mod tests {
 
     #[test]
     fn variable_radius_queries() {
+        let k = &Kernel::default();
         let mut cb = CurveBasedFs::new(1e-6, 0.5, 0.03);
         cb.solver.fsg = Some(FilletSurfaceGeneratorType::Circular);
         let mut fs = VariableRadiusFs {
@@ -3415,7 +3434,7 @@ mod tests {
         fs.curve_based.solver.fsg = None;
         assert!(fs.offset_radii_can_change().is_err());
         assert!(fs
-            .set_extension_flags()
+            .set_extension_flags(k)
             .expect_err("unported")
             .is_unported());
         assert!(fs

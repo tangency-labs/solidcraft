@@ -213,17 +213,11 @@ fn transpose<T: Copy>(a: &mut [T], num_rows: usize) {
 /// and `SmSurfOfExtrusion::IsNurbSurfaceSurfOfExtrusion`, in upstream's order. `None`
 /// when none recognises the surface.
 fn recognise_analytic(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface>> {
-    if crate::surface::cone::Cone::is_nurb_surface_cone(k, srf, 1.0)?.is_some() {
-        // DISPATCH GAP: the cone is not a SurfaceKind yet (no variant with its
-        // SmSurface overrides; issue #76 / PR #133), so no Surface can hold the
-        // recognised cone (no UNPORTED marker: surface.surface_p2 is partial).
-        return Err(SolidError::Unported {
-            upstream: "SmCone as SmSurface",
-            unit: "surface.surface_p2",
-        });
+    if let Some(cone) = crate::surface::cone::Cone::is_nurb_surface_cone(k, srf, 1.0)? {
+        return Ok(Some(Surface::from(cone)));
     }
     if crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, srf, 1.0)?.is_some() {
-        // DISPATCH GAP: as the cone, the sphere is not a SurfaceKind yet.
+        // DISPATCH GAP: the sphere is not a SurfaceKind yet (issue #76).
         return Err(SolidError::Unported {
             upstream: "SmSphere as SmSurface",
             unit: "surface.surface_p2",
@@ -234,7 +228,7 @@ fn recognise_analytic(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface
         return Ok(Some(Surface::from(rev)));
     }
     if SurfOfExtrusion::is_nurb_surface_surf_of_extrusion(k, srf, 1.0)?.is_some() {
-        // DISPATCH GAP: as the cone, the extrusion is not a SurfaceKind yet.
+        // DISPATCH GAP: the extrusion is not a SurfaceKind yet (issue #76).
         return Err(SolidError::Unported {
             upstream: "SmSurfOfExtrusion as SmSurface",
             unit: "surface.surface_p2",
@@ -243,20 +237,11 @@ fn recognise_analytic(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface
     Ok(None)
 }
 
-/// `SmCurve::IsArc(lNumberOfSamplePoints, d3DTol, ..)` of a B-spline curve.
-fn curve_is_arc(
-    k: &Kernel,
-    c: &BSplineCurve,
-    num_samples: u64,
-    tol: f64,
-) -> Result<Option<ArcData>> {
-    let arc = crate::curve::curve::p5::is_arc_base(
-        k,
-        c,
-        |c, tol| c.is_degenerate(k, tol, None),
-        num_samples,
-        tol,
-    )?;
+/// `pArc->IsArc(lNumberOfSamplePoints, d3DTol, ..)`: the virtual call on an
+/// `SmBSplineCurve *` whose real kind may be a circle (`SmCircle::IsArc`, exact) or a
+/// line (never an arc); [`SmCurve::is_arc`].
+fn curve_is_arc(k: &Kernel, c: &SmCurve, num_samples: u64, tol: f64) -> Result<Option<ArcData>> {
+    let arc = c.is_arc(k, num_samples, tol)?;
     Ok(arc.map(|(frame, radius, start_deg, end_deg)| ArcData {
         frame,
         radius,
@@ -387,8 +372,10 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// Those of [`Plane::is_nurb_surface_plane`]; [`SolidError::Unported`]: the
-    /// recognisers after the plane (`SmCone::IsNurbSurfaceCone`, ...) are not ported.
+    /// Those of the recognisers ([`Plane::is_nurb_surface_plane`],
+    /// [`crate::surface::cone::Cone::is_nurb_surface_cone`], ...);
+    /// [`SolidError::Unported`]: a recognised sphere or extrusion cannot be held
+    /// by a [`Surface`] yet.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         // SmPlane
@@ -496,7 +483,7 @@ impl BSplineSurface {
     /// meeting at their ends; [`SolidError::Unported`] (`SmCurve::IsArc`).
     pub fn create_sphere_from_arcs(
         k: &Kernel,
-        arcs: &[BSplineCurve],
+        arcs: &[SmCurve],
         tol_3d: f64,
     ) -> Result<SphereFromArcs> {
         let total_curves = arcs.len();
@@ -582,7 +569,10 @@ impl BSplineSurface {
         // Now find the non common point between the second largest and the gen curve
         let ends = |c: &SmCurve| -> Result<(Point3, Point3)> {
             let ivl = c.natural_interval();
-            Ok((c.evaluate_point(ivl.min())?, c.evaluate_point(ivl.max())?))
+            Ok((
+                c.evaluate_point(k, ivl.min())?,
+                c.evaluate_point(k, ivl.max())?,
+            ))
         };
         let gen_curve = arc(gen_curve_index)?;
         let (st1, end1) = ends(gen_curve)?;
@@ -646,9 +636,22 @@ impl BSplineSurface {
         }
         let z_axis = z_axis.unitize_or_z();
 
-        // Make the Sphere as a SurfOfRevolution
-        let sphere =
-            Self::create_surf_of_revolution(k, gen_curve, origin, z_axis, angle_span, false, None)?;
+        // Make the Sphere as a SurfOfRevolution (of the generator's NURB data: a B-spline
+        // or a circle, the only kinds IsArc accepts)
+        let gen_nurb = match gen_curve.kind() {
+            CurveKind::BSpline(b) => b,
+            CurveKind::Ellipse(e) => e.base(),
+            _ => return Err(SolidError::sm_err(OP_SPHERE)),
+        };
+        let sphere = Self::create_surf_of_revolution(
+            k,
+            gen_nurb,
+            ref_frame.origin(),
+            z_axis,
+            angle_span,
+            false,
+            None,
+        )?;
         Ok(SphereFromArcs {
             ccw_arcs,
             orients,
@@ -1503,6 +1506,7 @@ mod tests {
     /// sphere, as upstream's aliased (dead) centre check lets them.
     #[test]
     fn sphere_from_arcs_about_two_centres() {
+        let k = &Kernel::default();
         let arcs = [
             arc3(
                 [5.0, 0.0, 0.0],
@@ -1523,7 +1527,7 @@ mod tests {
                 [10.0, 2.5, 4.330_127_018_922_193],
             ),
         ];
-        let r = BSplineSurface::create_sphere_from_arcs(&arcs, 1e-6).unwrap();
+        let r = BSplineSurface::create_sphere_from_arcs(k, &arcs, 1e-6).unwrap();
         assert_eq!(r.ccw_arcs, vec![0, 1, 2]);
     }
 
@@ -1738,11 +1742,15 @@ mod tests {
     }
 
     #[test]
-    fn back_edges_are_unported() {
+    fn back_edges_are_wired() {
         let k = &Kernel::default();
         let s = patch(false);
-        let unported = |r: Result<()>| matches!(r, Err(SolidError::Unported { .. }));
-        assert!(unported(s.copy_and_add_analytics(k,).map(|_| ())));
+        // no recogniser takes the patch: a B-spline copy
+        let copy = s.copy_and_add_analytics(k).unwrap();
+        assert!(matches!(
+            copy.kind(),
+            crate::surface::surface::SurfaceKind::BSpline(_)
+        ));
         // (wired through surface.surface_p1 / surface.surface_p7)
         assert!(s.max_analytic_domain(k,).is_ok());
         assert!(s.is_degenerate_point(k, 1e-6, None).is_ok());

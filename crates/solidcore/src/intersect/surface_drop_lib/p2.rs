@@ -166,7 +166,7 @@ impl DropOffset {
         vector: Vec3,
     ) -> Result<Vec2> {
         let off = offset.offset_of(k, surface)?;
-        drop_vectors_at(&off, uv, side(from_left_u), side(from_left_v), &[vector])?
+        drop_vectors_at(k, &off, uv, side(from_left_u), side(from_left_v), &[vector])?
             .first()
             .copied()
             .ok_or_else(|| SolidError::sm_err(OP_SET))
@@ -185,7 +185,7 @@ impl DropOffset {
         from_left_v: bool,
     ) -> Result<[Point3; 2]> {
         let off = offset.offset_of(k, surface)?;
-        let d = off.evaluate_directional_derivs(uv, uv_dir, 1, from_left_u, from_left_v)?;
+        let d = off.evaluate_directional_derivs(k, uv, uv_dir, 1, from_left_u, from_left_v)?;
         match d.as_slice() {
             [p, d1, ..] => Ok([*p, *d1]),
             _ => Err(SolidError::sm_err(OP_SET)),

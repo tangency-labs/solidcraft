@@ -83,7 +83,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -175,7 +175,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -267,7 +267,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -359,7 +359,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -2127,7 +2127,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -2435,7 +2435,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -2863,7 +2863,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -3011,7 +3011,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -3287,7 +3287,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -3411,7 +3411,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -3423,7 +3423,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -3563,7 +3563,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -4063,7 +4063,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -4147,7 +4147,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -4519,7 +4519,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -4531,7 +4531,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -4847,7 +4847,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -5491,7 +5491,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -6159,7 +6159,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -6683,7 +6683,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -7615,7 +7615,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -8091,7 +8091,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -8287,7 +8287,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -8355,7 +8355,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -8503,7 +8503,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -8635,7 +8635,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -9335,7 +9335,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -10419,7 +10419,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -10463,7 +10463,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,
@@ -11443,7 +11443,7 @@
     },
     {
       "deferred": {
-        "symbol": "SurfaceKind::Cone (SmSurface::IntersectSurfaceBoundaries)",
+        "symbol": "SmCone common boundary dispatch adapter",
         "unit": "surface.surface_p2"
       },
       "max_rel_err": 0.0,

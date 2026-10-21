@@ -228,8 +228,8 @@ fn plane_intersections(
         .to_vec())
 }
 
-fn pv(curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
-    let v = curve.evaluate(t, 1, true, true)?;
+fn pv(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
+    let v = curve.evaluate(k, t, 1, true, true)?;
     Ok([
         *v.first().ok_or_else(|| SolidError::sm_err(OP))?,
         *v.get(1).ok_or_else(|| SolidError::sm_err(OP))?,
@@ -390,7 +390,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut solutions = Vec::new();
         let mut degenerate = Vec::new();
         for (ii, boundary) in boundaries.iter().enumerate() {
-            let deg = !uv && boundary.is_degenerate(EFF_ZERO, None)?;
+            let deg = !uv && boundary.is_degenerate(k, EFF_ZERO, None)?;
             degenerate.push(deg);
             let mut sols = if deg {
                 Vec::new()
@@ -424,8 +424,8 @@ impl<O: ClassObject> CurveClassification<O> {
                     continue;
                 }
                 let t = sol.start.parameters[0];
-                let cpv = pv(curve, t)?;
-                let mut bpv = pv(boundary, sol.start.parameters[1])?;
+                let cpv = pv(k, curve, t)?;
+                let mut bpv = pv(k, boundary, sol.start.parameters[1])?;
                 if uv {
                     if are_parallel(bpv[1], cpv[1], None) {
                         continue;
@@ -464,7 +464,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         2 => Point2::new(t, domain.max().y),
                         _ => Point2::new(domain.min().x, t),
                     };
-                    let normal = surface.evaluate_normal(p, Side::Left, Side::Left)?;
+                    let normal = surface.evaluate_normal(k, p, Side::Left, Side::Left)?;
                     if !are_perpendicular(cpv[1], normal, None) {
                         continue;
                     }
@@ -497,7 +497,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 continue;
             }
             let t = self.at(i)?.interval().evaluate(0.5);
-            let cpv = pv(curve, t)?;
+            let cpv = pv(k, curve, t)?;
             if uv {
                 let inside = domain.contains_point(Point2::new(cpv[0].x, cpv[0].y), 0.0);
                 self.at_mut(i)?.mid.set_class_object(
@@ -519,7 +519,7 @@ impl<O: ClassObject> CurveClassification<O> {
             ))? {
                 if drop.success && drop.gap < tol {
                     if let Some(normal) =
-                        ignored(surface.evaluate_normal(drop.result_uv, Side::Left, Side::Left))?
+                        ignored(surface.evaluate_normal(k, drop.result_uv, Side::Left, Side::Left))?
                     {
                         if are_perpendicular(cpv[1], normal, None) {
                             self.at_mut(i)?
@@ -660,15 +660,15 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
                 let t = sol.start.parameters[0];
                 let bt = sol.start.parameters[1];
-                let cpv = pv(curve, t)?;
-                let bpv = pv(boundary, bt)?;
+                let cpv = pv(k, curve, t)?;
+                let bpv = pv(k, boundary, bt)?;
                 let normal = if uv {
                     Vec3::Z
                 } else {
                     let CurveKind::CrvOnSurf(iso) = boundary.kind() else {
                         return Err(SolidError::sm_err(OP));
                     };
-                    iso.evaluate_surface_normal(bt, true)?.normal
+                    iso.evaluate_surface_normal(k, bt, true)?.normal
                 };
                 if are_parallel(bpv[1], cpv[1], None) {
                     continue;
@@ -692,7 +692,7 @@ impl<O: ClassObject> CurveClassification<O> {
             let first = self.at(0)?;
             let t = first.interval().evaluate(0.5);
             let inside = if uv {
-                let p = pv(curve, t)?[0];
+                let p = pv(k, curve, t)?[0];
                 domain.contains_point(Point2::new(p.x, p.y), 0.0)
             } else {
                 let guess = first
@@ -702,11 +702,11 @@ impl<O: ClassObject> CurveClassification<O> {
                         CurveKind::CrvOnSurf(c) => Some(c),
                         _ => None,
                     })
-                    .map(|c| c.evaluate_uv_point(first.start.t_param()))
+                    .map(|c| c.evaluate_uv_point(k, first.start.t_param()))
                     .transpose()?;
                 let drop = ignored(surface.drop_point::<BoundaryObject>(
                     k,
-                    curve.evaluate_point(t)?,
+                    curve.evaluate_point(k, t)?,
                     &domain,
                     &DropPointOptions {
                         guess_uv: guess,
@@ -744,7 +744,7 @@ impl<O: ClassObject> CurveClassification<O> {
             return Err(SolidError::sm_err(OP));
         }
         let mut d = Discontinuities3d::new();
-        if !volume.has_discontinuities(Some(&mut d), false)? {
+        if !volume.has_discontinuities(k, Some(&mut d), false)? {
             return Ok(());
         }
         let domain = volume.natural_param_domain()?;
@@ -880,7 +880,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         continue;
                     }
                     let t = sol.start.parameters[0];
-                    let cpv = pv(curve, t)?;
+                    let cpv = pv(k, curve, t)?;
                     let normal = plane.evaluate_normal();
                     if normal.is_perpendicular_to(cpv[1], 0.5) {
                         continue;
@@ -901,7 +901,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
             }
             if !classified {
-                let p = curve.evaluate_point(self.at(0)?.interval().evaluate(0.5))?;
+                let p = curve.evaluate_point(k, self.at(0)?.interval().evaluate(0.5))?;
                 let inside = domain.contains_point(p, 0.0);
                 self.at_mut(0)?.mid.set_class_object(
                     if inside {

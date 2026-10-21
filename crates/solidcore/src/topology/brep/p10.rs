@@ -1027,8 +1027,8 @@ fn edge_curve(
                     None,
                 )?;
                 let ends_match = |t: f64| -> Result<bool> {
-                    let or = src.object.evaluate_point(t)?;
-                    let an = c.evaluate_point(t)?;
+                    let or = src.object.evaluate_point(k, t)?;
+                    let an = c.evaluate_point(k, t)?;
                     let too_far = or.distance(an) > EFF_ZERO * (1.0 + or.max_dimension());
                     Ok(!too_far)
                 };
@@ -1865,8 +1865,13 @@ fn brep_bounding_box(_k: &Kernel, _b: &Brep) -> Result<Extent3d> {
 }
 
 /// `sm_GetPointFromSol(sSol, start)` ([`crate::topology::brep::p2::point_from_solution`]).
-fn point_from_solution(b: &Brep, solution: &Solution<CacheObject>, start: usize) -> Result<Point3> {
-    crate::topology::brep::p2::point_from_solution(b, solution, start)
+fn point_from_solution(
+    k: &Kernel,
+    b: &Brep,
+    solution: &Solution<CacheObject>,
+    start: usize,
+) -> Result<Point3> {
+    crate::topology::brep::p2::point_from_solution(k, b, solution, start)
 }
 
 fn remove_faces(k: &mut Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
@@ -2017,7 +2022,7 @@ fn faces_to_delete(
                     .as_ref()
                     .ok_or(SolidError::null_pointer(OP_PROJECT))?;
                 let tol1 = 5.0 * (rec.tolerance + tol);
-                let p = c.evaluate_point(rec.interval.evaluate(0.5))?;
+                let p = c.evaluate_point(k, rec.interval.evaluate(0.5))?;
                 if let Some(side) = ignored(find_side_of_curve(k, curve, p, direction, tol1))? {
                     if side != 0 {
                         right_votes += 1;
@@ -2079,7 +2084,7 @@ fn faces_to_delete(
             let Some(first) = solutions.as_slice().first() else {
                 continue;
             };
-            let p = point_from_solution(b, first, 1)?;
+            let p = point_from_solution(k, b, first, 1)?;
             let tol1 = 5.0 * (b.face(face)?.tolerance + tol);
             match ignored(find_side_of_curve(k, curve, p, direction, tol1))? {
                 Some(side) => face_right_side = side,

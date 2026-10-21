@@ -285,13 +285,17 @@ impl<O: ClassObject> CurveClassification<O> {
     /// [`CurveClassification::classify_crv_loc`].
     pub fn classify_crv_loc_by_index(
         &self,
+        k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         index: usize,
     ) -> Result<(Point3, f64)> {
         let (point_class, param) = self.point_class_by_index(index)?;
 
         // all done: return SSS point if possible else m_cpCurve(dCurveParameter)
-        Ok((self.classify_crv_loc(geometry, point_class, param)?, param))
+        Ok((
+            self.classify_crv_loc(k, geometry, point_class, param)?,
+            param,
+        ))
     }
 
     /// Inserts `interval` at `index` (`InsertAt`): past the end the classification
@@ -583,7 +587,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // if the neighbor interval has shrunk to zero length
             if collapse_degen_intervals {
                 let curve = self.curve_geometry(geometry)?;
-                if curve_is_degenerate(Some(curve), &self.at(index - 1)?.interval, tol)? {
+                if curve_is_degenerate(k, Some(curve), &self.at(index - 1)?.interval, tol)? {
                     // remove the interval from the SmCurveClassification (status ignored)
                     ignore_status(self.collapse_interval(k, geometry, index - 1))?;
                 }
@@ -652,7 +656,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // if the neighbor interval has shrunk to zero length
             if collapse_degen_intervals {
                 let curve = self.curve_geometry(geometry)?;
-                if curve_is_degenerate(Some(curve), &self.at(index + 1)?.interval, tol)? {
+                if curve_is_degenerate(k, Some(curve), &self.at(index + 1)?.interval, tol)? {
                     // remove the interval from the SmCurveClassification (status ignored)
                     ignore_status(self.collapse_interval(k, geometry, index + 1))?;
                 }
@@ -721,7 +725,7 @@ impl<O: ClassObject> CurveClassification<O> {
             ivl.interval.max(),
             ivl.end.obj_zone_tol_3d(k, geometry)?,
         )?;
-        if collapse && curve_is_degenerate(Some(curve), &ivl.interval, tol)? {
+        if collapse && curve_is_degenerate(k, Some(curve), &ivl.interval, tol)? {
             // remove the interval from the SmCurveClassification (status ignored)
             ignore_status(self.collapse_interval(k, geometry, index))?;
         }
@@ -740,12 +744,13 @@ impl<O: ClassObject> CurveClassification<O> {
     /// unit `topology.face_p2`).
     pub fn interval_min_uv(
         &self,
+        k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         index: usize,
         uv: Point2,
     ) -> Result<Point2> {
         let param = self.at(index)?.interval.min();
-        self.interval_uv_at(geometry, param, uv)
+        self.interval_uv_at(k, geometry, param, uv)
     }
 
     /// The UV point of the end of interval `index` (`SmCurveInterval::GetMaxUV`; see
@@ -756,17 +761,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// As [`CurveClassification::interval_min_uv`].
     pub fn interval_max_uv(
         &self,
+        k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         index: usize,
         uv: Point2,
     ) -> Result<Point2> {
         let param = self.at(index)?.interval.max();
-        self.interval_uv_at(geometry, param, uv)
+        self.interval_uv_at(k, geometry, param, uv)
     }
 
     /// `GetMinUV` / `GetMaxUV` at curve parameter `param`.
     fn interval_uv_at(
         &self,
+        k: &Kernel,
         geometry: &impl ClassGeometry<O>,
         param: f64,
         uv: Point2,
@@ -776,12 +783,12 @@ impl<O: ClassObject> CurveClassification<O> {
         // set output - UV point
         if curve.dim() == 2 {
             // (status ignored: an undefined point on failure)
-            let p = ignored(curve.evaluate_point(param))?.unwrap_or(Vec3::UNDEF);
+            let p = ignored(curve.evaluate_point(k, param))?.unwrap_or(Vec3::UNDEF);
             return Ok(Point2::new(p.x, p.y));
         }
         if let CurveKind::CrvOnSurf(c) = curve.kind() {
             // (status ignored: rUV unchanged on failure)
-            return Ok(ignored(c.evaluate_uv_point(param))?.unwrap_or(uv));
+            return Ok(ignored(c.evaluate_uv_point(k, param))?.unwrap_or(uv));
         }
 
         // Curve is 3d branch - Use drop point
@@ -1001,14 +1008,14 @@ mod tests {
         let k = Kernel::default();
         let g = line();
         let c = cc(&k, &[0.0, 0.5, 1.0]);
-        let (p, t) = c.classify_crv_loc_by_index(&g, 2).unwrap();
+        let (p, t) = c.classify_crv_loc_by_index(&k, &g, 2).unwrap();
         assert_eq!((p.x, t), (1.0, 1.0));
-        assert!(c.classify_crv_loc_by_index(&g, 3).is_err());
+        assert!(c.classify_crv_loc_by_index(&k, &g, 3).is_err());
         assert!(!c
             .has_dead_topology_point_object(Some(&Brep::new()))
             .unwrap());
         assert!(c
-            .interval_min_uv(&g, 0, Point2::new(0.0, 0.0))
+            .interval_min_uv(&k, &g, 0, Point2::new(0.0, 0.0))
             .is_err_and(|e| !e.is_unported()));
         let s: Solution<H> = Solution::new();
         let r = refine_cci_to_surfaces(&c, &s, None, Point3::new(1.0, 2.0, 3.0), 6).unwrap();

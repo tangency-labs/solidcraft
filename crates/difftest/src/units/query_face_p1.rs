@@ -408,7 +408,7 @@ struct PointArgs {
     loops: Vec<LoopId>,
 }
 
-fn point_args(m: &Model, i: &PointInput) -> Result<Option<PointArgs>, HarnessError> {
+fn point_args(k: &Kernel, m: &Model, i: &PointInput) -> Result<Option<PointArgs>, HarnessError> {
     let b = &m.brep;
     let Some(f) = pick(i.face, b.faces().len()) else {
         return Ok(None);
@@ -423,7 +423,7 @@ fn point_args(m: &Model, i: &PointInput) -> Result<Option<PointArgs>, HarnessErr
     let size = dom.size();
     let uv = Point2::new(dom.min().x + i.u * size.x, dom.min().y + i.v * size.y);
     let s = surface
-        .evaluate_point(uv)
+        .evaluate_point(k, uv)
         .map_err(|e| harness(format!("surface point: {e}")))?;
     let point = Vec3::new(s.x + i.offset[0], s.y + i.offset[1], s.z + i.offset[2]);
     let guess = i
@@ -489,9 +489,9 @@ impl solidcore::intersect::point_class::ClassGeometry<EntityRef> for NoGeometry 
     }
 }
 
-fn run_point(i: &PointInput, cpp: bool) -> Result<Output, HarnessError> {
+fn run_point(k: &Kernel, i: &PointInput, cpp: bool) -> Result<Output, HarnessError> {
     let m = model(&i.brep)?;
-    let Some(a) = point_args(&m, i)? else {
+    let Some(a) = point_args(k, &m, i)? else {
         return Ok(none_output());
     };
     if cpp {
@@ -652,7 +652,7 @@ fn curve_output(status: i32, values: [f64; 9]) -> Output {
         .values("out", values.to_vec())
 }
 
-fn run_curve(input: &CurveInput, cpp: bool) -> Result<Output, HarnessError> {
+fn run_curve(k: &Kernel, input: &CurveInput, cpp: bool) -> Result<Output, HarnessError> {
     // Inputs the FFI refuses before any C++ runs: nothing runs on either side.
     if !(0..=2).contains(&input.kind)
         || !(0..=7).contains(&input.mask)
@@ -688,7 +688,7 @@ fn run_curve(input: &CurveInput, cpp: bool) -> Result<Output, HarnessError> {
         _ => return Err(harness("unknown curve kind")),
     };
     let mut values = [11., 13., 17., 19., 23., 29., 31., 37., 41.];
-    match p1::evaluate_curve(curve.as_ref(), input.parameter.value()?) {
+    match p1::evaluate_curve(k, curve.as_ref(), input.parameter.value()?) {
         Ok(result) => {
             for ((i, vector), destination) in
                 result.iter().enumerate().zip(values.as_chunks_mut::<3>().0)
@@ -705,13 +705,13 @@ fn run_curve(input: &CurveInput, cpp: bool) -> Result<Output, HarnessError> {
     }
 }
 
-fn run(case: &Case, cpp: bool) -> Result<Output, HarnessError> {
+fn run(k: &Kernel, case: &Case, cpp: bool) -> Result<Output, HarnessError> {
     let input = case.parse::<Input>()?;
     match input {
         Input::Box(i) => run_box(&i, cpp),
-        Input::Point(i) => run_point(&i, cpp),
+        Input::Point(i) => run_point(k, &i, cpp),
         Input::EdgeOn(i) => run_edge_on(&i, cpp),
-        Input::Curve(i) => run_curve(&i, cpp),
+        Input::Curve(i) => run_curve(k, &i, cpp),
     }
 }
 
@@ -900,11 +900,13 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
-        run(case, true)
+        let k = &Kernel::default();
+        run(k, case, true)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        run(case, false)
+        let k = &Kernel::default();
+        run(k, case, false)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

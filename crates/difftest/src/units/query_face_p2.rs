@@ -1049,7 +1049,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         cpp(k, &case.parse::<Inputs>()?)
     }
 

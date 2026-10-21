@@ -1920,6 +1920,7 @@ struct Start {
 }
 
 fn resolve_prefix(
+    k: &Kernel,
     ops: &[OpIn],
     c: &Counts,
     two: &Two,
@@ -1928,7 +1929,7 @@ fn resolve_prefix(
     let mut n = ops.len();
     let mut cut: Option<(usize, String)> = None;
     loop {
-        match resolve(ops.get(..n).unwrap_or(&[]), c, two, start) {
+        match resolve(k, ops.get(..n).unwrap_or(&[]), c, two, start) {
             Ok(r) => return (r, cut),
             Err(name) => {
                 if n == 0 {
@@ -1944,7 +1945,7 @@ fn resolve_prefix(
 /// Resolves every op of `ops` against the imported B-reps; `Err(name)` names the
 /// first op that cannot be run.
 #[allow(clippy::too_many_lines)]
-fn resolve(ops: &[OpIn], c: &Counts, two: &Two, start: Start) -> Result<Vec<ROp>, String> {
+fn resolve(k: &Kernel, ops: &[OpIn], c: &Counts, two: &Two, start: Start) -> Result<Vec<ROp>, String> {
     let i_ctor = start.ctor;
     let mut approx = start.approx;
     let mut out = Vec::new();
@@ -2189,7 +2190,7 @@ fn resolve(ops: &[OpIn], c: &Counts, two: &Two, start: Start) -> Result<Vec<ROp>
                         .ok_or_else(|| fail("surface"))?;
                     let s = ClassGeometry::surface(two, sh).ok_or_else(|| fail("surface"))?;
                     let uv = dom.evaluate(p[0], p[1]);
-                    let pt = s.evaluate_point(uv).map_err(|_| fail("evaluate"))?;
+                    let pt = s.evaluate_point(k, uv).map_err(|_| fail("evaluate"))?;
                     let n = s.evaluate_normal_or_zero(uv);
                     let q = pt + n * p[2];
                     [q.x, q.y, q.z]
@@ -2412,12 +2413,13 @@ trait NormalOrZero {
 
 impl NormalOrZero for Surface {
     fn evaluate_normal_or_zero(&self, uv: Point2) -> Vec3 {
+        let k = &Kernel::default();
         // a small finite-difference normal: enough to offset a test point off the surface
         let h = 1e-3;
         let (Ok(p), Ok(pu), Ok(pv)) = (
-            self.evaluate_point(uv),
-            self.evaluate_point(Point2::new(uv.x + h, uv.y)),
-            self.evaluate_point(Point2::new(uv.x, uv.y + h)),
+            self.evaluate_point(k, uv),
+            self.evaluate_point(k, Point2::new(uv.x + h, uv.y)),
+            self.evaluate_point(k, Point2::new(uv.x, uv.y + h)),
         ) else {
             return Vec3::new(0.0, 0.0, 0.0);
         };
@@ -2722,7 +2724,7 @@ fn put_cut(o: &mut Vec<f64>, cut: Option<&(usize, String)>) {
 /// Exports and imports the B-reps and resolves the script; `Err(Ok(output))` is the
 /// output both sides report when the B-reps cannot be built or an op cannot be
 /// resolved.
-fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
+fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let ex = export(i).map_err(|e| Box::new(Err(e)))?;
     let Some((a, b)) = ffi::split_exports(&ex) else {
         return Err(Box::new(Ok(build_failure(&ex))));
@@ -2749,7 +2751,7 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
         approx: i.approx,
         block_max_abs,
     };
-    let (ops, cut) = resolve_prefix(&i.ops, &counts, &two, start);
+    let (ops, cut) = resolve_prefix(k, &i.ops, &counts, &two, start);
     // a script cut at its first op compares nothing: both sides report the error (it is
     // counted as both-errored, not as a pass)
     if ops.is_empty() {
@@ -2760,16 +2762,16 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     Ok(Prepared { two, ops, cut })
 }
 
-fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    run_cpp_with(i, ffi::eval)
+fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+    run_cpp_with(k, i, ffi::eval)
 }
 
 /// The shim entry a case runs through (part 1's, or part 2's with its ops).
 pub(super) type Eval = fn(Op, [&str; 2], &[f64]) -> Result<Vec<f64>, solidcore_ffi::FfiError>;
 
 /// [`run_cpp`] through `eval`.
-pub(super) fn run_cpp_with(i: &Inputs, eval: Eval) -> Result<Output, HarnessError> {
-    let p = match prepare(i) {
+pub(super) fn run_cpp_with(k: &Kernel, i: &Inputs, eval: Eval) -> Result<Output, HarnessError> {
+    let p = match prepare(k, i) {
         Ok(p) => p,
         Err(r) => return *r,
     };
@@ -3141,7 +3143,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                     continue;
                 }
                 let eh = eh.ok_or_else(|| harness("edge"))?;
-                match status(ti::check_interior_edge(&two, eh, *t, *tol), &mut o)? {
+                match status(ti::check_interior_edge(&k, &two, eh, *t, *tol), &mut o)? {
                     Some(interior) => o.push(flag(interior)),
                     None => o.push(0.0), // bInterior == FALSE on trouble
                 }
@@ -3710,8 +3712,8 @@ impl IntersectorBrepP2<H> for Two {
     }
 }
 
-pub(super) fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let p = match prepare(i) {
+pub(super) fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+    let p = match prepare(k, i) {
         Ok(p) => p,
         Err(r) => return *r,
     };
@@ -3730,7 +3732,8 @@ pub(super) fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
 /// case. For coverage censuses.
 #[cfg(test)]
 pub(super) fn rust_op_statuses(i: &Inputs) -> Option<Vec<(f64, f64, f64)>> {
-    let p = prepare(i).ok()?;
+    let k = &Kernel::default();
+    let p = prepare(k, i).ok()?;
     let (o, marks) = run_rust_script(i, p).ok()?;
     Some(
         marks
@@ -4223,13 +4226,15 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        let k = &Kernel::default();
         let i: Inputs = case.parse()?;
-        run_cpp(&i)
+        run_cpp(k, &i)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        let k = &Kernel::default();
         let i: Inputs = case.parse()?;
-        run_rust(&i)
+        run_rust(k, &i)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

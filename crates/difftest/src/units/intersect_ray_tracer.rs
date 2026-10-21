@@ -1115,7 +1115,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let i: Inputs = case.parse()?;
         match run_rust(k, &i, &mut Stats::default()) {
             Ok(rec) => Ok(Output::new().values("rec", rec)),
@@ -1125,7 +1125,7 @@ let k = &Kernel::default();
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         serde_json::to_value(gen_checked(k, rng)).ok()
     }
 

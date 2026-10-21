@@ -1056,7 +1056,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                         o.push(st(r)?.err().unwrap_or(0.0));
                     }
                     OpIn::IvlBound { j, do_min, .. } => {
-                        let r = cc.ivl_bound_edgeuse_obj(&pool, *j, *do_min);
+                        let r = cc.ivl_bound_edgeuse_obj(&k, &pool, *j, *do_min);
                         match st(r)? {
                             Ok(eu) => o.extend([0.0, pool.id(eu)]),
                             Err(s) => o.push(s),

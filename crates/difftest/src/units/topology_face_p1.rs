@@ -426,7 +426,7 @@ fn put_domain(o: &mut Vec<f64>, d: &Extent2d) {
 }
 
 /// A curve as samples (the shim's `fp1_put_curve`).
-fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
+fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: Option<&Curve>) {
     let Some(c) = c else {
         o.push(-1.0);
         return;
@@ -440,7 +440,7 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
         } else {
             ivl.min() + f64::from(i) / 4.0 * (ivl.max() - ivl.min())
         };
-        let p = c.evaluate_point(t).unwrap_or_default();
+        let p = c.evaluate_point(k, t).unwrap_or_default();
         o.extend([p.x, p.y, p.z]);
     }
 }
@@ -472,9 +472,9 @@ fn put_orientation(o: &mut Vec<f64>, b: &Brep) {
     }
 }
 
-fn put_uv_curves(o: &mut Vec<f64>, b: &Brep) {
+fn put_uv_curves(k: &Kernel, o: &mut Vec<f64>, b: &Brep) {
     for (_, eu) in b.edgeuses().iter() {
-        put_curve(o, eu.uv_trim_curve.as_ref());
+        put_curve(k, o, eu.uv_trim_curve.as_ref());
     }
 }
 
@@ -574,6 +574,7 @@ fn probe(
 /// Such cases are deferred to `cpp-crash-guard:UB-137`.
 #[allow(clippy::too_many_arguments)]
 fn seam_guard(
+    k: &Kernel,
     b: &Brep,
     f: FaceId,
     props: Option<PropsIn>,
@@ -592,8 +593,8 @@ fn seam_guard(
         .ok_or_else(|| Fail::Harness(harness("face without surface")))?;
     let nat = s.natural_uv_domain();
     // (as the shim: the face properties' closed flag or the real surface)
-    let real_u = s.is_periodic(&nat, Sp::U).map_err(|e| fail(&e))?;
-    let real_v = s.is_periodic(&nat, Sp::V).map_err(|e| fail(&e))?;
+    let real_u = s.is_periodic(k, &nat, Sp::U).map_err(|e| fail(&e))?;
+    let real_v = s.is_periodic(k, &nat, Sp::V).map_err(|e| fail(&e))?;
     let (per_u, per_v) = match props {
         Some(p) => (p.closed_u != 0 || real_u, p.closed_v != 0 || real_v),
         None => (real_u, real_v),
@@ -713,7 +714,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                     o.extend(t.loops.iter().map(|&n| n as f64));
                     o.push(t.curves.len() as f64);
                     for c in &t.curves {
-                        put_curve(&mut o, Some(c));
+                        put_curve(&k, &mut o, Some(c));
                     }
                 }
                 Err(_) => o.extend([0.0, 0.0]),
@@ -768,7 +769,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             }
             let r = fp1::remove_uv_trim_curves(&mut b, f);
             o.push(status(&r)?);
-            put_uv_curves(&mut o, &b);
+            put_uv_curves(&k, &mut o, &b);
         }
         OpIn::SwapUv => {
             let face = b.face(f).map_err(e)?;
@@ -783,7 +784,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             o.push(status(&r)?);
             put_domain(&mut o, &b.face(f).map_err(e)?.uv_domain);
             put_orientation(&mut o, &b);
-            put_uv_curves(&mut o, &b);
+            put_uv_curves(&k, &mut o, &b);
         }
         OpIn::Shrink => {
             let r = fp1::shrink_geometry(&k, &mut b, f, ko);
@@ -808,7 +809,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             let Some((problem, mut cu, mut cv)) = probe(&k, i)? else {
                 return Err(Fail::Harness(harness("probe refused a face with surface")));
             };
-            if seam_guard(&b, f, *props, problem, &cu, &cv, false, *split)? {
+            if seam_guard(&k, &b, f, *props, problem, &cu, &cv, false, *split)? {
                 return Err(merge_deferred());
             }
             let fp = face_props(*props)?;
@@ -848,7 +849,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             let Some((problem, mut cu, mut cv)) = probe(&k, i)? else {
                 return Err(Fail::Harness(harness("probe refused a face with surface")));
             };
-            if seam_guard(&b, f, *props, problem, &cu, &cv, true, false)? {
+            if seam_guard(&k, &b, f, *props, problem, &cu, &cv, true, false)? {
                 return Err(merge_deferred());
             }
             let fp = face_props(*props)?;

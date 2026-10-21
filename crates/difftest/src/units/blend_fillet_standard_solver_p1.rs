@@ -1034,7 +1034,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 if n > ffi::MAX_DERIV {
                     return Err(harness("base: derivative count above the FFI bound"));
                 }
-                match fs.evaluate_base_curve(t, n) {
+                match fs.evaluate_base_curve(&k, t, n) {
                     Ok(pv) => {
                         o.push(0.0);
                         for v in pv {
@@ -1148,7 +1148,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let mut offs = [jac.off1, jac.off2];
             let mut f = jac.f.clone();
             let mut m = jac_matrix(jac)?;
-            let res = fs.load_jacobian(
+            let res = fs.load_jacobian(&k, 
                 &mut ne,
                 &mut np,
                 jac.rail,
@@ -1218,7 +1218,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let (mut ne, mut np) = (jac.ne, jac.np);
             let mut f = jac.f.clone();
             let mut m = jac_matrix(jac)?;
-            let res = fs.load_jacobian(
+            let res = fs.load_jacobian(&k, 
                 &mut ne,
                 &mut np,
                 jac.rail,
@@ -1546,7 +1546,7 @@ fn rust_edgeuse_body(
                     d.min().x + fu * (d.max().x - d.min().x),
                     d.min().y + fv * (d.max().y - d.min().y),
                 );
-                match s.surface.evaluate_point(uv) {
+                match s.surface.evaluate_point(&k, uv) {
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(e) => {
@@ -1562,8 +1562,8 @@ fn rust_edgeuse_body(
         Err(SolidError::Upstream { code, .. }) => v.push(f64::from(code)),
         Err(e) => return Err(e),
     }
-    put_eu_state(&mut v, b, Some(eu))?;
-    put_eu_state(&mut v, b, radial)?;
+    put_eu_state(&k, &mut v, b, Some(eu))?;
+    put_eu_state(&k, &mut v, b, radial)?;
     Ok(v)
 }
 

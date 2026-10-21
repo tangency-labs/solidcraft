@@ -1202,15 +1202,7 @@ fn join_curves(k: &Kernel, this: &mut Curve, other: &mut Curve) -> Result<()> {
 
 /// `SM_CAST_PTR(SmOffsetSurface, surface) != NULL`.
 const fn is_offset_surface(surface: &Surface) -> bool {
-    match surface.kind() {
-        SurfaceKind::Cone(_)
-        | SurfaceKind::BSpline(_)
-        | SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Plane(_)
-        | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::SrfInVolume(_) => false,
-    }
+    matches!(surface.kind(), SurfaceKind::OffsetSurface(_))
 }
 
 /// `surface.IsSingularity(uv, eWhichDir)` (default tolerance): the plane override
@@ -1370,10 +1362,10 @@ mod tests {
 
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
         let mut si = SurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
-        assert!(matches!(
-            si.find_interior_curves(&k, &mut out),
-            Err(SolidError::Unported { .. })
-        ));
+        // (completes since the generic IsoCurve holds a plane's iso boundaries, #76;
+        // the curves are compared by difftest)
+        let mut found = TsectCurves::default();
+        si.find_interior_curves(&k, &mut found).unwrap();
         // a pair next to a curve already found is skipped
         out.curves_3d.push(Curve::from(
             crate::curve::line::Line::create_line_segment(

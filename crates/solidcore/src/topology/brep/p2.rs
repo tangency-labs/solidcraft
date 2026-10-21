@@ -1043,6 +1043,7 @@ pub fn delete_stale_caches<O: Copy + PartialEq>(
 /// edge or face object the B-rep does not hold (the port cannot evaluate it); the evaluation's
 /// error (upstream ignores it and returns an uninitialised point).
 pub fn point_from_solution(
+    k: &Kernel,
     b: &Brep,
     solution: &Solution<CacheObject>,
     index: usize,
@@ -1074,7 +1075,7 @@ pub fn point_from_solution(
                         .as_ref()
                         .ok_or(null_deref("edge without curve"))?;
                     // Evaluate the curve at the current parameter
-                    return curve.evaluate_point(param(start)?);
+                    return curve.evaluate_point(k, param(start)?);
                 }
                 CacheObject::Face(f) => {
                     let surface = b
@@ -1084,7 +1085,7 @@ pub fn point_from_solution(
                         .ok_or(null_deref("face without surface"))?;
                     // Initialize a 2D point using two parameters from the solution
                     let uv = Point2::new(param(start)?, param(start + 1)?);
-                    return surface.evaluate_point(uv);
+                    return surface.evaluate_point(k, uv);
                 }
                 // a curve, edge or face the B-rep does not hold: upstream evaluates it
                 CacheObject::Other(r)
@@ -1154,24 +1155,24 @@ pub fn local_curve_sector(
 
     // evaluate Curve EndPoint tangent at intersection
     let mut test_dir = if orientation == OrientType::Same {
-        let pv = curve.evaluate(interval.min(), 1, true, true)?;
+        let pv = curve.evaluate(k, interval.min(), 1, true, true)?;
         *pv.get(1).ok_or(null_deref("missing tangent"))?
     } else {
-        let pv = curve.evaluate(interval.max(), 1, false, true)?;
+        let pv = curve.evaluate(k, interval.max(), 1, false, true)?;
         -*pv.get(1).ok_or(null_deref("missing tangent"))?
     };
 
     // evaluate Curve NearEndPoint - this is for classifying vertex corners where this
     // point is dropped to all vertex->faces
     let d3_step = b.tolerance() * 10.0;
-    let (length, _) = curve.approximate_length(interval, 10, false)?;
+    let (length, _) = curve.approximate_length(k, interval, 10, false)?;
     let t_step = d3_step / length * (interval.max() - interval.min());
     let t_test = if orientation == OrientType::Same {
         interval.min() + t_step
     } else {
         interval.max() - t_step
     };
-    let test_pnt = curve.evaluate_point(t_test)?;
+    let test_pnt = curve.evaluate_point(k, t_test)?;
     test_dir *= t_step / test_dir.length();
 
     // switch on the intersection type
@@ -1939,7 +1940,7 @@ fn merge_curves_body<O: ClassObject + Copy>(
 
         // skip very short curves (gwc:this is tolerance bug waiting to happen)
         let natural = curve.natural_interval();
-        if curve.approximate_length(&natural, 10, false)?.0 < tolerance {
+        if curve.approximate_length(k, &natural, 10, false)?.0 < tolerance {
             continue;
         }
 
@@ -2245,7 +2246,7 @@ pub fn mate_lamina_edge_to_surface(
             .as_ref()
             .ok_or(null_deref("edge without curve"))?;
         for j in 0..=20u32 {
-            let edge_pnt = e_curve.evaluate_point(ivl.evaluate(f64::from(j) / 20.0))?;
+            let edge_pnt = e_curve.evaluate_point(k, ivl.evaluate(f64::from(j) / 20.0))?;
             // (only the distance is read: no handle for the surface)
             let sols = ext_mating.global_point_solve::<ObjectHandle>(
                 k,
@@ -2707,21 +2708,23 @@ mod tests {
         let s = solution(&objs, &[0.25, 0.5, 0.75, 1.0]);
         let edge = b.edge(e).unwrap().curve.as_ref().unwrap();
         assert_eq!(
-            point_from_solution(&b, &s, 0).unwrap(),
-            edge.evaluate_point(0.25).unwrap()
+            point_from_solution(&Kernel::default(), &b, &s, 0).unwrap(),
+            edge.evaluate_point(&Kernel::default(), 0.25).unwrap()
         );
         let plane = b.face(f).unwrap().surface.as_ref().unwrap();
         assert_eq!(
-            point_from_solution(&b, &s, 1).unwrap(),
-            plane.evaluate_point(Point2::new(0.5, 0.75)).unwrap()
+            point_from_solution(&Kernel::default(), &b, &s, 1).unwrap(),
+            plane
+                .evaluate_point(&Kernel::default(), Point2::new(0.5, 0.75))
+                .unwrap()
         );
         assert_eq!(
-            point_from_solution(&b, &s, 2).unwrap(),
+            point_from_solution(&Kernel::default(), &b, &s, 2).unwrap(),
             Point3::new(1.0, 2.0, 3.0)
         );
         assert_eq!(
-            point_from_solution(&b, &s, 3).unwrap(),
-            edge.evaluate_point(1.0).unwrap()
+            point_from_solution(&Kernel::default(), &b, &s, 3).unwrap(),
+            edge.evaluate_point(&Kernel::default(), 1.0).unwrap()
         );
     }
 
@@ -2731,13 +2734,13 @@ mod tests {
         // a surface object is no curve, edge, vertex or face: SE(SM_ERR), the origin
         let s = solution(&[CacheObject::Surface(f)], &[]);
         assert_eq!(
-            point_from_solution(&b, &s, 0).unwrap(),
+            point_from_solution(&Kernel::default(), &b, &s, 0).unwrap(),
             Point3::new(0.0, 0.0, 0.0)
         );
         // a null object is dereferenced upstream
         let s = solution(&[], &[]);
         assert!(matches!(
-            point_from_solution(&b, &s, 0),
+            point_from_solution(&Kernel::default(), &b, &s, 0),
             Err(SolidError::InvalidInput { .. })
         ));
     }

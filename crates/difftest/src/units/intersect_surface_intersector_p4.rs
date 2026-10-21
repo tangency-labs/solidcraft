@@ -74,6 +74,10 @@ const NO_POINT: f64 = -3.0;
 /// An output upstream leaves unset (the shim presets it).
 const UNSET: f64 = -7.0;
 
+/// The curve type the shim presets (`(SmTsectCurveType)-7`) as the record holds it:
+/// `(double)type` of an enum with an unsigned underlying type, `2^32 - 7`.
+const UNSET_TYPE: f64 = 4_294_967_289.0;
+
 // ---- inputs ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -960,7 +964,7 @@ fn put_single(o: &mut Vec<f64>, c: &IntersectionCurve) -> Result<(), Fail> {
             }
         }
     }
-    o.push(c.curve_type.map_or(UNSET, |t| f64::from(t as i32)));
+    o.push(c.curve_type.map_or(UNSET_TYPE, |t| f64::from(t as i32)));
     o.push(c.deviation.unwrap_or(UNSET));
     Ok(())
 }
@@ -1926,7 +1930,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }

@@ -493,14 +493,14 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
 ///
 /// Those of the curve evaluation (upstream then reports not interior); a null curve or
 /// vertex pointer upstream dereferences.
-pub fn check_interior_edge(b: &Brep, e: EdgeId, t: f64, tol: f64) -> Result<bool> {
+pub fn check_interior_edge(k: &Kernel, b: &Brep, e: EdgeId, t: f64, tol: f64) -> Result<bool> {
     // Check common simple case first. Note, negative tol excludes the ends.
     let domain = edge::interval(b, e)?;
     if !domain.contains_value(t, -EFF_ZERO) {
         return Ok(false);
     }
 
-    let pts = curve_of(b, e)?.evaluate(t, 1, false, true)?;
+    let pts = curve_of(b, e)?.evaluate(k, t, 1, false, true)?;
     let crv_pt = pts.first().copied().ok_or_else(sm_err)?;
     let param_len = pts.get(1).copied().ok_or_else(sm_err)?.length();
     if param_len > 0.1 {
@@ -596,7 +596,7 @@ pub fn test_and_split_edge(
 
     // Check on the interior (status ignored: a failure reports not interior).
     let interior =
-        ignored(check_interior_edge(b, e, dropped.parameter, this_tol))?.unwrap_or(false);
+        ignored(check_interior_edge(k, b, e, dropped.parameter, this_tol))?.unwrap_or(false);
     if !interior {
         out.reason = SplitReason::CloseToBoundary;
         return Ok(out);
@@ -869,10 +869,10 @@ impl<'c> Stitch<'c> {
                     let (mut d_start, mut d_end) = (d_ivl.min(), d_ivl.max());
                     let k_curve = curve_of(b, k_edge)?;
                     let d_curve = curve_of(b, d_edge)?;
-                    let k_pt0 = k_curve.evaluate_point(k_start)?;
-                    let k_pt1 = k_curve.evaluate_point(k_end)?;
-                    let d_pt0 = d_curve.evaluate_point(d_start)?;
-                    let d_pt1 = d_curve.evaluate_point(d_end)?;
+                    let k_pt0 = k_curve.evaluate_point(k, k_start)?;
+                    let k_pt1 = k_curve.evaluate_point(k, k_end)?;
+                    let d_pt0 = d_curve.evaluate_point(k, d_start)?;
+                    let d_pt1 = d_curve.evaluate_point(k, d_end)?;
                     if k_pt0.distance(d_pt0) < vtol && k_pt1.distance(d_pt1) < vtol {
                         // do nothing, continue on to check dist.
                     } else if k_pt0.distance(d_pt1) < vtol && k_pt1.distance(d_pt0) < vtol {
@@ -1004,7 +1004,7 @@ impl<'c> Stitch<'c> {
                     let mut squeeze_edge: Option<EdgeId> = None;
                     for e in vertex::common_edges(b, v0, Some(v1), None)? {
                         let edge_length = curve_of(b, e)?
-                            .approximate_length(&edge::interval(b, e)?, 10, false)?
+                            .approximate_length(k, &edge::interval(b, e)?, 10, false)?
                             .0;
                         if edge_length < 2.0 * dist_to_v {
                             if do_squeeze {
@@ -1046,7 +1046,7 @@ impl<'c> Stitch<'c> {
                     let e1_ivl = edge::interval(b, e1)?;
                     let e0_curve = curve_of(b, e0)?;
                     let e1_curve = curve_of(b, e1)?;
-                    let mid_pnt = e0_curve.evaluate_point(e0_ivl.evaluate(0.5))?;
+                    let mid_pnt = e0_curve.evaluate_point(k, e0_ivl.evaluate(0.5))?;
                     let dropped = e1_curve.drop_point(
                         k,
                         &e1_ivl,
@@ -1059,8 +1059,8 @@ impl<'c> Stitch<'c> {
                     if !dropped.success {
                         return Err(sm_err());
                     }
-                    let pv = e0_curve.evaluate(e0_ivl.evaluate(0.5), 1, true, true)?;
-                    let pv_test = e1_curve.evaluate(dropped.parameter, 1, true, true)?;
+                    let pv = e0_curve.evaluate(k, e0_ivl.evaluate(0.5), 1, true, true)?;
+                    let pv_test = e1_curve.evaluate(k, dropped.parameter, 1, true, true)?;
                     let mut orientation = OrientType::Same;
                     let (mut t_start, mut t_end) = (e1_ivl.min(), e1_ivl.max());
                     if tangent(&pv)?.dot(tangent(&pv_test)?) < 0.0 {
@@ -1260,8 +1260,13 @@ impl<'c> Stitch<'c> {
                             if norm_param < 0.02 || norm_param > 0.98 {
                                 continue;
                             }
-                            let pv =
-                                curve_of(b, other)?.evaluate(dropped.parameter, 1, true, true)?;
+                            let pv = curve_of(b, other)?.evaluate(
+                                k,
+                                dropped.parameter,
+                                1,
+                                true,
+                                true,
+                            )?;
                             // status ignored: a failure leaves the angle 0
                             let angle_rad =
                                 ignored(tangent(&pv)?.angle_between(dir))?.unwrap_or(0.0);
@@ -1708,7 +1713,7 @@ impl<'c> Stitch<'c> {
                     let te_ivl = edge::interval(b, test_e)?;
                     let e_curve = curve_of(b, e)?;
                     let te_curve = curve_of(b, test_e)?;
-                    let mid_pnt = e_curve.evaluate_point(e_ivl.evaluate(0.5))?;
+                    let mid_pnt = e_curve.evaluate_point(k, e_ivl.evaluate(0.5))?;
 
                     // select new tolerance
                     let this_tol = smos_max(
@@ -1737,8 +1742,8 @@ impl<'c> Stitch<'c> {
                     }
 
                     // Ok, the midpoints are close. Figure out the relative orientation.
-                    let pv = e_curve.evaluate(e_ivl.evaluate(0.5), 1, true, true)?;
-                    let pv_test = te_curve.evaluate(dropped.parameter, 1, true, true)?;
+                    let pv = e_curve.evaluate(k, e_ivl.evaluate(0.5), 1, true, true)?;
+                    let pv_test = te_curve.evaluate(k, dropped.parameter, 1, true, true)?;
                     let mut orientation = OrientType::Same;
                     let (mut t_start, mut t_end) = (te_ivl.min(), te_ivl.max());
                     if tangent(&pv)?.dot(tangent(&pv_test)?) < 0.0 {

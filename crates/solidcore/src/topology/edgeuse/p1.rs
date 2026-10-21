@@ -1988,11 +1988,13 @@ mod tests {
         ));
         // the caches were reset before
         assert!(!is_max_edge_face_gap_init(&b, a0).unwrap());
-        assert!(calc_edge_ccw_edge_gap(&k, &mut b, a0, false, false)
-            .unwrap()
-            .is_none());
+        assert!(
+            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, false, false)
+                .unwrap()
+                .is_none()
+        );
         assert!(matches!(
-            calc_edge_ccw_edge_gap(&k, &mut b, a0, true, false),
+            calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, false),
             Err(SolidError::InvalidInput { .. })
         ));
         // With curves, both edge/edge and edge/face gaps are evaluated.
@@ -2004,7 +2006,7 @@ mod tests {
             line.set_owner(None, None);
             b.edge_mut(e).unwrap().curve = Some(line);
         }
-        let g = calc_edge_ccw_edge_gap(&k, &mut b, a0, true, true)
+        let g = calc_edge_ccw_edge_gap(&Kernel::default(), &mut b, a0, true, true)
             .unwrap()
             .unwrap();
         assert!(g.is_init() && g.gap_3d.abs() < 1e-12);

@@ -889,6 +889,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         base,
                         surface: Some(&s),
                         uv_domain: dom,
+                        surface_cache: None,
                     }
                     .identical_solutions(&sa, &sb),
                     "identical_solutions",

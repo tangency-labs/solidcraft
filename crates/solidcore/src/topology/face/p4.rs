@@ -765,10 +765,10 @@ struct Closure {
 
 fn closure_of(k: &Kernel, surface: &Surface, uv_domain: &Extent2d) -> Result<Closure> {
     let closed_u = surface
-        .is_closed(uv_domain, SurfParamType::U, None, false)?
+        .is_closed(k, uv_domain, SurfParamType::U, None, false)?
         .0;
     let closed_v = surface
-        .is_closed(uv_domain, SurfParamType::V, None, false)?
+        .is_closed(k, uv_domain, SurfParamType::V, None, false)?
         .0;
     let seam_u = surface
         .create_seam_curve(k, SurfParamType::U, closed_u)?
@@ -914,7 +914,7 @@ pub fn find_vertex_sector(
     // get 3DCurve SurfaceUVPoint when given cpUVCurve
     let mut vertex_uv = Point2::new(0.0, 0.0);
     if let Some(uvc) = uv_curve {
-        let p = uvc.evaluate_point(param_at_vertex)?;
+        let p = uvc.evaluate_point(k, param_at_vertex)?;
         vertex_uv = Point2::new(p.x, p.y);
     }
 
@@ -1135,7 +1135,7 @@ pub fn find_vertex_sector(
 
                 // get the curve tangent at the vertex parameter (status ignored upstream,
                 // which then reads the tangent uninitialised)
-                let pv = match curve.evaluate(param_at_vertex, 1, true, true) {
+                let pv = match curve.evaluate(k, param_at_vertex, 1, true, true) {
                     Ok(pv) => pv,
                     Err(e) if must_propagate(&e) => return Err(e),
                     Err(_) => {
@@ -1455,7 +1455,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     get_loop_crossings(k, &objects, &class, loops, props, dir)?;
 
     // Find and Fix False SeamEdge EndPoint Classifications (status ignored)
-    match review_start_and_stop_on_seam_crv_classifies(&objects, &mut class) {
+    match review_start_and_stop_on_seam_crv_classifies(k, &objects, &mut class) {
         Err(e) if must_propagate(&e) => return Err(e),
         _ => {}
     }
@@ -1534,12 +1534,12 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     let periodic_u = match (opt_periodic_u, face_props.as_deref()) {
         (Some(p), _) => p,
         (None, Some(fp)) => closed_c1(fp.closed_u, fp.closed_val_u),
-        (None, None) => surface.is_periodic(&uv_domain, SurfParamType::U)?,
+        (None, None) => surface.is_periodic(k, &uv_domain, SurfParamType::U)?,
     };
     let periodic_v = match (opt_periodic_v, face_props.as_deref()) {
         (Some(p), _) => p,
         (None, Some(fp)) => closed_c1(fp.closed_v, fp.closed_val_v),
-        (None, None) => surface.is_periodic(&uv_domain, SurfParamType::V)?,
+        (None, None) => surface.is_periodic(k, &uv_domain, SurfParamType::V)?,
     };
 
     // low work - Face->Surface is not periodic - return Okay

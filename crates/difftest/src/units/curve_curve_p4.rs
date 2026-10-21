@@ -1677,7 +1677,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }
@@ -1691,7 +1691,7 @@ mod tests {
     /// Generated cases cover every op with both successful and failing statuses.
     #[test]
     fn generated_cases_are_diverse() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         let mut trues: BTreeMap<String, usize> = BTreeMap::new();

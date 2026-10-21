@@ -217,6 +217,7 @@ fn status(e: &SolidError) -> f64 {
     }
 }
 fn put_cc(
+    k: &Kernel,
     out: &mut Vec<f64>,
     cc: &CurveClassification<Handle>,
     g: &Geometry,
@@ -233,7 +234,7 @@ fn put_cc(
         put_pc(out, &i.mid);
         put_pc(out, &i.end);
         for t in [i.min(), i.interval.evaluate(0.5), i.max()] {
-            match g.0.evaluate_point(t) {
+            match g.0.evaluate_point(k, t) {
                 Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
                 Err(e) => {
                     if e.is_unported() {
@@ -364,8 +365,8 @@ impl UnitDiff for Runner {
                 if let Some(b) = changed {
                     out.push(f64::from(b));
                 }
-                put_cc(&mut out, &a, &g)?;
-                put_cc(&mut out, &b, &g)?;
+                put_cc(&k, &mut out, &a, &g)?;
+                put_cc(&k, &mut out, &b, &g)?;
                 Ok(Output::new().values("out", out))
             }
         }

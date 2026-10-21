@@ -1381,7 +1381,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..64 {
             let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
@@ -1419,7 +1419,7 @@ mod tests {
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats = [0usize; 4];
         for _ in 0..200 {

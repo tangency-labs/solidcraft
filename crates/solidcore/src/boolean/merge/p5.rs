@@ -82,13 +82,13 @@ fn delete_vertex(_brep: &mut Brep, _vertex: VertexId) -> Result<()> {
     ))
 }
 
-fn midpoint(b: &Brep, id: EdgeId) -> Result<Point3> {
+fn midpoint(k: &Kernel, b: &Brep, id: EdgeId) -> Result<Point3> {
     let edge = b.edge(id)?;
     let curve = edge
         .curve
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer(OP))?;
-    curve.evaluate_point(edge.interval.evaluate(0.5))
+    curve.evaluate_point(k, edge.interval.evaluate(0.5))
 }
 
 fn removes_primary(operation: BooleanOperation) -> bool {
@@ -347,7 +347,7 @@ fn collect_wires_and_shell_vertices(
             let region = classify_region(
                 kernels.primary(),
                 other,
-                midpoint(brep, id)?,
+                midpoint(kernels.primary(), brep, id)?,
                 brep.edge(id)?.tolerance,
                 true,
                 true,
@@ -413,7 +413,7 @@ fn collect_wires_and_shell_vertices(
         let region = classify_region(
             kernels.primary(),
             brep,
-            midpoint(other, id)?,
+            midpoint(kernels.other(), other, id)?,
             other.edge(id)?.tolerance,
             true,
             false,

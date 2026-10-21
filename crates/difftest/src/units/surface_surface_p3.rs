@@ -720,7 +720,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..64 {
             let i = gen_case(k, rng);
             let Ok((op, input)) = cpp_input(&i) else {
@@ -750,7 +750,7 @@ let k = &Kernel::default();
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     #[ignore = "debugging aid; needs P3_CASES"]
     fn p3_dump_case() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for idx in std::env::var("P3_CASES").unwrap().split(',') {
             let i: usize = idx.parse().unwrap();
             let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p3", i));
@@ -781,7 +781,7 @@ let k = &Kernel::default();
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 3]> = BTreeMap::new();
         for _ in 0..1500 {

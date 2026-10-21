@@ -381,7 +381,7 @@ fn interval_degenerate<O: ClassObject>(
         ivl.max(),
         ivl.end.obj_zone_tol_3d(k, geometry)?,
     )?;
-    curve_is_degenerate(Some(curve), &ivl.interval, tol)
+    curve_is_degenerate(k, Some(curve), &ivl.interval, tol)
 }
 
 fn homogenize_boundaries<O: ClassObject>(
@@ -404,7 +404,7 @@ fn homogenize_boundaries<O: ClassObject>(
         } else {
             ivl.max()
         };
-        let point = classify_crv_loc_by_index(geometry, src, index)?;
+        let point = classify_crv_loc_by_index(k, geometry, src, index)?;
         let tol = pc.obj_zone_tol_3d(k, geometry)?;
         let found = dst.find_interval(k, geometry, param, last, tol)?;
         let mut pos = found.position;
@@ -443,7 +443,7 @@ fn homogenize_boundaries<O: ClassObject>(
             new_pc.set_pre_snap_param(param);
             new_pc.copy_sss_point(pc);
             if matches!(new_pc.point_class(), Pc::Face | Pc::Edge) {
-                let point = classify_crv_loc_by_index(geometry, src, index)?;
+                let point = classify_crv_loc_by_index(k, geometry, src, index)?;
                 // Ordinary projection failures turn the classification into UNKNOWN.
                 match new_pc.compute_point_parameters(k, geometry, point) {
                     Ok(()) => {}

@@ -346,6 +346,7 @@ pub trait FilletSolverOps {
     /// The evaluation's failure.
     fn rail_surface_evaluate_1st_derivatives(
         &mut self,
+        k: &Kernel,
         rail: usize,
         uv: Point2,
     ) -> Result<(Point3, Vec3, Vec3)>;
@@ -558,10 +559,11 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
 
     fn rail_surface_evaluate_1st_derivatives(
         &mut self,
+        k: &Kernel,
         rail: usize,
         uv: Point2,
     ) -> Result<(Point3, Vec3, Vec3)> {
-        offset_evaluate_1st(self.surface_mut(rail)?, uv)
+        offset_evaluate_1st(k, self.surface_mut(rail)?, uv)
     }
 }
 
@@ -600,8 +602,8 @@ fn crv_on_surf(
 }
 
 /// `sMap.Evaluate(t, 1, TRUE, aPV)`: the position and first derivative.
-fn eval1(map: &CrvOnSurf, t: f64) -> Result<[Vec3; 2]> {
-    let v = map.evaluate(t, 1, true, true)?;
+fn eval1(k: &Kernel, map: &CrvOnSurf, t: f64) -> Result<[Vec3; 2]> {
+    let v = map.evaluate(k, t, 1, true, true)?;
     let p = v.first().copied().unwrap_or(Vec3::UNDEF);
     let d = v.get(1).copied().unwrap_or(Vec3::UNDEF);
     Ok([p, d])
@@ -736,6 +738,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     ///
     /// Those of [`AdvSurfaceIntersector::new`].
     pub fn new(
+        k: &'s Kernel,
         surface1: &'s Surface,
         uv_domain1: &Extent2d,
         surface2: &'s Surface,
@@ -743,7 +746,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         curr_fillet_geom: Option<G>,
     ) -> Result<Self> {
         let mut base =
-            AdvSurfaceIntersector::new(surface1, uv_domain1, surface2, uv_domain2, true)?;
+            AdvSurfaceIntersector::new(k, surface1, uv_domain1, surface2, uv_domain2, true)?;
         // Will not try to extend boundary intersection point to catch
         // an end point which is also on the boundary. i.e. deactivate this feature
         base.base.do_boundary_point_on_curve_test = false;
@@ -926,12 +929,12 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let map1 = crv_on_surf(k, uv_crv1, s1, &si.uv_domains[1])?;
 
         let ivl0 = map0.natural_interval();
-        let [p00, d00] = eval1(&map0, ivl0.min())?;
-        let [p01, d01] = eval1(&map0, ivl0.max())?;
+        let [p00, d00] = eval1(k, &map0, ivl0.min())?;
+        let [p01, d01] = eval1(k, &map0, ivl0.max())?;
         let crv_3d0 = HermiteCurve::new(p00, d00, p01, d01, 3);
         let ivl1 = map1.natural_interval();
-        let [p10, d10] = eval1(&map1, ivl1.min())?;
-        let [p11, d11] = eval1(&map1, ivl1.max())?;
+        let [p10, d10] = eval1(k, &map1, ivl1.min())?;
+        let [p11, d11] = eval1(k, &map1, ivl1.max())?;
         let crv_3d1 = HermiteCurve::new(p10, d10, p11, d11, 3);
 
         // Utilize the angle between the normals to adjust the tolerance.
@@ -948,12 +951,13 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         let tol_sq = adjusted_tolerance * adjusted_tolerance;
         if let Some(mid_pnt) = &mid_pnt {
-            let test_mid1 = s0.evaluate_point(mid_pnt.uv_pos(SrfIndex::First))?;
-            let test_mid2 = s1.evaluate_point(mid_pnt.uv_pos(SrfIndex::Second))?;
+            let test_mid1 = s0.evaluate_point(k, mid_pnt.uv_pos(SrfIndex::First))?;
+            let test_mid2 = s1.evaluate_point(k, mid_pnt.uv_pos(SrfIndex::Second))?;
             let c0 = Curve::from(crv_3d0);
             let c1 = Curve::from(crv_3d1);
 
             let (found, sol) = c0.local_point_solve::<()>(
+                k,
                 &c0.natural_interval(),
                 SolverOperation::Minimize,
                 test_mid1,
@@ -964,6 +968,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             let crv_pnt0 = crv_3d0.evaluate_point(t0);
 
             let (found, sol) = c1.local_point_solve::<()>(
+                k,
                 &c1.natural_interval(),
                 SolverOperation::Minimize,
                 test_mid2,
@@ -992,8 +997,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             let uv3d1 = uv_crv1.evaluate_point(param);
             let uv0 = si.uv_domains[0].clamp_point(Point2::new(uv3d0.x, uv3d0.y));
             let uv1 = si.uv_domains[1].clamp_point(Point2::new(uv3d1.x, uv3d1.y));
-            let pnt0 = s0.evaluate_point(uv0)?;
-            let pnt1 = s1.evaluate_point(uv1)?;
+            let pnt0 = s0.evaluate_point(k, uv0)?;
+            let pnt1 = s1.evaluate_point(k, uv1)?;
             let crv_pnt0 = crv_3d0.evaluate_point(param);
             let crv_pnt1 = crv_3d1.evaluate_point(param);
             let dist_sq = pnt0.distance_squared(crv_pnt0);
@@ -1271,8 +1276,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let map0 = crv_on_surf(k, uv_crv0, s0, &si.uv_domains[0])?;
         let map1 = crv_on_surf(k, uv_crv1, s1, &si.uv_domains[1])?;
 
-        let crv_3d0 = rail_hermite(&map0, adjust_derivatives)?;
-        let crv_3d1 = rail_hermite(&map1, adjust_derivatives)?;
+        let crv_3d0 = rail_hermite(k, &map0, adjust_derivatives)?;
+        let crv_3d1 = rail_hermite(k, &map1, adjust_derivatives)?;
 
         let mut adjusted_tolerance = si.this_approx_tol_3d;
         if adjust_derivatives {
@@ -1290,8 +1295,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             let uv1 = si.uv_domains[1].clamp_point(Point2::new(uv3d1.x, uv3d1.y));
 
             // evaluate the associated surface points
-            let pnt0 = s0.evaluate_point(uv0)?;
-            let pnt1 = s1.evaluate_point(uv1)?;
+            let pnt0 = s0.evaluate_point(k, uv0)?;
+            let pnt1 = s1.evaluate_point(k, uv1)?;
 
             // evaluate the associated 3d RailCurve points
             let crv_pnt0 = crv_3d0.evaluate_point(param);
@@ -1606,12 +1611,12 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
                 // Now lift the point and derivatives of UV curves into 3D on the zero offset surface.
                 let (pnt, du, dv) =
-                    solver.rail_surface_evaluate_1st_derivatives(rail, tsp_last.uv_pos(s))?;
+                    solver.rail_surface_evaluate_1st_derivatives(k, rail, tsp_last.uv_pos(s))?;
                 let p13d = pnt;
                 let d13d = du * der1.x + dv * der1.y;
 
                 let (pnt, du, dv) =
-                    solver.rail_surface_evaluate_1st_derivatives(rail, tsp_curr.uv_pos(s))?;
+                    solver.rail_surface_evaluate_1st_derivatives(k, rail, tsp_curr.uv_pos(s))?;
                 let p43d = pnt;
                 let d23d = du * der2.x + dv * der2.y;
 
@@ -1763,16 +1768,16 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 /// The 3D Hermite rail span of a UV span on its surface: the end points and
 /// derivatives of the mapped curve; with `adjust`, the derivatives taken at the
 /// interior parameters `0.001` and `0.999` instead.
-fn rail_hermite(map: &CrvOnSurf, adjust: bool) -> Result<HermiteCurve> {
+fn rail_hermite(k: &Kernel, map: &CrvOnSurf, adjust: bool) -> Result<HermiteCurve> {
     let ivl = map.natural_interval();
-    let [p0, mut d0] = eval1(map, ivl.min())?;
-    let [p1, mut d1] = eval1(map, ivl.max())?;
+    let [p0, mut d0] = eval1(k, map, ivl.min())?;
+    let [p1, mut d1] = eval1(k, map, ivl.max())?;
 
     // If we had to find the uv curve derivs by divided differences (above),
     // set 3d curve derivs from nearby internal points.
     if adjust {
-        let [_, da] = eval1(map, ivl.evaluate(0.001))?;
-        let [_, db] = eval1(map, ivl.evaluate(0.999))?;
+        let [_, da] = eval1(k, map, ivl.evaluate(0.001))?;
+        let [_, db] = eval1(k, map, ivl.evaluate(0.999))?;
         d0 = da;
         d1 = db;
     }
@@ -1846,10 +1851,11 @@ mod tests {
 
     #[test]
     fn construction_and_flags() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         assert!(!fi.base.base.do_boundary_point_on_curve_test);
         // the fillet flag keeps domains beyond the natural ones
         assert_eq!(fi.base.base.uv_domains[0], d);
@@ -1864,11 +1870,12 @@ mod tests {
 
     #[test]
     fn span_rejects_large_turn_and_keeps_offsets() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
             .base
@@ -1905,11 +1912,12 @@ mod tests {
 
     #[test]
     fn span_accepts_straight_line_on_planes() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
             .base
@@ -1949,11 +1957,12 @@ mod tests {
 
     #[test]
     fn next_point_needs_a_crossing() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let mut t = pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0);
         t.point_type = IntersectionPointType::TangentCurve;
         let p = fi.base.base.alloc_point(t);
@@ -2041,6 +2050,7 @@ mod tests {
 
         fn rail_surface_evaluate_1st_derivatives(
             &mut self,
+            _k: &Kernel,
             _rail: usize,
             _uv: Point2,
         ) -> Result<(Point3, Vec3, Vec3)> {
@@ -2050,10 +2060,11 @@ mod tests {
 
     #[test]
     fn next_point_uses_the_step_size_step_solve_returns() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let p = fi
             .base
             .base
@@ -2083,10 +2094,11 @@ mod tests {
 
     #[test]
     fn next_point_aliased_non_crossing_is_no_point() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let mut q = pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0);
         q.point_type = IntersectionPointType::TangentPoint;
         let p = fi.base.base.alloc_point(q);
@@ -2110,11 +2122,12 @@ mod tests {
 
     #[test]
     fn flush_curve_short_lists() {
+        let k = &Kernel::default();
         let (a, b) = surfaces();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut s = solver(&a, &b);
         let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
-            FilletIntersector::new(&a, &d, &b, &d, None).unwrap();
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
         let mut out = TsectCurves::default();
         // no points: SM_ERR_NULL_POINTER
         assert!(fi

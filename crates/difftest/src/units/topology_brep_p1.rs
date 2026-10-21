@@ -1123,7 +1123,7 @@ fn ids<I: solidcore::topology::ArenaId>(v: &[I]) -> Vec<f64> {
 
 /// A curve's fingerprint, as the shim's `put_curve_id`: `-1` (none), else `1 t0 t1
 /// P(t0) P(mid) P(t1)`.
-fn curve_id(c: Option<&Curve>, out: &mut Vec<f64>) {
+fn curve_id(k: &Kernel, c: Option<&Curve>, out: &mut Vec<f64>) {
     let Some(c) = c else {
         out.push(-1.0);
         return;
@@ -1132,16 +1132,16 @@ fn curve_id(c: Option<&Curve>, out: &mut Vec<f64>) {
     let ivl = c.natural_interval();
     out.extend([ivl.min(), ivl.max()]);
     for t in [ivl.min(), ivl.mid(), ivl.max()] {
-        let p = c.evaluate_point(t).unwrap_or(Vec3::UNDEF);
+        let p = c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF);
         out.extend([p.x, p.y, p.z]);
     }
 }
 
 /// The state of an edge use, as the shim's `put_eu_state`.
-fn eu_state(b: &Brep, eu: EdgeuseId, out: &mut Vec<f64>) -> Result<(), SolidError> {
+fn eu_state(k: &Kernel, b: &Brep, eu: EdgeuseId, out: &mut Vec<f64>) -> Result<(), SolidError> {
     out.push(1.0);
     let r = b.edgeuse(eu)?;
-    curve_id(r.uv_trim_curve.as_ref(), out);
+    curve_id(k, r.uv_trim_curve.as_ref(), out);
     out.push(if r.uv_trim_curve.is_some() {
         f64::from(eu.index())
     } else {
@@ -1303,7 +1303,7 @@ fn put_healed(k: &Kernel, b: &Brep, types: &ImportTypes, o: &mut Vec<f64>) -> Re
             idx(eu.vertexuse),
             orient_code(eu.orientation),
         ]);
-        curve_id(eu.uv_trim_curve.as_ref(), o);
+        curve_id(k, eu.uv_trim_curve.as_ref(), o);
         match eu.drop_curve_fail.as_deref() {
             Some(f) => o.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
             None => o.extend([0.0, 0.0, 0.0]),
@@ -1322,7 +1322,7 @@ fn put_healed(k: &Kernel, b: &Brep, types: &ImportTypes, o: &mut Vec<f64>) -> Re
                 .get(id.index() as usize)
                 .map_or(-1.0, |&t| t as f64),
         );
-        curve_id(e.curve.as_ref(), o);
+        curve_id(k, e.curve.as_ref(), o);
     }
     for (_, vu) in b.vertexuses().iter() {
         o.push(idx(vu.vertex));
@@ -1896,8 +1896,8 @@ fn run_rust_op(
                 Err(e) if e.is_unported() => return Err(e.into()),
                 Err(e) => o.push(status_of(&e)),
             }
-            eu_state(b, eo, &mut o)?;
-            eu_state(b, en, &mut o)?;
+            eu_state(k, b, eo, &mut o)?;
+            eu_state(k, b, en, &mut o)?;
             for eu in [eo, en] {
                 o.push(match b.edgeuse(eu)?.edge {
                     Some(e) => b.edge(e)?.tolerance,
@@ -2037,7 +2037,7 @@ fn run_rust_op(
                         Some(cs) => {
                             o.push(cs.len() as f64);
                             for c in &cs {
-                                curve_id(Some(c), &mut o);
+                                curve_id(k, Some(c), &mut o);
                             }
                         }
                     }
@@ -2046,7 +2046,7 @@ fn run_rust_op(
                         Some(cs) => {
                             o.push(cs.len() as f64);
                             for c in &cs {
-                                curve_id(c.as_ref(), &mut o);
+                                curve_id(k, c.as_ref(), &mut o);
                             }
                         }
                     }

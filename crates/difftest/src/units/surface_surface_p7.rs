@@ -799,7 +799,7 @@ fn put_sols(o: &mut Vec<f64>, sols: &SolutionArray<Handle>) -> Result<(), Fail> 
     Ok(())
 }
 
-fn rust_run(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
+fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     let s = surface_of(&i.surface)?;
     let mut o = Vec::new();
     match &i.op {
@@ -1200,7 +1200,7 @@ fn rust_run(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Vec<f64>, Fail>
     Ok(o)
 }
 
-fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     match rust_run(k, i) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(o)) => Ok(*o),
@@ -1476,7 +1476,7 @@ pub(crate) fn gen_curve(rng: &mut Rng) -> CrvIn {
     }
 }
 
-pub(crate) fn gen_point_near(k: &solidcore::kernel::Kernel, rng: &mut Rng, s: &SrfIn) -> [f64; 3] {
+pub(crate) fn gen_point_near(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> [f64; 3] {
     if let Ok(srf) = surface_of(s) {
         let uv = gen_uv(rng, s);
         if let Ok(p) = srf.evaluate_point(k, p2(uv)) {
@@ -1527,7 +1527,7 @@ fn lift_above(other: &mut BssIn, below: &BssIn, gap: f64) {
     }
 }
 
-fn gen_op(k: &solidcore::kernel::Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
+fn gen_op(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
     // planes and curve-bounded surfaces: not for the B-spline-only ops
     let is_plane = !matches!(s, SrfIn::Bspline(_) | SrfIn::Sms(_));
     let flag = |rng: &mut Rng| rng.chance(0.5);
@@ -1774,7 +1774,7 @@ pub(crate) fn unit_scale(s: &SrfIn) -> bool {
     }
 }
 
-fn gen_case(k: &solidcore::kernel::Kernel, rng: &mut Rng) -> Inputs {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     let surface = gen_surface(rng);
     let op = gen_op(k, rng, &surface);
     Inputs { surface, op }
@@ -1786,7 +1786,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &solidcore::Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..64 {
             let i = gen_case(k, rng);
             let Ok((op, input)) = cpp_input(&i) else {
@@ -1827,7 +1827,7 @@ let k = &solidcore::Kernel::default();
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &solidcore::Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }
@@ -1851,7 +1851,7 @@ mod tests {
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
-let k = &solidcore::Kernel::default();
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 3]> = BTreeMap::new();
         for _ in 0..1500 {

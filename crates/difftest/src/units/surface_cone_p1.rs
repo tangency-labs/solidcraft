@@ -1244,7 +1244,7 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
             surface.step_inversion(&k, &domain, v3(*p), *tol, guess.map(|[u,v]| Point2::new(u,v)))
                 .map(|(uv,location)| out.extend([SUCCESS,uv.x,uv.y,f64::from(location as u8)]))
         }
-        OpIn::Copy {} => surface.copy().and_then(|copy| {
+        OpIn::Copy {} => surface.copy(&k).and_then(|copy| {
             out.extend([SUCCESS, flag(copy.approx_eq(&k, &surface)?)]);
             match copy.kind() { SurfaceKind::Cone(c) => put_state(&k, &mut out, c),
                 _ => Err(SolidError::invalid_input("difftest::common_cone", "copy erased cone class")) }

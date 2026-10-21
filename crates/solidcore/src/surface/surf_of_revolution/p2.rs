@@ -603,12 +603,16 @@ impl SurfOfRevolution {
                 need_nurb_intersection = more;
                 out = found;
             }
-            SurfaceKind::Cone(_) => {
-                // DISPATCH GAP (#76): preserve SmCone/SmCylinder for the #131 adapter.
-                return Err(SolidError::unported(
-                    "SmSurfOfRevolution::IntersectWithCone dispatch",
-                    "surface.cone_p3",
-                ));
+            SurfaceKind::Cone(c) if c.type_code() == crate::surface::surface::p2::CONE_TYPE => {
+                let (more, found) = self.intersect_with_cone(
+                    k,
+                    uv_domain,
+                    c.as_ref(),
+                    other_uv_domain,
+                    approx_tol_3d,
+                )?;
+                need_nurb_intersection = more;
+                out = found;
             }
             SurfaceKind::SurfOfRevolution(o) => {
                 let (more, found) = self.intersect_with_surf_of_revolution(
@@ -621,8 +625,10 @@ impl SurfOfRevolution {
                 need_nurb_intersection = more;
                 out = found;
             }
-            // (IntersectWithSphere / IntersectWithCone once those kinds exist)
+            // (IntersectWithSphere once that kind exists; an SmCylinder is not
+            // SmCone_TYPE: the default branch)
             SurfaceKind::BSpline(_)
+            | SurfaceKind::Cone(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)

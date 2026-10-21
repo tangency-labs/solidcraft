@@ -842,9 +842,9 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, this: &CbsIn) -> Result<Run, HarnessEr
                 o.push(st(s.knots(SurfParamType::U, None))?);
                 o.push(flag(s.is_parallel_to_vector(v)?));
                 push_dom(&mut o, &s.max_analytic_domain(k)?);
-                o.push(st(s.copy())?);
+                o.push(st(s.copy(k))?);
                 o.push(st(s.copy_and_add_analytics(k))?);
-                o.push(st(s.split_at(0.5, SurfParamType::U))?);
+                o.push(st(s.split_at(k, 0.5, SurfParamType::U))?);
                 o.push(st(s.reverse(&Kernel::default(), SurfParamType::U))?);
                 o.push(st(s.swap_uv(&Kernel::default()))?);
                 dump_state(k, &mut o, &s);
@@ -1246,7 +1246,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         rust(k, &case.parse()?)
     }
 }
@@ -1259,7 +1259,7 @@ mod tests {
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..1000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);

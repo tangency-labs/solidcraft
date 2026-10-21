@@ -471,7 +471,7 @@ fn vertexuses_of_face(
 /// evaluates the gap (`CacheGap`) unless the parameter is `SM_UNDEF_DOUBLE`.
 fn set_vertex_edge_gap(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     vu: VertexuseId,
     edge_t: f64,
 ) -> Result<VertexEdgeGap> {
@@ -480,7 +480,12 @@ fn set_vertex_edge_gap(
 
 /// `SmVertexFaceGap::Set(vu, &uv)`: records the vertex use and surface parameter and
 /// evaluates the gap (`CacheGap`).
-fn set_vertex_face_gap(k: &Kernel, b: &Brep, vu: VertexuseId, uv: Point2) -> Result<VertexFaceGap> {
+fn set_vertex_face_gap(
+    k: &Kernel,
+    b: &mut Brep,
+    vu: VertexuseId,
+    uv: Point2,
+) -> Result<VertexFaceGap> {
     VertexFaceGap::with(k, b, Some(vu), Some(uv))
 }
 
@@ -1739,10 +1744,13 @@ mod tests {
         let (mut b, vu, _) = wire();
         b.vertexuse_mut(vu[0]).unwrap().vertex_edge_gap.vertexuse = Some(vu[0]);
         // no curve: the cache is cleared and nothing is evaluated
-        let g = calc_vertex_edge_gap(&k, &mut b, vu[0], true, true).unwrap();
+        let g = calc_vertex_edge_gap(&Kernel::default(), &mut b, vu[0], true, true).unwrap();
         assert_eq!(g, Some(VertexEdgeGap::new()));
         assert!(!b.vertexuse(vu[0]).unwrap().vertex_edge_gap.is_init());
-        assert_eq!(vertex_edge_gap(&k, &mut b, vu[0], true).unwrap(), None);
+        assert_eq!(
+            vertex_edge_gap(&Kernel::default(), &mut b, vu[0], true).unwrap(),
+            None
+        );
         assert_eq!(vertex_face_gap(&k, &mut b, vu[0], true).unwrap(), None);
         assert_eq!(
             calc_vertex_face_gap(&k, &mut b, vu[2], true, true).unwrap(),

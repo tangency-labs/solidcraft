@@ -527,7 +527,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             dtol,
             atol,
             uv,
-        } => match st(s.local_line_intersect(
+        } => match st(s.local_line_intersect(&k, 
             &dom_of(*dom),
             v3(*p),
             v3(*v),
@@ -586,7 +586,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                     for a in 0..=4 {
                         for c in 0..=4 {
                             let uv = nd.evaluate(f64::from(a) / 4.0, f64::from(c) / 4.0);
-                            match st(blend.evaluate_point(uv))? {
+                            match st(blend.evaluate_point(&k, uv))? {
                                 Ok(p) => pv(&mut o, p),
                                 Err(_) => o.extend([f64::NAN; 3]),
                             }
@@ -622,9 +622,8 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let stree = cache.tree().ok_or_else(|| harness("surface tree"))?;
             let leaf = first_leaf(stree)?;
             let mut solver =
-                SpGlobalSolver::new(&point_tree, stree, Some(cache.surface()), dom_of(*dom));
+                SpGlobalSolver::new(&k, &point_tree, stree, Some(cache.surface()), dom_of(*dom));
             solver.surface_cache = Some(&cache);
-            solver.kernel = Some(&k);
             solver.base.operation = sop_of(*sop)?;
             solver.base.tolerance_3d = *tol;
             solver.base.best_answer_so_far_sq = *best_sq;
@@ -680,7 +679,7 @@ fn gen_surface(rng: &mut Rng) -> SrfIn {
 }
 
 /// A point near the surface (on it at a random uv when its shape is known) and a direction.
-fn gen_line(rng: &mut Rng, surface: &SrfIn) -> ([f64; 3], [f64; 3]) {
+fn gen_line(k: &Kernel, rng: &mut Rng, surface: &SrfIn) -> ([f64; 3], [f64; 3]) {
     let d = natural_domain(surface);
     let kk = Kernel::default();
     let target = surface_of(&kk, surface)
@@ -691,7 +690,7 @@ fn gen_line(rng: &mut Rng, surface: &SrfIn) -> ([f64; 3], [f64; 3]) {
                 d[0] + (d[2] - d[0]) * rng.uniform(0.0, 1.0),
                 d[1] + (d[3] - d[1]) * rng.uniform(0.0, 1.0),
             );
-            s.evaluate_point(uv).ok()
+            s.evaluate_point(k, uv).ok()
         })
         .map_or([0.5, 0.5, 0.0], |p| [p.x, p.y, p.z]);
     let dir = match rng.below(6) {
@@ -719,7 +718,7 @@ fn gen_tol(rng: &mut Rng) -> f64 {
 }
 
 #[allow(clippy::too_many_lines)]
-fn gen_case(rng: &mut Rng) -> Inputs {
+fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     match rng.below(24) {
         0..=1 => Inputs {
             surface: gen_surface(rng),
@@ -752,7 +751,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         7..=11 => {
             let surface = gen_surface(rng);
             let dom = gen_subdomain(rng, natural_domain(&surface));
-            let (p, v) = gen_line(rng, &surface);
+            let (p, v) = gen_line(k, rng, &surface);
             let ivl = rng.chance(0.5).then(|| {
                 let a = rng.uniform(-6.0, 1.0);
                 [a, a + rng.uniform(0.5, 12.0)]
@@ -773,7 +772,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let surface = gen_surface(rng);
             let dom = gen_subdomain(rng, natural_domain(&surface));
             let (curve, ivl) = if rng.chance(0.5) {
-                let (p, v) = gen_line(rng, &surface);
+                let (p, v) = gen_line(k, rng, &surface);
                 let t = rng.uniform(0.5, 4.0);
                 (
                     CrvIn::Line {
@@ -798,7 +797,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         16..=18 => {
             let surface = gen_surface(rng);
             let dom = gen_subdomain(rng, natural_domain(&surface));
-            let (p, v) = gen_line(rng, &surface);
+            let (p, v) = gen_line(k, rng, &surface);
             let nd = natural_domain(&surface);
             let uv = [
                 nd[0] + (nd[2] - nd[0]) * rng.uniform(0.0, 1.0),
@@ -835,7 +834,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let base = surface_of(&kk, &surface)
                 .ok()
                 .flatten()
-                .and_then(|s| s.evaluate_point(Point2::new(uv[0], uv[1])).ok())
+                .and_then(|s| s.evaluate_point(k, Point2::new(uv[0], uv[1])).ok())
                 .map_or([0.0; 3], |p| [p.x, p.y, p.z]);
             let off = rng.point3(-0.3, 0.3);
             let p = [base[0] + off[0], base[1] + off[1], base[2] + off[2]];
@@ -876,7 +875,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             // a flat B-spline patch and a point near, inside or far from it
             let surface = SrfIn::Bspline(gen_bss(rng, Shape::Flat));
             let nd = natural_domain(&surface);
-            let (p, _) = gen_line(rng, &surface);
+            let (p, _) = gen_line(k, rng, &surface);
             Inputs {
                 surface,
                 op: OpIn::SpLocal {
@@ -931,8 +930,9 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let k = &Kernel::default();
         for _ in 0..64 {
-            let i = gen_case(rng);
+            let i = gen_case(k, rng);
             let Ok((op, input)) = cpp_input(&i) else {
                 continue;
             };

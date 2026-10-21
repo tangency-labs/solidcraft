@@ -473,13 +473,11 @@ pub fn evaluate_binormal_step_off_into(
     }
 
     // set output
-    Ok(BinormalEval {
-        point: surface.evaluate_point(k, uv_found)?,
-        binormal: normal.cross(tangent),
-        tangent,
-        face_normal: normal,
-        uv: uv_found,
-    })
+    out.binormal = normal.cross(tangent);
+    out.point = surface.evaluate_point(k, uv_found)?;
+    out.face_normal = normal;
+    out.uv = uv_found;
+    Ok(())
 }
 
 /// `IsConvexRadialSector`: true when, at `num_samples` evenly spaced interior samples

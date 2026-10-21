@@ -811,7 +811,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = siv_of(&s)?;
             let eq = match other {
                 None => tri!(o, c.approx_eq(&k, c)),
-                Some(oc) => tri!(o, c.approx_eq(&k, &build(oc)?)),
+                Some(oc) => tri!(o, c.approx_eq(&k, &build(&k, oc)?)),
             };
             o.extend([0.0, b(eq)]);
         }

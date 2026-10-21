@@ -937,7 +937,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..64 {
             let Ok(i) = gen_case(k, rng) else {
                 continue;

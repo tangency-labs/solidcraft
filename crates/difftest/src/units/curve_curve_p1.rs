@@ -1320,7 +1320,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..64 {
             let op = gen_case(k, rng);
             let Ok((code, input)) = cpp_input(&op) else {
@@ -1359,7 +1359,7 @@ mod tests {
     /// Generated cases cover every op, with passing (not deferred) cases.
     #[test]
     fn generated_cases_are_diverse() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut rng = Rng::new(7);
         let mut stats: BTreeMap<String, [usize; 4]> = BTreeMap::new();
         for _ in 0..600 {

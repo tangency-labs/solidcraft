@@ -81,7 +81,7 @@ const OP_EDGE_CURVE: &str = "query::face::p1::edge_curve_on_classify";
 ///
 /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`) for a null curve or a parameter
 /// outside the natural interval (NaN included); those of the curve's evaluator.
-pub fn evaluate_curve(curve: Option<&Curve>, parameter: f64) -> Result<[Vec3; 3]> {
+pub fn evaluate_curve(k: &Kernel, curve: Option<&Curve>, parameter: f64) -> Result<[Vec3; 3]> {
     let curve = curve.ok_or_else(|| SolidError::invalid_input(OP_CURVE, "null curve"))?;
 
     // Negated in-range test so a NaN parameter is rejected too.
@@ -93,7 +93,7 @@ pub fn evaluate_curve(curve: Option<&Curve>, parameter: f64) -> Result<[Vec3; 3]
         ));
     }
 
-    let values = curve.evaluate(parameter, 2, true, true)?;
+    let values = curve.evaluate(k, parameter, 2, true, true)?;
     let mut iter = values.into_iter();
     let missing = || SolidError::invalid_input(OP_CURVE, "curve returned too few derivatives");
     Ok([
@@ -504,7 +504,7 @@ pub fn point_3d_classify(
     // the 3D point and its surface point instead.
     let surface = fp2::surface(b, f)?
         .ok_or_else(|| SolidError::invalid_input(OP_POINT, "face without surface"))?;
-    if let Some(surface_point) = ignored(surface.evaluate_point(uv))? {
+    if let Some(surface_point) = ignored(surface.evaluate_point(k, uv))? {
         pc.set_gap_3d(point.distance(surface_point));
     }
 
@@ -738,11 +738,12 @@ mod tests {
 
     #[test]
     fn evaluate_curve_rejects_null_nan_and_outside() {
-        assert!(evaluate_curve(None, 0.0).is_err());
+        let k = &Kernel::default();
+        assert!(evaluate_curve(k, None, 0.0).is_err());
         let c: Curve = Line::from_points(Vec3::new(0., 0., 0.), Vec3::new(1., 2., 3.), 3).into();
-        assert!(evaluate_curve(Some(&c), f64::NAN).is_err());
-        assert!(evaluate_curve(Some(&c), 2.0).is_err());
-        let [p, d1, _] = evaluate_curve(Some(&c), 0.5).unwrap();
+        assert!(evaluate_curve(k, Some(&c), f64::NAN).is_err());
+        assert!(evaluate_curve(k, Some(&c), 2.0).is_err());
+        let [p, d1, _] = evaluate_curve(k, Some(&c), 0.5).unwrap();
         assert_eq!(p, Vec3::new(0.5, 1.0, 1.5));
         assert_eq!(d1, Vec3::new(1.0, 2.0, 3.0));
     }

@@ -1239,7 +1239,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     // evaluations below are not status-checked upstream: a failure leaves the points
     // unset; the port uses undefined coordinates there.)
     let (start_uv, end_uv) =
-        ignored(trim_crv.ends())?.map_or((Point3::UNDEF, Point3::UNDEF), |e| (e.start, e.end));
+        ignored(trim_crv.ends(k))?.map_or((Point3::UNDEF, Point3::UNDEF), |e| (e.start, e.end));
 
     let e = eu1::edge(b, eu)?.ok_or_else(|| null("sm_CheckUVTrimCurve: edge use without edge"))?;
     let edge_ivl = edge::interval(b, e)?;
@@ -1249,7 +1249,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .as_ref()
         .ok_or_else(|| null("sm_CheckUVTrimCurve: edge without curve"))?;
     let edge_3d_start =
-        ignored(curve.evaluate_point(edge_ivl.evaluate(0.0)))?.unwrap_or(Point3::UNDEF);
+        ignored(curve.evaluate_point(k, edge_ivl.evaluate(0.0)))?.unwrap_or(Point3::UNDEF);
 
     let mate_vertex = |b: &Brep| -> Result<VertexId> {
         start_vertex(
@@ -1268,8 +1268,8 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         eu1::face(b, eu)?.ok_or_else(|| null("sm_CheckUVTrimCurve: edge use without face"))?;
     let surf = face2::surface(b, face)?
         .ok_or_else(|| null("sm_CheckUVTrimCurve: face without surface"))?;
-    let face_3d_start =
-        ignored(surf.evaluate_point(Point2::new(start_uv.x, start_uv.y)))?.unwrap_or(Point3::UNDEF);
+    let face_3d_start = ignored(surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)))?
+        .unwrap_or(Point3::UNDEF);
 
     let face_tol = face2::tolerance(b, face)?;
     let edge_tol = edge::tolerance(b, e)?;
@@ -1286,7 +1286,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
 
     // Now the other end:
     let edge_3d_end =
-        ignored(curve.evaluate_point(edge_ivl.evaluate(1.0)))?.unwrap_or(Point3::UNDEF);
+        ignored(curve.evaluate_point(k, edge_ivl.evaluate(1.0)))?.unwrap_or(Point3::UNDEF);
     let end_vtx = if reverse {
         start_vertex(b, eu)?
     } else {
@@ -1294,7 +1294,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
     let face_3d_end =
-        ignored(surf.evaluate_point(Point2::new(end_uv.x, end_uv.y)))?.unwrap_or(Point3::UNDEF);
+        ignored(surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)))?.unwrap_or(Point3::UNDEF);
     vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
@@ -1553,7 +1553,7 @@ pub fn find_side_of_curve(
     }
     let sol = solutions.get(0).ok_or_else(sm_err)?;
 
-    let pv = curve.evaluate(sol.start.param(0)?, 1, true, true)?;
+    let pv = curve.evaluate(k, sol.start.param(0)?, 1, true, true)?;
     let (p0, p1) = match pv.as_slice() {
         [p0, p1, ..] => (*p0, *p1),
         _ => return Err(null("sm_FindSideOfCurve: evaluation without tangent")),
@@ -1620,8 +1620,8 @@ pub fn find_sector_of_face(
     let surface = face_surface(b, face)?;
     let eval = |uv: Point2| -> Result<(Point3, Vec3)> {
         // found Surface Point, Found Surface Point Normal
-        let p = surface.evaluate_point(uv)?;
-        let n = surface.evaluate_normal(uv, Side::Left, Side::Left)?;
+        let p = surface.evaluate_point(k, uv)?;
+        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         Ok((p, n))
     };
     let uv_of = |start: &crate::geom::solution_array::SolutionEnd| -> Result<Point2> {
@@ -1757,7 +1757,7 @@ pub fn update_vertex_edge_intervals(
         if edge::start_vertex(b, e)? == Some(vertex) {
             // eval edge's start point
             let min_t = interval.min();
-            let pnt = curve.evaluate_point(min_t)?;
+            let pnt = curve.evaluate_point(k, min_t)?;
 
             // get edgeStart to vertex distance
             orig_dist = pnt.distance(vertex_point);
@@ -1784,7 +1784,7 @@ pub fn update_vertex_edge_intervals(
             // (SM_ASSERT: the edge's other vertex is the target vertex)
             // eval EdgeEnd point
             let max_t = interval.max();
-            let pnt = curve.evaluate_point(max_t)?;
+            let pnt = curve.evaluate_point(k, max_t)?;
 
             // get EdgeEnd to Vertex distance
             orig_dist = pnt.distance(vertex_point);
@@ -1944,7 +1944,7 @@ pub fn redistribute_seam_uv_trim_curves(
             null("sm_RedistributeSeamUVTrimCurves: edge use without UV trim curve")
         })?;
         // (the three statuses are tested, not propagated)
-        let uv = ignored(this_uv_trim_curve.evaluate_point(parameter))?;
+        let uv = ignored(this_uv_trim_curve.evaluate_point(k, parameter))?;
         let binormal = match uv {
             Some(_) => ignored(evaluate_binormal(k, b, this_eu, parameter, true))?,
             None => None,
@@ -1954,7 +1954,7 @@ pub fn redistribute_seam_uv_trim_curves(
             let surface = face2::surface(b, face)?
                 .ok_or_else(|| null("sm_RedistributeSeamUVTrimCurves: face without surface"))?;
             if let Some((_surface_point, du, dv)) =
-                ignored(surface.evaluate_1st_derivatives(Point2::new(uv.x, uv.y), true, true))?
+                ignored(surface.evaluate_1st_derivatives(k, Point2::new(uv.x, uv.y), true, true))?
             {
                 let across = if this_seam_edge == SurfParamType::U {
                     du
@@ -2101,8 +2101,8 @@ pub fn make_vertex_split_uv_trim_curve(
         .ok_or_else(|| SolidError::null_pointer(OP))?
         .clone(); // NER
     let lift = |t: f64| -> Result<Point3> {
-        let p = new_uv_curve.evaluate_point(t)?;
-        surface.evaluate_point(Point2::new(p.x, p.y))
+        let p = new_uv_curve.evaluate_point(k, t)?;
+        surface.evaluate_point(k, Point2::new(p.x, p.y))
     };
 
     // when 3D distance from splitPoint to UVTrimCurvePoint > tol/100 (was "tol/30" [B606])
@@ -2130,6 +2130,7 @@ pub fn make_vertex_split_uv_trim_curve(
             )?);
             // get best UVTrimCurve param possible by projecting splitPoint to 3d UVTrimCurve
             let (found, sol) = uv_3d_curve.local_point_solve::<NoObject>(
+                k,
                 &new_uv_curve.natural_interval(),
                 SolverOperation::Minimize,
                 split_pnt,
@@ -2257,7 +2258,7 @@ pub fn brep_intersect(
         }
     }
 
-    crate::curve::curve::p5::remove_duplicate_curves(&mut curves_3d)?;
+    crate::curve::curve::p5::remove_duplicate_curves(k, &mut curves_3d)?;
     Ok((curves_3d.into_iter().flatten().collect(), points))
 }
 
@@ -2502,7 +2503,7 @@ pub fn create_corner_blend(
         // evaluation below takes the raw 0/1 parameter)
 
         // Curve EndPoint
-        let pnt = curve_3d.evaluate_point(param)?;
+        let pnt = curve_3d.evaluate_point(k, param)?;
 
         // create a degenerate 'point' curve at the second curve's endPoint (parameterized from 0 to 1)
         let top_curve = BSplineCurve::create_point_curve(pnt)?;
@@ -2524,6 +2525,7 @@ pub fn create_corner_blend(
     let surfs: Vec<Option<&BSplineSurface>> = ordered_surfs.iter().map(Option::as_ref).collect();
     let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
     BSplineSurface::create_corner_blend(
+        k,
         &ordered_3d,
         &eu_orients,
         &ordered_uv,

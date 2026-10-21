@@ -87,6 +87,7 @@ const MAX_GUESSES: usize = 6;
 /// `rdDeviation`), the status checked by the caller (`SER`).
 #[allow(clippy::too_many_arguments)] // upstream's arguments
 fn surface_local_curve_intersect(
+    k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
     curve: &Curve,
@@ -95,7 +96,7 @@ fn surface_local_curve_intersect(
     uv_guess: Point2,
     t_guess: f64,
 ) -> Result<Option<CurveIntersection>> {
-    surface.local_curve_intersect(domain, curve, interval, tol, uv_guess, t_guess)
+    surface.local_curve_intersect(k, domain, curve, interval, tol, uv_guess, t_guess)
 }
 
 /// `sm_FilterSolution`: whether to keep a curve/surface solution (`rbKeepSolution`).
@@ -559,6 +560,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
             // pass the call along to local curve intersection
             let Some(hit) = surface_local_curve_intersect(
+                k,
                 leaf.eval,
                 &leaf.domain,
                 &leaf.line,

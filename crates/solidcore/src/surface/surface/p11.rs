@@ -128,6 +128,7 @@ struct BoundaryHit {
 /// plane normal arguments are unused there and dropped; the guess is a copy.
 #[allow(clippy::too_many_arguments)]
 fn intersect_srf_bndry_crv(
+    k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     curve_surface: &Surface,
@@ -140,6 +141,7 @@ fn intersect_srf_bndry_crv(
     // (sm_IntersectSrfBndryCrv, surface.surface_p8; the deviation and the tangency flag
     // are not read here)
     let hit = super::p8::intersect_srf_bndry_crv(
+        k,
         surface,
         uv_domain,
         curve_surface,
@@ -325,6 +327,7 @@ impl Surface {
                 // intersect OtherSurface with const u Surface boundary isoParameterCurve
                 // (SER: checked; sm_IntersectSrfBndryCrv over the other surface's kind)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     other,
                     other_uv_domain,
                     self,
@@ -355,6 +358,7 @@ impl Surface {
                 // intersect OtherSurface with const v Surface boundary isoParameterCurve
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     other,
                     other_uv_domain,
                     self,
@@ -383,6 +387,7 @@ impl Surface {
                 // intersect Surface with const u OtherSurface boundary isoParameterCurve
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     self,
                     uv_domain,
                     other,
@@ -411,6 +416,7 @@ impl Surface {
                 // intersect Surface with const v OtherSurface boundary isoParameterCurve
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     self,
                     uv_domain,
                     other,
@@ -559,6 +565,7 @@ impl Surface {
             if are_same(sv[0], uv_domain.min().x) || are_same(sv[0], uv_domain.max().x) {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     other,
                     other_uv_domain,
                     self,
@@ -582,6 +589,7 @@ impl Surface {
             {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     other,
                     other_uv_domain,
                     self,
@@ -604,6 +612,7 @@ impl Surface {
             {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     self,
                     uv_domain,
                     other,
@@ -626,6 +635,7 @@ impl Surface {
             {
                 // (SER: checked)
                 let hit = intersect_srf_bndry_crv(
+                    k,
                     self,
                     uv_domain,
                     other,

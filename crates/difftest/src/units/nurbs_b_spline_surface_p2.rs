@@ -935,7 +935,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 dump_state(&mut o, &r);
             }),
         (OpIn::Sphere { arcs, tol }, None) => {
-            let cs = arcs.iter().map(bsc_of).collect::<Result<Vec<_>, _>>()?;
+            let cs = arcs
+                .iter()
+                .map(|a| bsc_of(a).map(SmCurve::from))
+                .collect::<Result<Vec<_>, _>>()?;
             BSplineSurface::create_sphere_from_arcs(&k, &cs, *tol).map(|r| {
                 o.push(r.ccw_arcs.len() as f64);
                 o.extend(r.ccw_arcs.iter().map(|&j| j as f64));

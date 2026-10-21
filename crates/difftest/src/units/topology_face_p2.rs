@@ -1551,9 +1551,9 @@ impl ClassObject for H {
     }
 }
 
-fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if !i.op.is_brep() {
-        return match run_rust_geom(k, &i.op) {
+        return match run_rust_geom(&i.op) {
             Ok(o) => Ok(geom_output(&i.op, o)),
             Err(Fail::Solid(e)) => rust_err(&e),
             Err(Fail::Harness(h)) => Err(h),
@@ -1894,7 +1894,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
-fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
+fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     match op {
         OpIn::SeamCross {
@@ -1936,7 +1936,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let k = Kernel::default();
             let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
-            let r = e.evaluate(k, *t, &mut d);
+            let r = e.evaluate(*t, &mut d);
             match r {
                 Ok(()) => o.push(0.0),
                 Err(e) if e.is_unported() => return Err(e.into()),
@@ -1972,7 +1972,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 layout: &l,
             };
             let mut d = dydx.clone();
-            match e.evaluate(k, *t, &mut d) {
+            match e.evaluate(&k, *t, &mut d) {
                 Ok(()) => o.push(0.0),
                 Err(e) if e.is_unported() => return Err(e.into()),
                 Err(_) => o.push(1.0),
@@ -2223,8 +2223,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
-        run_rust(k, &case.parse::<Inputs>()?)
+        run_rust(&case.parse::<Inputs>()?)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

@@ -316,7 +316,7 @@ fn crv_on_surf_length(k: &Kernel, surface: &Surface, uv_curve: &Curve) -> Result
     };
     let cos = CrvOnSurf::new(k, uv_curve.clone(), bs.clone(), None, 0)?;
     let ivl = uv_curve.natural_interval();
-    Ok(Curve::from(cos).approximate_length(&ivl, 5, false)?.0)
+    Ok(Curve::from(cos).approximate_length(k, &ivl, 5, false)?.0)
 }
 
 /// Builds the other seam's UV curves for a UV curve along a seam: a copy moved by
@@ -403,7 +403,7 @@ pub fn create_uv_trim_curve(
         let base = Surface::from(cos.surface().clone());
         // `pSurface == base || *pSurface == *base` (identity is lost in the port: value
         // equality only) && same orientation as the primary edge use
-        if face_surface.approx_eq(&base)?
+        if face_surface.approx_eq(k, &base)?
             && orientation(b, eu)?
                 == orientation(
                     b,
@@ -415,7 +415,7 @@ pub fn create_uv_trim_curve(
             let surface_uv = face_surface.natural_uv_domain();
             let tol = tolerance(b, eu)?;
 
-            let (start_pt, _end_pt) = match ignored(uv_curve.ends())? {
+            let (start_pt, _end_pt) = match ignored(uv_curve.ends(k))? {
                 Some(ends) => (ends.start, ends.end),
                 None => (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
             };
@@ -443,7 +443,7 @@ pub fn create_uv_trim_curve(
             if u_length < tol
                 && ((start_pt.x - surface_uv.u_min()).abs() < tol
                     || (start_pt.x - surface_uv.u_max()).abs() < tol)
-                && face_surface.is_periodic(&surface_uv, SurfParamType::U)?
+                && face_surface.is_periodic(k, &surface_uv, SurfParamType::U)?
             {
                 // Must be a seam with constant U, so build the other possible UV curve.
                 let other_x = if (start_pt.x - surface_uv.u_min()).abs() < tol {
@@ -461,7 +461,7 @@ pub fn create_uv_trim_curve(
             } else if v_length < tol
                 && ((start_pt.y - surface_uv.v_min()).abs() < tol
                     || (start_pt.y - surface_uv.v_max()).abs() < tol)
-                && face_surface.is_periodic(&surface_uv, SurfParamType::V)?
+                && face_surface.is_periodic(k, &surface_uv, SurfParamType::V)?
             {
                 // Must be a seam with constant V, so build the other possible UV curve.
                 let other_y = if (start_pt.y - surface_uv.v_min()).abs() < tol {
@@ -808,7 +808,7 @@ pub fn create_uv_trim_curve(
             uv_curves
                 .first()
                 .ok_or_else(|| null("CreateUVTrimCurve: no UV curve"))?
-                .ends(),
+                .ends(k),
         )? {
             Some(ends) => (ends.start, ends.end),
             None => (Vec3::UNDEF, Vec3::UNDEF),
@@ -818,8 +818,9 @@ pub fn create_uv_trim_curve(
 
         // Get the 3D end points of the Drop Curve
         let drop_curve_start_3d =
-            ignored(surface.evaluate_point(uv_start_2d))?.unwrap_or(Vec3::UNDEF);
-        let drop_curve_end_3d = ignored(surface.evaluate_point(uv_end_2d))?.unwrap_or(Vec3::UNDEF);
+            ignored(surface.evaluate_point(k, uv_start_2d))?.unwrap_or(Vec3::UNDEF);
+        let drop_curve_end_3d =
+            ignored(surface.evaluate_point(k, uv_end_2d))?.unwrap_or(Vec3::UNDEF);
 
         // Get the local XSect Tolerances
         // (`SmTol::GetXSectTol3d(pEdge, pVertex)` takes the system zone tolerance for a
@@ -1083,8 +1084,8 @@ fn two_singular_end_points(
     let surface_uv_domain = surface.natural_uv_domain();
 
     // Curve EndPoints
-    let start_point = ignored(curve.evaluate_point(edge_domain.min()))?.unwrap_or(Vec3::UNDEF);
-    let end_point = ignored(curve.evaluate_point(edge_domain.max()))?.unwrap_or(Vec3::UNDEF);
+    let start_point = ignored(curve.evaluate_point(k, edge_domain.min()))?.unwrap_or(Vec3::UNDEF);
+    let end_point = ignored(curve.evaluate_point(k, edge_domain.max()))?.unwrap_or(Vec3::UNDEF);
 
     // drop curve endpoints onto surface
     let start_drop = ignored(surface_drop_point(
@@ -1228,16 +1229,16 @@ fn pick_seam_curve(
             .get(1)
             .ok_or_else(|| null("seam: no second curve"))?;
         (
-            c1.evaluate_point(c1.natural_interval().evaluate(0.48765))?,
-            c2.evaluate_point(c2.natural_interval().evaluate(0.48765))?,
+            c1.evaluate_point(k, c1.natural_interval().evaluate(0.48765))?,
+            c2.evaluate_point(k, c2.natural_interval().evaluate(0.48765))?,
         )
     };
     let uv1 = face_domain.clamp_point(Point2::new(uv_pnt1.x, uv_pnt1.y));
     let uv2 = face_domain.clamp_point(Point2::new(uv_pnt2.x, uv_pnt2.y));
 
     // project NearMid UVCurve Points to 3Space through Edgeuse->Face->Surface
-    let (_p1, du1, dv1) = surface.evaluate_1st_derivatives(uv1, true, true)?;
-    let (_p2, du2, dv2) = surface.evaluate_1st_derivatives(uv2, true, true)?;
+    let (_p1, du1, dv1) = surface.evaluate_1st_derivatives(k, uv1, true, true)?;
+    let (_p2, du2, dv2) = surface.evaluate_1st_derivatives(k, uv2, true, true)?;
 
     // When there are still 2 UVTrimCurves expect to have 2 UVCurves running down either
     // side of a seam curve. Find the right one for this Edgeuse.
@@ -1361,7 +1362,7 @@ fn brute_force(
     for ii in 0..=100_u32 {
         // evaluate the curve at evenly spaced parameter points
         let param = edge_domain.evaluate(f64::from(ii) / 100.0);
-        let pv = curve.evaluate(param, 1, true, true)?;
+        let pv = curve.evaluate(k, param, 1, true, true)?;
         let p0 = *pv.first().ok_or_else(|| null("brute force: no point"))?;
 
         // find closest point on surface to sample point
@@ -1387,7 +1388,7 @@ fn brute_force(
                 params.push(param);
 
                 // (the solution's own first object, as `sm_CalcDistAndDev` reads it)
-                let (dist, dev) = calc_dist_and_dev(p0, sol, |_| Some(surface), want_deviation)?;
+                let (dist, dev) = calc_dist_and_dev(k, p0, sol, |_| Some(surface), want_deviation)?;
                 max_dist = max_dist.max(dist);
                 // (Note, dMaxDev is 0 if ptr is Null.)
                 max_dev = max_dev.max(dev.unwrap_or(0.0));
@@ -1712,7 +1713,7 @@ pub fn evaluate_binormal_uv(
     let eu_orientation = orientation(b, eu)?;
 
     // evaluate the unoriented curve position and tangent values
-    let mut curve_pv = pv3(&curve_3d.evaluate(parameter, 1, true, true)?);
+    let mut curve_pv = pv3(&curve_3d.evaluate(k, parameter, 1, true, true)?);
 
     // while tangent length is zero - step along curve looking for a nonDegenerate
     // tangent direction
@@ -1732,7 +1733,7 @@ pub fn evaluate_binormal_uv(
         // [bd, 13 Sep 05]
 
         // Try eval from right
-        curve_pv = pv3(&curve_3d.evaluate(parameter, 2, true, true)?);
+        curve_pv = pv3(&curve_3d.evaluate(k, parameter, 2, true, true)?);
         if curve_pv[2].length_squared() >= EFF_ZERO_SQ {
             // assume 2nd deriv points pos at edge beg where parameterization is
             // expected to be increasing and neg at edge ends where parameterization is
@@ -1746,7 +1747,7 @@ pub fn evaluate_binormal_uv(
         }
 
         // Else try eval from left
-        curve_pv = pv3(&curve_3d.evaluate(parameter, 2, false, true)?);
+        curve_pv = pv3(&curve_3d.evaluate(k, parameter, 2, false, true)?);
         if curve_pv[2].length_squared() >= EFF_ZERO_SQ {
             curve_pv[1] = if edge_ivl.mid() > parameter {
                 curve_pv[2]
@@ -1771,7 +1772,7 @@ pub fn evaluate_binormal_uv(
         };
 
         // evaluate unoriented curve at modified param value
-        let pv2 = curve_3d.evaluate(step_param, 1, true, true)?;
+        let pv2 = curve_3d.evaluate(k, step_param, 1, true, true)?;
         curve_pv[1] = pv2
             .get(1)
             .copied()
@@ -1838,7 +1839,7 @@ pub fn evaluate_binormal_uv(
         parameter = trim.natural_interval().clamp_value(parameter);
 
         // compute UVTrimCurve Point and clamp that to SurfaceDomain
-        let pnt = trim.evaluate_point(parameter)?;
+        let pnt = trim.evaluate_point(k, parameter)?;
         uv = domain.clamp_point(Point2::new(pnt.x, pnt.y));
         got_uv = true;
 
@@ -1849,7 +1850,7 @@ pub fn evaluate_binormal_uv(
             // the dist from the 3d curve point to the surface normal.
             // (status ignored)
             let (this_srf_pt, this_su, this_sv) = ignored(
-                surface.evaluate_1st_derivatives(uv, false, false),
+                surface.evaluate_1st_derivatives(k, uv, false, false),
             )?
             .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
 
@@ -1862,6 +1863,7 @@ pub fn evaluate_binormal_uv(
                 // when cheap is degenerate - try expensive normal eval (status ignored;
                 // sThisNorm is returned unitized)
                 if let Some(n) = ignored(surface.evaluate_normal(
+                    k,
                     uv,
                     crate::nurbs::knots::Side::Right,
                     crate::nurbs::knots::Side::Right,
@@ -1960,7 +1962,7 @@ pub fn evaluate_binormal_uv(
 
             // set sUV based on sUVTrimCurve eval clamped to surface domain
             parameter = trim.natural_interval().clamp_value(parameter);
-            let pnt = trim.evaluate_point(parameter)?;
+            let pnt = trim.evaluate_point(k, parameter)?;
             uv = domain.clamp_point(Point2::new(pnt.x, pnt.y));
         } else if let [sol] = sols {
             // the solution is the sUV point
@@ -2021,6 +2023,7 @@ pub fn evaluate_binormal_uv(
         }
 
         normal = surface.evaluate_normal(
+            k,
             step_uv,
             crate::nurbs::knots::Side::Left,
             crate::nurbs::knots::Side::Left,
@@ -2042,7 +2045,7 @@ pub fn evaluate_binormal_uv(
         // when Binormal is zero length - try curve eval just below given param point
         if edge_ivl.min() < parameter - crv_step {
             if crv_eval_lo.is_none() {
-                let pv = curve_3d.evaluate(parameter - crv_step, 1, true, true)?;
+                let pv = curve_3d.evaluate(k, parameter - crv_step, 1, true, true)?;
                 crv_eval_lo = pv.get(1).copied();
             }
             curve_pv[1] = crv_eval_lo.ok_or_else(|| null("curve evaluation"))?;
@@ -2063,7 +2066,7 @@ pub fn evaluate_binormal_uv(
         // point
         if edge_ivl.max() > parameter + crv_step {
             if crv_eval_hi.is_none() {
-                let pv = curve_3d.evaluate(parameter + crv_step, 1, true, true)?;
+                let pv = curve_3d.evaluate(k, parameter + crv_step, 1, true, true)?;
                 crv_eval_hi = pv.get(1).copied();
             }
             curve_pv[1] = crv_eval_hi.ok_or_else(|| null("curve evaluation"))?;
@@ -2091,7 +2094,7 @@ pub fn evaluate_binormal_uv(
 
     // store optional output values (ComputeParamDirection: status ignored)
     let uv_vector = if options.want_uv_vector {
-        ignored(surface.compute_param_direction(uv, binormal))?
+        ignored(surface.compute_param_direction(k, uv, binormal))?
     } else {
         None
     };
@@ -2122,6 +2125,7 @@ pub struct NormalizedEval {
 
 /// The evaluation of `curve` over `ivl` at the oriented normalised parameter.
 fn eval_on_curve(
+    k: &Kernel,
     curve: &Curve,
     ivl: &Extent1d,
     orient: OrientType,
@@ -2136,7 +2140,7 @@ fn eval_on_curve(
 
     // get requested evaluation
     if want_first_deriv {
-        let pv = curve.evaluate(ivl.evaluate(oriented_param), 1, true, true)?;
+        let pv = curve.evaluate(k, ivl.evaluate(oriented_param), 1, true, true)?;
         let p = *pv
             .first()
             .ok_or_else(|| null("NormalizedEvaluate: no point"))?;
@@ -2154,7 +2158,7 @@ fn eval_on_curve(
         })
     } else {
         Ok(NormalizedEval {
-            point: curve.evaluate_point(ivl.evaluate(oriented_param))?,
+            point: curve.evaluate_point(k, ivl.evaluate(oriented_param))?,
             first_deriv: None,
         })
     }
@@ -2190,7 +2194,14 @@ pub fn normalized_evaluate(
 
         if let Some(trim) = uv_trim_curve(b, eu)?.0 {
             let ivl = trim.natural_interval();
-            return eval_on_curve(trim, &ivl, orient, normalized_parameter, want_first_deriv);
+            return eval_on_curve(
+                k,
+                trim,
+                &ivl,
+                orient,
+                normalized_parameter,
+                want_first_deriv,
+            );
         }
         {
             {
@@ -2198,8 +2209,14 @@ pub fn normalized_evaluate(
                 // and drop to the surface. And don't forget pOptFirstDeriv.
 
                 // Evaluate in 3d, then drop to surface.
-                let three_d =
-                    normalized_evaluate_3d(b, eu, orient, normalized_parameter, want_first_deriv)?;
+                let three_d = normalized_evaluate_3d(
+                    k,
+                    b,
+                    eu,
+                    orient,
+                    normalized_parameter,
+                    want_first_deriv,
+                )?;
                 let f = crate::topology::edgeuse::p1::face(b, eu)?
                     .ok_or_else(|| null("NormalizedEvaluate: edge use without face"))?;
                 let surf = b
@@ -2217,7 +2234,7 @@ pub fn normalized_evaluate(
                 let mut first_deriv = None;
                 if let Some(d3) = three_d.first_deriv {
                     // (status ignored)
-                    let (s_su, s_sv) = ignored(surf.evaluate_1st_derivatives(uv, false, false))?
+                    let (s_su, s_sv) = ignored(surf.evaluate_1st_derivatives(k, uv, false, false))?
                         .map_or((Vec3::UNDEF, Vec3::UNDEF), |(_, su, sv)| (su, sv));
                     first_deriv = Some(match vec_lin_comb_two_vectors(s_su, s_sv, d3) {
                         Ok(d) => Vec3::new(d.x, d.y, 0.0),
@@ -2244,12 +2261,13 @@ pub fn normalized_evaluate(
     }
 
     // xyzSpace - let p3dOrUVCurve = 3DCurve and sIvl = Edge domain.
-    normalized_evaluate_3d(b, eu, orient, normalized_parameter, want_first_deriv)
+    normalized_evaluate_3d(k, b, eu, orient, normalized_parameter, want_first_deriv)
 }
 
 /// `NormalizedEvaluate(t, FALSE, ..)`: the edge curve evaluated at the oriented
 /// normalised parameter.
 fn normalized_evaluate_3d(
+    k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     orient: OrientType,
@@ -2263,6 +2281,7 @@ fn normalized_evaluate_3d(
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer(OP))?; // NER(p3dOrUVCurve)
     eval_on_curve(
+        k,
         curve,
         &rec.interval,
         orient,

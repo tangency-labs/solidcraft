@@ -1165,7 +1165,8 @@ impl<O: ClassObject> PointClassification<O> {
     ///
     /// `SM_ERR` when the parameters are not set or the classification has no point
     /// (unknown, nothing, region); the errors of the evaluations;
-    /// [`SolidError::Unported`] for topology objects.
+    /// [`SolidError::Unported`] for edge uses, faces and vertex or edge handles
+    /// `geometry` cannot resolve to its B-rep.
     pub fn find_obj_point_3d(
         &self,
         k: &Kernel,
@@ -1205,7 +1206,7 @@ impl<O: ClassObject> PointClassification<O> {
                 let o = self.cast(ClassObjectKind::Edge)?;
                 let curve =
                     edge_curve(geometry, o, OP_FIND)?.ok_or_else(|| null_object(OP_FIND))?;
-                curve.evaluate_point(self.t_param)
+                curve.evaluate_point(k, self.t_param)
             }
             PointClassType::Edgeuse => {
                 self.cast(ClassObjectKind::Edgeuse)?;

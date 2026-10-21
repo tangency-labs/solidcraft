@@ -1535,7 +1535,7 @@ pub fn is_spine(b: &Brep, e: EdgeId) -> Result<bool> {
 
 /// `IsSeam()`: the edge is a seam of the surface of any of its faces
 /// ([`is_seam_of_surface`]).
-pub fn is_seam(k: &Kernel, b: &Brep, e: EdgeId) -> Result<bool> {
+pub fn is_seam(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
     for f in faces(b, e, None)? {
         if b.face(f)?.surface.is_some() && is_seam_of_surface(k, b, e, f)? {
             return Ok(true);
@@ -1553,7 +1553,12 @@ pub fn is_seam(k: &Kernel, b: &Brep, e: EdgeId) -> Result<bool> {
 /// [`SolidError::InvalidInput`] for a face without surface or an edge use without
 /// face (upstream dereferences them); those of the surface queries;
 /// [`SolidError::Unported`] from `SmEdgeuse::NormalizedEvaluate`.
-pub fn is_seam_of_surface(k: &Kernel, b: &Brep, e: EdgeId, surface_face: FaceId) -> Result<bool> {
+pub fn is_seam_of_surface(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    surface_face: FaceId,
+) -> Result<bool> {
     let surface = b
         .face(surface_face)?
         .surface

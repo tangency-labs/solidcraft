@@ -714,7 +714,7 @@ impl Hcr {
                 let mid = Geometry { brep: &self.scene }
                     .curve(curve)
                     .ok_or(undefined("classification curve not resolved"))?
-                    .evaluate_point(t_mid)?;
+                    .evaluate_point(k, t_mid)?;
                 visibility = self.is_point_visible(k, mid)?;
             }
 
@@ -780,7 +780,7 @@ impl Hcr {
                         marked.insert(e);
                     } else if let Some(curve) = edge::curve(&self.scene, e)? {
                         let tol = self.scene.tolerance() / 100.0;
-                        if curve.is_line(10, tol)?.is_some() {
+                        if curve.is_line(k, 10, tol)?.is_some() {
                             let t = edge::interval(&self.scene, e)?.evaluate(0.5);
                             let (bin, _, _) = evaluate_binormal(k, &mut self.scene, eu, t)?;
                             if bin.z > -EFF_ZERO {
@@ -1353,7 +1353,7 @@ impl Hcr {
         let mut ray_start = ray_end;
         ray_start.z += max_distance;
 
-        match tracer.fire_ray(ray_start, ray_vec, max_distance) {
+        match tracer.fire_ray(k, ray_start, ray_vec, max_distance) {
             Ok(hit) => Ok(!hit.hits_something),
             Err(err) if err.is_unported() => Err(err),
             // signal an error and guess that the point is visible
@@ -1430,7 +1430,7 @@ impl Hcr {
                     continue;
                 }
                 // skip solutions behind this curve
-                let crv_pnt = curve.evaluate_point(param)?;
+                let crv_pnt = curve.evaluate_point(k, param)?;
                 if crv_pnt.z > vert_pnt.z + self.ray_offset_tolerance {
                     continue;
                 }
@@ -1449,7 +1449,7 @@ impl Hcr {
                         .point_class_by_index(index)
                         .map_err(|_| undefined("null point class"))?;
                     if pc.point_class() == PointClassType::Vertex {
-                        let existing = ignored(pc.find_obj_point_3d(&geom))?
+                        let existing = ignored(pc.find_obj_point_3d(k, &geom))?
                             .ok_or(undefined("uninitialised vertex point"))?;
                         if existing.z >= vert_pnt.z {
                             continue; // Just ignore this one.
@@ -1514,8 +1514,8 @@ impl Hcr {
                     [Some(&sol.start), None]
                 };
                 for end in ends.into_iter().flatten() {
-                    let p1 = curve.evaluate_point(end.parameters[0])?;
-                    let p2 = other.evaluate_point(end.parameters[1])?;
+                    let p1 = curve.evaluate_point(k, end.parameters[0])?;
+                    let p2 = other.evaluate_point(k, end.parameters[1])?;
                     // Don't use this intersection if it is behind the curve
                     if p1.z < p2.z + self.ray_offset_tolerance {
                         let mut pc = PointClassification::new(curve_zone);

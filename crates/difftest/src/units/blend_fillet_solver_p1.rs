@@ -799,7 +799,7 @@ fn shim_with(s: &Surfs, load: bool, found: bool, setup: bool) -> Result<ShimSolv
 }
 
 /// `put_crv` of the static shim: `1 t0 t1 P(t0) P(mid) P(t1)`, `-1` for none.
-fn put_crv(o: &mut Vec<f64>, c: Option<&Curve>) {
+fn put_crv(k: &Kernel, o: &mut Vec<f64>, c: Option<&Curve>) {
     let Some(c) = c else {
         o.push(-1.0);
         return;
@@ -808,7 +808,7 @@ fn put_crv(o: &mut Vec<f64>, c: Option<&Curve>) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     for t in [ivl.min(), ivl.mid(), ivl.max()] {
-        let p = c.evaluate_point(t).unwrap_or(Vec3::UNDEF);
+        let p = c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF);
         o.extend([p.x, p.y, p.z]);
     }
 }
@@ -873,7 +873,7 @@ fn rust_brep(
                         .map_err(|e| harness(e.to_string()))?
                         .curve
                         .as_ref();
-                    put_crv(o, copy.as_ref().or(edge_curve));
+                    put_crv(&k, o, copy.as_ref().or(edge_curve));
                     Ok(())
                 }
                 Err(SolidError::InvalidInput { .. }) => {
@@ -922,9 +922,9 @@ fn rust_brep(
                 o.push(st);
                 let bb = &c.brep;
                 let err = |e: SolidError| harness(e.to_string());
-                put_crv(o, bb.edge(e).map_err(err)?.curve.as_ref());
-                put_crv(o, eu::uv_trim_curve(bb, prim).map_err(err)?.0);
-                put_crv(o, eu::uv_trim_curve(bb, mate).map_err(err)?.0);
+                put_crv(&k, o, bb.edge(e).map_err(err)?.curve.as_ref());
+                put_crv(&k, o, eu::uv_trim_curve(bb, prim).map_err(err)?.0);
+                put_crv(&k, o, eu::uv_trim_curve(bb, mate).map_err(err)?.0);
                 Ok(())
             } else {
                 o.push(-2.0);
@@ -1065,7 +1065,7 @@ fn rust_static(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, H
             let mut f = arrays.f.clone();
             let mut j = jacobian_of(arrays)?;
             let mut e = RailRailIntersectEnfo::new(*rail, &mut s1, *other, &mut s2);
-            let res = e.evaluate(&arrays.x, &mut f, j.as_mut());
+            let res = e.evaluate(&k, &arrays.x, &mut f, j.as_mut());
             match &res {
                 Ok(found) => o.extend_from_slice(&[0.0, b(*found)]),
                 Err(e @ SolidError::Unported { .. }) => return Ok(Err(e.clone())),
@@ -1151,7 +1151,7 @@ fn rust_static(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, H
                     let evaluated = match radius {
                         Some(_) if !both => Some(vec![-2.0]),
                         Some(r) => {
-                            let st = match e.evaluate(*r) {
+                            let st = match e.evaluate(&k, *r) {
                                 Ok(_) => 0.0,
                                 Err(err @ SolidError::Unported { .. }) => return Err(err),
                                 Err(err) => status(&err),
@@ -1194,7 +1194,7 @@ fn rust_static(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, H
     Ok(res)
 }
 
-fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     if i.static_op().is_some() {
         let res = if let Some(brep) = i.brep() {
@@ -1252,7 +1252,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let mut j = jacobian_of(arrays)?;
             let mut e = FilletSphereSolveEnfo::new(Vec3::new(c[0], c[1], c[2]), *r, &mut fs);
             e.set_plane_adjusts(*adjusts);
-            let res = e.evaluate(&arrays.x, &mut f, j.as_mut());
+            let res = e.evaluate(k, &arrays.x, &mut f, j.as_mut());
             match &res {
                 Ok(found) => o.extend_from_slice(&[0.0, b(*found)]),
                 Err(e) => {
@@ -1288,7 +1288,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 *rail,
                 &mut fs,
             );
-            let res = e.evaluate(&arrays.x, &mut f, j.as_mut());
+            let res = e.evaluate(k, &arrays.x, &mut f, j.as_mut());
             match &res {
                 Ok(found) => o.extend_from_slice(&[0.0, b(*found)]),
                 Err(e) => {
@@ -1304,7 +1304,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::SurfValues { setup, surfs, uv } => {
             let mut fs = shim_with(surfs, false, false, *setup)?;
             let mut t = TsectPnt::new();
-            let r = FilletSolver::compute_surface_values(
+            let r = FilletSolver::compute_surface_values(k, 
                 &mut fs as &mut dyn FilletSolverOps,
                 [Point2::new(uv[0], uv[1]), Point2::new(uv[2], uv[3])],
                 &mut t,
@@ -1546,6 +1546,7 @@ impl FilletSolverOps for ShimSolver {
 
     fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         load: &mut JacobianLoad<'_>,
@@ -1555,7 +1556,7 @@ impl FilletSolverOps for ShimSolver {
         if !self.load {
             return self
                 .base
-                .load_jacobian(num_equations, num_parameters, load, f, jacobian);
+                .load_jacobian(k, num_equations, num_parameters, load, f, jacobian);
         }
         let ne = *num_equations;
         let o1 = load.surf1_offset;
@@ -2363,6 +2364,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &crate::Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let k = &Kernel::default();
+        rust(k, &case.parse()?)
     }
 }

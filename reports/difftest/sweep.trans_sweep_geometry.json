@@ -354,52 +354,36 @@
       "values_compared": 755
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "interval_2_8_zero",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#44",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "interval_2_8_short",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#45",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "interval_2_8_outside",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#46",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "interval_2_8_full",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/adversarial.json#47",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
       "max_rel_err": 0.0,
@@ -2027,28 +2011,20 @@
       "values_compared": 755
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "geometry_2_7_True_False",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#91 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
-      "values_compared": 0
+      "values_compared": 755
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "geometry_2_7_True_True",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "fixture:fixtures/sweep.trans_sweep_geometry/sweeps.json#92 (upstream tests/SM_API_test/src/TestSmPrimitives.cpp:373)",
-      "values_compared": 0
+      "values_compared": 755
     },
     {
       "max_rel_err": 0.0,
@@ -2447,16 +2423,12 @@
       "values_compared": 2
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0005",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12482191920730667762",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
       "max_rel_err": 0.0,
@@ -4189,16 +4161,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0218",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12482191920730667975",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
       "max_rel_err": 0.0,
@@ -4572,16 +4540,12 @@
       "values_compared": 13
     },
     {
-      "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
-      },
       "max_rel_err": 0.0,
       "name": "gen0262",
-      "outcome": "deferred",
-      "pass": false,
+      "outcome": "pass",
+      "pass": true,
       "source": "generated:seed=12482191920730668019",
-      "values_compared": 0
+      "values_compared": 207
     },
     {
       "max_rel_err": 0.0,
@@ -6702,13 +6666,13 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 33,
+  "cases_deferred": 24,
   "cases_failed": 0,
-  "cases_passed": 736,
+  "cases_passed": 745,
   "cases_rejected": 19,
   "cases_total": 788,
   "deferred_by_unit": {
-    "surface.surface_p2": 33
+    "surface.surface_p2": 24
   },
   "max_rel_err": 0.0,
   "pass": true,

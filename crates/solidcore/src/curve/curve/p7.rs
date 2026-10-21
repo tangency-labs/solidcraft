@@ -1105,7 +1105,7 @@ impl Curve {
         if property == P::PerpendicularToVector {
             // For a line, either every point or no point is a solution.
             if self.is_linear(k, EFF_ZERO, false)?.linear {
-                return Ok(out);
+                return Ok(());
             }
 
             let planar = self.is_planar(k, EFF_ZERO)?;

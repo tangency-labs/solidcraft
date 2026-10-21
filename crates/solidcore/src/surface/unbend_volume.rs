@@ -555,7 +555,7 @@ impl UnbendVolume {
     /// null or deleted line); [`SolidError::Unported`] from the edge boxes.
     pub fn evaluate_bounding_box_simple(
         &self,
-        k: &crate::kernel::Kernel,
+        k: &Kernel,
         volume: &Volume,
         param_box: &Extent3d,
         proj_box: Option<&mut Extent3d>,
@@ -1152,7 +1152,7 @@ mod tests {
 
     #[test]
     fn bounding_boxes() {
-        let k = &crate::Kernel::default();
+        let k = &Kernel::default();
         let vol = UnbendVolume::create(Vec3::ZERO, Vec3::Z, Vec3::X, 1.0, 0.01);
         let VolumeKind::Unbend(u) = vol.kind() else {
             panic!("not an unbend")

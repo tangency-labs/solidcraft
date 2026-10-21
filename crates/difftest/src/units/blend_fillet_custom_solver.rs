@@ -661,12 +661,12 @@ fn rust_jac(
     let (res, offsets) = match kind {
         Kind::Eiffel => {
             let mut fs = EiffelTowerFs::new(base, solver.angle);
-            let r = fs.load_jacobian(&mut ne, &mut np, &mut load, &mut f, j.as_mut());
+            let r = fs.load_jacobian(&k, &mut ne, &mut np, &mut load, &mut f, j.as_mut());
             (r, offsets_of(&fs.base))
         }
         Kind::Secant => {
             let mut fs = SecantConstantRadiusFs::new(base, solver.angle);
-            let r = fs.load_jacobian(&mut ne, &mut np, &mut load, &mut f, j.as_mut());
+            let r = fs.load_jacobian(&k, &mut ne, &mut np, &mut load, &mut f, j.as_mut());
             (r, offsets_of(&fs.base))
         }
     };

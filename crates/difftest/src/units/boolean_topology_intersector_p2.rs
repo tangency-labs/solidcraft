@@ -924,13 +924,15 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        let k = &solidcore::kernel::Kernel::default();
         let i: Inputs = case.parse()?;
-        run_cpp_with(&i, ffi::eval)
+        run_cpp_with(k, &i, ffi::eval)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        let k = &solidcore::kernel::Kernel::default();
         let i: Inputs = case.parse()?;
-        run_rust(&i)
+        run_rust(k, &i)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

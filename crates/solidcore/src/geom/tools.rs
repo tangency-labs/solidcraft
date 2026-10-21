@@ -595,6 +595,11 @@ mod tests {
         let r = find_coincident_edge(k, &brep, &q, &[e], 0);
         assert!(matches!(r, Err(SolidError::Unported { .. })));
         assert_eq!(find_coincident_edge(k, &brep, &q, &[e], 1).unwrap(), None);
+        // SmBrep::GetEdges is ported (topology.brep_p1): the edge is reached and its
+        // drop (curve.curve_p6) is what defers
+        brep.edge_mut(e).unwrap().curve = Some(crate::curve::curve::Curve::from(
+            crate::curve::line::Line::from_points(p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), 3),
+        ));
         assert!(matches!(
             find_edge(&brep, p(0.0, 0.0, 0.0)),
             Err(SolidError::Unported {

@@ -343,7 +343,7 @@ struct SectionTracer<'s> {
 impl SectionTracer<'_> {
     /// `[S, S_u, S_v]` (`Evaluate(uv, 1, 1, TRUE, TRUE, FALSE, D)`).
     fn eval(&self, uv: Point2) -> solidcore::Result<(Vec3, Vec3, Vec3)> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let d = self
             .base
             .surface
@@ -1215,7 +1215,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         for _ in 0..8 {
             if let Some(i) = gen_inputs(k, rng) {
                 return serde_json::to_value(i).ok();

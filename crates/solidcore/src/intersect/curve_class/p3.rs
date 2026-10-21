@@ -209,11 +209,12 @@ fn point_class_mate_loc_by_index<O: ClassObject>(
 
 /// `SmCurveClassification::GetClassifyCrvLoc(ULONG)`: the location of boundary `index`.
 pub(super) fn classify_crv_loc_by_index<O: ClassObject>(
+    k: &Kernel,
     geometry: &impl ClassGeometry<O>,
     cc: &CurveClassification<O>,
     index: usize,
 ) -> Result<Point3> {
-    Ok(cc.classify_crv_loc_by_index(geometry, index)?.0)
+    Ok(cc.classify_crv_loc_by_index(k, geometry, index)?.0)
 }
 
 /// `SmCurveClassification::AreCoincidentMaybe(other, index, endOfCoincidentMaybe)`
@@ -1300,7 +1301,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // evaluate the interval's min-point's position in 3 space using the curve
         // definition (gets SSSPoint when available else the curve point)
-        let vert_pnt = classify_crv_loc_by_index(geometry, self, index)?;
+        let vert_pnt = classify_crv_loc_by_index(k, geometry, self, index)?;
 
         // when the point classifies to an edge - remember that edge
         let (point_class_type, point_class_object) = {

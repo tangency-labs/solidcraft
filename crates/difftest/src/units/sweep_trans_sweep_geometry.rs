@@ -163,12 +163,12 @@ fn build(k: &Kernel, i: &Input) -> Result<Curve> {
 fn put(o: &mut Vec<f64>, p: Vec3) {
     o.extend([p.x, p.y, p.z]);
 }
-fn curve(o: &mut Vec<f64>, c: &Curve) -> Result<()> {
+fn curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) -> Result<()> {
     o.push(c.type_code() as f64);
     let iv = c.natural_interval();
     o.extend([iv.min(), iv.max()]);
     for j in 0..=8 {
-        match c.evaluate(iv.evaluate(f64::from(j) / 8.), 1, true, true) {
+        match c.evaluate(k, iv.evaluate(f64::from(j) / 8.), 1, true, true) {
             Ok(p) => {
                 o.push(0.);
                 for x in p {
@@ -181,7 +181,7 @@ fn curve(o: &mut Vec<f64>, c: &Curve) -> Result<()> {
     }
     Ok(())
 }
-fn surface(o: &mut Vec<f64>, s: &Surface) -> Result<()> {
+fn surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<()> {
     o.push(s.type_code() as f64);
     let d = s.natural_uv_domain();
     o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
@@ -189,8 +189,8 @@ fn surface(o: &mut Vec<f64>, s: &Surface) -> Result<()> {
         for z in 0..=4 {
             let uv = d.evaluate(f64::from(u) / 4., f64::from(z) / 4.);
             for r in [
-                s.evaluate_point(uv),
-                s.evaluate_normal(uv, Side::Left, Side::Left),
+                s.evaluate_point(k, uv),
+                s.evaluate_normal(k, uv, Side::Left, Side::Left),
             ] {
                 match r {
                     Ok(p) => {
@@ -237,7 +237,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
             } else {
                 let (c, t) = sweep.vertex_sweep_higher(&b, id)?;
                 o.push(t);
-                curve(&mut o, &Curve::from(c))?;
+                curve(&k, &mut o, &Curve::from(c))?;
             }
         }
         5 => {
@@ -254,8 +254,8 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
         6 | 7 => {
             let c = build(&k, i)?;
             let iv = Extent1d::from_min_max(i.interval[0], i.interval[1]);
-            let mut a = c.evaluate_point(iv.min())?;
-            let mut z = c.evaluate_point(iv.max())?;
+            let mut a = c.evaluate_point(&k, iv.min())?;
+            let mut z = c.evaluate_point(&k, iv.max())?;
             if i.swap {
                 core::mem::swap(&mut a, &mut z);
             }
@@ -295,7 +295,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
             if i.op == 6 {
                 let (c, t) = sweep.edge_sweep_same(&k, &b, eid)?;
                 o.push(t);
-                curve(&mut o, &c)?;
+                curve(&k, &mut o, &c)?;
             } else {
                 let r = sweep.edge_sweep_higher(&k, &b, eid)?;
                 o.extend([
@@ -306,7 +306,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
                     r.end_vertex_curve.map_or(0., |j| r.curve_tolerances[j]),
                 ]);
                 put(&mut o, r.start_normal);
-                surface(&mut o, &r.surface)?;
+                surface(&k, &mut o, &r.surface)?;
                 o.push(4.);
                 for j in 0..4 {
                     o.extend([
@@ -318,8 +318,8 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
                         f64::from(j == r.start_vertex_curve),
                         f64::from(Some(j) == r.end_vertex_curve),
                     ]);
-                    curve(&mut o, &r.curves[j])?;
-                    curve(&mut o, &Curve::from(r.uv_curves[j].clone()))?;
+                    curve(&k, &mut o, &r.curves[j])?;
+                    curve(&k, &mut o, &Curve::from(r.uv_curves[j].clone()))?;
                 }
             }
         }
@@ -355,7 +355,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
             }
             let (s, t) = sweep.face_sweep_same(&k, &b, f)?;
             o.push(t);
-            surface(&mut o, &s)?;
+            surface(&k, &mut o, &s)?;
         }
     }
     Ok(o)

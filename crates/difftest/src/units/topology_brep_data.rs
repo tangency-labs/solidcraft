@@ -202,7 +202,7 @@ impl Dump<'_> {
     }
 
     fn curve(&mut self, c: &Keyed<Curve>) {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         self.i(1);
         let cv = &c.object;
         self.i(cv.type_code());
@@ -226,7 +226,7 @@ let k = &Kernel::default();
     }
 
     fn surface(&mut self, s: &Keyed<Surface>) {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         self.i(1);
         let sf = &s.object;
         self.i(sf.type_code());

@@ -61,8 +61,8 @@ fn import(input: &Operand) -> Result<Option<Brep>, HarnessError> {
     super::topology_vertexuse::import(&raw).map(|(b, _)| Some(b))
 }
 
-fn append_graph(output: &mut Output, prefix: &str, brep: &Brep) -> Result<(), HarnessError> {
-    let graph = super::topology_brep_p10::snapshot(brep)?;
+fn append_graph(k: &Kernel, output: &mut Output, prefix: &str, brep: &Brep) -> Result<(), HarnessError> {
+    let graph = super::topology_brep_p10::snapshot(k, brep)?;
     for (key, values) in graph.ints {
         output.ints.insert(format!("{prefix}.{key}"), values);
     }
@@ -101,7 +101,7 @@ impl<'a> Record<'a> {
     }
 }
 
-fn native_snapshot(raw: &[f64]) -> Result<Output, HarnessError> {
+fn native_snapshot(k: &Kernel, raw: &[f64]) -> Result<Output, HarnessError> {
     let mut rd = Record { remaining: raw };
     let mut header = Vec::new();
     for _ in 0..9 {
@@ -127,7 +127,7 @@ fn native_snapshot(raw: &[f64]) -> Result<Output, HarnessError> {
             return Err(error("inexact post-state surface import"));
         }
         b.set_editing_enabled(*editing != 0.0);
-        append_graph(&mut output, prefix, &b)
+        append_graph(k, &mut output, prefix, &b)
     };
     let mut presence = Vec::new();
     for prefix in ["primary", "other"] {
@@ -153,6 +153,7 @@ fn rust_snapshot(
     state: &ManifoldState,
 ) -> Result<Output, HarnessError> {
     let other_kernel = kernels.other.as_deref().unwrap_or(kernels.primary);
+    let k: &Kernel = kernels.primary;
     let mut output = Output::new()
         .ints(
             "status_and_state",
@@ -174,7 +175,7 @@ fn rust_snapshot(
         );
     for (prefix, b) in [("primary", primary), ("other", other)] {
         if let Some(b) = b {
-            append_graph(&mut output, prefix, b)?;
+            append_graph(k, &mut output, prefix, b)?;
         }
     }
     for (i, b) in state
@@ -183,7 +184,7 @@ fn rust_snapshot(
         .chain(&state.other_components)
         .enumerate()
     {
-        append_graph(&mut output, &format!("component.{i}"), b)?;
+        append_graph(k, &mut output, &format!("component.{i}"), b)?;
     }
     Ok(output)
 }
@@ -193,13 +194,14 @@ impl UnitDiff for Runner {
         "boolean.merge_p4"
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        let k = &Kernel::default();
         let i: Inputs = case.parse()?;
         let raw = ffi::eval(&i.primary, &i.other, request(&i)).map_err(|e| error(&e))?;
         if raw == [-1.0] {
             return Ok(Output::rejected("native primitive constructor"));
         }
         // Status is data: Output::err would suppress all state comparison.
-        native_snapshot(&raw)
+        native_snapshot(k, &raw)
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;

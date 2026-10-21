@@ -183,8 +183,12 @@ impl OffsetSurface {
 }
 
 /// `SmOffsetSurface::EvaluatePoint`.
-pub(crate) fn offset_evaluate_point(s: &mut OffsetSurface, uv: Point2) -> Result<Point3> {
-    s.surface.evaluate_point_extending(uv)
+pub(crate) fn offset_evaluate_point(
+    k: &Kernel,
+    s: &mut OffsetSurface,
+    uv: Point2,
+) -> Result<Point3> {
+    s.surface.evaluate_point_extending(k, uv)
 }
 
 /// `SmOffsetSurface::GetNaturalUVDomain`.
@@ -195,26 +199,36 @@ pub(crate) fn offset_natural_uv_domain(s: &OffsetSurface) -> Extent2d {
 /// `Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` of an offset surface:
 /// `(P, S_u, S_v)`.
 pub(crate) fn offset_evaluate_1st(
+    k: &Kernel,
     s: &mut OffsetSurface,
     uv: Point2,
 ) -> Result<(Point3, Vec3, Vec3)> {
     s.surface
-        .with_evaluator(|e| evaluate_1st_derivatives(e, uv, Side::Left, Side::Left))
+        .with_evaluator(|e| evaluate_1st_derivatives(k, e, uv, Side::Left, Side::Left))
 }
 
 /// `Evaluate2ndDerivatives(uv, TRUE, TRUE, ..)` of an offset surface:
 /// `(P, S_u, S_v, S_uv, S_uu, S_vv)`.
-pub(crate) fn offset_evaluate_2nd(s: &mut OffsetSurface, uv: Point2) -> Result<[Vec3; 6]> {
+pub(crate) fn offset_evaluate_2nd(
+    k: &Kernel,
+    s: &mut OffsetSurface,
+    uv: Point2,
+) -> Result<[Vec3; 6]> {
     let d = s
         .surface
-        .with_evaluator(|e| evaluate_2nd_derivatives(e, uv, Side::Left, Side::Left))?;
+        .with_evaluator(|e| evaluate_2nd_derivatives(k, e, uv, Side::Left, Side::Left))?;
     Ok([d.point, d.du, d.dv, d.duv, d.duu, d.dvv])
 }
 
 /// `SmSurface::ComputeInwardVector` of an offset surface (it evaluates the offset
 /// surface).
-pub(crate) fn offset_compute_inward_vector(s: &mut OffsetSurface, uv: Point2) -> Result<Vec3> {
-    s.surface.with_evaluator(|e| compute_inward_vector(e, uv))
+pub(crate) fn offset_compute_inward_vector(
+    k: &Kernel,
+    s: &mut OffsetSurface,
+    uv: Point2,
+) -> Result<Vec3> {
+    s.surface
+        .with_evaluator(|e| compute_inward_vector(k, e, uv))
 }
 
 /// `LocalPointSolve(domain, SM_SO_MINIMIZE, point, guess, bFound, sSol)` of an offset
@@ -538,7 +552,7 @@ fn initial_setup(
         x_at(guess_t, surface1_index, op)?,
         x_at(guess_t, checked_add(surface1_index, 1, op)?, op)?,
     );
-    let pnt = offset_evaluate_point(surface1, uv1)?;
+    let pnt = offset_evaluate_point(k, surface1, uv1)?;
     let base2 = surface2.base_surface();
     let mut domain1 = offset_natural_uv_domain(surface1);
     let mut domain2 = offset_natural_uv_domain(surface2);
@@ -604,7 +618,7 @@ fn initial_setup(
         // also moves generally towards the interior of the surface.
         if curve.is_closed(k, &ivl, 0.0)? {
             let p3 = curve.evaluate_point(k, t)?;
-            let inward = offset_compute_inward_vector(surface1, uv1)?;
+            let inward = offset_compute_inward_vector(k, surface1, uv1)?;
             let dropped = curve.drop_point(
                 k,
                 &ivl,
@@ -897,6 +911,7 @@ impl EiffelTowerFs {
     #[allow(clippy::too_many_lines)]
     pub fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         load: &mut JacobianLoad<'_>,
@@ -921,7 +936,7 @@ impl EiffelTowerFs {
             x_at(x, checked_add(surf1_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(0)?.set_offset_distance(0.0);
-        let [_, duf, dvf, duvf, duuf, dvvf] = offset_evaluate_2nd(fs.surface_mut(0)?, uv)?;
+        let [_, duf, dvf, duvf, duuf, dvvf] = offset_evaluate_2nd(k, fs.surface_mut(0)?, uv)?;
 
         // get lSurf2Off index into crX array for lSurf2 parameters
         let base1 = fs.surface(1)?.base_id;
@@ -933,7 +948,7 @@ impl EiffelTowerFs {
             x_at(x, checked_add(surf2_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(1)?.set_offset_distance(0.0);
-        let [_, dug, dvg, duvg, duug, dvvg] = offset_evaluate_2nd(fs.surface_mut(1)?, uv2)?;
+        let [_, dug, dvg, duvg, duug, dvvg] = offset_evaluate_2nd(k, fs.surface_mut(1)?, uv2)?;
 
         // check surface tangent magnitudes
         let duf_len_sq = duf.length_squared();
@@ -983,10 +998,10 @@ impl EiffelTowerFs {
         // evaluate offsetSurface F and G point positions
         let d0 = fs.radius(0)? * orient0;
         fs.surface_mut(0)?.set_offset_distance(d0);
-        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
+        let (pf, duf, dvf) = offset_evaluate_1st(k, fs.surface_mut(0)?, uv)?;
         let d1 = fs.radius(1)? * fs.orientation(1)?;
         fs.surface_mut(1)?.set_offset_distance(d1);
-        let (pg, dug, dvg) = offset_evaluate_1st(fs.surface_mut(1)?, uv2)?;
+        let (pg, dug, dvg) = offset_evaluate_1st(k, fs.surface_mut(1)?, uv2)?;
 
         // set sV = distance between offsetSurface points
         let v = pf - pg;
@@ -1451,6 +1466,7 @@ impl SecantConstantRadiusFs {
     #[allow(clippy::too_many_lines)]
     pub fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         load: &mut JacobianLoad<'_>,
@@ -1475,7 +1491,7 @@ impl SecantConstantRadiusFs {
             x_at(x, checked_add(surf1_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(0)?.set_offset_distance(0.0);
-        let (_, duf2, dvf2) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
+        let (_, duf2, dvf2) = offset_evaluate_1st(k, fs.surface_mut(0)?, uv)?;
 
         // get baseSurface1 surface normal and check its size
         let n = duf2.cross(dvf2);
@@ -1488,7 +1504,7 @@ impl SecantConstantRadiusFs {
         // get offsetSurface1 F point values for given crX
         let d0 = fs.radius(0)? * orient0;
         fs.surface_mut(0)?.set_offset_distance(d0);
-        let (pf, duf, dvf) = offset_evaluate_1st(fs.surface_mut(0)?, uv)?;
+        let (pf, duf, dvf) = offset_evaluate_1st(k, fs.surface_mut(0)?, uv)?;
 
         // get lSurf2Off index into crX array for lSurf2 parameters
         let base1 = fs.surface(1)?.base_id;
@@ -1500,7 +1516,7 @@ impl SecantConstantRadiusFs {
             x_at(x, checked_add(surf2_off, 1, OP)?, OP)?,
         );
         fs.surface_mut(1)?.set_offset_distance(0.0);
-        let (pg2, dug2, dvg2) = offset_evaluate_1st(fs.surface_mut(1)?, uv2)?;
+        let (pg2, dug2, dvg2) = offset_evaluate_1st(k, fs.surface_mut(1)?, uv2)?;
 
         // get baseSurface surface normal value
         let n2 = dug2.cross(dvg2);
@@ -1633,13 +1649,14 @@ macro_rules! fillet_solver_ops {
 
             fn load_jacobian(
                 &mut self,
+                k: &Kernel,
                 num_equations: &mut usize,
                 num_parameters: &mut usize,
                 load: &mut JacobianLoad<'_>,
                 f: &mut [f64],
                 jacobian: Option<&mut Matrix>,
             ) -> Result<bool> {
-                <$t>::load_jacobian(self, num_equations, num_parameters, load, f, jacobian)
+                <$t>::load_jacobian(self, k, num_equations, num_parameters, load, f, jacobian)
             }
 
             fn load_initial_values(
@@ -1807,7 +1824,7 @@ mod tests {
             surf2_offset: 0,
             x: &xs,
         };
-        let r = fs.load_jacobian(&mut ne, &mut np, &mut load, &mut f, None);
+        let r = fs.load_jacobian(&k, &mut ne, &mut np, &mut load, &mut f, None);
         assert!(r.is_ok(), "{r:?}");
         assert_eq!(np, 4);
         assert!(f.iter().all(|v| v.is_finite()));

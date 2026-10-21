@@ -375,6 +375,7 @@ impl SurfOfExtrusion {
             //  flag, so a failure is "no curves, no more intersections")
             let plane_tol = approx_tol_3d.map(|t| approx_tol3d(k, t));
             let (needs_more, plane_x) = match plane.intersect_with_plane(
+                k,
                 other_uv_domain,
                 &this_plane,
                 &this_plane.step_uv_domain(),

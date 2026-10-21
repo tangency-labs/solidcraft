@@ -931,7 +931,7 @@ fn put_cc(o: &mut Vec<f64>, k: &Kernel, cc: &CurveClassification<H>) {
 }
 
 /// The curve record (see the ffi module).
-fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
+pub(crate) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     let ivl = c.natural_interval();
     o.extend([ivl.min(), ivl.max()]);
     let base = match c.kind() {

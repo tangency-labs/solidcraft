@@ -19043,12 +19043,11 @@
     }
   ],
   "cases_both_errored": 0,
-  "cases_deferred": 48,
+  "cases_deferred": 2,
   "cases_failed": 0,
-  "cases_passed": 2331,
+  "cases_passed": 2377,
   "cases_total": 2379,
   "deferred_by_unit": {
-    "surface.offset_surface": 46,
     "surface.surf_of_extrusion_p2": 2
   },
   "max_rel_err": 0.0,

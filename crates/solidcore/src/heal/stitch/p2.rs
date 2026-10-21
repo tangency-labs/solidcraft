@@ -140,9 +140,9 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
 }
 
 /// `SmCurve::ApproximateLength(edge interval, samples)` of the edge's curve.
-fn edge_length(b: &Brep, e: EdgeId, samples: usize) -> Result<f64> {
+fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, samples: usize) -> Result<f64> {
     Ok(curve_of(b, e)?
-        .approximate_length(&edge::interval(b, e)?, samples, false)?
+        .approximate_length(k, &edge::interval(b, e)?, samples, false)?
         .0)
 }
 
@@ -296,7 +296,7 @@ impl Stitch<'_> {
                 }
 
                 // get edge->curve approximate length
-                let length = edge_length(b, e, 5)?;
+                let length = edge_length(k, b, e, 5)?;
 
                 // when edge is shorter than stitching tolerance and open (else upstream
                 // only tightens dMinEdgeLength, which nothing reads)
@@ -561,7 +561,8 @@ impl Stitch<'_> {
                         continue; // Don't stitch it if distance gets too big.
                     }
 
-                    let (do_glue, do_squeeze, squeeze_edge) = glue_or_squeeze(b, v, cv, dist_to_v)?;
+                    let (do_glue, do_squeeze, squeeze_edge) =
+                        glue_or_squeeze(k, b, v, cv, dist_to_v)?;
 
                     // skip squeezing vertices when m_bSqueezeSmallEdges is FALSE
                     if do_squeeze && !self.squeeze_small_edges {
@@ -728,7 +729,7 @@ impl Stitch<'_> {
                     let this_tol =
                         smos_max(tol_3d, edge::tolerance(b, test_e)? + edge::tolerance(b, e)?);
 
-                    let mid_pnt = e_curve.evaluate_point(e_ivl.evaluate(0.5))?;
+                    let mid_pnt = e_curve.evaluate_point(k, e_ivl.evaluate(0.5))?;
 
                     // If we're finding pdMinUnstitchedEdgeGap, collect every solution.
                     let guess = te_ivl.mid();
@@ -765,8 +766,8 @@ impl Stitch<'_> {
                     }
 
                     // Check relative orientation of the edge curves.
-                    let pv = e_curve.evaluate(e_ivl.evaluate(0.5), 1, true, true)?;
-                    let pv_test = te_curve.evaluate(dropped.parameter, 1, true, true)?;
+                    let pv = e_curve.evaluate(k, e_ivl.evaluate(0.5), 1, true, true)?;
+                    let pv_test = te_curve.evaluate(k, dropped.parameter, 1, true, true)?;
 
                     let mut orientation = OrientType::Same;
                     let mut t_start = te_ivl.min();
@@ -1057,7 +1058,7 @@ impl Stitch<'_> {
                     continue; // Don't stitch it if distance gets too big.
                 }
 
-                let (do_glue, do_squeeze, squeeze_edge) = glue_or_squeeze(b, v, cv, dist_to_v)?;
+                let (do_glue, do_squeeze, squeeze_edge) = glue_or_squeeze(k, b, v, cv, dist_to_v)?;
 
                 // skip squeezing vertices when m_bSqueezeSmallEdges is set to FALSE
                 if do_squeeze && !self.squeeze_small_edges {
@@ -1257,6 +1258,7 @@ impl Stitch<'_> {
 /// wire; neither when it is manifold or a second short edge exists. Returns
 /// `(glue, squeeze, first short lamina/wire edge)`.
 fn glue_or_squeeze(
+    k: &Kernel,
     b: &Brep,
     v: VertexId,
     other: VertexId,
@@ -1268,7 +1270,7 @@ fn glue_or_squeeze(
 
     // for every common edge between the vertices
     for e in vertex::common_edges(b, v, Some(other), None)? {
-        let edge_length = edge_length(b, e, 10)?;
+        let edge_length = edge_length(k, b, e, 10)?;
 
         // if edge is short
         if edge_length < 2.0 * dist {
@@ -1536,6 +1538,7 @@ mod tests {
 
     #[test]
     fn glue_or_squeeze_defaults_to_glue() {
+        let k = &Kernel::default();
         // no common edge: glue
         let mut b = Brep::new();
         let v1 = b
@@ -1544,7 +1547,7 @@ mod tests {
         let v2 = b
             .add_vertex(crate::math::Point3::new(1.0, 0.0, 0.0))
             .unwrap();
-        let (glue, squeeze, e) = glue_or_squeeze(&b, v1, v2, 1.0).unwrap();
+        let (glue, squeeze, e) = glue_or_squeeze(k, &b, v1, v2, 1.0).unwrap();
         assert!(glue && !squeeze && e.is_none());
     }
 

@@ -594,7 +594,7 @@ pub fn compute_loop_orientation(
         // walk all UVTrimCurves to determine if this is a CCW or CW loop
         let normal = Vec3::new(0.0, 0.0, 1.0);
         match CompositeCurve::compute_projected_loop_orientation(
-            &uv_curves, &senses, normal, uv_bounds,
+            k, &uv_curves, &senses, normal, uv_bounds,
         ) {
             Ok(o) if o != OrientType::Unknown => return Ok(o),
             Err(e) if e.is_unported() => return Err(e),
@@ -650,10 +650,10 @@ pub fn compute_loop_orientation(
     let mut param_shift = Vec2::new(0.0, 0.0);
 
     let closed_u = surf_copy
-        .is_closed(&surf_domain, SurfParamType::U, None, false)?
+        .is_closed(k, &surf_domain, SurfParamType::U, None, false)?
         .0;
     let closed_v = surf_copy
-        .is_closed(&surf_domain, SurfParamType::V, None, false)?
+        .is_closed(k, &surf_domain, SurfParamType::V, None, false)?
         .0;
 
     for &eu in &edgeuses {
@@ -1073,7 +1073,7 @@ pub fn is_degenerate(
         let zone_tol = opt_zone_tol_3d.unwrap_or(edge_tol);
 
         // when edge is degenerate - its classification is NULL
-        if edge_curve(b, e)?.is_degenerate(zone_tol, Some(&interval))? {
+        if edge_curve(b, e)?.is_degenerate(k, zone_tol, Some(&interval))? {
             classify.push(None);
         } else {
             classify.push(Some(curve_classification(
@@ -1113,7 +1113,7 @@ pub fn is_degenerate(
 
             // We have to get the magnitude of this vector in 3d.
             let uv_2d = Point2::new(uv_pt.x, uv_pt.y);
-            let eval = ignored(surface_of(b, f)?.evaluate_1st_derivatives(uv_2d, false, false))?;
+            let eval = ignored(surface_of(b, f)?.evaluate_1st_derivatives(k, uv_2d, false, false))?;
             if let Some((_srf_pt, su, sv)) = eval {
                 // get 3d vector from edge pointing into face - sized to Edge 1st Deriv
                 let vec_3d = su * uv_deriv.x + sv * uv_deriv.y;
@@ -1513,7 +1513,7 @@ pub fn face_intersect(
         'faces: for face in [f, other] {
             for e in face_edges(b, face)? {
                 let edge_crv = edge_curve(b, e)?;
-                if edge_crv.is_degenerate(EFF_ZERO, None)? {
+                if edge_crv.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
                 }
                 let mut new_crv = match edge_crv.copy(k) {
@@ -1561,7 +1561,7 @@ pub fn face_intersect(
                 continue;
             };
             // status ignored upstream
-            let point = ignored(curve.evaluate_point(0.5))?.unwrap_or(Vec3::UNDEF);
+            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
             let mut pc1 = PointClassification::<IntersectObject>::new(this_zone_tol);
             let mut pc2 = PointClassification::<IntersectObject>::new(other_zone_tol);
             // statuses ignored upstream

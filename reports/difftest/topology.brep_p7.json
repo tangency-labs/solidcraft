@@ -431,8 +431,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_box_with_large_fillet.smb_0",
@@ -443,8 +443,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_box_with_large_fillet.smb_1",
@@ -567,8 +567,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_cone.smb_0",
@@ -579,8 +579,8 @@
     },
     {
       "deferred": {
-        "symbol": "SmCone as SmSurface",
-        "unit": "surface.surface_p2"
+        "symbol": "SmFace::GetTolerance",
+        "unit": "topology.face_p2"
       },
       "max_rel_err": 0.0,
       "name": "read_cone.smb_1",
@@ -2856,11 +2856,11 @@
     "curve.crv_on_surf": 2,
     "curve.curve_p6": 2,
     "query.brep": 2,
-    "surface.surface_p2": 12,
+    "surface.surface_p2": 8,
     "topology.brep_p3": 36,
     "topology.brep_p4": 1,
     "topology.brep_p9": 2,
-    "topology.face_p2": 18,
+    "topology.face_p2": 22,
     "topology.face_p3": 1
   },
   "max_rel_err": 0.0,

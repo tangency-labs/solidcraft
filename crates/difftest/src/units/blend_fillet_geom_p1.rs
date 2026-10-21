@@ -1332,14 +1332,14 @@ fn face_brep(surface: Surface) -> Result<(Brep, FaceId), HarnessError> {
 /// A wire edge on `curve` over its natural interval (`CreateWireEdgeFromCurve`): start and
 /// end vertices at the curve ends (glued into the start vertex when closer than the
 /// B-rep tolerance), the edge with two edge uses and vertex uses.
-fn wire_edge(b: &mut Brep, curve: BSplineCurve, tol: Option<f64>) -> Result<EdgeId, HarnessError> {
+fn wire_edge(k: &Kernel, b: &mut Brep, curve: BSplineCurve, tol: Option<f64>) -> Result<EdgeId, HarnessError> {
     let c = Curve::from(curve);
     let ivl = c.natural_interval();
     let ps = c
-        .evaluate_point(ivl.min())
+        .evaluate_point(k, ivl.min())
         .map_err(|e| harness(e.to_string()))?;
     let pe = c
-        .evaluate_point(ivl.max())
+        .evaluate_point(k, ivl.max())
         .map_err(|e| harness(e.to_string()))?;
     let vs = b.add_vertex(ps).map_err(|e| harness(e.to_string()))?;
     let ve = if ps.distance(pe) < ZONE_TOL_3D {
@@ -1408,7 +1408,7 @@ impl RustModel {
         let mut target = Brep::new();
         let mut target_edges = Vec::new();
         for c in &m.targets {
-            target_edges.push(wire_edge(&mut target, curve_of(c)?, None)?);
+            target_edges.push(wire_edge(&k, &mut target, curve_of(c)?, None)?);
         }
         let mut target_faces = Vec::new();
         for s in &m.faces {
@@ -1424,7 +1424,7 @@ impl RustModel {
         let mut fillet = Brep::new();
         let mut fillet_edges = Vec::new();
         for e in &m.fillet_brep {
-            fillet_edges.push(wire_edge(&mut fillet, curve_of(&e.curve)?, Some(e.tol))?);
+            fillet_edges.push(wire_edge(&k, &mut fillet, curve_of(&e.curve)?, Some(e.tol))?);
         }
 
         let mut fb = FilletBrep::new();
@@ -1901,7 +1901,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
         Inputs::SurfaceClosure { surface, domain } => {
             let s = surface_of(surface)?;
             let dom = Extent2d::from_bounds(domain[0][0], domain[0][1], domain[1][0], domain[1][1]);
-            match try_status!(fg::set_surface_closure(&s, &dom)) {
+            match try_status!(fg::set_surface_closure(&k, &s, &dom)) {
                 Ok(c) => o.extend([0.0, c as u64 as f64]),
                 Err(st) => o.push(st),
             }
@@ -1929,7 +1929,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             let s = surface_of(surface)?;
             let mut q = uv(*p);
             let r =
-                fg::adjust_uv_on_seam(&s, Vec3::new(ref_dir[0], ref_dir[1], ref_dir[2]), &mut q);
+                fg::adjust_uv_on_seam(&k, &s, Vec3::new(ref_dir[0], ref_dir[1], ref_dir[2]), &mut q);
             match try_status!(r) {
                 Ok(()) => o.push(0.0),
                 Err(st) => o.push(st),
@@ -2019,7 +2019,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Inputs::EvaluateMate { surface, uv: p } => {
             let (b, f) = face_brep(surface_of(surface)?)?;
-            match try_status!(fg::evaluate_mate(&b, f, uv(*p))) {
+            match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
                 Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }
@@ -2030,7 +2030,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 Ok(srf) => {
                     let (b, f) = face_brep(srf)?;
                     o.push(0.0);
-                    match try_status!(fg::evaluate_mate(&b, f, uv(*p))) {
+                    match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
                         Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
                         Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
                     }

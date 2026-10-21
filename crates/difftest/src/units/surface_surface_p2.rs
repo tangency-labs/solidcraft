@@ -1176,6 +1176,7 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
         // an SmSurfOfRevolution is an SmBSplineSurface: its NURB
         Some(sp2::SurfaceKind::SurfOfRevolution(r)) => dump_bss(o, r.base()),
         Some(sp2::SurfaceKind::Cone(c)) => dump_bss(o, c.rev().base()),
+        // `put_state` of a surface that is not a B-spline
         Some(
             sp2::SurfaceKind::CurveBounded(_)
             | sp2::SurfaceKind::Step(_)
@@ -1447,7 +1448,7 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
             record(|o| {
                 let c = match &s {
                     Some(x) if anal => x.copy_and_add_analytics(k)?,
-                    Some(x) => x.copy()?,
+                    Some(x) => x.copy(k)?,
                     None if anal => sp2::base_copy_and_add_analytics()?,
                     None => sp2::base_copy()?,
                 };
@@ -2749,7 +2750,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         if let Some(value) = case.inputs.get("common_cone") {
             return super::surface_cone_p1::common_rust(value.clone(), case.inputs.get("common_db"), case.inputs.get("common_lazy").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_subdomain").and_then(Value::as_bool).unwrap_or(false), case.inputs.get("common_queries").and_then(Value::as_bool).unwrap_or(false));
         }
@@ -2765,7 +2766,7 @@ mod tests {
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
-let k = &Kernel::default();
+        let k = &Kernel::default();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..2000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);

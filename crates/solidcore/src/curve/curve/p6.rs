@@ -2029,7 +2029,7 @@ mod tests {
                     reused.success && reused.distance < tol,
                     "angle {a}: {reused:?}"
                 );
-                let q = full.evaluate_point(reused.parameter).unwrap();
+                let q = full.evaluate_point(&k, reused.parameter).unwrap();
                 assert!(q.distance(on) < tol, "angle {a}: {q:?}");
             }
         }
@@ -2049,7 +2049,7 @@ mod tests {
         let (ivl, other_ivl) = (full.natural_interval(), half.natural_interval());
         let tol = 1e-6;
         let objects = [None::<NoObject>, None];
-        assert!(full.is_split_needed(&ivl, tol).unwrap());
+        assert!(full.is_split_needed(&k, &ivl, tol).unwrap());
 
         let mut caches = [None, None];
         let mut check = || {
@@ -2078,8 +2078,8 @@ mod tests {
         for s in &prefilled.solutions {
             let mut angles = [0.0; 2];
             for (angle, e) in angles.iter_mut().zip([&s.start, &s.end]) {
-                let p = full.evaluate_point(e.param(0).unwrap()).unwrap();
-                let q = half.evaluate_point(e.param(1).unwrap()).unwrap();
+                let p = full.evaluate_point(&k, e.param(0).unwrap()).unwrap();
+                let q = half.evaluate_point(&k, e.param(1).unwrap()).unwrap();
                 assert!(p.distance(q) < tol, "{p:?} vs {q:?}");
                 assert!(p.y > -tol && (p.length() - 2.0).abs() < tol, "{p:?}");
                 *angle = p.y.max(0.0).atan2(p.x);

@@ -750,8 +750,8 @@ fn rust_bisector(k: &Kernel, b: &Brep, c: &BisectorCase) -> Result<Output, Harne
     let line = match objects.classify_uv_curve() {
         Some(l) if r.has_curve => {
             let ivl: Extent1d = l.natural_interval();
-            let a = l.evaluate_point(ivl.min()).map_err(|e| harness(e.to_string()))?;
-            let z = l.evaluate_point(ivl.max()).map_err(|e| harness(e.to_string()))?;
+            let a = l.evaluate_point(k, ivl.min()).map_err(|e| harness(e.to_string()))?;
+            let z = l.evaluate_point(k, ivl.max()).map_err(|e| harness(e.to_string()))?;
             vec![a.x, a.y, z.x, z.y]
         }
         _ => Vec::new(),
