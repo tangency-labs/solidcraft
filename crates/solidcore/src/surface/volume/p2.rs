@@ -51,7 +51,7 @@
 //!   private handle.
 //! - **Recursion.** The next-map chain is walked recursively as upstream (one level
 //!   per map; chains are built by the caller). `ReadFromDB` recursion is input
-//!   driven and bounded by [`DatabaseReader::enter_nested`] (64 levels); past the
+//!   driven and bounded by [`DatabaseReader::enter_nested`] (32 levels); past the
 //!   bound the read fails with [`SolidError::InvalidInput`], which the nested reads
 //!   whose statuses upstream ignores propagate rather than drop.
 //! - **Contexts** and `bCalcGeometric` (unused by the ported simple maps) are dropped.
@@ -1892,21 +1892,23 @@ mod tests {
 
     #[test]
     fn nesting_bound_is_not_an_ignored_status() {
-        // 65 twists chained by next maps, one past the bound; the twist data and
-        // base flags are zeros, so a swallowed bound error would leave a stream that
-        // still reads as a shorter (64-map) chain
+        // MAX_READ_NESTING + 1 (33) twists chained by next maps, one past the bound;
+        // the twist data and base flags are zeros, so a swallowed bound error would
+        // leave a stream that still reads as a shorter (32-map) chain
+        let max = crate::topology::database_io::MAX_READ_NESTING as usize;
+        assert_eq!(max, 32);
         let twist = format!("0\n0\n1\nObject Type {TWIST_VOLUME_TYPE}\n");
-        let mut text = twist.repeat(64);
+        let mut text = twist.repeat(max);
         text.push_str("0\n0\n0\n0\n");
-        text.push_str(&"0\n".repeat(64));
+        text.push_str(&"0\n".repeat(max));
         assert!(matches!(
             Volume::read_from_db(TWIST_VOLUME_TYPE, &mut ascii(&text), 30),
             Err(SolidError::InvalidInput { reason, .. }) if reason == NESTING_LIMIT_REASON
         ));
-        // 64 maps read
-        let mut text = twist.repeat(63);
+        // MAX_READ_NESTING (32) maps read
+        let mut text = twist.repeat(max - 1);
         text.push_str("0\n0\n0\n0\n");
-        text.push_str(&"0\n".repeat(63));
+        text.push_str(&"0\n".repeat(max - 1));
         let vol = Volume::read_from_db(TWIST_VOLUME_TYPE, &mut ascii(&text), 30).unwrap();
         let mut n = 0;
         let mut p = Some(&vol);
@@ -1914,7 +1916,7 @@ mod tests {
             n += 1;
             p = q.next_map();
         }
-        assert_eq!(n, 64);
+        assert_eq!(n, max);
     }
 
     #[test]

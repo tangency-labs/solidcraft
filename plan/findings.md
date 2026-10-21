@@ -2051,7 +2051,7 @@ Upstream `SmCurve::ReadFromDB` dispatches to `SmProjectedCurve::ReadFromDB` (and
 iso, ... curves), which reads its base curve through `SmCurve::ReadFromDB` again, with no
 depth limit: a crafted file of a few bytes per level overflows the stack. The Rust
 dispatcher bounds nesting with `DatabaseReader::enter_nested` (limit
-`MAX_READ_NESTING` = 64); deeper input is `InvalidInput`. Deviation from upstream only
+`MAX_READ_NESTING` = 32, lowered from 64 for the wasm32 stack); deeper input is `InvalidInput`. Deviation from upstream only
 for inputs that would crash it. Found by the commit security review of
 `curve.projected_curve`.
 
@@ -4992,8 +4992,9 @@ there is no new SSI implementation or external corpus use.
   offset distance: the revolution polar-box reproducer is rejected, while nonzero plane
   offset `(hu=2,hv=0,upper)` stays covered. Shim roots/intermediates/borrowed bases use
   scoped ownership.
-- **Rust nesting:** construction/restoration checks a maximum of 64 surface wrappers,
-  including STEP/bounded wrappers and extended bases, before recursive queries.
+- **Rust nesting:** construction/restoration checks a maximum of `MAX_SURFACE_NESTING`
+  (32) surface wrappers, including STEP/bounded wrappers and extended bases, before
+  recursive queries.
 
 - **Extension cache.** Upstream's `const` evaluators (`EvaluatePoint`, `Evaluate`,
   `EvaluateSimple`, and `EvaluateNormal` through the `SmSurface` body) build an extended

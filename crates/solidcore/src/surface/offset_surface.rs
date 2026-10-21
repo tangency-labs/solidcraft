@@ -84,7 +84,7 @@
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
 //!   fixtures reach depth 1). Construction and restoration bound nested surface
-//!   wrappers to [`MAX_SURFACE_NESTING`] (64, versus at most 3 in fixtures), including
+//!   wrappers to [`MAX_SURFACE_NESTING`] (32, versus at most 3 in fixtures), including
 //!   STEP/bounded wrappers and extended bases, before any recursive geometry query.
 //!   Database dispatch also enforces the reader's nesting limit.
 //! - **Database.** `ReadFromDB` always makes a new surface (the fill-an-existing-object
@@ -1751,8 +1751,10 @@ impl OffsetSurface {
 
 /// Maximum wrapper depth accepted by offset construction and restoration.
 ///
-/// Bounds recursive domain queries, edits, cloning and destruction on wasm32.
-pub const MAX_SURFACE_NESTING: usize = 64;
+/// Bounds recursive domain queries, edits, cloning and destruction on wasm32. Equal
+/// to the database reader's bound
+/// ([`MAX_READ_NESTING`](crate::topology::database_io::MAX_READ_NESTING)).
+pub const MAX_SURFACE_NESTING: usize = 32;
 
 /// Walk wrappers in base-before-extension order, checking before recursive descent.
 fn check_surface_nesting(surface: &Surface, depth: usize, op: &'static str) -> Result<()> {

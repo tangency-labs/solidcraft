@@ -68,7 +68,7 @@ pub const MAX_DEGREE: usize = 4;
 pub const MAX_COORD: f64 = 1e8;
 /// Most nested volume reads in a `ReadDb` text (the head included), as
 /// `solidcore::topology::database_io::MAX_READ_NESTING`.
-pub const MAX_READ_NESTING: usize = 64;
+pub const MAX_READ_NESTING: usize = 32;
 /// Longest database text.
 pub const MAX_DATA: usize = 1 << 16;
 /// Shortest side of a bounded box handed to an unbend's `EvaluateBoundingBoxSimple`:
@@ -646,7 +646,7 @@ impl<'a> Text<'a> {
     /// The derived data and base data of a volume of type `t`; `Ok(false)` when the
     /// read fails without reading anything.
     fn volume(&mut self, t: i64, depth: usize) -> Result<bool, FfiError> {
-        // the Rust reader's documented bound (`MAX_READ_NESTING`, 64 nested reads):
+        // the Rust reader's documented bound (`MAX_READ_NESTING`, 32 nested reads):
         // a deeper stream is a deliberate deviation (Rust fails, C++ recurses on)
         if depth >= MAX_READ_NESTING {
             return Err(bad("database volumes nested past the Rust reader's bound"));

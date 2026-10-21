@@ -54299,59 +54299,59 @@
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_twist_64",
+      "name": "nest_twist_32",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#0",
-      "values_compared": 322
+      "values_compared": 162
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_transform_64",
+      "name": "nest_transform_32",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#1",
-      "values_compared": 1218
+      "values_compared": 610
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_unbend_64",
+      "name": "nest_unbend_32",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#2",
-      "values_compared": 322
+      "values_compared": 162
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_mixed_64",
+      "name": "nest_mixed_32",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#3",
-      "values_compared": 630
+      "values_compared": 316
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_twist_63_orient",
+      "name": "nest_twist_31_orient",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#4",
-      "values_compared": 349
+      "values_compared": 189
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_mixed_63_orient",
+      "name": "nest_mixed_31_orient",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#5",
-      "values_compared": 643
+      "values_compared": 329
     },
     {
       "max_rel_err": 0.0,
-      "name": "nest_twist_33",
+      "name": "nest_twist_17",
       "outcome": "pass",
       "pass": true,
       "source": "fixture:fixtures/surface.volume_p2/review3_nesting.json#6",
-      "values_compared": 167
+      "values_compared": 87
     },
     {
       "max_rel_err": 0.0,

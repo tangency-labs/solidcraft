@@ -60,10 +60,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 # difftest runs optimised (FP results are unchanged: Rust never contracts or reassociates
-# floating point) but keeps overflow checks and debug assertions as a safety net.
+# floating point; every --green report is identical at opt-level 1 and 3) but keeps
+# overflow checks and debug assertions as a safety net.
 [profile.difftest]
 inherits = "release"
-opt-level = 1
+opt-level = 3
 overflow-checks = true
 debug-assertions = true
 incremental = true

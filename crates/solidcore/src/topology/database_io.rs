@@ -60,6 +60,20 @@
 //!   `sizeof(short) != 2` and always returns 0 (its shifts are truncated to 16 bits).
 //! - `ReadCharacters` and the write side (`Write*`, `OpenFileForWrite`) belong to
 //!   other units and are not here.
+//! - **Nesting bound.** Upstream recurses through nested polymorphic reads (a curve
+//!   holding a curve holding ...) without limit. The port stops at
+//!   [`MAX_READ_NESTING`] = 32 levels ([`DatabaseReader::enter_nested`]); upstream
+//!   fixtures nest at most 3. Past the bound the read is [`SolidError::InvalidInput`]
+//!   with [`NESTING_LIMIT_REASON`].
+//! - **Stack use (wasm32).** Measured on x86-64 (reader fuzz driver, smallest thread
+//!   stack that reads the file): at the old 64-level bound a file of 64 chained offset
+//!   surfaces needed about 2 MiB in an unoptimised (debug) build and 384 KiB at
+//!   `opt-level = 1`. At 32 levels it needs about 1 MiB (debug) and 210 KiB
+//!   (`opt-level = 1`); 16 pairs of a surface of revolution over an iso curve on the
+//!   next one need 770 KiB and 180 KiB. `wasm32-unknown-unknown` has a 1 MiB default
+//!   stack and no guard page, so an overflow there corrupts memory silently: wasm
+//!   consumers must build the kernel optimised (`opt-level >= 1`) or raise the stack
+//!   (`-C link-arg=-zstack-size=<bytes>`, at least 2 MiB for an unoptimised build).
 
 use crate::error::{Result, SolidError};
 
@@ -629,8 +643,10 @@ pub struct DatabaseReader {
 
 /// Deepest nesting of polymorphic reads (a curve holding a curve holding ...) a
 /// reader accepts. Not upstream: upstream recurses without bound, so a crafted file
-/// overflows the stack. Real models nest a handful of levels.
-pub const MAX_READ_NESTING: u32 = 64;
+/// overflows the stack. Real models nest a handful of levels (upstream fixtures at
+/// most 3). 32 (64 before) halves the stack a crafted file can use; see the module
+/// docs, "Stack use", for what wasm32 builds still need.
+pub const MAX_READ_NESTING: u32 = 32;
 
 /// The `reason` of the [`SolidError::InvalidInput`] that
 /// [`DatabaseReader::enter_nested`] returns past [`MAX_READ_NESTING`]. Readers that
@@ -991,6 +1007,7 @@ impl DatabaseReader {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn nesting_is_bounded() {
@@ -1002,7 +1019,86 @@ mod tests {
         db.leave_nested();
         assert!(db.enter_nested("test").is_ok());
     }
-    use super::*;
+
+    /// Bilinear B-spline surface record (version 30), the innermost surface of the
+    /// nesting chains below; it does not count a nesting level.
+    const BSPLINE_SURFACE: &str =
+        "Object Type 15002\n1 1\n1 1\n0\n0 0 0\n0 3 0\n2 0 0\n2 3 1\n0\n0\n1\n1\n0\n0\n1\n1\n";
+    /// One offset surface wrapper (one nesting level), as the reader fuzz builds it.
+    const OFFSET_WRAPPER: &str = "Object Type 15400\n0.1\n0\n0\n0\n0\n//base\n";
+    /// A surface of revolution whose generator is an iso curve on the next surface
+    /// (two nesting levels), as the reader fuzz builds it.
+    const REV_ISO_PAIR: &str = "Object Type 15020\n0\n0\n0 0 0\n1 0 0\n0 1 0\n0 0 1 1\n0\n//gen\n\
+                                Object Type 14045\nCurve Dim 3\n0\n0.5\n1\n//surf\n";
+
+    /// Reads the surface (type header and record) at the start of `text`.
+    fn read_surface(text: &str) -> Result<crate::surface::surface::Surface> {
+        let k = crate::kernel::Kernel::default();
+        let mut db = DatabaseReader::new();
+        db.open_for_read(text.as_bytes().to_vec(), FileType::Ascii);
+        let ty = db.read_type(false)?.type_code.unwrap_or_default();
+        crate::surface::surface::Surface::read_from_db(&k, ty, &mut db, 30)
+    }
+
+    fn is_nesting_error(r: &Result<crate::surface::surface::Surface>) -> bool {
+        matches!(r, Err(SolidError::InvalidInput { reason, .. }) if *reason == NESTING_LIMIT_REASON)
+    }
+
+    /// `offsets` offset surfaces chained over a B-spline surface.
+    fn offset_chain(offsets: usize) -> String {
+        let mut text = OFFSET_WRAPPER.repeat(offsets);
+        text.push_str(BSPLINE_SURFACE);
+        // the line break each offset skips after its base record
+        text.push_str(&"\n".repeat(offsets));
+        text
+    }
+
+    /// `offsets` offset surfaces over `pairs` revolution/iso pairs over a B-spline
+    /// surface: `offsets + 2 * pairs` nesting levels.
+    fn rev_iso_chain(offsets: usize, pairs: usize) -> String {
+        let mut text = OFFSET_WRAPPER.repeat(offsets);
+        text.push_str(&REV_ISO_PAIR.repeat(pairs));
+        text.push_str(BSPLINE_SURFACE);
+        text
+    }
+
+    #[test]
+    fn offset_surface_chain_reads_to_the_bound() {
+        assert_eq!(MAX_READ_NESTING, 32);
+        for depth in [1, 31, 32] {
+            let s = read_surface(&offset_chain(depth));
+            assert!(s.is_ok(), "depth {depth}: {s:?}");
+        }
+        for depth in [33, 64, 1000] {
+            let s = read_surface(&offset_chain(depth));
+            assert!(is_nesting_error(&s), "depth {depth}: {s:?}");
+        }
+    }
+
+    #[test]
+    fn revolution_iso_chain_is_bounded() {
+        // An iso curve is not derived from `SmBSplineCurve`, so the innermost surface
+        // of revolution rejects its generator once every level has been read: up to
+        // the bound the chain fails with that error, past it with the nesting error.
+        let not_b_spline = crate::surface::surf_of_revolution::p1::not_b_spline();
+        for (offsets, pairs) in [(0, 1), (1, 15), (0, 16)] {
+            let s = read_surface(&rev_iso_chain(offsets, pairs));
+            assert_eq!(
+                s.as_ref().err(),
+                Some(&not_b_spline),
+                "{} levels",
+                offsets + 2 * pairs
+            );
+        }
+        for (offsets, pairs) in [(1, 16), (0, 17), (0, 32), (0, 500)] {
+            let s = read_surface(&rev_iso_chain(offsets, pairs));
+            assert!(
+                is_nesting_error(&s),
+                "{} levels: {s:?}",
+                offsets + 2 * pairs
+            );
+        }
+    }
 
     fn ascii(s: &str) -> InputStream {
         InputStream::new(s.as_bytes().to_vec())

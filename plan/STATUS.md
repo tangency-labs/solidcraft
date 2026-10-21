@@ -293,7 +293,7 @@ adds a variant must also extend the exhaustive matches in `curve::curve_cache`.
   `GlobalPointSolveSTEP`; `curve.curve_p1`'s porter decides the port (`SM_ERR`).
 - Nested polymorphic reads (`SmCurve::ReadFromDB` -> projected/offset/iso curve ->
   `SmCurve::ReadFromDB`) have no depth limit upstream; the port bounds them at
-  `MAX_READ_NESTING` = 64.
+  `MAX_READ_NESTING` = 32.
 - `curve.tangent_field`: `SmTangentField` derives from `SmCrvOnSurf`; `SetAll`,
   `GetNaturalInterval`, `IsKindOf`, `operator==` are `CO-PORT(curve.crv_on_surf)`.
 - `nlib.srf_adv_p5`: with rails and rational input the derivative curves share the
