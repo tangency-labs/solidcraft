@@ -101,7 +101,7 @@ pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: 
             };
             fitted.push((pc, u.forward));
         }
-        on.close(&mut fitted)?;
+        on.close(&mut fitted, tolerance)?;
         out.push(fitted.into_iter().map(|(c, _)| c).collect());
     }
     Ok(out)
@@ -254,10 +254,29 @@ impl On {
         Some(q)
     }
 
-    fn sample(&self, curve: &CurveEval, t: f64, near: Option<[f64; 2]>, accept: f64) -> Result<Sample> {
+    fn sample(&self, curve: &CurveEval, t: f64, near: Option<[f64; 2]>, accept: f64, reach: f64) -> Result<Sample> {
         let p = curve.point(t).ok_or_else(|| Error::Failed(format!("the curve has no point at {t}")))?;
         let uv = self.project(p, near, accept).ok_or_else(|| self.off(p, t, near))?;
-        Ok(Sample { t, p, uv, pole: self.surface.pole(uv), mid: None })
+        Ok(Sample { t, p, uv, pole: self.pole(uv, reach), mid: None })
+    }
+
+    /// Whether `uv` is at a pole along each direction, or within `reach` of one: moving that
+    /// parameter by half its period (or across its range) moves the point by no more than `reach`
+    /// at its speed there. There the parameter is as free as at the pole itself.
+    fn pole(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
+        let mut out = self.surface.pole(uv);
+        let Some((_, su, sv)) = self.surface.derivs(uv[0], uv[1]) else { return out };
+        for (d, speed) in [su.len(), sv.len()].into_iter().enumerate() {
+            let span = match (self.dom.period.get(d).copied().flatten(), self.dom.range.get(d).copied().flatten()) {
+                (Some(period), _) => 0.5 * period,
+                (None, Some((a, b))) => (b - a).abs(),
+                (None, None) => continue,
+            };
+            if let Some(flag) = out.get_mut(d) {
+                *flag |= speed * span <= reach;
+            }
+        }
+        out
     }
 
     /// The error for a curve point `p` (at `t`) farther than the fit allows from the surface.
@@ -272,6 +291,9 @@ impl On {
     /// sampled twice as densely until none does.
     fn fit(&self, record: &Curve, curve: &CurveEval, [t0, t1]: [f64; 2], tol: f64) -> Result<Curve2> {
         let (target, accept) = (0.5 * tol, 0.5 * tol);
+        // Samples this near a pole take their free parameter from a neighbour, which moves
+        // their lift by at most this (well inside the target).
+        let reach = 0.25 * tol;
         // Interior knots: where the curve's own parameterisation is less smooth (a pcurve is no
         // smoother than its curve), else even.
         let mut inner = breaks(record, t0, t1);
@@ -289,7 +311,7 @@ impl On {
             let (a, b) = (w.first().copied().unwrap_or(t0), w.get(1).copied().unwrap_or(t1));
             for k in usize::from(!samples.is_empty())..=PER_SPAN {
                 let t = if k == PER_SPAN { b } else { a + (b - a) * k as f64 / PER_SPAN as f64 };
-                let s = self.sample(curve, t, near, accept)?;
+                let s = self.sample(curve, t, near, accept, reach)?;
                 near = Some(s.uv);
                 samples.push(s);
             }
@@ -340,7 +362,7 @@ impl On {
                         let t = 0.5 * (s.t + n.t);
                         let uv = self.project(m, Some(s.uv), accept).ok_or_else(|| self.off(m, t, Some(s.uv)))?;
                         dense.push(Sample { mid: None, ..s });
-                        dense.push(Sample { t, p: m, uv, pole: self.surface.pole(uv), mid: None });
+                        dense.push(Sample { t, p: m, uv, pole: self.pole(uv, reach), mid: None });
                     }
                     _ => dense.push(s),
                 }
@@ -352,10 +374,11 @@ impl On {
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
     /// loop order and direction), then all together into the surface's base period where the
-    /// loop's lowest point allows. Where uses meet at a pole the periodic parameter is free:
-    /// there the offsets that turn the loop counter-clockwise in (u, v) (a face boundary seen
-    /// from the natural normal) are taken, else the nearest.
-    fn close(&self, uses: &mut [(Curve2, bool)]) -> Result<()> {
+    /// loop's lowest point allows. Where uses meet at a pole (within `tol`) the periodic
+    /// parameter is free: there the offsets that turn the loop counter-clockwise in (u, v) (a
+    /// face boundary seen from the natural normal) by more than rounding are taken, else the
+    /// nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::with_capacity(n);
         for (c, fwd) in uses.iter() {
@@ -367,7 +390,7 @@ impl On {
             let Some(period) = self.dom.period.get(d).copied().flatten().filter(|p| *p > 0.0) else { continue };
             // Start after a pole junction if there is one: from there continuity fixes the
             // offsets up to the next pole.
-            let at_pole: Vec<bool> = ends.iter().map(|(s, _)| self.surface.pole(*s).get(d).copied().unwrap_or(false)).collect();
+            let at_pole: Vec<bool> = ends.iter().map(|(s, _)| self.pole(*s, tol).get(d).copied().unwrap_or(false)).collect();
             let first = at_pole.iter().position(|&p| p).unwrap_or(0);
             let order: Vec<usize> = (0..n).map(|k| (first + k) % n).collect();
             let mut shift = vec![0.0; n];
@@ -384,6 +407,11 @@ impl On {
             // After each later pole one period less, none or more: the right turn, then the
             // fewest moves.
             if !free.is_empty() && free.len() <= 6 {
+                // Less than this is rounding: a loop that encloses nothing (a seam's two uses
+                // on one line) has no turn, whatever the sign of its area.
+                let other = uses.iter().flat_map(|(c, _)| points(c).into_iter().filter_map(|q| q.get(1 - d).copied()));
+                let (lo, hi) = other.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
+                let flat = if hi >= lo { 1e-9 * period * (hi - lo) } else { 0.0 };
                 let mut best: Option<(bool, usize, Vec<f64>)> = None;
                 for combo in 0..3usize.pow(free.len() as u32) {
                     let (mut code, mut moved, mut add) = (combo, 0, 0.0);
@@ -399,7 +427,7 @@ impl On {
                             *slot += add;
                         }
                     }
-                    let right = area(uses, &extra, d) > 0.0;
+                    let right = area(uses, &extra, d) > flat;
                     if best.as_ref().is_none_or(|(r, m, _)| (right && !r) || (right == *r && moved < *m)) {
                         best = Some((right, moved, extra));
                     }
