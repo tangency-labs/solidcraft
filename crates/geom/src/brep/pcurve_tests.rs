@@ -486,22 +486,30 @@ fn intersection_curves_lie_on_both_surfaces() {
     }
 }
 
-/// A thread flank as a screw sweep leaves it: a spline strip winding twenty turns of pitch 1 about
+/// A thread flank as a screw sweep leaves it: a spline strip winding twenty-two turns of pitch 1 about
 /// z, rising from radius 3 to radius 4 by half the pitch, so one turn lies 0.89 mm from the next,
 /// and its v = ½ line (its rows' midpoints on its u knots, so it lies on the strip).
 fn thread_flank() -> (Surface, Curve) {
-    const TURNS: usize = 20;
-    const PER_TURN: usize = 8;
-    let n = TURNS * PER_TURN + 1;
+    helical_strip([3., 4.], 0.5, 0.5)
+}
+
+/// A spline strip winding twenty-two turns of pitch 1 about z from radius `r[0]` (v = 0) to `r[1]`
+/// (v = 1), rising by `rise` across, and its line at v = `at` (its rows' points there on its u
+/// knots, so it lies on the strip).
+fn helical_strip(r: [f64; 2], rise: f64, at: f64) -> (Surface, Curve) {
+    // Control points 7.3 to a turn (161 over 22 turns), so the knots fall at other angles on
+    // each turn.
+    const PER_TURN: f64 = 7.3;
+    let n = 161;
     let helix = |r: f64, rise: f64| -> Vec<[f64; 3]> {
         (0..n)
             .map(|i| {
-                let a = TAU * i as f64 / PER_TURN as f64;
+                let a = TAU * i as f64 / PER_TURN;
                 [r * a.cos(), r * a.sin(), a / TAU + rise]
             })
             .collect()
     };
-    let (inner, outer) = (helix(3., 0.), helix(4., 0.5));
+    let (inner, outer) = (helix(r[0], 0.), helix(r[1], rise));
     let mut u_knots = vec![0.; 4];
     u_knots.extend((1..n - 3).map(|k| k as f64 / (n - 3) as f64));
     u_knots.extend([1.; 4]);
@@ -510,7 +518,8 @@ fn thread_flank() -> (Surface, Curve) {
         v_knots: vec![0., 0., 1., 1.],
         points: inner.iter().zip(&outer).map(|(a, b)| vec![*a, *b]).collect(),
     };
-    let middle = Curve::Spline { knots: u_knots, points: inner.iter().zip(&outer).map(|(a, b)| [0, 1, 2].map(|k| 0.5 * (a[k] + b[k]))).collect() };
+    let middle =
+        Curve::Spline { knots: u_knots, points: inner.iter().zip(&outer).map(|(a, b)| [0, 1, 2].map(|k| (1. - at) * a[k] + at * b[k])).collect() };
     (surface, middle)
 }
 
@@ -525,6 +534,22 @@ fn edges_on_a_spline_winding_several_turns_stay_on_their_turn() {
             let e = lift_error(&surface, &middle, interval, pc);
             assert!(e <= tol, "{interval:?} at {tol}: {e}");
         }
+    }
+}
+
+/// A thread's root band, 0.93 of the pitch tall, its turns 0.07 mm apart: an edge along its lower
+/// rim (as where the root meets a shoulder) gets a pcurve on its own turn, though the rim of the
+/// turn below passes nearer some of the search's starts than its own turn does.
+#[test]
+fn an_edge_along_the_rim_of_a_band_winding_close_to_itself_stays_on_its_turn() {
+    let (surface, rim) = helical_strip([5., 5.], 0.93, 0.);
+    // Short edges starting every 1/64 of a turn round one turn.
+    for k in 0..64 {
+        let t0 = 0.5 + f64::from(k) / (64. * 22.);
+        let interval = [t0, t0 + 1. / 64.];
+        let pc = &pcurves(&surface, &one(&rim, interval), 2e-4).unwrap()[0][0];
+        let e = lift_error(&surface, &rim, interval, pc);
+        assert!(e <= 2e-4, "{interval:?}: {e}");
     }
 }
 

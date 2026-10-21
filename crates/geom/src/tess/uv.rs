@@ -210,11 +210,17 @@ pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, a
         }
     }
     starts.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, start) in starts.iter().take(4) {
+    // The nearest starts first, until one converges within `accept`: where turns of a surface
+    // pass close to each other (a thread's root band a tenth of a millimetre from the next
+    // turn's), the nearest few can all lie on the wrong turn.
+    for (_, start) in starts.iter().take(NEWTON_STARTS) {
         if let Some((uv, d)) = newton(s, dom, p, *start)
             && best.is_none_or(|(_, bd)| d < bd)
         {
             best = Some((uv, d));
+        }
+        if accept.is_finite() && best.is_some_and(|(_, d)| d <= accept) {
+            break;
         }
     }
     best.filter(|(_, d)| *d <= accept).map(|(uv, _)| uv)
@@ -226,6 +232,8 @@ const EVEN_STARTS: usize = 16;
 const SPAN_STARTS: usize = 2;
 /// Most points of the surface the search measures.
 const MAX_STARTS: usize = 1 << 14;
+/// Most of them it runs Gauss–Newton from.
+const NEWTON_STARTS: usize = 32;
 
 /// The parameters along direction `d` (over `range`) that [`project`] starts from when it has no
 /// hint: even steps across the range, and where the surface has its own knots along `d` (a
