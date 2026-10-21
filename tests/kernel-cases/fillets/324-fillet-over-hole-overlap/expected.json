@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#324",
+  "tangency-labs/solidcraft#1885"
+ ],
+ "what": "a 4 mm fillet on a top edge whose round overlaps the rim of a through hole (the hole breaks into the round)",
+ "source": "analytic",
+ "method": "block 40x20x10 minus a through hole of r=3 centred (20,14.5), then R4 on the top long edge at y=20 (round covers y=16..20, removes 40*(16-4pi) = 137.35 from the plain block). Where the hole reaches into the round (y>16) the two removals overlap: that volume is counted twice by 137.35 + 282.74, so add it back: overlap = integral over y from 16 to 17.5 of [4 - sqrt(16-(y-16)^2)] (height removed by the round) x 2 sqrt(9-(y-14.5)^2) (chord of the hole) dy = 0.3758 (Simpson, 40000 steps). V = 8000 - 9*pi*10 - 40*(16-4*pi) + overlap = 7580.287.",
+ "body_count": 1,
+ "volume_mm3": 7580.287315360674
+}

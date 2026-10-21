@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1668",
+  "tangency-labs/solidcraft#1720"
+ ],
+ "what": "an R5 round on an outer top edge and the matching inner (concave) edge of a 2 mm wall in one feature fits, as it does one after the other",
+ "source": "analytic",
+ "method": "box 100x60x40 shelled outward 2 mm with the bottom face open: outer box 104x64x42 minus the 100x60x40 cavity = 39552. The outer round (convex, length 104) removes (1-pi/4) 25 x 104; the inner round (concave, length 100) adds (1-pi/4) 25 x 100. The two quarter-circle arcs (centres (y=27,z=37) and (25,35)) stay 2.8 mm apart at their closest, so the wall never breaks through and nothing overlaps. V = 39552 - 21.46 = 39530.5.",
+ "body_count": 1,
+ "volume_mm3": 39530.53981633975
+}

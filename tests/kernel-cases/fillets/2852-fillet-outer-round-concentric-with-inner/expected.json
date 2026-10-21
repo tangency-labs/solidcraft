@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2852"
+ ],
+ "what": "an R18 round on the outside top edges of a 3 mm thick upside-down U, concentric with the R15 round of its inside edges",
+ "source": "analytic",
+ "method": "box 245x218x236 with a 239 wide cut from below up to z=233: walls 3 mm, top 3 mm, V0 = 245*218*236 - 239*218*233. R15 on the two inside top edges (concave, length 218) adds (1-pi/4) 225 x 218 each; R18 on the two outside top edges (convex) removes (1-pi/4) 324 x 218 each. The two rounds have the same centre (18, 218 in x,z), so the wall stays exactly 3 mm thick and nothing overlaps: V = V0 + 2 (1-pi/4) 218 (225 - 324) = 455730.93.",
+ "body_count": 1,
+ "volume_mm3": 455730.92632488743
+}

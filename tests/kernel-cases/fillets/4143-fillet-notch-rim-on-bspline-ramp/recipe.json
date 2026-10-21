@@ -1,0 +1,184 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Side",
+    "plane": "YZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -39,
+      5
+     ],
+     [
+      -39,
+      0
+     ],
+     [
+      60,
+      0
+     ],
+     [
+      60,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      60,
+      10
+     ],
+     [
+      49.5,
+      10
+     ],
+     [
+      49.5,
+      5
+     ],
+     [
+      39,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      39,
+      5
+     ],
+     [
+      -39,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "body_name": "Plate",
+    "direction": "symmetric",
+    "distance": 56,
+    "name": "Pad",
+    "sketch": "Side"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "Slot",
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -15,
+      66
+     ],
+     [
+      -15,
+      50
+     ],
+     [
+      -5,
+      50
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     50
+    ],
+    "end": [
+     5,
+     50
+    ],
+    "start": [
+     -5,
+     50
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      5,
+      50
+     ],
+     [
+      15,
+      50
+     ],
+     [
+      15,
+      66
+     ],
+     [
+      -15,
+      66
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "direction": "symmetric",
+    "name": "SlotCut",
+    "operation": "cut",
+    "sketch": "Slot",
+    "targets": [
+     "Plate"
+    ],
+    "through_all": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Plate",
+    "edges": [
+     [
+      0,
+      45,
+      5.72
+     ]
+    ],
+    "name": "NotchFillet",
+    "radius": 4
+   }
+  }
+ ]
+}

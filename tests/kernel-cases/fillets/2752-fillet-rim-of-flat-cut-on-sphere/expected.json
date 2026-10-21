@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2752",
+  "tangency-labs/solidcraft#2787"
+ ],
+ "what": "an R1 round round the rim of a radius-2 sphere cut flat at z=1",
+ "source": "analytic",
+ "method": "sphere R2 with everything above z=1 cut away: V = 32 pi/3 - pi h^2 (3R - h)/3 with h=1 -> 32 pi/3 - 5 pi/3. The R1 rolling ball is tangent to the plane z=1 and (inside) to the sphere: its centre is on the circle of radius 1 at z=0 (distance R-r=1 from the origin), so the round is a torus piece. Removed = revolve of the region between z=0..1, sphere rho^2 = 4 - z^2 and the round rho = 1 + sqrt(1 - z^2): pi * integral over z in 0..1 of [4 - z^2 - (1 + sqrt(1-z^2))^2] dz = pi * integral of [2 - 2 sqrt(1-z^2)] = 2 pi (1 - pi/4) = 1.348. V = 28.274 - 1.348 = 26.9260.",
+ "body_count": 1,
+ "volume_mm3": 26.92595077567323
+}
