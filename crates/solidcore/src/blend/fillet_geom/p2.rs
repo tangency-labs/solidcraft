@@ -381,6 +381,8 @@ fn with_lazy_nurb(s: &Surface) -> Cow<'_, Surface> {
 // ---- unported callees -----------------------------------------------------------------
 
 /// `SmFilletCorner::GetFilletedVertex` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_filleted_vertex(corner: FilletCornerId) -> Result<Option<VertexId>> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetFilletedVertex
     unported_on(
@@ -391,6 +393,8 @@ fn corner_filleted_vertex(corner: FilletCornerId) -> Result<Option<VertexId>> {
 }
 
 /// `SmFilletCorner::GetSetBackDist` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_set_back_dist(corner: FilletCornerId) -> Result<f64> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetSetBackDist
     unported_on(
@@ -401,6 +405,8 @@ fn corner_set_back_dist(corner: FilletCornerId) -> Result<f64> {
 }
 
 /// `SmFilletCorner::IsCalcAsConstRad` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_is_calc_as_const_rad(corner: Option<FilletCornerId>) -> Result<bool> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::IsCalcAsConstRad
     unported_on(
@@ -411,6 +417,8 @@ fn corner_is_calc_as_const_rad(corner: Option<FilletCornerId>) -> Result<bool> {
 }
 
 /// `SmFilletCorner::IsBlendingCorner` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_is_blending(corner: FilletCornerId) -> Result<bool> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::IsBlendingCorner
     unported_on(
@@ -421,6 +429,8 @@ fn corner_is_blending(corner: FilletCornerId) -> Result<bool> {
 }
 
 /// `SmFilletCorner::GetFilletEdges` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_fillet_edges(corner: FilletCornerId) -> Result<Vec<EdgeId>> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetFilletEdges
     unported_on(
@@ -431,6 +441,8 @@ fn corner_fillet_edges(corner: FilletCornerId) -> Result<Vec<EdgeId>> {
 }
 
 /// `SmFilletCorner::GetCornerType` (unit `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_type(corner: FilletCornerId) -> Result<FilletCornerType> {
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::GetCornerType
     unported_on(
@@ -467,6 +479,8 @@ fn b_spline_base_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
 
 /// `SmFilletConcaveNxNCorner::TestRailRailInterpolationCurve` (unit
 /// `blend.fillet_corner_p1`).
+/// Needs the executive corner store (`blend.fillet_executive_p2`, #267) to resolve the
+/// id; wired in a follow-up once it merges.
 fn corner_test_rail_rail_interpolation_curve(
     corner: FilletCornerId,
     curve: &BSplineCurve,

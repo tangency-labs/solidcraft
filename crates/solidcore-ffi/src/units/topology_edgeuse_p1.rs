@@ -229,7 +229,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -237,7 +240,7 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
 }
 
 /// The parameter domain `[u0, v0, u1, v1]` of a surface block, `None` for a plane.
-type Domain = Option<[f64; 4]>;
+pub(crate) type Domain = Option<[f64; 4]>;
 
 /// A surface block; returns its domain.
 pub(crate) fn surface(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
@@ -297,7 +300,8 @@ fn uv(rd: &mut Reader<'_>, dom: Domain) -> Result<(), FfiError> {
     let v = rd.finite()?;
     if let Some([u0, v0, u1, v1]) = dom {
         let (du, dv) = (u1 - u0, v1 - v0);
-        if u < u0 - 100.0 * du || u > u1 + 100.0 * du || v < v0 - 100.0 * dv || v > v1 + 100.0 * dv {
+        if u < u0 - 100.0 * du || u > u1 + 100.0 * du || v < v0 - 100.0 * dv || v > v1 + 100.0 * dv
+        {
             return Err(bad("uv too far outside the domain"));
         }
     } else if u.abs() > 1e6 || v.abs() > 1e6 {
@@ -314,32 +318,36 @@ pub(crate) fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError
 /// The surface and parameter domain of a face block (`2`, `6`, and `5` with a face):
 /// whether the surface is a B-spline surface (not a plane).
 pub(crate) fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result<bool, FfiError> {
-        let dom = surface(rd)?;
-        let d = rd.finites(4)?;
-        let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
-        else {
-            return Err(bad("domain too short"));
-        };
-        if a >= c || b2 >= e {
-            return Err(bad("face domain not ordered"));
-        }
-        match dom {
-            Some([u0, v0, u1, v1]) => {
-                if a < u0 || c > u1 || b2 < v0 || e > v1 {
-                    return Err(bad("face domain outside the surface's"));
-                }
-            }
-            None => {
-                if d.iter().any(|x| x.abs() > plane_domain_limit) {
-                    return Err(bad("plane face domain too large"));
-                }
+    let dom = surface(rd)?;
+    let d = rd.finites(4)?;
+    let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+    else {
+        return Err(bad("domain too short"));
+    };
+    if a >= c || b2 >= e {
+        return Err(bad("face domain not ordered"));
+    }
+    match dom {
+        Some([u0, v0, u1, v1]) => {
+            if a < u0 || c > u1 || b2 < v0 || e > v1 {
+                return Err(bad("face domain outside the surface's"));
             }
         }
+        None => {
+            if d.iter().any(|x| x.abs() > plane_domain_limit) {
+                return Err(bad("plane face domain too large"));
+            }
+        }
+    }
     Ok(dom.is_some())
 }
 
-fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
-    match rd.index(8)? {
+fn brep_block_with_plane_limit(
+    rd: &mut Reader<'_>,
+    path: &str,
+    plane_domain_limit: f64,
+) -> Result<(), FfiError> {
+    match rd.index(6)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {

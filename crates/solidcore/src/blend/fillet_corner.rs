@@ -5,4 +5,5 @@
 //! The file is split into parts (`plan/modules.toml`, units `blend.fillet_corner_p1` ..
 //! `blend.fillet_corner_p3`); each part is a submodule.
 
+pub mod p1;
 pub mod p3;

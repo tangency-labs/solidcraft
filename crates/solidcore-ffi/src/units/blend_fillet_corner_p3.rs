@@ -112,7 +112,9 @@ pub fn create(path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     rd.below(n_v)?;
     let ns = rd.index(MAX_SOLVER_EUS)?;
     if ns == 0 {
-        return Err(bad("no filleted edge use (upstream reads (*pSolverEUs)[0])"));
+        return Err(bad(
+            "no filleted edge use (upstream reads (*pSolverEUs)[0])",
+        ));
     }
     for _ in 0..ns {
         rd.below(n_eu)?;
@@ -199,16 +201,20 @@ pub fn validate_corner(input: &[f64]) -> Result<(), FfiError> {
     }
     let no = rd.index(MAX_LIST)?;
     for _ in 0..no {
-        rd.opt_index(b.ne())?.ok_or_else(|| bad("original face: edge -1"))?;
-        rd.opt_index(b.nf)?.ok_or_else(|| bad("original face: face -1"))?;
+        rd.opt_index(b.ne())?
+            .ok_or_else(|| bad("original face: edge -1"))?;
+        rd.opt_index(b.nf)?
+            .ok_or_else(|| bad("original face: face -1"))?;
     }
     let nl = rd.index(MAX_LIST)?;
     for _ in 0..nl {
-        rd.opt_index(b.ne())?.ok_or_else(|| bad("line edge: edge -1"))?;
+        rd.opt_index(b.ne())?
+            .ok_or_else(|| bad("line edge: edge -1"))?;
     }
     let na = rd.index(MAX_LIST)?;
     for _ in 0..na {
-        rd.opt_index(b.ne())?.ok_or_else(|| bad("arc edge: edge -1"))?;
+        rd.opt_index(b.ne())?
+            .ok_or_else(|| bad("arc edge: edge -1"))?;
         rd.finites(3)?;
         // SmCircle asserts dRadius > SM_EFF_ZERO and takes a domain in [-360, 360];
         // SmEllipse asserts its length is in (SM_EFF_ZERO, 360 + SM_EFF_ZERO]

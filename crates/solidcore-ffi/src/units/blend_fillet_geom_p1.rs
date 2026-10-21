@@ -404,7 +404,6 @@ fn points(rd: &mut Reader<'_>, k: usize) -> Result<Vec<[f64; 4]>, FfiError> {
 }
 
 /// Reads and validates a curve `dim n p m cpts knots` of dimension `want_dim`.
-/// Reads and validates a curve `dim n p m cpts knots` of dimension `want_dim`.
 pub(crate) fn curve(rd: &mut Reader<'_>, want_dim: usize, what: &str) -> Result<(), FfiError> {
     let dim = rd.index(3)?;
     if dim != want_dim {
@@ -537,6 +536,10 @@ pub(crate) struct Block {
     pub(crate) nfb: usize,
     /// Per vertex: the classification object kind (`pc_kind`).
     pub(crate) pc_kinds: Vec<usize>,
+    /// Per vertex: whether its status is `SM_FIL_PROCESSED`.
+    pub(crate) vertex_processed: Vec<bool>,
+    /// Per vertex: its two mates (model vertices).
+    pub(crate) vertex_mates: Vec<[Option<usize>; 2]>,
     /// Per edge: whether it has a curve.
     pub(crate) edge_curves: Vec<bool>,
     /// Per edge: its two vertices.
@@ -578,10 +581,11 @@ pub(crate) fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
 
     let nv = rd.index(MAX_LIST)?;
     let mut pc_kinds = Vec::with_capacity(nv);
+    let mut vertex_processed = Vec::with_capacity(nv);
     for _ in 0..nv {
         rd.finites(3)?;
         rd.index(13)?; // SmFilletVertexType
-        rd.index(12)?; // SmFilStatus
+        vertex_processed.push(rd.index(12)? == 1); // SmFilStatus (SM_FIL_PROCESSED = 1)
         rd.opt_index(MAX_LIST)?; // corner tag
                                  // SmPointClassificationType: SM_PC_UNKNOWN (100) ..= SM_PC_NOTHING (110)
         let pc_class = rd.index(110)?;
@@ -669,9 +673,9 @@ pub(crate) fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         }
     }
 
+    let mut vertex_mates = Vec::with_capacity(nv);
     for _ in 0..nv {
-        rd.opt_index(nv)?;
-        rd.opt_index(nv)?;
+        vertex_mates.push([rd.opt_index(nv)?, rd.opt_index(nv)?]);
     }
 
     Ok(Block {
@@ -679,6 +683,8 @@ pub(crate) fn validate_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         nf,
         nfb,
         pc_kinds,
+        vertex_processed,
+        vertex_mates,
         edge_curves,
         edge_vertices,
         geom_surfaces,

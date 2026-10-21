@@ -212,7 +212,29 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
     }
     case 3:
     case 5: // Nx1, open
-        return E.GetSize() == 3 ? P3C_NOT_RUN : 0.0;
+    {
+        if (E.GetSize() != 3)
+            return 0.0; // SM_DBG_WARN only
+        if (!(c->*P3CornerPeek::ext()))
+            return P3C_NOT_RUN; // the default patch: MakeAnalyticCornerSurface
+        // CreateEndPatch (blend.fillet_corner_p1, ported): the first fillet-side-face edge's
+        // original face's extended surface or surface is copied, then MakeFaceBrep (a Rust
+        // stub); without such an edge it returns SM_SUCCESS, without an original face a
+        // status (NER), and a face without surface is dereferenced
+        for (ULONG i = 0; i < E.GetSize(); ++i)
+        {
+            if (E[i]->GetFilletEdgeType() != SM_FE_FILLET_X_SIDE_FACE)
+                continue;
+            SmFace* f = E[i]->GetOriginalFace();
+            if (f == NULL)
+                return 0.0;
+            SmSurface* s = c->GetExtendedSurface(f);
+            if (s == NULL)
+                s = f->GetSurface();
+            return s == NULL ? P3C_REFUSE : P3C_NOT_RUN;
+        }
+        return 0.0;
+    }
     case 7: // Nx2
         if (E.GetSize() > 3 && E.GetSize() != 6 && V.GetSize() == 0)
             return P3C_REFUSE; // unsigned index wraps around
