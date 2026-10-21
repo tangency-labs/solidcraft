@@ -1,0 +1,9 @@
+Updates: HANG-29
+
+#### HANG-29 (update, 2026-10-26). More triggers from `--fuzz 30000`; more FFI wrappers refuse the overflow range
+- **More triggers (`--fuzz 30000` on main `16f04231`, 2026-10-21; each a surface control point of `+-1e300`; gdb backtraces in `GlobalCoincidenceChecker` after 40 s):**
+  - `boolean.topology_intersector_p1` (`fuzz05142` `face_face_coin`, `fuzz17005` `check_ssi`/`edge_face`, `fuzz27420` `face_face`) and `_p2` (`fuzz06354` `intersect_topo`). Replaying `fuzz05142`: `1e154` and above give no result in 60 s, `1e150` and below return in 0.1 s. A curve control point does it too (`_p2` `fuzz20492`, `intersect_topo` on a wire with a point of `-1e300`): `-1e155` and above take 27 s, `-1e154` and below return at once.
+  - `heal.gap` topology op (`fuzz14876`): `-1e300` and `-1e155` hang, `-1e200`, `-1e160`, `-1e154` and below return at once (erratic above the overflow point).
+  - `heal.heal_data_p2` heal scripts through the edge/face caching (`fuzz03677`, `fuzz22334`, `fuzz26581`).
+  - `blend.fillet_geom_p2` `RailRail` with an original face (`fuzz09135` and 6 more), through `SmSurfaceDropCurve::FindBoundaryStartPoints`: `-1e155` and above hang, `-1e154` and below return.
+- **Rust port:** `boolean.topology_intersector_p1`/`_p2` (and `_p3`, which validates its blocks with the same reader) refuse surface and curve control point coordinates of `MAX_GEOMETRY_COORD = 1e154` or more; `blend.fillet_geom_p2`'s `RailRail` bounds its original face's surface by `blend.fillet_geom_p1`'s `MAX_MAGNITUDE` (`1e150`). `heal.gap`'s topology op and every `heal.heal_data_p2`/`_p3` B-rep block were already refused above `1e150` by the `topology.vertexuse` export they both build (`topology_edgeuse_p2::check_block_magnitudes`), so they need no bound of their own. Regression inputs: `crates/difftest/tests/fuzz_regressions/`.

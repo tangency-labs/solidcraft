@@ -52,7 +52,7 @@
 use crate::{call_with_buffer, FfiError};
 
 use super::blend_fillet_geom_p1::{
-    surface, validate_block, Reader, MAX_LIST, MAX_SOLVER_MAGNITUDE,
+    surface, validate_block, Reader, MAX_LIST, MAX_MAGNITUDE, MAX_SOLVER_MAGNITUDE,
 };
 
 /// The upstream routine run by the shim.
@@ -155,7 +155,12 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         Op::RailRail => {
             rd.opt_index(b.ne())?.ok_or_else(|| bad("edge -1"))?;
             if let Some(kind) = rd.opt_index(3)? {
+                // the original face's boundary reaches HANG-29 (UV trim curves dropped
+                // through GlobalCurveIntersect), bounded as for `blend.fillet_geom_p1`'s
+                // ClassifyFacePoint
+                rd.bound = MAX_MAGNITUDE;
                 any_surface(&mut rd, kind)?;
+                rd.bound = MAX_SOLVER_MAGNITUDE;
                 rd.finite()?;
             }
             if let Some(n) = rd.opt_index(MAX_LIST)? {

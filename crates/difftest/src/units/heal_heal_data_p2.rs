@@ -2092,6 +2092,25 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// HANG-29: `--fuzz 30000` fuzz22334, a surface control point of `-1e300` in the
+    /// B-rep block; the healer's caching did not return. Both sides refuse the block
+    /// through the `topology.vertexuse` export's HANG-29 bound (`1e150`; the Rust side
+    /// imports through the same validated export).
+    #[test]
+    fn both_sides_refuse_a_block_in_the_overflow_range() {
+        let recorded: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_regressions/heal.heal_data_p2.json"
+        ))
+        .unwrap();
+        for recorded in recorded["cases"].as_array().unwrap() {
+            let i: Inputs = serde_json::from_value(recorded["inputs"].clone()).unwrap();
+            for error in [run_cpp(&i), run_rust(&i)] {
+                let error = error.unwrap_err().to_string();
+                assert!(error.contains("HANG-29"), "{}: {error}", recorded["name"]);
+            }
+        }
+    }
+
     /// A native analytic face must reach healing as the same surface kind in Rust.
     /// A plain B-spline copy has the same control net but different UV evaluation.
     #[test]

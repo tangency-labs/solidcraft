@@ -1727,7 +1727,39 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
     }
 }
 
-void run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
+// UB-166: the B-spline surface constructor's sm_FixupKnotVector can raise a v knot
+// vector's start multiplicity above q + 1 (a first interior knot snapped or spread onto
+// the start knot, e.g. a v knot of 1e-300); sm_DecomposeSrf then writes past its patch
+// array when the face/face intersection builds the surface cache. As in the
+// blend.fillet_geom_p1 shim, read back the knot vectors the constructor left and refuse
+// such a B-rep (the precondition: some runs never build that cache).
+bool decomposition_overflows(const Two& t)
+{
+    for (int b = 0; b < 2; b++)
+    {
+        if (t.brep[b] == nullptr)
+            continue;
+        for (SmFace* f : t.g[b].faces)
+        {
+            const SmSurface* s = f ? f->GetSurface() : nullptr;
+            if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE))
+                continue;
+            const gw_SURFACE* g = ((SmBSplineSurface*)s)->GetGwNurbPointer();
+            if (g == NULL)
+                continue;
+            const gw_INDEX last = g->knv->m;
+            gw_INDEX mult = 1;
+            while (mult <= last && g->knv->U[mult] == g->knv->U[0])
+                ++mult;
+            if (mult > (gw_INDEX)g->q + 1)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Runs one call; false when the B-reps are refused (UB-166).
+bool run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     Two t;
     struct Clean
@@ -1742,7 +1774,9 @@ void run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         }
     } clean{t};
     if (!build_two(rd, path, t, o))
-        return;
+        return true;
+    if (decomposition_overflows(t))
+        return false;
     o.push_back(0.0);
     if (op == TI_EXPORT)
     {
@@ -1759,9 +1793,10 @@ void run_ti(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back((double)ex.size());
             o.insert(o.end(), ex.begin(), ex.end());
         }
-        return;
+        return true;
     }
     run_script(rd, t, o);
+    return true;
 }
 } // namespace
 
@@ -1773,7 +1808,8 @@ SC_EXPORT int32_t SC_TI_EVAL_NAME(int32_t op, const char* path, const double* in
     SC_TRY
     Rd rd{in, 0};
     std::vector<double> o;
-    run_ti(op, rd, path, o);
+    if (!run_ti(op, rd, path, o))
+        return SC_ERR_ARG;
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

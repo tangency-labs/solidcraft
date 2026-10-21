@@ -1279,6 +1279,27 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// HANG-29: `--fuzz 30000` fuzz09135, `RailRail` whose original face has a control
+    /// point of `-1e300` (no native result in 60 s). Both sides refuse it.
+    #[test]
+    fn rail_rail_refuses_an_original_face_in_the_overflow_range() {
+        let recorded: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_regressions/blend.fillet_geom_p2.json"
+        ))
+        .unwrap();
+        for recorded in recorded["cases"].as_array().unwrap() {
+            let case = Case {
+                unit: "blend.fillet_geom_p2".into(),
+                name: recorded["name"].as_str().unwrap().into(),
+                source: crate::case::CaseSource::Inline,
+                inputs: recorded["inputs"].clone(),
+            };
+            for error in [Runner.run_cpp(&case), Runner.run_rust(&case)] {
+                assert!(error.is_err(), "{}: {error:?}", case.name);
+            }
+        }
+    }
+
     /// Tallies the Rust outcome of every case per query (status `0`, an upstream error
     /// status, a deferral): with no failed case, the passes' success-path / error-path
     /// split. `CASE_SEEDS` sets the generated count.

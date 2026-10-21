@@ -1641,6 +1641,25 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// HANG-29: fuzz14876, a topology op on a face whose B-spline surface has a control
+    /// point of `-1e300` (no native result in 60 s). Both sides refuse its block through
+    /// the `topology.vertexuse` export's HANG-29 bound (`1e150`), which both run. It
+    /// cannot be a fixture (a harness error always fails a case).
+    #[test]
+    fn both_sides_refuse_a_topo_block_in_the_overflow_range() {
+        let recorded: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_regressions/heal.gap.json"
+        ))
+        .unwrap();
+        for recorded in recorded["cases"].as_array().unwrap() {
+            let i: Inputs = serde_json::from_value(recorded["inputs"].clone()).unwrap();
+            for error in [run_rust(&i), run_cpp(&i)] {
+                let error = error.unwrap_err().to_string();
+                assert!(error.contains("HANG-29"), "{}: {error}", recorded["name"]);
+            }
+        }
+    }
     use solidcore::curve::curve::p2::{CIRCLE_TYPE, ELLIPSE_TYPE};
     use solidcore::curve::curve::CurveKind;
 
