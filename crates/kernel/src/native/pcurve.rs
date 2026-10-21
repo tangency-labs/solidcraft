@@ -60,7 +60,7 @@ const MAX_SPANS: usize = 4000;
 /// Refinement rounds of one fit.
 const MAX_ROUNDS: usize = 40;
 /// Samples per knot span when a fit starts.
-const PER_SPAN: usize = 8;
+const PER_SPAN: usize = 4;
 /// Spans a fit starts from (more where the curve has its own knots).
 const START_SPANS: usize = 4;
 
