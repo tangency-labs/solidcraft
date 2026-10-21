@@ -1,0 +1,16 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3730",
+  "tangency-labs/solidcraft#3872"
+ ],
+ "what": "a block with a closed cavity written as BREP_WITH_VOIDS whose void shell (outward-facing faces) is turned by ORIENTED_CLOSED_SHELL .F.; the cavity must be taken out, not added",
+ "source": "analytic",
+ "method": "V = 40*30*12.5 - 20*6*5 = 15000 - 600; A = 2(40*30+40*12.5+30*12.5) + 2(20*6+20*5+6*5) = 4150 + 500; faces 6+6, edges 12+12, vertices 8+8; valid is false only because a body with a void holds two shells (outer and cavity), which the one-shell validity check does not allow",
+ "valid": false,
+ "body_count": 1,
+ "volume_mm3": 14400.0,
+ "area_mm2": 4650.0,
+ "faces": 12,
+ "edges": 24,
+ "vertices": 16
+}

@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3912",
+  "tangency-labs/solidcraft#3913"
+ ],
+ "what": "a box of six trimmed planes whose composite trim curves start with a piece written end to start (1st and 3rd pieces reversed): every loop must still close",
+ "method": "box 10 x 20 x 30 of six trimmed bilinear patches: V = 6000; A = 2(200+300+600) = 2200; 6 faces",
+ "source": "analytic",
+ "body_count": 1,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "faces": 6
+}

@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4006"
+ ],
+ "what": "an annular plate r 4..10, 3 thick, whose top face is a CONICAL_SURFACE of semi-angle pi/2 - 7e-12 (a plane to within rounding, as the exporter wrote it): the face must be read, not refused as a 'bad cone', and the body stays closed",
+ "source": "analytic",
+ "method": "V = pi (10^2 - 4^2) 3 = 252 pi = 791.6813; A = 2 pi (100 - 16) + 2 pi 10*3 + 2 pi 4*3 = 791.6813; 4 faces, 6 edges, 4 vertices",
+ "body_count": 1,
+ "volume_mm3": 791.6813,
+ "area_mm2": 791.6813,
+ "faces": 4,
+ "edges": 6,
+ "vertices": 4
+}
