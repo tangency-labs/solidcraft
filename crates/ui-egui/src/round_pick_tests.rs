@@ -183,13 +183,14 @@ fn move_rotates_about_a_cylinder_wall_and_moves_from_a_circle_centre() {
     assert!((a[2].abs() - 1.0).abs() < 1e-9, "about the shaft's axis: {a:?}");
     // The chips say what the round picks stand for.
     let label = |d: &crate::dialogs::Dialog, i: usize, sel: &Sel| crate::dialogs::selection_label(&h.app.session, d, &d.inputs[i], sel);
-    assert!(label(&d, 1, &wall).contains("axis of face"), "{}", label(&d, 1, &wall));
-    assert!(label(&d, 1, &rim).contains("axis of edge"), "{}", label(&d, 1, &rim));
+    let wall_label = label(&d, 1, &wall);
+    assert!(wall_label.starts_with("Shaft · face ") && wall_label.ends_with(" axis"), "{wall_label}");
+    assert!(label(&d, 1, &rim).ends_with("· circle axis"), "{}", label(&d, 1, &rim));
     // Point to Point from the rim: from its centre.
     d.kind = kind(POINT_TO_POINT);
     d.inputs = inputs(POINT_TO_POINT);
     d.inputs[0].items = vec![Sel::Body { name: "Lug".into() }];
-    assert!(label(&d, 1, &rim).contains("centre of edge"), "{}", label(&d, 1, &rim));
+    assert!(label(&d, 1, &rim).ends_with("· circle centre"), "{}", label(&d, 1, &rim));
     d.inputs[1].items = vec![rim];
     d.inputs[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::ZERO }];
     let p = params(&h.app, &d).unwrap();

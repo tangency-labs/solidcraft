@@ -2029,15 +2029,15 @@ pub(crate) fn selection_label(s: &Session, d: &Dialog, inp: &SelInput, item: &Se
         Sel::SketchCurve { id } => id.clone(),
         Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
         Sel::Plane { name } | Sel::Axis { name } | Sel::Body { name } => name.clone(),
-        Sel::Face { body, index, .. } if axis => format!("{body} · axis of face {index}"),
+        Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
         Sel::Face { body, index, .. } => format!("{body} · face {index}"),
-        Sel::Edge { body, index, .. } if axis => format!("{body} · axis of edge {index}"),
+        Sel::Edge { body, .. } if axis => format!("{body} · circle axis"),
         Sel::Edge { body, index, .. } if d.edge_is_centre(inp) && edge_circle(s, body, *index).is_some() => {
-            format!("{body} · centre of edge {index}")
+            format!("{body} · circle centre")
         }
         Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
         // A point of the model: a vertex, or the centre a round edge stands for.
-        Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · point ({:.2}, {:.2}, {:.2}) mm", point.x, point.y, point.z),
+        Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Vertex { body, point } if body.is_empty() => {
             let state = s.world_state();
