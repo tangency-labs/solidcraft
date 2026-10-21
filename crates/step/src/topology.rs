@@ -90,6 +90,9 @@ pub struct Solid {
     pub product: Option<String>,
     /// In the coordinates of the item's own representation (assembly placements not applied).
     pub brep: Brep,
+    /// The file's face entity (ADVANCED_FACE, FACE_SURFACE) of each of the record's faces, in
+    /// the record's face order.
+    pub face_origin: Vec<u64>,
     /// No closed shell: a surface model of open shells only.
     pub sheet: bool,
     /// What was repaired or noted on the way (faces whose same_sense disagreed with their
@@ -837,8 +840,10 @@ impl<'b, 'a> Builder<'b, 'a> {
             });
         }
         let mut faces = Vec::with_capacity(face_order.len());
+        let mut face_origin = Vec::with_capacity(face_order.len());
         for &f in &face_order {
             let face = self.faces.get(f as usize).ok_or("face reference")?;
+            face_origin.push(face.step);
             let pc = pcs.get(f as usize).ok_or("face reference")?;
             let mut loops = Vec::with_capacity(face.loops.len());
             let mut edge_loop = 0;
@@ -881,7 +886,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
         brep.validate().map_err(|e| format!("the record is invalid: {e}"))?;
         brep.check_geometry().map_err(|e| format!("the record's geometry disagrees: {e}"))?;
-        Ok(Solid { item, name, product: None, brep, sheet, notes })
+        Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes })
     }
 
     /// Every edge of the shell's faces used at least twice among them.
