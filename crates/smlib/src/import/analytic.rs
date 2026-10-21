@@ -9,8 +9,9 @@
 //! domain; where the analytic surface's natural normal is the other way round, the face is turned
 //! over (its loops reversed, its uses in the shells flipped), which leaves the solid as it was.
 //!
-//! A revolution of any other profile, or one placed by a matrix that is not a rigid motion, is
-//! refused; any other spline stays a spline.
+//! A revolution of any other profile, or one placed by a matrix that is not a rigid motion,
+//! stays a revolution, which the import sends as its exact rational B-spline; any other spline
+//! stays a spline.
 
 use std::borrow::Cow;
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -32,8 +33,14 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
     let mut turned = Vec::new();
     for (i, f) in brep.faces.iter().enumerate() {
         let found = match &f.surface {
+            // One that is none of the analytic kinds goes as its exact rational B-spline
+            // (`super::revolution`).
             b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
-                Some(Revolution::new(profile, *origin, *axis, matrix, *forward)?.analytic(f.domain)?)
+                match Revolution::new(profile, *origin, *axis, matrix, *forward).and_then(|r| r.analytic(f.domain)) {
+                    Ok(found) => Some(found),
+                    Err(Unsupported::NotYet(_)) => None,
+                    Err(e) => return Err(e),
+                }
             }
             b::Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
                 extruded_circle(u_knots, v_knots, homogeneous, f.domain, 1e-9 * size.max(1.0))
