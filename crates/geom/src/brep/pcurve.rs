@@ -67,6 +67,20 @@ const CHECKS: usize = 16;
 /// the surface. Loops are as the record keeps them (relative to the surface's natural normal: outer counter-clockwise, inner clockwise); each
 /// pcurve runs on its use's interval in its curve's direction, whatever `forward` says.
 pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<Vec<Vec<Curve2>>> {
+    pcurves_within(surface_record, loops, tolerance, None)
+}
+
+/// [`pcurves`] for a face whose parameter box is known (`domain`, u then v, as its kernel
+/// gives it): where two uses meet at a pole, the periodic parameter's jump there is free, and
+/// the loop takes the jumps whose extent in that parameter is nearest the box's. Two meridians
+/// a three-quarter turn apart bound a quarter of a sphere or three quarters of it; the loop alone
+/// can't tell which, the box can.
+pub fn pcurves_within(
+    surface_record: &Surface,
+    loops: &[Vec<EdgeUse<'_>>],
+    tolerance: f64,
+    domain: Option<[[f64; 2]; 2]>,
+) -> Result<Vec<Vec<Curve2>>> {
     if !(tolerance.is_finite() && tolerance > 0.0 && tolerance <= 1e3) {
         return Err(Error::Invalid(format!("pcurve tolerance {tolerance}")));
     }
@@ -76,7 +90,7 @@ pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: 
     }
     let mut budget = Budget(0);
     surface(surface_record, 0, &mut budget).map_err(|e| Error::Invalid(e.to_string()))?;
-    let on = On::new(surface_record)?;
+    let on = On::new(surface_record)?.within(domain);
     // A seam edge used twice is fitted once.
     let mut done: Vec<(u32, Curve2)> = Vec::new();
     let mut out = Vec::with_capacity(loops.len());
@@ -117,6 +131,8 @@ pub fn pcurves(surface_record: &Surface, loops: &[Vec<EdgeUse<'_>>], tolerance: 
 struct On {
     surface: SurfaceEval,
     dom: Domain,
+    /// The face's own parameter box, where its kernel gives one.
+    face: Option<[[f64; 2]; 2]>,
 }
 
 /// A curve sample: its parameter, point, surface parameters (periodic ones unwrapped along the
@@ -135,7 +151,12 @@ impl On {
     fn new(s: &Surface) -> Result<Self> {
         let surface = SurfaceEval::new(s)?;
         let dom = surface.domain();
-        Ok(On { surface, dom })
+        Ok(On { surface, dom, face: None })
+    }
+
+    fn within(self, face: Option<[[f64; 2]; 2]>) -> Self {
+        let face = face.filter(|f| f.iter().flatten().all(|x| x.is_finite()));
+        On { face, ..self }
     }
 
     fn pcurve(&self, record: &Curve, curve: &CurveEval, range: [f64; 2], tol: f64) -> Result<Curve2> {
@@ -418,7 +439,23 @@ impl On {
                 let other = uses.iter().flat_map(|(c, _)| points(c).into_iter().filter_map(|q| q.get(1 - d).copied()));
                 let (lo, hi) = other.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
                 let flat = if hi >= lo { 1e-9 * period * (hi - lo) } else { 0.0 };
-                let mut best: Option<(bool, usize, Vec<f64>)> = None;
+                // With the face's box: how far the loop's extent along `d` is from the box's
+                // (in steps of a millionth of a period, so rounding doesn't decide).
+                let width = self.face.and_then(|f| f.get(d).copied()).map(|[a, b]| (b - a).abs());
+                let misfit = |extra: &[f64]| -> u64 {
+                    let Some(width) = width else { return 0 };
+                    let (mut a, mut b) = (f64::INFINITY, f64::NEG_INFINITY);
+                    for ((c, _), s) in uses.iter().zip(extra) {
+                        for q in points(c) {
+                            if let Some(x) = q.get(d) {
+                                a = a.min(x + s);
+                                b = b.max(x + s);
+                            }
+                        }
+                    }
+                    if b < a { 0 } else { ((b - a - width).abs() / period * 1e6).round() as u64 }
+                };
+                let mut best: Option<(u64, bool, usize, Vec<f64>)> = None;
                 for combo in 0..3usize.pow(free.len() as u32) {
                     let (mut code, mut moved, mut add) = (combo, 0, 0.0);
                     let mut extra = shift.clone();
@@ -434,11 +471,12 @@ impl On {
                         }
                     }
                     let right = area(uses, &extra, d) > flat;
-                    if best.as_ref().is_none_or(|(r, m, _)| (right && !r) || (right == *r && moved < *m)) {
-                        best = Some((right, moved, extra));
+                    let fit = misfit(&extra);
+                    if best.as_ref().is_none_or(|(f, r, m, _)| fit < *f || (fit == *f && ((right && !r) || (right == *r && moved < *m)))) {
+                        best = Some((fit, right, moved, extra));
                     }
                 }
-                if let Some((_, _, extra)) = best {
+                if let Some((_, _, _, extra)) = best {
                     shift = extra;
                 }
             }

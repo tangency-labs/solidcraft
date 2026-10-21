@@ -234,6 +234,28 @@ fn meridians_run_straight_into_the_poles() {
     }
 }
 
+/// Two meridians a three-quarter turn apart bound a quarter of a sphere or three quarters of
+/// it; the loop alone can't tell which. Given the face's box, the loop spans it: three quarters
+/// of a turn in u (a ball revolved 270°), or a quarter where the box says so.
+#[test]
+fn meridians_at_a_pole_span_the_face_box() {
+    let sphere = Surface::Sphere { frame: about_z([0.; 3], false), radius: 6. };
+    let at = |a: f64| Curve::Circle { frame: frame([0.; 3], [a.cos(), a.sin(), 0.], [0., 0., 1.]), radius: 6. };
+    let (first, last) = (at(0.), at(1.5 * PI));
+    let half = [-FRAC_PI_2, FRAC_PI_2];
+    for (box_u, span) in [([0., 1.5 * PI], 1.5 * PI), ([-FRAC_PI_2, 0.], FRAC_PI_2)] {
+        for flip in [false, true] {
+            let l = vec![
+                EdgeUse { edge: 0, curve: &first, interval: half, forward: !flip, tolerance: 0.0 },
+                EdgeUse { edge: 1, curve: &last, interval: half, forward: flip, tolerance: 0.0 },
+            ];
+            let pcs = &pcurves_within(&sphere, std::slice::from_ref(&l), 1e-7, Some([box_u, [-FRAC_PI_2, FRAC_PI_2]])).unwrap()[0];
+            let (a, b) = (pcs[0].eval(0.).unwrap()[0], pcs[1].eval(0.).unwrap()[0]);
+            assert!(((a - b).abs() - span).abs() < 1e-9, "box {box_u:?}, flip {flip}: u {a} and {b}");
+        }
+    }
+}
+
 /// A whole sphere bounded only by its seam (one meridian from pole to pole, used twice), in
 /// frames where rounding leaves the loop with the uses on one line a tiny positive area: the
 /// two uses come out a period apart and the loop turns counter-clockwise around the whole

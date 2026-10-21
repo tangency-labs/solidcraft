@@ -1125,7 +1125,7 @@ fn pcurves(surface: &b::Surface, domain: [[f64; 2]; 2], loops: &[Loop], edges: &
         }
         uses.push(loop_uses);
     }
-    let mut curves = b::pcurve::pcurves(surface, &uses, tolerance).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves = b::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
