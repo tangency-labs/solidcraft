@@ -615,6 +615,9 @@ pub struct SolveApp {
     pub preview: preview::PreviewState,
     /// OK pressed on a feature that takes a while: its evaluation runs off the window thread.
     pub applying: Option<dialogs::Applying>,
+    /// OK's evaluations a Cancel left computing (a worker cannot be stopped): OK pressed again on
+    /// the same commands and design takes its job up instead of starting the work a second time.
+    pub(crate) abandoned: Vec<dialogs::Applying>,
     pub(crate) editing_state: Option<dialogs::EditingState>,
     /// A linked component's design edited in place, with its assembly around it.
     pub edit_in_place: edit_in_place::EditInPlace,
@@ -866,6 +869,7 @@ impl SolveApp {
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
             preview: preview::PreviewState::default(),
             applying: None,
+            abandoned: Vec::new(),
             editing_state: None,
             edit_in_place: Default::default(),
             pending_feature_edit: None,
@@ -1508,6 +1512,7 @@ impl SolveApp {
                     // applying cancellation hooks (such as restoring its timeline marker).
                     self.dialog = None;
                     self.applying = None;
+                    self.abandoned.clear();
                     self.editing_state = None;
                     self.pending_feature_edit = None;
                     // So does what it had computing: none of it may land in the new design.
@@ -2018,7 +2023,7 @@ impl SolveApp {
         }
         // Cancel before finishing a sketch or waiting for its history marker.
         if interactive && (self.editing_state.is_some() || self.applying.is_some()) {
-            dialogs::cancel(self);
+            dialogs::discard(self);
         }
         let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
         // The sketch's end may turn the view (Preferences › Sketch); Extrude goes back to the view
