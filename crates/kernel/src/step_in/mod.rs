@@ -121,9 +121,12 @@ struct Units {
     len: f64,
     ang: f64,
     tol: f64,
+    /// The context's own distance uncertainty (mm), as the file states it (SMLib's reads take it).
+    #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
+    uncertainty: Option<f64>,
 }
 
-const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01 };
+const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01, uncertainty: None };
 
 /// Units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT, uncertainty), read by
 /// [`solidcraft_step::units::context`]; the vertex-on-curve tolerance is ten times the
@@ -135,7 +138,7 @@ fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units
     }
     let c = solidcraft_step::units::context(ex, id);
     let tol = c.uncertainty.map(|t| (t * 10.0).max(1e-3)).unwrap_or(c.units.len * 1e-2).clamp(1e-4, 1.0);
-    let u = Units { len: c.units.len, ang: c.units.ang, tol };
+    let u = Units { len: c.units.len, ang: c.units.ang, tol, uncertainty: c.uncertainty };
     cache.insert(id, u);
     u
 }

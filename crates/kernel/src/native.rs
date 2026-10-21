@@ -210,24 +210,33 @@ pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(
 /// `None` where it does not.
 #[cfg(feature = "smlib")]
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    smlib_record_ordered(&tolerant_record(body)?)
+}
+
+/// `record` in SMLib, healed where SMLib's check refuses it as given, with where each of SMLib's
+/// faces and edges is in the record's order: `None` where SMLib's export of it does not number
+/// every face, edge and vertex as the record does.
+#[cfg(feature = "smlib")]
+pub(crate) fn smlib_record_ordered(
+    record: &solidcraft_geom::brep::Brep,
+) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
     use solidcraft_smlib::{Brep, CheckLevel};
-    let record = tolerant_record(body)?;
-    let import = |trusted: bool| Brep::from_record(&record, trusted).map_err(|e| KernelError::Failed(format!("SMLib: {e}")));
+    let import = |trusted: bool| Brep::from_record(record, trusted).map_err(|e| KernelError::Failed(format!("SMLib: {e}")));
     let valid = |b: &Brep| b.check(CheckLevel::All).is_ok_and(|c| c.is_valid());
     // A record SMLib's check refuses as given (a gap a little over the record's tolerance, a
     // hole listed before its face's outer loop) goes through SMLib's healer; healed, it is kept
     // only where SMLib then finds it valid.
-    let trusted = import(true)?;
-    let brep = if valid(&trusted) {
-        trusted
-    } else {
-        match import(false) {
+    // One SMLib refuses as given altogether goes through the healer too.
+    let brep = match import(true) {
+        Ok(trusted) if valid(&trusted) => trusted,
+        Ok(trusted) => match import(false) {
             Ok(healed) if valid(&healed) => healed,
             _ => trusted,
-        }
+        },
+        Err(e) => import(false).map_err(|_| e)?,
     };
     let order = match brep.to_native_ordered() {
-        Ok((back, order)) => same_numbering(&record, &back).then_some(order),
+        Ok((back, order)) => same_numbering(record, &back).then_some(order),
         Err(e) => {
             log::debug!(target: "smlib", "no order for an operand: {e}");
             None
