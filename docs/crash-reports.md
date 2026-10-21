@@ -14,7 +14,7 @@ To send a report:
 2. Attach the screenshot if you want to share it: use **Copy screenshot** and paste it into
    GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
 3. Attach the design only if it can be shared publicly. GitHub does not accept `.solidcraft`
-   files, so attach it as a `.zip`: **Save design to attach (.zip)…** saves the report's design
+   files, so attach it as a `.zip`: **Save design (.zip)…** saves the report's design
    (or the open design, for other reports) as `name.solidcraft.zip`. A design file is a ZIP
    container already, so renaming `name.solidcraft` to `name.solidcraft.zip` works too. SolidCraft
    opens such a `.zip`, and also a `.zip` that holds exactly one design file.
