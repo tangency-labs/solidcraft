@@ -13050,8 +13050,14 @@ guarded in `offset.offset_geometry_creation`; the fix belongs to the curve cache
     world separately, so no world can read the B-rep's geometry during the call;
     `topology::brep::p10::merge_curves_world` stays a `DISPATCH GAP` until the world can
     own the B-rep (as `boolean::merge::p4::ArenaPair` does).
-  - `geom.object`: `Shape::new` gets B-rep keys but no store to resolve them, so the B-rep
-    box (and the face box, already a `DISPATCH GAP`) cannot be reached there.
+  - `geom.object` (done in the follow-up PR): `Shape::new` got B-rep keys but no store to
+    resolve them, so the B-rep and face boxes were `DISPATCH GAP`s (and the edge and vertex
+    lists stale `UNPORTED` stubs). It now takes a `BrepStore` and runs the whole
+    constructor; the runner's C++ shape is built on the shared fixture B-rep, and the Rust
+    import gets upstream's `GetFaces` / `GetVertices` orders (the walk numbers them
+    differently; whole-B-rep shapes list their members in those orders). `geom.object` is
+    green. `query.api_queries`' 31 `SmApiFaceClosestPoint` cases that stopped at the face
+    box now build their shape and defer later (`topology.face_p2` 23, `geom.tol` 8).
 - **Wider seeds (2000 generated cases per unit, local macOS run).** `query.brep`,
   `boolean.merge_p1`, `boolean.merge_p4` and `topology.brep_p9` show no failures. Two units
   fail on generated cases this PR does not change; both are left to their owners:

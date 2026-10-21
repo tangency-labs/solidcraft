@@ -11,9 +11,11 @@
 //! | [`notify`] | `sc_geom_object_notify` | a script of `SmObject::Notify` calls             |
 //! | [`tcv`]    | `sc_geom_object_tcv`    | a script of `SmTemporaryChangeValue<TYPE>` calls |
 //! | [`shape`]  | `sc_geom_object_shape`  | `SmShape::SmShape` and its accessors             |
+//! | [`list_orders`] | `sc_geom_object_list_orders` | `SmBrep::GetFaces`, `GetEdges`, `GetVertices` of the fixture B-rep |
 
 use std::ffi::CString;
 
+use super::topology_edgeuse_p1 as graph;
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -42,10 +44,18 @@ mod sys {
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
-        pub fn sc_geom_object_shape(
-            source: i32,
-            bx: *const f64,
+        pub fn sc_geom_object_list_orders(
             path: *const std::ffi::c_char,
+            block: *const f64,
+            n_block: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_geom_object_shape(
+            path: *const std::ffi::c_char,
+            block: *const f64,
+            n_block: i64,
             sel: *const i64,
             n_sel: i64,
             out: *mut f64,
@@ -217,14 +227,18 @@ pub fn tcv(ty: i32, init: f64, steps: &[(i64, f64)]) -> Result<Vec<f64>, FfiErro
 pub enum ShapeSource {
     /// No B-rep (only the empty selection is valid).
     None,
-    /// `SmApiCreateBox(origin, length, width, height)`.
-    Box([f64; 6]),
-    /// `SmApiReadBrepFromFile(path, ascii)`.
-    File(String, bool),
+    /// The B-rep of the shared topology fixture `path` / `block` (the `topology_edgeuse_p1`
+    /// encoding).
+    Fixture {
+        /// The fixture's file path (empty for constructed B-reps).
+        path: String,
+        /// The fixture block.
+        block: Vec<f64>,
+    },
 }
 
 /// Which members of the B-rep go into the shape: the whole B-rep and indices into
-/// its `GetFaces` / `GetEdges` / `GetVertices` lists.
+/// the fixture walk's face, edge and vertex lists.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShapeSelection {
     /// Add the whole B-rep.
@@ -244,18 +258,25 @@ pub struct ShapeSelection {
 pub fn shape(source: &ShapeSource, sel: &ShapeSelection) -> Result<Vec<f64>, FfiError> {
     let empty =
         !sel.whole_brep && sel.faces.is_empty() && sel.edges.is_empty() && sel.vertices.is_empty();
-    let (code, bx, path) = match source {
-        ShapeSource::None if empty => (0, [0.0; 6], None),
+    let (path, block): (&str, &[f64]) = match source {
+        ShapeSource::None if empty => ("", &[]),
         ShapeSource::None => {
             return Err(FfiError::InvalidArgument("selection without B-rep".into()))
         }
-        ShapeSource::Box(b) => (1, *b, None),
-        ShapeSource::File(p, ascii) => (
-            2,
-            [if *ascii { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0, 0.0, 0.0],
-            Some(CString::new(p.as_str()).map_err(|_| FfiError::InvalidArgument("path".into()))?),
-        ),
+        ShapeSource::Fixture { path, block } => {
+            // the graph wrapper validates (and builds) the block first
+            let export = graph::eval(graph::Op::Export, path, block)?;
+            if graph::counts(&export).is_none() {
+                return Err(FfiError::InvalidArgument(
+                    "native fixture construction failed".into(),
+                ));
+            }
+            (path, block)
+        }
     };
+    let path = CString::new(path).map_err(|_| FfiError::InvalidArgument("path".into()))?;
+    let n_block = i64::try_from(block.len())
+        .map_err(|_| FfiError::InvalidArgument("block too large".into()))?;
     let mut s = vec![
         i64::from(sel.whole_brep),
         sel.faces.len() as i64,
@@ -265,18 +286,47 @@ pub fn shape(source: &ShapeSource, sel: &ShapeSelection) -> Result<Vec<f64>, Ffi
     s.extend(&sel.faces);
     s.extend(&sel.edges);
     s.extend(&sel.vertices);
-    let p = path.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     call_with_buffer(512, |buf: &mut [f64], len| {
-        // SAFETY: bx holds 6 values; p is NULL or a NUL-terminated string living
-        // across the call; s holds s.len() values in the documented layout (indices
-        // are range-checked by the shim); buf is valid for buf.len() writes.
+        // SAFETY: path is a NUL-terminated string and block holds n_block values (validated
+        // by the graph wrapper), both living across the call; s holds s.len() values in
+        // the documented layout (indices are range-checked by the shim); buf is valid for
+        // buf.len() writes.
         unsafe {
             sys::sc_geom_object_shape(
-                code,
-                bx.as_ptr(),
-                p,
+                path.as_ptr(),
+                block.as_ptr(),
+                n_block,
                 s.as_ptr(),
                 s.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// The fixture B-rep's `GetFaces`, `GetEdges` and `GetVertices` orders as fixture walk
+/// indices: `n, indices...` per kind.
+pub fn list_orders(path: &str, block: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let export = graph::eval(graph::Op::Export, path, block)?;
+    if graph::counts(&export).is_none() {
+        return Err(FfiError::InvalidArgument(
+            "native fixture construction failed".into(),
+        ));
+    }
+    let path = CString::new(path).map_err(|_| FfiError::InvalidArgument("path".into()))?;
+    let n_block = i64::try_from(block.len())
+        .map_err(|_| FfiError::InvalidArgument("block too large".into()))?;
+    call_with_buffer(256, |buf: &mut [f64], len| {
+        // SAFETY: path is a NUL-terminated string and block holds n_block values (validated
+        // by the graph wrapper), both living across the call; buf is valid for buf.len()
+        // writes.
+        unsafe {
+            sys::sc_geom_object_list_orders(
+                path.as_ptr(),
+                block.as_ptr(),
+                n_block,
                 buf.as_mut_ptr(),
                 buf.len() as i64,
                 &raw mut *len,

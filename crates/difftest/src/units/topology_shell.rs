@@ -161,14 +161,15 @@ impl solidcore::topology::shell::ShellRayWorld<NoRayObject> for EmptyRayWorld {
     }
     fn shell_ray_shape(
         &self,
+        kernel: &solidcore::kernel::Kernel,
+        brep: (solidcore::topology::BrepId, &solidcore::topology::Brep),
         faces: &[solidcore::geom::object::FaceKey],
     ) -> solidcore::Result<solidcore::geom::object::Shape> {
         if faces.is_empty() {
-            return solidcore::geom::object::Shape::new(&[], &[], &[], &[]);
+            return solidcore::geom::object::Shape::new(kernel, &brep, &[], &[], &[], &[]);
         }
-        // Harness-limited (see the note above): this adapter has no B-rep geometry, and
-        // a face shape also needs SmFace::CalculateBoundingBox through the face handle
-        // (the DISPATCH GAP in `geom::object::Shape::new`).
+        // Harness-limited (see the note above): the shape builds, but this adapter has
+        // no handles for the B-rep geometry the shape solve then reads.
         Err(solidcore::SolidError::unported(
             "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
             "harness:shell-ray-world",

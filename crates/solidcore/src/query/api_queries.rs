@@ -35,7 +35,7 @@ use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::object::{FaceKey, ObjectRef, Shape, ShapeMember};
+use crate::geom::object::{BrepStore, FaceKey, ObjectRef, Shape, ShapeMember};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionArray, SolutionObject};
 use crate::geom::tools::{self, EdgePick};
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -660,15 +660,16 @@ pub fn face_classify_uv(
     Ok(classification.point_class())
 }
 
-/// Trim-aware closest point on one face (`SmApiFaceClosestPoint`).
-/// Shape construction and solver errors propagate.
+/// Trim-aware closest point on one face (`SmApiFaceClosestPoint`), the face's B-rep
+/// held in `breps`. Shape construction and solver errors propagate.
 pub fn face_closest_point<O: SolutionObject>(
     k: &Kernel,
+    breps: &dyn BrepStore,
     objects: &dyn TopologyObjects<O>,
     face: FaceKey,
     point: Point3,
 ) -> Result<ClosestPoint> {
-    let shape = Shape::new(&[], &[face], &[], &[])?;
+    let shape = Shape::new(k, breps, &[], &[face], &[], &[])?;
     let mut options = solve_options(k, SolutionRequested::Single);
     options.tolerance_3d =
         objects.face_tolerance(objects.shape_member_object(ShapeMember::Face(face))?)?;

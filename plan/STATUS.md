@@ -33,9 +33,10 @@ decimation attributes and `SmApiEvaluateSurface*`); `geom.a_object` and
   The merge passes go through `boolean::merge::p1::classify_point_editing_disabled`.
 - **Lone B-reps** use `BrepIdentity::default()`; B-reps in a store pass their own
   `BrepIdentity`.
-- **Open follow-ups** (no PR yet): `topology::brep::p10::merge_curves_world` is a
-  `DISPATCH GAP` until the merge-curves world can own the B-rep (`topology.brep_p2`), and
-  `geom.object`'s `Shape` cannot reach the B-rep box without a store.
+- **Shapes:** `geom::object::Shape::new` takes a `BrepStore` (`(BrepId, &Brep)` for one
+  B-rep, `NoBreps` for an empty shape) and is fully ported; `geom.object` is green.
+- **Open follow-up:** `topology::brep::p10::merge_curves_world` is a `DISPATCH GAP` until
+  the merge-curves world can own the B-rep (`topology.brep_p2`; PR #348).
 
 ## Port review note (2026-10-18, issue #210)
 

@@ -1495,7 +1495,12 @@ mod tests {
         assert_eq!(snapshot.source_before, snapshot.source_after);
         assert_eq!(snapshot.foreign_before, snapshot.foreign_after);
 
-        let source = ShapeSource::Box([0.0, 0.0, 0.0, 2.0, 3.0, 4.0]);
+        // the shared fixture's SmApiCreateBox solid (kind 7: origin, size, then the
+        // validate-only and init-gaps flags)
+        let source = ShapeSource::Fixture {
+            path: String::new(),
+            block: vec![7.0, 0.0, 0.0, 0.0, 2.0, 3.0, 4.0, 0.0, 0.0],
+        };
         let selection = ShapeSelection {
             whole_brep: true,
             ..ShapeSelection::default()

@@ -2,13 +2,16 @@
 // difftest shim for unit `geom.object`. Wraps upstream SmObject (type system, Notify,
 // AssertValid), SmTemporaryChangeValue<TYPE> (source/SMLib/inc/SmObject.h,
 // source/SMLib/src/SmObject.cpp) and SmShape (source/SMLib/inc/SmShape.h,
-// source/SMLib/src/SmShape.cpp). B-reps for shapes come from SmApiCreateBox /
-// SmApiReadBrepFromFile (source/SM_API).
+// source/SMLib/src/SmShape.cpp). B-reps for shapes come from the shared B-rep fixture
+// (support/topology_fixture.h), whose walk numbers their entities as the Rust import does.
 #include "sc_shim.h"
-#include <SmApiImportExport.h>
-#include <SmApiPrimitives.h>
+#include "support/topology_fixture.h"
 #include <SmBrep.h>
 #include <SmContext.h>
+#include <SmEdge.h>
+#include <SmFace.h>
+#include <SmRegion.h>
+#include <SmVertex.h>
 #include <SmObject.h>
 #include <SmShape.h>
 #include <SmTree.h>
@@ -125,9 +128,9 @@ void put_tree(std::vector<double>& res, const SmTree* pTree)
 }
 
 template <typename P>
-int64_t index_of(const SmTArray<P*>& all, P* p)
+int64_t index_of(const std::vector<P*>& all, P* p)
 {
-    for (ULONG i = 0; i < all.GetSize(); ++i)
+    for (size_t i = 0; i < all.size(); ++i)
         if (all[i] == p)
             return (int64_t)i;
     return -1;
@@ -264,49 +267,15 @@ SC_EXPORT int32_t sc_geom_object_tcv(int32_t type, double init, const int64_t* o
     SC_CATCH
 }
 
-// SmShape. source 0 = no B-rep (all lists empty), 1 = SmApiCreateBox(box[0..3] origin,
-// box[3..6] size), 2 = SmApiReadBrepFromFile(path, ascii = box[0] != 0). sel = (whole_brep, n_f, n_e,
-// n_v, face indices..., edge indices..., vertex indices...) into the B-rep's GetFaces /
-// GetEdges / GetVertices lists. Output: (#faces, #edges, #vertices of the shape, their
-// B-rep list indices in shape order), each tree (node count, object count, has top,
-// top box), then IsInShape of every B-rep face, edge, vertex.
-SC_EXPORT int32_t sc_geom_object_shape(int32_t source, const double* box, const char* path,
-                                       const int64_t* sel, int64_t n_sel, double* out,
-                                       int64_t cap, int64_t* out_len)
+namespace
 {
-    if (source < 0 || source > 2 || n_sel < 4)
-        return SC_ERR_ARG;
-    int64_t nf = sel[1], ne = sel[2], nv = sel[3];
-    if (sel[0] < 0 || sel[0] > 1 || nf < 0 || ne < 0 || nv < 0 || 4 + nf + ne + nv != n_sel)
-        return SC_ERR_ARG;
-    if (source == 0 && (sel[0] != 0 || nf + ne + nv != 0))
-        return SC_ERR_ARG;
-    if (source == 2 && path == nullptr)
-        return SC_ERR_ARG;
-    SC_TRY
-    SmBrep* pBrep = nullptr;
-    if (source == 1)
-    {
-        if (SmApiCreateBox(SmVector3d(box[0], box[1], box[2]), box[3], box[4], box[5], pBrep) !=
-                SM_SUCCESS ||
-            pBrep == nullptr)
-            return 1;
-    }
-    else if (source == 2)
-    {
-        if (SmApiReadBrepFromFile(path, box[0] != 0.0 ? TRUE : FALSE, FALSE, pBrep) != SM_SUCCESS || pBrep == nullptr)
-            return 1;
-    }
-    SmObjDelete sCleanBrep(pBrep);
-    SmTArray<SmFace*> vAllF;
-    SmTArray<SmEdge*> vAllE;
-    SmTArray<SmVertex*> vAllV;
-    if (pBrep)
-    {
-        pBrep->GetFaces(vAllF);
-        pBrep->GetEdges(vAllE);
-        pBrep->GetVertices(vAllV);
-    }
+// The shape of `sel` over `pBrep` (null: no B-rep) whose faces, edges and vertices
+// are numbered by `vAllF` / `vAllE` / `vAllV`; see sc_geom_object_shape.
+int32_t shape_of(SmBrep* pBrep, const std::vector<SmFace*>& vAllF,
+                 const std::vector<SmEdge*>& vAllE, const std::vector<SmVertex*>& vAllV,
+                 const int64_t* sel, int64_t nf, int64_t ne, int64_t nv,
+                 std::vector<double>& res)
+{
     SmTArray<SmBrep*> sB;
     SmTArray<SmFace*> sF;
     SmTArray<SmEdge*> sE;
@@ -316,50 +285,144 @@ SC_EXPORT int32_t sc_geom_object_shape(int32_t source, const double* box, const 
     const int64_t* idx = sel + 4;
     for (int64_t i = 0; i < nf; ++i, ++idx)
     {
-        if (*idx < 0 || *idx >= (int64_t)vAllF.GetSize())
+        if (*idx < 0 || *idx >= (int64_t)vAllF.size())
             return SC_ERR_ARG;
-        sF.Add(vAllF[(ULONG)*idx]);
+        sF.Add(vAllF[(size_t)*idx]);
     }
     for (int64_t i = 0; i < ne; ++i, ++idx)
     {
-        if (*idx < 0 || *idx >= (int64_t)vAllE.GetSize())
+        if (*idx < 0 || *idx >= (int64_t)vAllE.size())
             return SC_ERR_ARG;
-        sE.Add(vAllE[(ULONG)*idx]);
+        sE.Add(vAllE[(size_t)*idx]);
     }
     for (int64_t i = 0; i < nv; ++i, ++idx)
     {
-        if (*idx < 0 || *idx >= (int64_t)vAllV.GetSize())
+        if (*idx < 0 || *idx >= (int64_t)vAllV.size())
             return SC_ERR_ARG;
-        sV.Add(vAllV[(ULONG)*idx]);
+        sV.Add(vAllV[(size_t)*idx]);
     }
-    std::vector<double> res;
+    // SmShape dereferences a face's surface and an edge's curve (a listed face's edges
+    // included)
+    for (ULONG i = 0; i < sF.GetSize(); ++i)
     {
-        SmShape sShape(sB, sF, sE, sV);
-        SmTArray<SmFace*> vF;
-        SmTArray<SmEdge*> vE;
-        SmTArray<SmVertex*> vV;
-        sShape.GetFaces(vF);
-        sShape.GetEdges(vE);
-        sShape.GetVertices(vV);
-        res.push_back((double)vF.GetSize());
-        res.push_back((double)vE.GetSize());
-        res.push_back((double)vV.GetSize());
-        for (ULONG i = 0; i < vF.GetSize(); ++i)
-            res.push_back((double)index_of(vAllF, vF[i]));
-        for (ULONG i = 0; i < vE.GetSize(); ++i)
-            res.push_back((double)index_of(vAllE, vE[i]));
-        for (ULONG i = 0; i < vV.GetSize(); ++i)
-            res.push_back((double)index_of(vAllV, vV[i]));
-        put_tree(res, sShape.GetVertexTree());
-        put_tree(res, sShape.GetCurveTree());
-        put_tree(res, sShape.GetSurfaceTree());
-        for (ULONG i = 0; i < vAllF.GetSize(); ++i)
-            res.push_back(sShape.IsInShape(vAllF[i]) ? 1.0 : 0.0);
-        for (ULONG i = 0; i < vAllE.GetSize(); ++i)
-            res.push_back(sShape.IsInShape(vAllE[i]) ? 1.0 : 0.0);
-        for (ULONG i = 0; i < vAllV.GetSize(); ++i)
-            res.push_back(sShape.IsInShape(vAllV[i]) ? 1.0 : 0.0);
+        if (sF[i]->GetSurface() == nullptr)
+            return SC_ERR_ARG;
+        SmTArray<SmEdge*> vFaceE;
+        sF[i]->GetEdges(vFaceE);
+        for (ULONG j = 0; j < vFaceE.GetSize(); ++j)
+            if (vFaceE[j]->GetCurve() == nullptr)
+                return SC_ERR_ARG;
     }
+    for (ULONG i = 0; i < sE.GetSize(); ++i)
+        if (sE[i]->GetCurve() == nullptr)
+            return SC_ERR_ARG;
+    if (sel[0])
+    {
+        for (SmFace* f : vAllF)
+            if (f->GetSurface() == nullptr)
+                return SC_ERR_ARG;
+        for (SmEdge* e : vAllE)
+            if (e->GetCurve() == nullptr)
+                return SC_ERR_ARG;
+        // the last listed object gives the trees their context
+        if (nf + ne + nv == 0 && pBrep->GetInfiniteRegion() == nullptr)
+            return SC_ERR_ARG;
+    }
+    SmShape sShape(sB, sF, sE, sV);
+    SmTArray<SmFace*> vF;
+    SmTArray<SmEdge*> vE;
+    SmTArray<SmVertex*> vV;
+    sShape.GetFaces(vF);
+    sShape.GetEdges(vE);
+    sShape.GetVertices(vV);
+    res.push_back((double)vF.GetSize());
+    res.push_back((double)vE.GetSize());
+    res.push_back((double)vV.GetSize());
+    for (ULONG i = 0; i < vF.GetSize(); ++i)
+        res.push_back((double)index_of(vAllF, vF[i]));
+    for (ULONG i = 0; i < vE.GetSize(); ++i)
+        res.push_back((double)index_of(vAllE, vE[i]));
+    for (ULONG i = 0; i < vV.GetSize(); ++i)
+        res.push_back((double)index_of(vAllV, vV[i]));
+    put_tree(res, sShape.GetVertexTree());
+    put_tree(res, sShape.GetCurveTree());
+    put_tree(res, sShape.GetSurfaceTree());
+    for (SmFace* f : vAllF)
+        res.push_back(sShape.IsInShape(f) ? 1.0 : 0.0);
+    for (SmEdge* e : vAllE)
+        res.push_back(sShape.IsInShape(e) ? 1.0 : 0.0);
+    for (SmVertex* v : vAllV)
+        res.push_back(sShape.IsInShape(v) ? 1.0 : 0.0);
+    return 0;
+}
+} // namespace
+
+// SmShape over the B-rep of the shared fixture `path` / `block` (`n_block == 0`: no
+// B-rep, all lists empty). sel = (whole_brep, n_f, n_e, n_v, face indices..., edge
+// indices..., vertex indices...) into the fixture walk's face / edge / vertex lists.
+// Output: (#faces, #edges, #vertices of the shape, their walk indices in shape order),
+// each tree (node count, object count, has top, top box), then IsInShape of every
+// face, edge and vertex of the B-rep.
+SC_EXPORT int32_t sc_geom_object_shape(const char* path, const double* block,
+                                       int64_t n_block, const int64_t* sel, int64_t n_sel,
+                                       double* out, int64_t cap, int64_t* out_len)
+{
+    if (n_block < 0 || (n_block > 0 && (path == nullptr || block == nullptr)) || sel == nullptr ||
+        n_sel < 4 || out_len == nullptr)
+        return SC_ERR_ARG;
+    int64_t nf = sel[1], ne = sel[2], nv = sel[3];
+    if (sel[0] < 0 || sel[0] > 1 || nf < 0 || ne < 0 || nv < 0 || 4 + nf + ne + nv != n_sel)
+        return SC_ERR_ARG;
+    if (n_block == 0 && (sel[0] != 0 || nf + ne + nv != 0))
+        return SC_ERR_ARG;
+    SC_TRY
+    std::vector<double> res;
+    int32_t rc = 0;
+    if (n_block == 0)
+        rc = shape_of(nullptr, {}, {}, {}, sel, nf, ne, nv, res);
+    else
+        rc = sc_topology_fixture::apply(path, block, n_block,
+                                        [&](const sc_topology_fixture::View& g) -> int32_t {
+                                            return shape_of(&g.brep, g.faces, g.edges,
+                                                            g.vertices, sel, nf, ne, nv, res);
+                                        });
+    if (rc != 0)
+        return rc;
+    return sc_copy_out(res.data(), (int64_t)res.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+// The fixture B-rep's GetFaces, GetEdges and GetVertices orders as fixture walk indices:
+// (n, indices...) per kind (the Rust import's list orders).
+SC_EXPORT int32_t sc_geom_object_list_orders(const char* path, const double* block,
+                                             int64_t n_block, double* out, int64_t cap,
+                                             int64_t* out_len)
+{
+    if (path == nullptr || block == nullptr || n_block < 1 || out_len == nullptr)
+        return SC_ERR_ARG;
+    SC_TRY
+    std::vector<double> res;
+    int32_t rc = sc_topology_fixture::apply(
+        path, block, n_block, [&](const sc_topology_fixture::View& g) -> int32_t {
+            SmTArray<SmFace*> vF;
+            SmTArray<SmEdge*> vE;
+            SmTArray<SmVertex*> vV;
+            g.brep.GetFaces(vF);
+            g.brep.GetEdges(vE);
+            g.brep.GetVertices(vV);
+            res.push_back((double)vF.GetSize());
+            for (ULONG i = 0; i < vF.GetSize(); ++i)
+                res.push_back((double)index_of(g.faces, vF[i]));
+            res.push_back((double)vE.GetSize());
+            for (ULONG i = 0; i < vE.GetSize(); ++i)
+                res.push_back((double)index_of(g.edges, vE[i]));
+            res.push_back((double)vV.GetSize());
+            for (ULONG i = 0; i < vV.GetSize(); ++i)
+                res.push_back((double)index_of(g.vertices, vV[i]));
+            return 0;
+        });
+    if (rc != 0)
+        return rc;
     return sc_copy_out(res.data(), (int64_t)res.size(), out, cap, out_len);
     SC_CATCH
 }

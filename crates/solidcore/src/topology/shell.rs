@@ -889,11 +889,16 @@ pub struct ShellRaySectorAttempt {
 /// Actual geometry and owner context needed by shell ray queries.
 /// No global owner registry or duplicate geometry metadata is introduced.
 pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjects<O> {
-    /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`).
-    /// Worlds that cannot build the real shape (a harness without the B-rep's cached
-    /// geometry) defer here instead of failing later.
-    fn shell_ray_shape(&self, faces: &[crate::geom::object::FaceKey]) -> Result<Shape> {
-        Shape::new(&[], faces, &[], &[])
+    /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`) of
+    /// `brep`. Worlds that cannot build the real shape (a harness without the B-rep's
+    /// cached geometry) defer here instead of failing later.
+    fn shell_ray_shape(
+        &self,
+        kernel: &Kernel,
+        brep: (crate::topology::BrepId, &Brep),
+        faces: &[crate::geom::object::FaceKey],
+    ) -> Result<Shape> {
+        Shape::new(kernel, &brep, &[], faces, &[], &[])
     }
 
     /// The topology entity behind a handle the shape solve returned (a vertex, edge
@@ -1004,7 +1009,7 @@ where
             }
             Ok::<_, SolidError>(faces)
         })??;
-        let shape = world.shell_ray_shape(&faces)?;
+        let shape = world.shell_ray_shape(kernel, (brep_id, brep), &faces)?;
         let vectors = [direction];
         let solutions = TopologySolver::shape_point_solve(
             &*kernel,

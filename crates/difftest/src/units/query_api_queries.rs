@@ -681,7 +681,13 @@ fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>>
             objects.build(k)?;
             closest(
                 &mut o,
-                api::face_closest_point(k, &objects, (BrepId::from_index(0), face), point)?,
+                api::face_closest_point(
+                    k,
+                    &(BrepId::from_index(0), b),
+                    &objects,
+                    (BrepId::from_index(0), face),
+                    point,
+                )?,
             );
         }
         21 => cclosest(
