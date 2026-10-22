@@ -2,14 +2,12 @@
 //! measured back off the face it built (a grid of points, five-point differences along the run).
 
 use super::*;
-use crate::body::from_p3;
 use crate::bridge::{bridge, sample_grid};
-use truck_modeling as mt;
-use truck_modeling::ParametricSurface;
+use solidcraft_geom::brep::eval::SurfaceEval;
 
 /// The blend's surface: it is one face.
-fn surface_of(body: &Body) -> mt::Surface {
-    body.solid.face_iter().next().unwrap().surface()
+fn surface_of(body: &Body) -> SurfaceEval {
+    SurfaceEval::new(&body.record().faces[0].surface).unwrap()
 }
 
 /// Position and the run direction's first three derivatives at `(t, v)` of the face, read with the
@@ -18,10 +16,9 @@ fn surface_of(body: &Body) -> mt::Surface {
 /// the parameter falling and turns the odd derivatives round, so every value is a derivative in
 /// the run direction `u`.
 fn run_derivs(body: &Body, t: f64, v: f64, backwards: bool, h: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let surf = face.surface();
+    let surf = surface_of(body);
     let dir = if backwards { -1.0 } else { 1.0 };
-    let q: Vec<Vec3> = (0..5).map(|k| from_p3(surf.subs(t + dir * k as f64 * h, v))).collect();
+    let q: Vec<Vec3> = (0..5).map(|k| surf.point([t + dir * k as f64 * h, v]).unwrap()).collect();
     let d1 = (q[0] * -25.0 + q[1] * 48.0 + q[2] * -36.0 + q[3] * 16.0 + q[4] * -3.0) * (dir / (12.0 * h));
     let d2 = (q[0] * 35.0 + q[1] * -104.0 + q[2] * 114.0 + q[3] * -56.0 + q[4] * 11.0) * (1.0 / (12.0 * h * h));
     let d3 = (q[0] * -5.0 + q[1] * 18.0 + q[2] * -24.0 + q[3] * 14.0 + q[4] * -3.0) * (dir / (2.0 * h * h * h));
@@ -354,8 +351,8 @@ fn a_two_section_blend_is_the_bridge() {
     // The blend runs with the sections, the bridge crosses from one boundary to the other: the
     // same face, its two parameters the other way round.
     for (run, station) in [(0.0, 0.0), (0.25, 0.3), (0.5, 0.7), (0.75, 0.1), (1.0, 1.0)] {
-        let x = from_p3(surface_of(&made).subs(run, station));
-        let y = from_p3(surface_of(&other).subs(station, run));
+        let x = surface_of(&made).point([run, station]).unwrap();
+        let y = surface_of(&other).point([station, run]).unwrap();
         assert!(x.dist(y) < 1e-9, "run {run} station {station}: {x:?} vs {y:?}");
     }
     let grid = sample_grid(&other, 9, 7).unwrap();
@@ -378,7 +375,7 @@ fn crown_shapes_the_middle_without_moving_the_joints() {
         assert!(p.dist(sections[1][4].p) < 1e-9, "the crown left the joint where the sections put it");
         joints.push((d1, d2));
         // Halfway up the first span is where a fuller crown reaches further.
-        heights.push(from_p3(surface_of(&body).subs(0.25, 0.5)).z);
+        heights.push(surface_of(&body).point([0.25, 0.5]).unwrap().z);
         assert_runs_through(&body, &sections, n);
     }
     for (d1, d2) in &joints {
