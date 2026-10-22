@@ -1950,10 +1950,13 @@ mod tests {
         a.add(&single(1.0, &[]));
         a.add(&single(2.0, &[]));
         let keep = a.clone();
-        assert!(a.try_set_size(1 << 40).is_err());
+        // Byte counts past isize::MAX, so the reservation fails on every target; sizes
+        // the OS merely cannot back (2^33 solutions, ~2.5 TB) are granted lazily on
+        // macOS and the fill then commits them.
+        assert!(a.try_set_size(1 << 58).is_err());
         assert!(a.try_set_size(usize::MAX).is_err());
         assert!(a
-            .try_insert_at(1 << 32, &single(3.0, &[]), 1 << 32)
+            .try_insert_at(1 << 57, &single(3.0, &[]), 1 << 57)
             .is_err());
         assert!(a.try_insert_at(usize::MAX, &single(3.0, &[]), 1).is_err());
         assert!(a.try_insert_at(1, &single(3.0, &[]), usize::MAX).is_err());

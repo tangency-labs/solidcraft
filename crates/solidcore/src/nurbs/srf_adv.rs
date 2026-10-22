@@ -60,7 +60,11 @@ mod tests {
     #[test]
     fn allocation_failures_and_degree_range_are_errors() {
         assert!(filled(usize::MAX, 0.0_f64, "t").is_err());
-        assert!(grid(1 << 40, 1 << 40, 0.0_f64, "t").is_err());
+        // Byte counts past isize::MAX, so the reservation fails on every target; sizes
+        // the OS merely cannot back (2^40 x 2^40) are granted lazily on macOS and the
+        // zero fill then commits terabytes.
+        assert!(grid(1 << 61, 1, 0.0_f64, "t").is_err());
+        assert!(grid(1, 1 << 61, 0.0_f64, "t").is_err());
         assert_eq!(filled(3, 1.5_f64, "t").unwrap(), vec![1.5; 3]);
         assert_eq!(degree(DEGREE_RANGE_MAX, "t").unwrap(), DEGREE_RANGE_MAX);
         assert!(degree(DEGREE_RANGE_MAX + 1, "t").is_err());

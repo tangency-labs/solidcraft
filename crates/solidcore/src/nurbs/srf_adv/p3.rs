@@ -1473,6 +1473,10 @@ mod tests {
         assert!(
             create_skin_srf(&mut cs, false, false, i64::MAX as usize, Direction::V, 0.0).is_err()
         );
-        assert!(net::<f64>(1 << 40, 1 << 40, "t").is_err());
+        // Byte counts past isize::MAX, so the reservation fails on every target; sizes
+        // the OS merely cannot back (2^40 x 2^40) are granted lazily on macOS and the
+        // zero fill then commits terabytes.
+        assert!(net::<f64>(1 << 61, 0, "t").is_err());
+        assert!(net::<f64>(0, 1 << 61, "t").is_err());
     }
 }

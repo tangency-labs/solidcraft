@@ -1620,7 +1620,11 @@ mod tests {
         assert!(decompose_to_bez(&bad).is_err());
         assert!(insert_knot(&s, 0.5, usize::MAX >> 1, Direction::U).is_err());
         assert!(zeros1::<f64>(isize::MAX - 1, "t").is_err());
-        assert!(zeros2::<f64>(1 << 40, 1 << 40, "t").is_err());
+        // Byte counts past isize::MAX, so the reservation fails on every target; sizes
+        // the OS merely cannot back (2^40 x 2^40) are granted lazily on macOS and the
+        // zero fill then commits terabytes.
+        assert!(zeros2::<f64>(1 << 61, 0, "t").is_err());
+        assert!(zeros2::<f64>(0, 1 << 61, "t").is_err());
         assert!(twice(isize::MAX, "t").is_err());
         assert!(degree(DEGREE_RANGE_MAX + 1, "t").is_err());
     }
