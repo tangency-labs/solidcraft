@@ -14,6 +14,7 @@ pub mod envelope;
 pub mod eval;
 pub mod geometry;
 pub mod history;
+pub mod part;
 pub mod pcurve;
 pub mod placement;
 mod topology;
