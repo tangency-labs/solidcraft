@@ -15,9 +15,9 @@
 
 use serde::Serialize;
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
+use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
 
-use crate::body::{Body, from_p3, p3};
+use crate::body::Body;
 use crate::{KernelError, Result};
 
 /// Bodies with more edges than this are refused rather than sampled for minutes.
@@ -117,16 +117,16 @@ pub fn pick_edges(body: &Body, picks: &[EdgePick]) -> Result<Vec<usize>> {
         return Err(KernelError::Invalid(format!("pick at most {MAX_PICKS} edges")));
     }
     crate::guard("continuity picks", || {
-        let (edges, adjacent) = topology(body)?;
+        let Topology { record, adjacent, .. } = topology(body)?;
         if picks.is_empty() {
-            return Ok((0..edges.len()).filter(|i| two_sided(&adjacent, *i)).collect());
+            return Ok((0..record.edges.len()).filter(|i| two_sided(&adjacent, *i)).collect());
         }
         let reach = body.size() * 0.05 + 1e-6;
         let mut out: Vec<usize> = Vec::new();
         for pick in picks {
             let index = match *pick {
                 EdgePick::Index(index) => index,
-                EdgePick::Point(p) => nearest_edge(&edges, p, reach)?,
+                EdgePick::Point(p) => nearest_edge(&record.edges, p, reach)?,
             };
             if !two_sided(&adjacent, index) {
                 return Err(KernelError::Invalid(format!("edge {index} of this body is not a seam between two faces")));
@@ -157,16 +157,46 @@ pub fn seam_diagnostics(body: &Body, edges: &[usize], samples: usize, tolerances
     crate::guard("continuity", || measure(body, edges, samples, tolerances))
 }
 
-/// The body's unique edges and the faces meeting at each of them, either under the caps.
-fn topology(body: &Body) -> Result<(Vec<mt::Edge>, Vec<Vec<usize>>)> {
-    if body.solid.face_iter().take(MAX_FACES + 1).count() > MAX_FACES {
+/// The body's record with, per edge, the faces it bounds (each once: a periodic face's own seam
+/// bounds one), and per face whether its surface's natural normal points out of the material;
+/// refused past the caps.
+struct Topology {
+    record: b::Brep,
+    adjacent: Vec<Vec<usize>>,
+    outward: Vec<bool>,
+}
+
+fn topology(body: &Body) -> Result<Topology> {
+    let record = crate::native::brep_record(body)?;
+    if record.faces.len() > MAX_FACES {
         return Err(KernelError::TooLarge(format!("the body has more than {MAX_FACES} faces")));
     }
-    let (edges, adjacent) = crate::body::edge_order(body.solid.face_iter());
-    if edges.len() > MAX_EDGES {
+    if record.edges.len() > MAX_EDGES {
         return Err(KernelError::TooLarge(format!("the body has more than {MAX_EDGES} edges")));
     }
-    Ok((edges, adjacent))
+    let adjacent = record
+        .edges
+        .iter()
+        .map(|e| {
+            let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
+            faces.sort_unstable();
+            faces.dedup();
+            faces
+        })
+        .collect();
+    // A face's side in the first shell that uses it (canonical order walks faces that way).
+    let mut outward: Vec<Option<bool>> = vec![None; record.faces.len()];
+    for shell in &record.shells {
+        if let b::Shell::Faces { faces, .. } = shell {
+            for f in faces {
+                if let Some(slot) = outward.get_mut(f.face as usize) {
+                    slot.get_or_insert(f.forward);
+                }
+            }
+        }
+    }
+    let outward = outward.into_iter().map(|o| o.unwrap_or(true)).collect();
+    Ok(Topology { record, adjacent, outward })
 }
 
 /// Is the edge at `index` shared by (exactly) two faces of the body?
@@ -175,17 +205,13 @@ fn two_sided(adjacent: &[Vec<usize>], index: usize) -> bool {
 }
 
 /// The index of the edge whose curve comes nearest `p`, within `reach`.
-fn nearest_edge(edges: &[mt::Edge], p: Vec3, reach: f64) -> Result<usize> {
-    use mt::ParametricCurve;
+fn nearest_edge(edges: &[b::Edge], p: Vec3, reach: f64) -> Result<usize> {
     let mut best: Option<(f64, usize)> = None;
     for (index, edge) in edges.iter().enumerate() {
-        let curve = edge.curve();
-        let Some((t0, t1)) = curve.try_range_tuple() else { continue };
-        if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
-            continue;
-        }
+        let Ok(curve) = CurveEval::new(&edge.curve) else { continue };
+        let [t0, t1] = edge.interval;
         for k in 0..=PICK_SAMPLES {
-            let q = from_p3(curve.subs(t0 + (t1 - t0) * k as f64 / PICK_SAMPLES as f64));
+            let Some(q) = curve.point(t0 + (t1 - t0) * k as f64 / PICK_SAMPLES as f64) else { continue };
             let d = q.dist(p);
             if d.is_finite() && best.is_none_or(|(bd, _)| d < bd) {
                 best = Some((d, index));
@@ -199,12 +225,11 @@ fn nearest_edge(edges: &[mt::Edge], p: Vec3, reach: f64) -> Result<usize> {
 }
 
 fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityTolerances) -> Result<ContinuityReport> {
-    let (list, adjacent) = topology(body)?;
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
+    let Topology { record, adjacent, outward } = topology(body)?;
     let mut selected: Vec<usize> = Vec::new();
     let mut skipped = 0usize;
     if edges.is_empty() {
-        for index in 0..list.len() {
+        for index in 0..record.edges.len() {
             if two_sided(&adjacent, index) {
                 selected.push(index);
             } else {
@@ -216,7 +241,7 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
         selected.sort_unstable();
         selected.dedup();
         for &index in &selected {
-            if index >= list.len() {
+            if index >= record.edges.len() {
                 return Err(KernelError::Invalid(format!("the body has no edge {index}")));
             }
             if !two_sided(&adjacent, index) {
@@ -224,21 +249,27 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
             }
         }
     }
+    let face = |i: usize| -> Option<FaceSurface> {
+        let f = record.faces.get(i)?;
+        FaceSurface::new(&f.surface, outward.get(i).copied().unwrap_or(true))
+    };
     let mut seams = Vec::new();
     let mut unmeasured = 0usize;
     let mut budget = MAX_STATIONS;
     for index in selected {
-        let Some(face_pair) = adjacent.get(index).filter(|faces| faces.len() == 2) else { continue };
-        let (Some(&first), Some(&second)) = (face_pair.first(), face_pair.get(1)) else { continue };
-        let (Some(a), Some(b)) = (faces.get(first).copied(), faces.get(second).copied()) else { continue };
-        let Some(edge) = list.get(index) else { continue };
+        let Some([first, second]) = adjacent.get(index).and_then(|f| <[usize; 2]>::try_from(f.as_slice()).ok()) else { continue };
+        let Some(edge) = record.edges.get(index) else { continue };
         // Every edge costs `samples` stations; a run out of budget stops cleanly.
         if budget < samples {
             skipped += 1;
             continue;
         }
         budget -= samples;
-        match seam(index, edge, a, b, samples, tolerances) {
+        let report = match (face(first), face(second), CurveEval::new(&edge.curve)) {
+            (Some(a), Some(b), Ok(curve)) => seam(index, &curve, edge.interval, a, b, samples, tolerances),
+            _ => None,
+        };
+        match report {
             Some(report) => seams.push(report),
             None => unmeasured += 1,
         }
@@ -247,29 +278,31 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
 }
 
 /// One edge's worst gap, normal angle and curvature jump.
-fn seam(index: usize, edge: &mt::Edge, face_a: &mt::Face, face_b: &mt::Face, samples: usize, tolerances: ContinuityTolerances) -> Option<SeamReport> {
-    use mt::ParametricCurve;
-    let curve = edge.curve();
-    let (t0, t1) = curve.try_range_tuple()?;
+fn seam(
+    index: usize,
+    curve: &CurveEval,
+    [t0, t1]: [f64; 2],
+    mut on_a: FaceSurface,
+    mut on_b: FaceSurface,
+    samples: usize,
+    tolerances: ContinuityTolerances,
+) -> Option<SeamReport> {
     // The station fractions: 0 at the edge's start, 1 at its end.
     let steps = samples.checked_sub(1)?;
     let fraction = |k: usize| k as f64 / steps as f64;
-    let mut on_a = FaceSurface::new(face_a);
-    let mut on_b = FaceSurface::new(face_b);
     let mut gap = None;
     let mut angle = None;
     let mut jump = None;
     let mut points = Vec::with_capacity(samples);
     for k in 0..samples {
         let f = fraction(k);
-        let at = from_p3(curve.subs(t0 + (t1 - t0) * f));
+        let Some((at, tangent)) = curve.derivs(t0 + (t1 - t0) * f) else { continue };
         if !at.is_finite() {
             continue;
         }
         // Both projections and both curvatures, or the station says nothing.
         let (Some((qa, na, uv_a)), Some((qb, nb, uv_b))) = (on_a.project(at), on_b.project(at)) else { continue };
-        let tangent = curve.der(t0 + (t1 - t0) * f);
-        let Some(tangent) = Vec3::new(tangent.x, tangent.y, tangent.z).normalized() else { continue };
+        let Some(tangent) = tangent.normalized() else { continue };
         // The normal sections square to the seam: one direction per face, in its tangent plane.
         let (Some(ka), Some(kb)) = (on_a.normal_curvature(uv_a, na, across(na, tangent)), on_b.normal_curvature(uv_b, nb, across(nb, tangent)))
         else {
@@ -324,31 +357,26 @@ fn keep(worst: &mut Option<SeamWorst>, value: f64, at: Vec3, edge_fraction: f64)
 /// A face's surface, kept over the stations of one edge so each search can start at the last
 /// answer (stations run along the edge, so the parameters move smoothly).
 struct FaceSurface {
-    surface: mt::Surface,
-    hint: Option<(f64, f64)>,
+    surface: SurfaceEval,
+    /// +1 where the natural normal points out of the material, −1 where it points in.
+    side: f64,
+    hint: Option<[f64; 2]>,
 }
 
 impl FaceSurface {
-    /// The face's own outward-facing surface (`oriented_surface`: a reversed face's surface is
-    /// inverted, so its normal is the material's outward normal).
-    fn new(face: &mt::Face) -> Self {
-        Self { surface: face.oriented_surface(), hint: None }
+    fn new(surface: &b::Surface, outward: bool) -> Option<Self> {
+        Some(Self { surface: SurfaceEval::new(surface).ok()?, side: if outward { 1.0 } else { -1.0 }, hint: None })
     }
 
     /// The nearest point of the surface to `p`, the outward unit normal there and the
     /// parameters. `None` where the search or the normal is unusable.
-    fn project(&mut self, p: Vec3) -> Option<(Vec3, Vec3, (f64, f64))> {
-        use mt::{ParametricSurface, ParametricSurface3D, SearchNearestParameter};
-        let uv = self.surface.search_nearest_parameter(p3(p), self.hint, 100).or_else(|| self.surface.search_nearest_parameter(p3(p), None, 100))?;
-        if !(uv.0.is_finite() && uv.1.is_finite()) {
-            return None;
-        }
-        let q = from_p3(self.surface.subs(uv.0, uv.1));
-        let n = self.surface.normal(uv.0, uv.1);
+    fn project(&mut self, p: Vec3) -> Option<(Vec3, Vec3, [f64; 2])> {
+        let uv = self.surface.project(p, self.hint, f64::INFINITY).or_else(|| self.surface.project(p, None, f64::INFINITY))?;
+        let (q, su, sv) = self.surface.derivs(uv[0], uv[1])?;
         if !q.is_finite() {
             return None;
         }
-        let normal = Vec3::new(n.x, n.y, n.z).normalized()?;
+        let normal = (su.cross(sv) * self.side).normalized()?;
         self.hint = Some(uv);
         Some((q, normal, uv))
     }
@@ -359,10 +387,9 @@ impl FaceSurface {
     /// `direction`: a plane reads 0 and a cylinder of radius `R`, across its axis, −1 / R
     /// (bending towards its axis). `None` at a degenerate parameter point (a cone's apex), where
     /// the surface has no curvature.
-    fn normal_curvature(&self, uv: (f64, f64), normal: Vec3, direction: Vec3) -> Option<f64> {
-        use mt::ParametricSurface;
-        let ru = vec3(self.surface.uder(uv.0, uv.1));
-        let rv = vec3(self.surface.vder(uv.0, uv.1));
+    fn normal_curvature(&self, uv: [f64; 2], normal: Vec3, direction: Vec3) -> Option<f64> {
+        let (_, ru, rv) = self.surface.derivs(uv[0], uv[1])?;
+        let (ruu, ruv, rvv) = self.surface.second(uv[0], uv[1])?;
         let (ru_len, rv_len) = (ru.len(), rv.len());
         if !(ru_len > 0.0 && rv_len > 0.0) {
             return None;
@@ -386,18 +413,9 @@ impl FaceSurface {
         if !(speed > 1e-6) {
             return None;
         }
-        let second = normal.dot(
-            vec3(self.surface.uuder(uv.0, uv.1)) * (du * du)
-                + vec3(self.surface.uvder(uv.0, uv.1)) * (2.0 * du * dv)
-                + vec3(self.surface.vvder(uv.0, uv.1)) * (dv * dv),
-        );
+        let second = normal.dot(ruu * (du * du) + ruv * (2.0 * du * dv) + rvv * (dv * dv));
         (second / (speed * speed)).is_finite().then_some(second / (speed * speed))
     }
-}
-
-/// A kernel point as a vector.
-fn vec3(p: mt::Vector3) -> Vec3 {
-    Vec3::new(p.x, p.y, p.z)
 }
 
 #[cfg(test)]

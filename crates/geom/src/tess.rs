@@ -329,6 +329,75 @@ impl EvalSurface {
     }
 }
 
+impl EvalSurface {
+    /// The second partial derivatives `(S_uu, S_uv, S_vv)` at (u, v) of a plane or spline (zero
+    /// on a plane); `None` for a revolution (its profile carries first derivatives only) and
+    /// where the spline cannot be evaluated.
+    pub fn second(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        if !(u.is_finite() && v.is_finite()) {
+            return None;
+        }
+        match self {
+            EvalSurface::Plane { .. } => Some((Vec3::ZERO, Vec3::ZERO, Vec3::ZERO)),
+            EvalSurface::Nurbs { degree, knots, count, ctrl, .. } => {
+                let [u, v] = self.wrap([u, v]);
+                nurbs_second(*degree, knots, *count, ctrl, u, v)
+            }
+            EvalSurface::Revolved { .. } => None,
+        }
+    }
+}
+
+/// The values and first two derivatives of the `p + 1` basis functions of degree `p` alive at
+/// `t` on `span`, each from its own local knots (`bspline::local_basis`).
+fn basis_second(knots: &[f64], span: usize, p: usize, t: f64) -> Option<Vec<[f64; 3]>> {
+    let n = knots.len().checked_sub(p + 1)?;
+    let side = if t >= *knots.get(n)? { crate::bspline::Side::Left } else { crate::bspline::Side::Right };
+    (span.checked_sub(p)?..=span)
+        .map(|i| {
+            let d = crate::bspline::local_basis(knots.get(i..=i + p + 1)?, t, side, 2);
+            Some([*d.first()?, *d.get(1)?, *d.get(2)?])
+        })
+        .collect()
+}
+
+fn nurbs_second(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ctrl: &[[f64; 4]], u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+    let [pu, pv] = degree;
+    let [nu, nv] = count;
+    let ok = |p: usize, n: usize, k: &[f64]| (1..=MAX_SPLINE_DEGREE).contains(&p) && n > p && k.len() == n + p + 1;
+    if !ok(pu, nu, &knots[0]) || !ok(pv, nv, &knots[1]) || nu.checked_mul(nv)? != ctrl.len() {
+        return None;
+    }
+    let (su, sv) = (span_of(&knots[0], pu, nu, u), span_of(&knots[1], pv, nv, v));
+    let (bu, bv) = (basis_second(&knots[0], su, pu, u)?, basis_second(&knots[1], sv, pv, v)?);
+    // Homogeneous sums: [A, A_u, A_v, A_uu, A_uv, A_vv].
+    let mut a = [[0.0f64; 4]; 6];
+    for (j, bj) in bv.iter().enumerate() {
+        for (i, bi) in bu.iter().enumerate() {
+            let c = ctrl.get((sv + j - pv) * nu + su + i - pu)?;
+            let w = [bi[0] * bj[0], bi[1] * bj[0], bi[0] * bj[1], bi[2] * bj[0], bi[1] * bj[1], bi[0] * bj[2]];
+            for (sum, w) in a.iter_mut().zip(w) {
+                for d in 0..4 {
+                    sum[d] += w * c[d];
+                }
+            }
+        }
+    }
+    let w = a[0][3];
+    if !(w.abs() > 1e-300) {
+        return None;
+    }
+    let xyz = |h: &[f64; 4]| Vec3::new(h[0], h[1], h[2]);
+    // S = A / w, differentiated by the quotient rule.
+    let s = xyz(&a[0]) * (1.0 / w);
+    let su_ = (xyz(&a[1]) - s * a[1][3]) * (1.0 / w);
+    let sv_ = (xyz(&a[2]) - s * a[2][3]) * (1.0 / w);
+    let suu = (xyz(&a[3]) - su_ * (2.0 * a[1][3]) - s * a[3][3]) * (1.0 / w);
+    let suv = (xyz(&a[4]) - su_ * a[2][3] - sv_ * a[1][3] - s * a[4][3]) * (1.0 / w);
+    let svv = (xyz(&a[5]) - sv_ * (2.0 * a[2][3]) - s * a[5][3]) * (1.0 / w);
+    (suu.is_finite() && suv.is_finite() && svv.is_finite()).then_some((suu, suv, svv))
+}
+
 fn affine(m: &[[f64; 4]; 3], p: Vec3) -> Vec3 {
     linear(m, p) + Vec3::new(m[0][3], m[1][3], m[2][3])
 }
