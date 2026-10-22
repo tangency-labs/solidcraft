@@ -211,6 +211,9 @@ pub struct ViewportState {
     /// The two-finger gesture in progress on a touch screen (`navigation::handle`), kept between
     /// frames so a tap can be told from a pan.
     pub(crate) touch: Option<crate::navigation::TouchGesture>,
+    /// A finger a two-finger gesture left behind (the other lifted first): the pointer it holds
+    /// is the pan's leftover, not a press, so it selects and drags nothing until it lifts.
+    pub(crate) touch_leftover: bool,
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
     /// Select Other: its list, a press being held, and click cycling.
@@ -4162,8 +4165,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
-    let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
-        input;
+    let CameraInput {
+        hover,
+        scroll,
+        mods,
+        middle,
+        secondary_down,
+        primary_down,
+        primary_pressed,
+        delta,
+        inside,
+        axes,
+        pinch,
+        pan,
+        primary_nav,
+        mode,
+        touch_leftover,
+    } = input;
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
@@ -4206,6 +4224,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || secondary_down
         || (app.viewport.primary_nav.is_some() && primary_down)
         || mode.is_some()
+        || touch_leftover
         || app.viewport.axis_drag.is_some()
         || app.viewport.spin
         || app.cam_anim.is_some();
@@ -4763,10 +4782,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::sketch_text_handles::dragging(app) && !crate::issue_report::cad_input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
-    // Dragging a part moves its free chain (outside sketches), or reaches within its joints
-    // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
-    // draws a selection box instead, as a drag from empty space does.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+    // Dragging a part that joints place moves it as far as they allow (outside sketches).
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && !touch_leftover
+        && app.session.active_sketch.is_none()
+        && !held
+    {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
             // still keep a modified drag from moving a part.
@@ -4823,6 +4847,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !held
         && primary_nav.is_none()
         && mode.is_none()
+        && !touch_leftover
         && app.viewport.point_drag.is_none()
         && !crate::joint_drag::active(app)
         && !crate::joint_handles::active(app)
@@ -10301,6 +10326,7 @@ mod tests {
         h.app.preferences.trackpad_pan = false;
         two_fingers(&mut h, pos2(760.0, 500.0), pos2(880.0, 500.0));
         assert!(h.app.viewport.touch.is_some(), "two fingers start a gesture");
+        assert!(h.app.session.selection.is_empty(), "the fingers land on the camera's behalf, not to select");
         let start = h.app.cam;
         // Both fingers slide together: the view pans with them, no zoom and no roll.
         h.app.synthetic.push(finger(0, egui::TouchPhase::Move, pos2(790.0, 530.0)));
@@ -10373,6 +10399,64 @@ mod tests {
         assert!(h.app.viewport.touch.is_none());
         h.frames(4);
         assert!(h.app.viewport.context_menu.is_none(), "a cancelled gesture must not open the menu");
+    }
+
+    #[test]
+    fn the_finger_a_two_finger_pan_leaves_behind_selects_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.trackpad_pan = false;
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).ok();
+        h.app.ui.pick_bodies = true;
+        h.app.fit_view();
+        h.frames(2);
+        h.call("ui.move", json!({"x": 760, "y": 500}));
+        // The first finger lands: egui-winit holds the mouse's button where it does.
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Start, pos2(760.0, 500.0)));
+        h.app.synthetic.push(finger(1, egui::TouchPhase::Start, pos2(880.0, 500.0)));
+        h.app.synthetic.push(finger_press(pos2(760.0, 500.0), true));
+        h.frame();
+        assert!(h.app.viewport.touch.is_some(), "two fingers start a gesture");
+        // Both fingers slide: the view pans under them, and the pointer they emulate with it.
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Move, pos2(790.0, 540.0)));
+        h.app.synthetic.push(finger(1, egui::TouchPhase::Move, pos2(910.0, 540.0)));
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(790.0, 540.0)));
+        h.frame();
+        assert!(h.app.viewport.boxsel.is_none(), "the pan itself must not box select");
+        // The second finger lifts and the first stays, sliding on: that leftover finger is no new
+        // press, so it neither selects nor drags until it lifts.
+        let cam = h.app.cam;
+        h.app.synthetic.push(finger(1, egui::TouchPhase::End, pos2(910.0, 540.0)));
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Move, pos2(830.0, 600.0)));
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(830.0, 600.0)));
+        h.frame();
+        assert!(h.app.viewport.touch_leftover, "the finger left behind is held back");
+        assert!(h.app.viewport.boxsel.is_none(), "the finger left behind must not start a box selection");
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Move, pos2(860.0, 620.0)));
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(860.0, 620.0)));
+        h.frame();
+        assert!(h.app.viewport.boxsel.is_none(), "nor after it slides further");
+        assert_eq!(h.app.cam.target, cam.target, "the finger left behind moves no camera either");
+        // It lifts: its release is no click either, and a pan is no tap, so no menu opens.
+        h.app.synthetic.push(finger(0, egui::TouchPhase::End, pos2(860.0, 620.0)));
+        h.app.synthetic.push(finger_press(pos2(860.0, 620.0), false));
+        h.app.synthetic.push(egui::Event::PointerGone);
+        h.frame();
+        h.frames(2);
+        assert!(h.app.viewport.boxsel.is_none());
+        assert!(h.app.session.selection.is_empty(), "the leftover finger selects nothing as it lifts");
+        assert!(!h.app.viewport.touch_leftover, "the next touch is a new press");
+        assert!(h.app.viewport.context_menu.is_none(), "a pan is no tap, so no menu");
+        // That new touch works as any first touch does: a tap selects what it lands on.
+        let p = h.app.viewport.rect.expect("the viewport").center();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Start, p));
+        h.app.synthetic.push(finger_press(p, true));
+        h.frame();
+        h.app.synthetic.push(finger(0, egui::TouchPhase::End, p));
+        h.app.synthetic.push(finger_press(p, false));
+        h.app.synthetic.push(egui::Event::PointerGone);
+        h.frame();
+        assert!(!h.app.session.selection.is_empty(), "a new touch selects what it lands on");
     }
 
     #[test]
