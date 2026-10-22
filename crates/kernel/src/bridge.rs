@@ -16,14 +16,14 @@
 //! speed) by finite differences: the second derivative of a surface curve with a unit tangent is
 //! its curvature vector, and the third is the arclength derivative of that curvature vector.
 
-use mt::{BoundedCurve, ParametricCurve, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::Brep;
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
-use truck_modeling as mt;
 
-use crate::body::{Body, from_p3, p3};
-use crate::surfaces::surface_body;
-use crate::{KernelError, Result, guard};
+use crate::body::Body;
+use crate::surfaces::Chain;
+use crate::{KernelError, Result};
 
 /// How much of a support surface a bridge repeats along its boundary.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -89,41 +89,40 @@ pub struct Frame {
 }
 
 /// The edges of `body` picked by points on them, chained: each runs on from the last, and the
-/// chain may close. Used with [`frames`], whose chain must be a chain of one face's own edges.
-pub fn chain(body: &Body, at: &[Vec3]) -> Result<Vec<mt::Edge>> {
+/// chain may close. Each is an edge of the body's record (its index) with whether the chain runs
+/// along it. Used with [`frames`], whose chain must be a chain of one face's own edges.
+pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
     body.require_brep("blend")?;
     if at.is_empty() || at.len() > 10_000 || at.iter().any(|p| !p.is_finite()) {
         return Err(KernelError::Invalid("pick 1 to 10000 points on the edges of a chain".into()));
     }
-    let mut pool: Vec<mt::Edge> = Vec::new();
+    let r = crate::native::brep_record(body)?;
+    let mut pool: Vec<usize> = Vec::new();
     for p in at {
         let e = crate::surfaces::edge_near(body, *p).ok_or_else(|| KernelError::Invalid("no edge near a picked point".to_string()))?;
-        if !pool.iter().any(|x| x.id() == e.id()) {
+        if !pool.contains(&e) {
             pool.push(e);
         }
     }
+    let ends = |e: usize| r.edges.get(e).map(|x| x.vertices).ok_or_else(|| KernelError::Invalid("an edge reference".into()));
     let first = pool.remove(0);
-    let mut chain = vec![first];
+    let mut chain = vec![(first, true)];
     // The picks need not be given in order: run forward from the first edge, then backwards.
-    let mut end = match chain.first() {
-        Some(e) => e.back().clone(),
-        None => return Err(KernelError::Invalid("pick at least one edge".into())),
-    };
-    while let Some(k) = pool.iter().position(|e| e.front().id() == end.id() || e.back().id() == end.id()) {
+    let mut end = ends(first)?[1];
+    while let Some(k) = pool.iter().position(|e| ends(*e).is_ok_and(|v| v.contains(&end))) {
         let e = pool.remove(k);
-        let e = if e.front().id() == end.id() { e } else { e.inverse() };
-        end = e.back().clone();
-        chain.push(e);
+        let [a, z] = ends(e)?;
+        let forward = a == end;
+        end = if forward { z } else { a };
+        chain.push((e, forward));
     }
-    let mut start = match chain.first() {
-        Some(e) => e.front().clone(),
-        None => return Err(KernelError::Invalid("pick at least one edge".into())),
-    };
-    while let Some(k) = pool.iter().position(|e| e.front().id() == start.id() || e.back().id() == start.id()) {
+    let mut start = ends(first)?[0];
+    while let Some(k) = pool.iter().position(|e| ends(*e).is_ok_and(|v| v.contains(&start))) {
         let e = pool.remove(k);
-        let e = if e.back().id() == start.id() { e } else { e.inverse() };
-        start = e.front().clone();
-        chain.insert(0, e);
+        let [a, z] = ends(e)?;
+        let forward = z == start;
+        start = if forward { a } else { z };
+        chain.insert(0, (e, forward));
     }
     if !pool.is_empty() {
         return Err(KernelError::Invalid("the picked edges do not run on from one another".into()));
@@ -131,14 +130,21 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Vec<mt::Edge>> {
     Ok(chain)
 }
 
-/// Whether a chain of edges closes back on itself.
-pub fn chain_closes(chain: &[mt::Edge]) -> bool {
+/// Whether a chain of `body`'s edges closes back on itself.
+pub fn chain_closes(body: &Body, chain: &Chain) -> bool {
+    let Ok(r) = crate::native::brep_record(body) else { return false };
+    closes(&r, chain)
+}
+
+fn closes(r: &Brep, chain: &Chain) -> bool {
+    let end = |(e, forward): (usize, bool), head: bool| r.edges.get(e).map(|x| if forward == head { x.vertices[1] } else { x.vertices[0] });
     let (Some(first), Some(last)) = (chain.first(), chain.last()) else { return false };
-    first.front().id() == last.back().id()
+    end(*first, false).is_some() && end(*first, false) == end(*last, true)
 }
 
 /// A point of a [`ChainLine`]'s polyline: where it is, its arclength along the chain, the chain
-/// edge (its index) the segment from it runs along, and that edge's curve parameter there.
+/// edge (its index in the chain) the segment from it runs along, and that edge's curve parameter
+/// there.
 #[derive(Clone, Copy)]
 struct Sample {
     p: Vec3,
@@ -148,40 +154,42 @@ struct Sample {
 }
 
 /// A chain of edges measured by arclength through a fine polyline on it, so that a station is read
-/// on the edge's own curve, not on a chord. A chain that closes ends back on its first point.
+/// on the edge's own curve, not on a chord. A chain that closes ends back on its first point. Each
+/// edge's curve is walked the way the chain runs along it.
 struct ChainLine {
-    curves: Vec<mt::Curve>,
+    curves: Vec<(CurveEval, [f64; 2])>,
     samples: Vec<Sample>,
     closed: bool,
 }
 
 impl ChainLine {
-    fn of(edges: &[mt::Edge]) -> Result<ChainLine> {
+    fn of(body: &Body, chain: &Chain) -> Result<ChainLine> {
         /// Samples per edge used for the length table.
         const PER_EDGE: usize = 64;
-        let mut samples: Vec<Sample> = Vec::with_capacity(edges.len() * (PER_EDGE + 1) + 1);
-        let mut curves = Vec::with_capacity(edges.len());
+        let r = crate::native::brep_record(body)?;
+        let mut samples: Vec<Sample> = Vec::with_capacity(chain.len() * (PER_EDGE + 1) + 1);
+        let mut curves = Vec::with_capacity(chain.len());
         let push = |samples: &mut Vec<Sample>, p: Vec3, edge: usize, t: f64| {
             let s = samples.last().map_or(0.0, |last| last.s + last.p.dist(p));
             samples.push(Sample { p, s, edge, t });
         };
-        for (i, e) in edges.iter().enumerate() {
-            let c = e.curve();
-            let (t0, t1) = c.range_tuple();
-            if !(t1 > t0) || ![t0, t1].into_iter().all(f64::is_finite) {
-                return Err(KernelError::Invalid("an edge has no parameter range".into()));
-            }
+        let fail = || KernelError::Failed("bridge: an edge has no point".into());
+        for (i, &(e, forward)) in chain.iter().enumerate() {
+            let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
+            let c = CurveEval::new(&edge.curve).map_err(|err| KernelError::Failed(format!("bridge: {err}")))?;
+            let [t0, t1] = edge.interval;
+            let (a, z) = if forward { (t0, t1) } else { (t1, t0) };
             for k in 0..=PER_EDGE {
                 // The segment that starts at this point: along this edge, or the zero-length join
                 // to the next edge.
-                let t = t0 + (t1 - t0) * k as f64 / PER_EDGE as f64;
-                push(&mut samples, from_p3(c.subs(t)), i, t);
+                let t = a + (z - a) * k as f64 / PER_EDGE as f64;
+                push(&mut samples, c.point(t).ok_or_else(fail)?, i, t);
             }
-            curves.push(c);
+            curves.push((c, [a, z]));
         }
-        let closed = chain_closes(edges);
+        let closed = closes(&r, chain);
         if closed && let Some(first) = samples.first().copied() {
-            push(&mut samples, first.p, edges.len().saturating_sub(1), first.t);
+            push(&mut samples, first.p, chain.len().saturating_sub(1), first.t);
         }
         let line = ChainLine { curves, samples, closed };
         let total = line.length();
@@ -195,6 +203,10 @@ impl ChainLine {
         self.samples.last().map_or(0.0, |x| x.s)
     }
 
+    fn point(&self, edge: usize, t: f64) -> Result<Vec3> {
+        self.curves.get(edge).and_then(|(c, _)| c.point(t)).ok_or_else(|| KernelError::Failed("bridge: sample".into()))
+    }
+
     /// The point at arclength `s` (wrapped round a closed chain, clamped on an open one), on its
     /// edge's own curve, and the chain edge it is on.
     fn at(&self, s: f64) -> Result<(Vec3, usize)> {
@@ -203,14 +215,13 @@ impl ChainLine {
         let hi = self.samples.partition_point(|x| x.s < s).clamp(1, self.samples.len().saturating_sub(1));
         let fail = || KernelError::Failed("bridge: sample".into());
         let (lo, hi) = (self.samples.get(hi - 1).ok_or_else(fail)?, self.samples.get(hi).ok_or_else(fail)?);
-        let curve = self.curves.get(lo.edge).ok_or_else(fail)?;
         let span = hi.s - lo.s;
         if !(span > 1e-12) {
             // The zero-length join between two edges: the end of the edge it belongs to.
-            return Ok((from_p3(curve.subs(lo.t)), lo.edge));
+            return Ok((self.point(lo.edge, lo.t)?, lo.edge));
         }
         let f = ((s - lo.s) / span).clamp(0.0, 1.0);
-        Ok((from_p3(curve.subs(lo.t + (hi.t - lo.t) * f)), lo.edge))
+        Ok((self.point(lo.edge, lo.t + (hi.t - lo.t) * f)?, lo.edge))
     }
 
     /// `count` stations evenly along the chain, from arclength `start` (a closed chain's seam; an
@@ -234,11 +245,10 @@ impl ChainLine {
     fn edges_at(&self, p: Vec3, edge: usize) -> [Option<usize>; 3] {
         let count = self.curves.len();
         let tol = self.length() * 1e-9 + 1e-12;
-        let Some(curve) = self.curves.get(edge) else { return [Some(edge), None, None] };
-        let (t0, t1) = curve.range_tuple();
-        let at = |t: f64| from_p3(curve.subs(t)).dist(p) <= tol;
-        let before = at(t0).then(|| edge.checked_sub(1).or(self.closed.then(|| count.saturating_sub(1)))).flatten();
-        let after = at(t1).then(|| Some(edge + 1).filter(|e| *e < count).or(self.closed.then_some(0))).flatten();
+        let Some((curve, [a, z])) = self.curves.get(edge) else { return [Some(edge), None, None] };
+        let at = |t: f64| curve.point(t).is_some_and(|q| q.dist(p) <= tol);
+        let before = at(*a).then(|| edge.checked_sub(1).or(self.closed.then(|| count.saturating_sub(1)))).flatten();
+        let after = at(*z).then(|| Some(edge + 1).filter(|e| *e < count).or(self.closed.then_some(0))).flatten();
         [Some(edge), before, after]
     }
 
@@ -250,23 +260,33 @@ impl ChainLine {
     }
 
     /// The arclength of the chain's point nearest `p`, and how far `p` is from the chain: the
-    /// nearest point of the fine polyline, then refined on that edge's own curve.
+    /// nearest point of the fine polyline, then refined on that edge's own curve between the
+    /// samples either side (golden-section search).
     fn nearest_with_distance(&self, p: Vec3) -> (f64, f64) {
-        let mut best = (f64::INFINITY, 0.0, 0usize, 0.0);
+        let mut best = (f64::INFINITY, 0.0, 0usize, 0.0, 0.0);
         for w in self.samples.windows(2) {
             let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
             let len = a.p.dist(b.p);
             let f = if len > 1e-12 { ((p - a.p).dot(b.p - a.p) / (len * len)).clamp(0.0, 1.0) } else { 0.0 };
             let d = p.dist(a.p + (b.p - a.p) * f);
-            if d < best.0 {
-                best = (d, a.s + len * f, a.edge, a.t + (b.t - a.t) * f);
+            if d < best.0 && a.edge == b.edge {
+                best = (d, a.s + len * f, a.edge, a.t, b.t);
             }
         }
-        let (chord, s, edge, hint) = best;
-        let on_curve = self.curves.get(edge).and_then(|c| {
-            let (t0, t1) = c.range_tuple();
-            let t = c.search_nearest_parameter(p3(p), Some(hint), 100)?;
-            (t0..=t1).contains(&t).then(|| from_p3(c.subs(t)).dist(p))
+        let (chord, s, edge, ta, tb) = best;
+        let on_curve = self.curves.get(edge).and_then(|(c, _)| {
+            let d = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
+            let (mut lo, mut hi) = (ta.min(tb), ta.max(tb));
+            let g = 0.5 * (5f64.sqrt() - 1.0);
+            for _ in 0..80 {
+                let (x, y) = (hi - g * (hi - lo), lo + g * (hi - lo));
+                if d(x) < d(y) {
+                    hi = y;
+                } else {
+                    lo = x;
+                }
+            }
+            Some(d(0.5 * (lo + hi))).filter(|x| x.is_finite())
         });
         (s, on_curve.map_or(chord, |d| d.min(chord)))
     }
@@ -294,24 +314,25 @@ impl ChainLine {
     }
 }
 
-/// The support surface's frames along `edges` (a chain of its own edges), for a bridge that
-/// leaves in direction `leave` (projected into the tangent plane at each station).
-pub fn frames(face: &mt::Face, edges: &[mt::Edge], leave: Vec3, count: usize) -> Result<Vec<Frame>> {
+/// The support surface's frames along `chain` (a chain of edges of `body`'s face `face`), for a
+/// bridge that leaves in direction `leave` (projected into the tangent plane at each station).
+pub fn frames(body: &Body, face: usize, chain: &Chain, leave: Vec3, count: usize) -> Result<Vec<Frame>> {
     if !(2..=4097).contains(&count) {
         return Err(KernelError::Invalid("a bridge needs 2 to 4097 stations".into()));
     }
-    let line = ChainLine::of(edges)?;
+    let line = ChainLine::of(body, chain)?;
     let stations = line.stations(count, 0.0, false)?;
-    frames_on(&vec![face.clone(); edges.len()], &stations, &line, leave)
+    let r = crate::native::brep_record(body)?;
+    frames_on(&r, &vec![face; chain.len()], &stations, &line, leave)
 }
 
 /// The frames at `stations` (points on `line`, each with the index of the chain edge it is on),
-/// each read on the support face of its own edge (`faces`, one per chain edge): a chain may run
-/// along the boundaries of several faces, a tube's rim along the halves of its wall. A station on
-/// the vertex where two of those faces meet sits at a corner of one face's parameters, where the
-/// shape may not be readable along the leave direction; it is then read on the other face, which
-/// holds the same point.
-fn frames_on(faces: &[mt::Face], stations: &[(Vec3, usize)], line: &ChainLine, leave: Vec3) -> Result<Vec<Frame>> {
+/// each read on the support face of its own edge (`faces`, faces of `r`, one per chain edge): a
+/// chain may run along the boundaries of several faces, a tube's rim along the halves of its wall.
+/// A station on the vertex where two of those faces meet sits at a corner of one face's
+/// parameters, where the shape may not be readable along the leave direction; it is then read on
+/// the other face, which holds the same point.
+fn frames_on(r: &Brep, faces: &[usize], stations: &[(Vec3, usize)], line: &ChainLine, leave: Vec3) -> Result<Vec<Frame>> {
     let leave =
         leave.normalized().filter(|l| l.is_finite()).ok_or_else(|| KernelError::Invalid("the leave direction must be a finite vector".into()))?;
     let along = |n: Vec3| -> Result<Vec3> {
@@ -322,22 +343,21 @@ fn frames_on(faces: &[mt::Face], stations: &[(Vec3, usize)], line: &ChainLine, l
     let length = line.length();
     // One support per distinct face, each with its own walk (a parameter hint means nothing on
     // another surface).
-    let mut supports: Vec<(mt::FaceID, Support, Walk)> = Vec::new();
+    let mut supports: Vec<(usize, Support, Walk)> = Vec::new();
     let mut out = Vec::with_capacity(stations.len());
     'stations: for (p, edge) in stations {
-        let mut tried: Vec<mt::FaceID> = Vec::with_capacity(2);
+        let mut tried: Vec<usize> = Vec::with_capacity(2);
         let mut refusal: Option<KernelError> = None;
         for e in line.edges_at(*p, *edge).into_iter().flatten() {
-            let Some(face) = faces.get(e) else { continue };
-            let id = face.id();
-            if tried.contains(&id) {
+            let Some(&face) = faces.get(e) else { continue };
+            if tried.contains(&face) {
                 continue;
             }
-            tried.push(id);
-            let k = match supports.iter().position(|(f, _, _)| *f == id) {
+            tried.push(face);
+            let k = match supports.iter().position(|(f, _, _)| *f == face) {
                 Some(k) => k,
                 None => {
-                    supports.push((id, Support::of(face, length)?, Walk::new(length)));
+                    supports.push((face, Support::of(r, face, length)?, Walk::new(length)));
                     supports.len() - 1
                 }
             };
@@ -359,21 +379,22 @@ fn frames_on(faces: &[mt::Face], stations: &[(Vec3, usize)], line: &ChainLine, l
     Ok(out)
 }
 
-/// The frames of `face` at stations on its own boundary, each leaving the face straight across
-/// that boundary: `stations` are points on the boundary with the boundary's direction there *as
-/// the face's own boundary runs* (its wires as [`mt::Face::boundaries`] gives them), and the leave
-/// direction is that direction × the face's outward normal — in the face's tangent plane, at
-/// right angles to the boundary, away from the face. `length` is the size of the boundary the
-/// stations are on (it sets how closely a station must lie on the surface and the step the shape
-/// is read with). Each frame comes with the face's unit normal there (as the face is oriented).
-/// With `shape` false only the leave direction and the normal are read (`bend` and
-/// `bend_change` are zero), which needs no room on the surface beside the station.
-pub fn frames_across(face: &mt::Face, stations: &[(Vec3, Vec3)], length: f64, shape: bool) -> Result<Vec<(Frame, Vec3)>> {
+/// The frames of `body`'s face `face` at stations on its own boundary, each leaving the face
+/// straight across that boundary: `stations` are points on the boundary with the boundary's
+/// direction there *as the face's own boundary runs* (counter-clockwise about its outward normal),
+/// and the leave direction is that direction × the face's outward normal — in the face's tangent
+/// plane, at right angles to the boundary, away from the face. `length` is the size of the boundary
+/// the stations are on (it sets how closely a station must lie on the surface and the step the
+/// shape is read with). Each frame comes with the face's outward unit normal there. With `shape`
+/// false only the leave direction and the normal are read (`bend` and `bend_change` are zero),
+/// which needs no room on the surface beside the station.
+pub fn frames_across(body: &Body, face: usize, stations: &[(Vec3, Vec3)], length: f64, shape: bool) -> Result<Vec<(Frame, Vec3)>> {
     if stations.len() > 1 << 16 || !(length.is_finite() && length > 0.0) {
         return Err(KernelError::Invalid("frames across a boundary need at most 65536 stations on a boundary of finite size".into()));
     }
-    let support = Support::of(face, length)?;
-    let outward = if face.orientation() { 1.0 } else { -1.0 };
+    let r = crate::native::brep_record(body)?;
+    let support = Support::of(&r, face, length)?;
+    let outward = if support.forward { 1.0 } else { -1.0 };
     let mut walk = Walk::new(length);
     let mut out = Vec::with_capacity(stations.len());
     for (p, tangent) in stations {
@@ -389,12 +410,13 @@ pub fn frames_across(face: &mt::Face, stations: &[(Vec3, Vec3)], length: f64, sh
     Ok(out)
 }
 
-/// A support surface read at stations: the surface, its parameter box, and how close a station
-/// must lie to it.
+/// A support surface read at stations: the surface, where its parameters run (a periodic
+/// direction without bound), whether its face is used along its natural normal, and how close a
+/// station must lie to it.
 struct Support {
-    surf: mt::Surface,
-    range_u: (f64, f64),
-    range_v: (f64, f64),
+    surf: SurfaceEval,
+    range: [(f64, f64); 2],
+    forward: bool,
     tol: f64,
 }
 
@@ -402,7 +424,7 @@ struct Support {
 /// next projection, which keeps the search on the same side of a periodic or split surface) and
 /// the finite-difference step that worked.
 struct Walk {
-    hint: Option<(f64, f64)>,
+    hint: Option<[f64; 2]>,
     step: f64,
 }
 
@@ -415,45 +437,46 @@ impl Walk {
 }
 
 impl Support {
-    fn of(face: &mt::Face, length: f64) -> Result<Support> {
-        let surf = face.surface();
-        let (Some(range_u), Some(range_v)) = surf.try_range_tuple() else {
-            return Err(KernelError::Failed("bridge: the support surface is unbounded".into()));
-        };
-        // A face's own edges may sit a fit tolerance off its surface (a cylinder's wall as a NURBS
-        // next to its exact ring), so the projection is only asked to be close, not exact.
+    fn of(r: &Brep, face: usize, length: f64) -> Result<Support> {
+        let f = r.faces.get(face).ok_or_else(|| KernelError::Invalid("no such face".into()))?;
+        let surf = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
+        let dom = surf.domain();
+        let range = [0, 1].map(|d| match (dom.period[d], dom.range[d]) {
+            (None, Some(r)) => r,
+            _ => (f64::NEG_INFINITY, f64::INFINITY),
+        });
+        let forward = r
+            .shells
+            .iter()
+            .find_map(|s| match s {
+                solidcraft_geom::brep::Shell::Faces { faces, .. } => faces.iter().find(|o| o.face as usize == face).map(|o| o.forward),
+                _ => None,
+            })
+            .unwrap_or(true);
+        // A face's own edges may sit a fit tolerance off its surface, so the projection is only
+        // asked to be close, not exact.
         let tol = (length * 1e-4).max(1e-6);
-        Ok(Support { surf, range_u, range_v, tol })
+        Ok(Support { surf, range, forward, tol })
     }
 
-    /// The frame at `p`, leaving in `leave(n)` (`n` the surface's unit normal there), and that
-    /// normal. Without `read_shape`, the frame's shape is left at zero.
+    /// The frame at `p`, leaving in `leave(n)` (`n` the surface's natural unit normal there), and
+    /// that normal. Without `read_shape`, the frame's shape is left at zero.
     fn station(&self, p: Vec3, leave: &dyn Fn(Vec3) -> Result<Vec3>, walk: &mut Walk, read_shape: bool) -> Result<(Frame, Vec3)> {
-        let (surf, range_u, range_v, tol) = (&self.surf, self.range_u, self.range_v, self.tol);
-        let project = |hint: Option<(f64, f64)>| surf.search_nearest_parameter(p3(p), hint, 100);
-        let close = |uv: (f64, f64)| from_p3(surf.subs(uv.0, uv.1)).dist(p) <= tol;
+        let (surf, [range_u, range_v], tol) = (&self.surf, self.range, self.tol);
         // The station before this one is the hint where it lands close; a chain that wraps the
         // surface (or a periodic one) falls back to a free search.
-        let (u, v) = match project(walk.hint).filter(|uv| close(*uv)).or_else(|| project(None).filter(|uv| close(*uv))) {
-            Some(uv) => uv,
-            None => return Err(KernelError::Invalid("a picked edge is not on the support surface".into())),
-        };
-        walk.hint = Some((u, v));
-        let at = from_p3(surf.subs(u, v));
-        if at.dist(p) > tol {
+        let Some([u, v]) = surf.project(p, walk.hint, tol).or_else(|| surf.project(p, None, tol)) else {
             return Err(KernelError::Invalid("a picked edge is not on the support surface".into()));
-        }
-        let normal = surf.normal(u, v);
-        let n = Vec3::new(normal.x, normal.y, normal.z)
-            .normalized()
-            .ok_or_else(|| KernelError::Failed("bridge: the support surface has no normal".into()))?;
+        };
+        walk.hint = Some([u, v]);
+        let fail = || KernelError::Failed("bridge: the support surface has no point there".into());
+        let (_, su, sv) = surf.derivs(u, v).ok_or_else(fail)?;
+        let n = su.cross(sv).normalized().ok_or_else(|| KernelError::Failed("bridge: the support surface has no normal".into()))?;
         let w = leave(n)?;
         if !read_shape {
             return Ok((Frame { p, leave: w, bend: Vec3::ZERO, bend_change: Vec3::ZERO }, n));
         }
         // Parameter-space direction that leaves in `w` at unit 3D speed: S_u·du + S_v·dv = w.
-        let su = tangent(surf, u, v, range_u, true);
-        let sv = tangent(surf, u, v, range_v, false);
         let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
         let det = a * c - b * b;
         let scale = a.max(c).max(1e-30);
@@ -463,8 +486,8 @@ impl Support {
         let du = (c * w.dot(su) - b * w.dot(sv)) / det;
         let dv = (a * w.dot(sv) - b * w.dot(su)) / det;
         // The samples of the parameter line. A station sits on the support surface's own
-        // boundary, so the line usually leaves the surface: the shape is then read from the
-        // samples of the one side that is still on it, which is the surface's own extension past
+        // boundary, so the line usually leaves the face: the shape is then read from the samples
+        // of the one side that is still on the surface, which is the surface's own extension past
         // that boundary (exact for a plane and a cylinder, what a blend continues from).
         let slack = 1e-9;
         let on = |t: f64, h: f64| {
@@ -497,7 +520,7 @@ impl Support {
         let Some(offsets) = chosen else {
             return Err(KernelError::Invalid("the support surface is too small around a picked edge to read its shape".into()));
         };
-        let q: Vec<Vec3> = offsets.iter().map(|t| from_p3(surf.subs(u + t * h * du, v + t * h * dv))).collect();
+        let q: Vec<Vec3> = offsets.iter().map(|t| surf.point([u + t * h * du, v + t * h * dv]).ok_or_else(fail)).collect::<Result<_>>()?;
         let (Some(&f0), Some(&f1), Some(&f2), Some(&f3), Some(&f4)) = (q.first(), q.get(1), q.get(2), q.get(3), q.get(4)) else {
             return Err(KernelError::Failed("bridge: samples".into()));
         };
@@ -526,22 +549,6 @@ impl Support {
         let bend_change = if t.dot(w) < 0.0 { -bend_change } else { bend_change };
         walk.step = h;
         Ok((Frame { p, leave: w, bend, bend_change }, n))
-    }
-}
-
-/// A first derivative of the surface in one parameter, by central differences (one-sided where
-/// the parameter is at the edge of the domain).
-fn tangent(surf: &mt::Surface, u: f64, v: f64, range: (f64, f64), along_u: bool) -> Vec3 {
-    let span = (range.1 - range.0).max(1e-12);
-    let h = (span * 1e-5).max(1e-12);
-    let at = |x: f64| if along_u { from_p3(surf.subs(x, v)) } else { from_p3(surf.subs(u, x)) };
-    let x = if along_u { u } else { v };
-    if x - h >= range.0 && x + h <= range.1 {
-        (at(x + h) - at(x - h)) * (0.5 / h)
-    } else if x + h <= range.1 {
-        (at(x + h) - at(x)) * (1.0 / h)
-    } else {
-        (at(x.min(range.1)) - at((x - h).max(range.0))) * (1.0 / h)
     }
 }
 
@@ -721,71 +728,68 @@ pub fn bridge(a: &[Frame], b: &[Frame], orders: [Continuity; 2], crown: [f64; 2]
     knots_v.extend(std::iter::repeat_n(1.0, n + 1));
     let points: Vec<HPoint> = ctrl.iter().map(|p| HPoint::weighted(*p, 1.0)).collect();
     let nurbs = NurbsSurface::from_homogeneous([degree, n], [knots_u, knots_v], points).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
-    guard("bridge surface", || crate::spline_conv::tensor_face(&nurbs).map(|f| surface_body(vec![f])))
+    crate::surfaces::tensor_sheet(&nurbs)
 }
 
-/// The surface of a bridge face as a grid of points, for callers that measure the result.
+/// The one face of a bridge body: its surface and its parameter box.
+pub(crate) fn the_face(body: &Body) -> Result<(SurfaceEval, [[f64; 2]; 2])> {
+    let r = crate::native::brep_record(body)?;
+    let face = r.faces.first().ok_or_else(|| KernelError::Failed("bridge: no face".into()))?;
+    let surf = SurfaceEval::new(&face.surface).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
+    Ok((surf, face.domain))
+}
+
+/// The surface of a bridge face as a grid of points over its parameter box, for callers that
+/// measure the result.
 pub fn sample_grid(body: &Body, along: usize, across: usize) -> Result<Vec<Vec<Vec3>>> {
     if !(2..=1025).contains(&along) || !(2..=1025).contains(&across) {
         return Err(KernelError::Invalid("a grid needs 2 to 1025 samples each way".into()));
     }
-    let face = body.solid.face_iter().next().ok_or_else(|| KernelError::Failed("bridge: no face".into()))?;
-    let surf = face.surface();
-    let (Some((u0, u1)), Some((v0, v1))) = surf.try_range_tuple() else {
-        return Err(KernelError::Failed("bridge: the surface is unbounded".into()));
-    };
-    let mut out = Vec::with_capacity(along);
-    for i in 0..along {
-        let u = u0 + (u1 - u0) * i as f64 / (along - 1) as f64;
-        let mut row = Vec::with_capacity(across);
-        for j in 0..across {
-            let v = v0 + (v1 - v0) * j as f64 / (across - 1) as f64;
-            row.push(from_p3(surf.subs(u, v)));
-        }
-        out.push(row);
-    }
-    Ok(out)
+    let (surf, [[u0, u1], [v0, v1]]) = the_face(body)?;
+    let fail = || KernelError::Failed("bridge: the surface has no point there".into());
+    (0..along)
+        .map(|i| {
+            let u = u0 + (u1 - u0) * i as f64 / (along - 1) as f64;
+            (0..across).map(|j| surf.point([u, v0 + (v1 - v0) * j as f64 / (across - 1) as f64]).ok_or_else(fail)).collect()
+        })
+        .collect()
 }
 
 /// The most any point of a bridge's boundary row is from the chain it was built on — the row at
 /// `v0` for the first boundary, at `v1` for the second: what a stitch would have to close up.
 fn boundary_gap(made: &Body, line: &ChainLine, at_end: bool) -> Result<f64> {
-    let face = made.solid.face_iter().next().ok_or_else(|| KernelError::Failed("bridge: no face".into()))?;
-    let surf = face.surface();
-    let (Some((u0, u1)), Some((v0, v1))) = surf.try_range_tuple() else {
-        return Err(KernelError::Failed("bridge: the surface is unbounded".into()));
-    };
+    let (surf, [[u0, u1], [v0, v1]]) = the_face(made)?;
     let v = if at_end { v1 } else { v0 };
     let mut worst: f64 = 0.0;
     for i in 0..=256 {
-        let u = u0 + (u1 - u0) * i as f64 / 256.0;
-        worst = worst.max(line.nearest_with_distance(from_p3(surf.subs(u, v))).1);
+        let q =
+            surf.point([u0 + (u1 - u0) * i as f64 / 256.0, v]).ok_or_else(|| KernelError::Failed("bridge: the surface has no point there".into()))?;
+        worst = worst.max(line.nearest_with_distance(q).1);
     }
     Ok(worst)
 }
 
 /// Which face of `body` the blend continues from along each edge of a chain (one per edge, in
-/// chain order): of the faces each edge bounds, the one whose tangent plane holds as much of
-/// `leave` as possible there. A chain may run along several faces (a tube's rim along the halves
-/// of its wall).
-fn support_faces(body: &Body, chain: &[mt::Edge], leave: Vec3) -> Result<Vec<mt::Face>> {
+/// chain order, by its index in the body's record): of the faces each edge bounds, the one whose
+/// tangent plane holds as much of `leave` as possible there. A chain may run along several faces
+/// (a tube's rim along the halves of its wall).
+fn support_faces(r: &Brep, chain: &Chain, leave: Vec3, size: f64) -> Result<Vec<usize>> {
     let mut out = Vec::with_capacity(chain.len());
-    for edge in chain {
-        let curve = edge.curve();
-        let (t0, t1) = curve.range_tuple();
-        let mid = from_p3(curve.subs(0.5 * (t0 + t1)));
-        let mut best: Option<(f64, mt::Face)> = None;
-        for face in body.solid.face_iter() {
-            if !face.edge_iter().any(|f| f.id() == edge.id()) {
-                continue;
-            }
-            let Some((q, n, _)) = crate::curveblend::project(face, mid, None) else { continue };
-            if q.dist(mid) > body.size() * 1e-6 + 1e-9 {
-                continue;
-            }
+    for &(e, _) in chain {
+        let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
+        let mid = CurveEval::new(&edge.curve)
+            .ok()
+            .and_then(|c| c.point(0.5 * (edge.interval[0] + edge.interval[1])))
+            .ok_or_else(|| KernelError::Failed("bridge: an edge has no point".into()))?;
+        let mut best: Option<(f64, usize)> = None;
+        for u in &edge.uses {
+            let face = u.face as usize;
+            let Some(surf) = r.faces.get(face).and_then(|f| SurfaceEval::new(&f.surface).ok()) else { continue };
+            let Some(uv) = surf.project(mid, None, size * 1e-6 + 1e-9) else { continue };
+            let Some(n) = surf.derivs(uv[0], uv[1]).and_then(|(_, su, sv)| su.cross(sv).normalized()) else { continue };
             let score = (leave - n * leave.dot(n)).len();
-            if best.as_ref().is_none_or(|(b, _)| score > *b) {
-                best = Some((score, face.clone()));
+            if best.is_none_or(|(b, _)| score > b) {
+                best = Some((score, face));
             }
         }
         let (score, face) = best.ok_or_else(|| KernelError::Invalid("no face of the body holds a picked edge".into()))?;
@@ -898,7 +902,8 @@ pub fn blend_between(
     }
     let chain_a = chain(a, picks_a)?;
     let chain_b = chain(b, picks_b)?;
-    let (line_a, line_b) = (ChainLine::of(&chain_a)?, ChainLine::of(&chain_b)?);
+    let (line_a, line_b) = (ChainLine::of(a, &chain_a)?, ChainLine::of(b, &chain_b)?);
+    let (record_a, record_b) = (crate::native::brep_record(a)?, crate::native::brep_record(b)?);
     if line_a.closed != line_b.closed {
         return Err(KernelError::Invalid("a closed chain blends only to a closed chain, and an open one only to an open one".into()));
     }
@@ -913,21 +918,17 @@ pub fn blend_between(
             (mid_a - mid_b).normalized().ok_or_else(|| KernelError::Invalid("the two boundaries coincide: there is nothing to blend".into()))?,
         ),
     };
-    let faces_a = support_faces(a, &chain_a, leave_a)?;
-    let faces_b = support_faces(b, &chain_b, leave_b)?;
+    let faces_a = support_faces(&record_a, &chain_a, leave_a, a.size())?;
+    let faces_b = support_faces(&record_b, &chain_b, leave_b, b.size())?;
     let (start_a, backwards_a) = seam.map_or((0.0, false), |[p, _]| line_a.start_at_seam(p));
     let stations_a = line_a.stations(samples, start_a, backwards_a)?;
     let stations_b = pair_with(&stations_a, &line_b, seam.map(|[_, q]| q))?;
-    let frames_a = frames_on(&faces_a, &stations_a, &line_a, leave_a)?;
-    let frames_b = frames_on(&faces_b, &stations_b, &line_b, leave_b)?;
+    let frames_a = frames_on(&record_a, &faces_a, &stations_a, &line_a, leave_a)?;
+    let frames_b = frames_on(&record_b, &faces_b, &stations_b, &line_b, leave_b)?;
     let made = bridge(&frames_a, &frames_b, orders, crown)?;
     let gap = boundary_gap(&made, &line_a, false)?.max(boundary_gap(&made, &line_b, true)?);
-    let faces: Vec<mt::Face> = made.solid.face_iter().cloned().collect();
-    let mut rec = crate::record::Rebuild::default();
-    for f in &faces {
-        rec.made(f, Vec::new());
-    }
-    let blend = crate::record::rebuilt_body(surface_body(faces), &[&a.solid, &b.solid], &rec);
+    // The blend's face is new to the operation over `[a, b]`.
+    let blend = crate::surfaces::all_new(made, &[a, b])?;
     if !stitch {
         return Ok((blend, gap));
     }
