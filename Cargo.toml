@@ -78,6 +78,9 @@ cadmpeg-registry = { version = "=0.6.1", default-features = false, features = ["
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
+# Ends a process group with the system call (MIT; already in the tree through zip).
+nix = { version = "0.31", default-features = false, features = ["signal"] }
+
 # images
 image = { version = "0.25", default-features = false, features = ["png", "hdr"] }
 png = "0.18.1"
