@@ -470,7 +470,8 @@ mod tests {
 
     #[test]
     fn sweeps_along_3d_paths() {
-        // A quarter of a helix-like 3D curve: a smooth wall, volume ≈ area × length.
+        // A polyline through 41 points of a quarter of a helix-like 3D curve: the profile swept
+        // along its 40 lines, mitred at each point, so volume = area × length.
         let path: Vec<Vec3> = (0..=40)
             .map(|i| {
                 let t = i as f64 / 40.0 * std::f64::consts::FRAC_PI_2;
@@ -484,8 +485,9 @@ mod tests {
         let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = std::f64::consts::PI * 4.0 * len;
         assert!((v - want).abs() < 0.02 * want, "{v} vs {want}");
-        // One wall per profile segment and two caps (ruled walls would give dozens).
-        assert!(b.faces(0.01).unwrap().len() <= 8, "smooth walls: {}", b.faces(0.01).unwrap().len());
+        // The path is its lines (no wall is fitted through the points): a wall per profile
+        // segment (the circle's two arcs) along each of the 40 lines, and two caps.
+        assert_eq!(b.faces(0.01).unwrap().len(), 2 * 40 + 2, "walls along each line");
         // An L-shaped path (a sharp corner) with a holed square: mitred ruled walls.
         let path = [Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 20.0)];
         let plane = Plane::from_normal(Vec3::ZERO, Vec3::Z).unwrap();
