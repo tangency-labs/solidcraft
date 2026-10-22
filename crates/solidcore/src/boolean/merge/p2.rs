@@ -74,10 +74,10 @@
 //! - Callees not ported yet return [`SolidError::Unported`] at the call site,
 //!   tagged `UNPORTED(<unit>)`: `SmBrep::MakeWireEdge` (`topology.brep_p3`, an
 //!   integration gap: the ported callee needs `&mut Kernel`, which
-//!   `MergeContext::Split` lacks, and a `NotifyEnv` from `TopologyCopy`'s keys); the
-//!   [`MergeBrep`] defaults do the same for `SmFace::GetEdges` / `GetVertices` /
-//!   `GetBrep` (`topology.face_p4`). `OrientTrimmedSurfaces` is a required
-//!   [`MergeBrep`] method (`topology::brep::p3`).
+//!   `MergeContext::Split` lacks, and a `NotifyEnv` from `TopologyCopy`'s keys).
+//!   `OrientTrimmedSurfaces` is a required [`MergeBrep`] method (`topology::brep::p3`);
+//!   `SmFace::GetEdges` / `GetVertices` / `GetBrep` are the intersector backend's
+//!   ([`IntersectorBrep::face_edges`] and siblings).
 //!   The code after each stub is ported in full. `SmBrep::GetMinEdgeBBoxSize` is
 //!   `topology::brep::p2::min_edge_bbox_size`. The callees ported on arena B-reps are
 //!   required [`MergeBrep`] methods (`SmEdge::GetVertices`, `SmFace::GetFaceuses`,
@@ -1042,39 +1042,6 @@ pub trait MergeBrep<O>: IntersectorBrepP2<O> {
     ///
     /// Those of the notification.
     fn notify_brep(&mut self, k: &mut Kernel, brep: O, operation: NotifyOperation) -> Result<()>;
-
-    /// `SmFace::GetEdges(rEdges)`.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
-    fn face_edges(&self, face: O) -> Result<Vec<O>> {
-        let _ = face;
-        // UNPORTED(topology.face_p4): SmFace::GetEdges
-        unavailable("SmFace::GetEdges", "topology.face_p4")
-    }
-
-    /// `SmFace::GetVertices(rVertices)`.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
-    fn face_vertices(&self, face: O) -> Result<Vec<O>> {
-        let _ = face;
-        // UNPORTED(topology.face_p4): SmFace::GetVertices
-        unavailable("SmFace::GetVertices", "topology.face_p4")
-    }
-
-    /// `SmFace::GetBrep`.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] until `topology.face_p4` is ported.
-    fn face_brep(&self, face: O) -> Result<Option<O>> {
-        let _ = face;
-        // UNPORTED(topology.face_p4): SmFace::GetBrep
-        unavailable("SmFace::GetBrep", "topology.face_p4")
-    }
 
     /// `SmBrep::IsManifoldSolid` (`topology::brep::p2::is_manifold_solid`).
     ///

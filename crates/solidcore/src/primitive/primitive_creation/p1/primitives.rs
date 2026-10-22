@@ -191,9 +191,9 @@ fn create_face_id(
         "topology.brep_p8",
     ))
 }
-fn face_edges(_k: &Kernel, _b: &Brep, _face: FaceId) -> Result<Vec<crate::topology::EdgeId>> {
-    // UNPORTED(topology.face_p4): SmFace::GetEdges
-    Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"))
+/// `SmFace::GetEdges(rEdges)` with its defaults (`topology::face::p4::edges`).
+fn face_edges(_k: &Kernel, b: &Brep, face: FaceId) -> Result<Vec<crate::topology::EdgeId>> {
+    crate::topology::face::p4::edges(b, face, None, false, None)
 }
 pub(super) fn detailed_face(
     k: &mut Kernel,

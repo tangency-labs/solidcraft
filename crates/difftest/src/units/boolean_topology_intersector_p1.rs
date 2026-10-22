@@ -1471,6 +1471,27 @@ impl IntersectorBrep<H> for Two {
     fn edge_vertex(&self, edge: H) -> solidcore::Result<Option<H>> {
         Ok(ed::vertex(self.brep_r(edge)?, eid(edge))?.map(|v| hd(edge.b, K_VERTEX, v.index())))
     }
+    fn face_brep(&self, face: H) -> solidcore::Result<Option<H>> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let b = self.brep_r(face)?;
+        Ok(solidcore::topology::face::p4::brep(b, fid(face))?.map(|_| brep_h(face.b)))
+    }
+    fn face_vertices(&self, face: H) -> solidcore::Result<Vec<H>> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let vs = solidcore::topology::face::p4::vertices(self.brep_r(face)?, fid(face), None, false, None)?;
+        Ok(vs.into_iter().map(|v| hd(face.b, K_VERTEX, v.index())).collect())
+    }
+    fn face_edges(&self, face: H) -> solidcore::Result<Vec<H>> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let es = solidcore::topology::face::p4::edges(self.brep_r(face)?, fid(face), None, false, None)?;
+        Ok(es.into_iter().map(|e| hd(face.b, K_EDGE, e.index())).collect())
+    }
     fn edge_primary_edgeuse_orientation(&self, edge: H) -> solidcore::Result<Option<OrientType>> {
         let b = self.brep_r(edge)?;
         match eu1::primary_edgeuse(b, eid(edge))? {
@@ -1556,8 +1577,16 @@ impl IntersectorBrep<H> for Two {
         ang_tol_deg: f64,
         opt_coincidence_flag: Option<bool>,
     ) -> solidcore::Result<ti::FaceIntersection<H>> {
-        if face1.kind != K_FACE || face2.kind != K_FACE || face1.b != face2.b {
-            return Err(invalid("FaceIntersect needs two faces of one B-rep"));
+        if face1.kind != K_FACE || face2.kind != K_FACE {
+            return Err(invalid("FaceIntersect needs two faces"));
+        }
+        if face1.b != face2.b {
+            // UNPORTED(topology.face_p3): SmFace::FaceIntersect of faces of two B-reps --
+            // justified: topology::face::p3::face_intersect takes one B-rep arena
+            return Err(SolidError::unported(
+                "SmFace::FaceIntersect (faces of two B-reps)",
+                "topology.face_p3",
+            ));
         }
         let options = FaceIntersectOptions {
             want_this_classes: true,
