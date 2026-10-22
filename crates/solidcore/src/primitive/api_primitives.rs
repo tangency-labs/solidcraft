@@ -46,14 +46,15 @@
 //!   upstream's `NULL` checks (`SM_ERR_INVALID_INPUT`) hold by construction.
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; errors of the
 //!   called constructors pass through unchanged.
-//! - Every B-rep entry point validates its inputs as upstream (and the pyramid makes its
-//!   base edges), then returns [`SolidError::Unported`]: `SmPrimitiveCreation` (units
-//!   `primitive.primitive_creation_p1..p3`) and the `SmBrep` construction it fills
-//!   (`topology.brep_p5`, `topology.brep_p8`) are not ported yet. The error names the
-//!   call that builds the solid.
+//! - Every B-rep entry point but the pyramid validates its inputs as upstream, then
+//!   returns [`SolidError::Unported`]: `SmPrimitiveCreation` (units
+//!   `primitive.primitive_creation_p1..p3`) is not ported yet. The error names the call
+//!   that builds the solid. [`create_pyramid`] builds its faces (`topology.brep_p8`) and
+//!   stitches them (`topology.brep_p5`).
 //! - **The new B-rep.** `new SmBrep()` is [`Brep::new_with_infinite_region`]: the
-//!   topology part of `topology.brep_p3`'s constructor (its infinite void region). These
-//!   entry points take no kernel (`SmApiCreate*` take no context), so the rest of
+//!   topology part of `topology.brep_p3`'s constructor (its infinite void region), except
+//!   for [`create_pyramid`], which takes the kernel and builds the whole `SmBrep()`. The
+//!   other entry points take no kernel (`SmApiCreate*` take no context), so the rest of
 //!   `SmBrep()` (the context's zone tolerance and size settings, and the
 //!   `SM_NO_CONSTRUCTION` notification) is not applied, the same deviation as
 //!   `blend::fillet_geom::p1::FilletBrep::new`'s.
@@ -84,7 +85,9 @@ const OP_PYRAMID: &str = "primitive::api_primitives::create_pyramid";
 const OP_CYLINDRICAL_BOX: &str = "primitive::api_primitives::create_cylindrical_box";
 const OP_SPHERE_NO_POLE: &str = "primitive::api_primitives::create_sphere_no_pole";
 
-const UNIT_BREP_P3: &str = "topology.brep_p3";
+const UNIT_P1: &str = "primitive.primitive_creation_p1";
+const UNIT_P2: &str = "primitive.primitive_creation_p2";
+const UNIT_P3: &str = "primitive.primitive_creation_p3";
 const UNIT_BREP_P8: &str = "topology.brep_p8";
 
 /// `SmApiIsPositiveDim`: a finite dimension (radius, length, height) above
@@ -342,14 +345,24 @@ pub fn create_torus_surface(
 
 /// The solid pyramid on the square base of side `length` centred at `base_center` in
 /// the XY plane, with its apex `height` above the centre along Z
-/// (`SmApiCreatePyramid`).
+/// (`SmApiCreatePyramid`): the base and four triangular side faces
+/// ([`crate::topology::brep::p8::create_planar_face_with_3d_curves`], tolerance `1e-5`)
+/// stitched and oriented into a closed solid
+/// ([`crate::topology::brep::p5::stitch_and_orient`]). The B-rep is `new SmBrep()` in
+/// `k`'s context ([`crate::topology::brep::p3::new_brep`]); its edits notify an
+/// arena-only store (no observer holds identities for the new B-rep's objects).
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a length or height not above `0` (NaN passes, as
-/// upstream); those of [`Line::create_line_segment`] for the base edges (corners that
-/// coincide); then [`SolidError::Unported`] (`SmBrep::CreatePlanarFaceWith3DCurves`).
-pub fn create_pyramid(base_center: Point3, length: f64, height: f64) -> Result<Brep> {
+/// upstream); those of [`Line::create_line_segment`] for the edges (corners that
+/// coincide), of the face builder and of the stitching.
+pub fn create_pyramid(
+    k: &mut Kernel,
+    base_center: Point3,
+    length: f64,
+    height: f64,
+) -> Result<Brep> {
     if length <= 0.0 || height <= 0.0 {
         return Err(SolidError::invalid_input(
             OP_PYRAMID,
@@ -369,9 +382,24 @@ pub fn create_pyramid(base_center: Point3, length: f64, height: f64) -> Result<B
     let apex = base_center + Vec3::new(0.0, 0.0, height);
     let tol = 1.0e-5;
 
-    // `new SmBrep()`: the B-rep and its infinite void region (module Deviations)
-    let new_brep = Brep::new_with_infinite_region()?;
-    let _ = new_brep.infinite_region();
+    // `new SmBrep()`: the B-rep and its infinite void region
+    let mut brep = crate::topology::brep::p3::new_brep(
+        k,
+        crate::geom::tol::USE_DEFAULT,
+        crate::geom::tol::USE_DEFAULT,
+    )?;
+    let region = brep.infinite_region();
+
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(&brep);
+    let mut env = state.env(None);
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    let this_face =
+        |f: FaceId| crate::topology::loopuse::notify_ref(crate::error::EntityRef::Face(f));
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
 
     // Square base face: c0 -> c1 -> c2 -> c3.
     let mut base_loop: Vec<Curve> = Vec::new();
@@ -381,13 +409,34 @@ pub fn create_pyramid(base_center: Point3, length: f64, height: f64) -> Result<B
             3, *start, end, None,
         )?));
     }
-    let _ = (base_loop, apex, tol);
-    // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFaceWith3DCurves
-    // UNPORTED(topology.brep_p5): SmBrep::StitchAndOrient
-    Err(SolidError::unported(
-        "SmBrep::CreatePlanarFaceWith3DCurves",
-        UNIT_BREP_P8,
-    ))
+    crate::topology::brep::p8::create_planar_face_with_3d_curves(
+        k, &mut brep, region, &base_loop, tol, &mut fenv,
+    )?;
+
+    // Four triangular side faces: c_i -> c_{i+1} -> apex.
+    for ii in 0..4 {
+        let p0 = *base
+            .get(ii)
+            .ok_or(SolidError::invalid_input(OP_PYRAMID, "corner"))?;
+        let p1 = *base
+            .get((ii + 1) % 4)
+            .ok_or(SolidError::invalid_input(OP_PYRAMID, "corner"))?;
+        let side = vec![
+            Curve::from(Line::create_line_segment(3, p0, p1, None)?),
+            Curve::from(Line::create_line_segment(3, p1, apex, None)?),
+            Curve::from(Line::create_line_segment(3, apex, p0, None)?),
+        ];
+        crate::topology::brep::p8::create_planar_face_with_3d_curves(
+            k, &mut brep, region, &side, tol, &mut fenv,
+        )?;
+    }
+
+    crate::topology::brep::p5::stitch_and_orient(
+        k,
+        &mut brep,
+        &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+    )?;
+    Ok(brep)
 }
 
 /// The solid sector of the hollow cylinder of `inside_radius` and `outside_radius`
@@ -765,7 +814,7 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(matches!(
-            create_pyramid(o(), 0.0, 1.0),
+            create_pyramid(&mut Kernel::default(), o(), 0.0, 1.0),
             Err(SolidError::InvalidInput { .. })
         ));
         for (a0, a1) in [(400.0, 450.0), (90.0, 10.0), (45.0, 45.0), (0.0, 400.0)] {
@@ -784,7 +833,11 @@ mod tests {
     fn valid_brep_inputs_reach_the_unported_kernel() {
         assert!(create_box(o(), 5.0, 10.0, 20.0).is_err_and(|e| e.is_unported()));
         assert!(create_sphere_no_pole(o(), -5.0).is_err_and(|e| e.is_unported()));
-        assert!(create_pyramid(o(), 2.0, 3.0).is_err_and(|e| e.is_unported()));
+        // the pyramid's faces are built (topology.brep_p8) until the face construction
+        // of MakeFaceTopology (topology.brep_p6) stops
+        assert!(
+            create_pyramid(&mut Kernel::default(), o(), 2.0, 3.0).is_err_and(|e| e.is_unported())
+        );
     }
 
     #[test]
@@ -795,22 +848,34 @@ mod tests {
                 _ => None,
             }
         }
-        let brep_p3 = Some(UNIT_BREP_P3);
-        assert_eq!(deferred_at(&create_sphere(o(), 5.0)), brep_p3);
-        assert_eq!(
-            deferred_at(&create_partial_sphere(o(), 5.0, 0.0, 90.0)),
-            brep_p3
-        );
-        assert_eq!(deferred_at(&create_cone(o(), 5.0, 2.0, 10.0)), brep_p3);
-        assert_eq!(
-            deferred_at(&create_partial_cylinder(o(), 5.0, 10.0, 0.0, 90.0)),
-            brep_p3
-        );
-        assert_eq!(deferred_at(&create_torus(o(), 10.0, 2.0)), brep_p3);
-        assert_eq!(
-            deferred_at(&create_partial_torus(o(), 10.0, 2.0, 0.0, 90.0)),
-            brep_p3
-        );
+        // the new B-rep is built (topology.brep_p3); the SmPrimitiveCreation call that
+        // fills it is not wired yet
+        let creation = |r: Option<&'static str>| {
+            r.is_some_and(|u| u.starts_with("primitive.primitive_creation_p"))
+        };
+        assert!(creation(deferred_at(&create_sphere(o(), 5.0))));
+        assert!(creation(deferred_at(&create_partial_sphere(
+            o(),
+            5.0,
+            0.0,
+            90.0
+        ))));
+        assert!(creation(deferred_at(&create_cone(o(), 5.0, 2.0, 10.0))));
+        assert!(creation(deferred_at(&create_partial_cylinder(
+            o(),
+            5.0,
+            10.0,
+            0.0,
+            90.0
+        ))));
+        assert!(creation(deferred_at(&create_torus(o(), 10.0, 2.0))));
+        assert!(creation(deferred_at(&create_partial_torus(
+            o(),
+            10.0,
+            2.0,
+            0.0,
+            90.0
+        ))));
         let mut brep = Brep::new();
         let (edge, face) = (EdgeId::from_index(0), FaceId::from_index(0));
         assert_eq!(
@@ -874,8 +939,13 @@ mod tests {
         let _ = create_torus_surface(&k, Point3::new(nan, 0.0, inf), 3.0, 1.0);
         let _ = create_cylinder_surface(&k, Point3::new(nan, inf, 0.0), 1.0, 1.0e17);
         let _ = create_cone_surface(&k, Point3::new(1.0e300, 0.0, 0.0), 1.0e17, 0.0, 1.0e-11);
-        let _ = create_pyramid(Point3::new(nan, 0.0, 0.0), nan, 1.0);
-        let _ = create_pyramid(Point3::new(1.0e17, 0.0, 0.0), 1.0, 1.0);
+        let _ = create_pyramid(&mut Kernel::default(), Point3::new(nan, 0.0, 0.0), nan, 1.0);
+        let _ = create_pyramid(
+            &mut Kernel::default(),
+            Point3::new(1.0e17, 0.0, 0.0),
+            1.0,
+            1.0,
+        );
         let _ = create_cylindrical_box(o(), 1.0, 1.0, 2.0, 0.0, 360.0);
         let _ = create_sphere_no_pole(o(), 1.0e18);
     }

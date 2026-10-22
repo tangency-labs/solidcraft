@@ -425,6 +425,7 @@ impl OffsetExecutive {
             // adapters must still propagate Unported even though native ignores
             // ordinary errors. Do not turn that partial path into empty success.
             if crate::error::ignored(crate::topology::brep::p5::make_manifold(
+                kernel,
                 &mut result,
                 None,
                 false,
@@ -685,7 +686,7 @@ impl OffsetExecutive {
                                 false,
                             )
                         },
-                    )?;
+                    )??;
                 let trim_domain =
                     crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
                         kernel,

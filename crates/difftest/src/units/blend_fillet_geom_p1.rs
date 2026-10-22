@@ -1793,8 +1793,15 @@ impl RustModel {
         for &e in es {
             let fe = self.fb.fillet_edge(e).map_err(h)?;
             let edge = b.edge(e).map_err(h)?;
-            o.push(self.vertex_index(Some(edge.vertices[0])));
-            o.push(self.vertex_index(Some(edge.vertices[1])));
+            // the shim's SmEdge::GetVertices(vs, ve): through the primary edge use and its
+            // mate, swapped unless the primary use is SM_OT_SAME (a new rail edge's uses are
+            // SM_OT_UNKNOWN); the stored pair where the uses cannot give it
+            let (vs0, ve0) = solidcore::topology::vertex::edge_vertex_pair(b, e)
+                .ok()
+                .and_then(|(s, t)| s.zip(t))
+                .unwrap_or((edge.vertices[0], edge.vertices[1]));
+            o.push(self.vertex_index(Some(vs0)));
+            o.push(self.vertex_index(Some(ve0)));
             o.push(fe.fillet_edge_type() as i64 as f64);
             o.push(fe.status() as i64 as f64);
             o.push(Self::corner_index(fe.fillet_corner()));

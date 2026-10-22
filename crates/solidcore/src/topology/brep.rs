@@ -10,6 +10,7 @@
 //! | [`p5`]    | B-rep editing and transformation operations, part 5             |
 //! | [`p6`]    | see the module                                                  |
 //! | [`p7`]    | see the module                                                  |
+//! | [`p8`]    | making faces from surfaces and from loops of curves              |
 //! | [`p10`]   | `MakeTopologyFromData`, `ProjectAndTrim`, `RemoveAllTopology`, `TestClosureSplitRegion` (edge version) |
 //!
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
@@ -21,4 +22,5 @@ pub mod p3;
 pub mod p5;
 pub mod p6;
 pub mod p7;
+pub mod p8;
 pub mod p9;

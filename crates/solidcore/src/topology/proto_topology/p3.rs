@@ -41,8 +41,9 @@
 //!   [`ProtoTopologyManager::glue_coincident_brep_vertices`] takes `&mut Kernel` and
 //!   the B-reps mutably.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
-//!   each tagged `UNPORTED(<unit>)`: `SmBrep::Point3DClassify` (`query.brep`),
-//!   `DeleteEdge` (`topology.brep_p4`). `SmBrep::GlueVertices`
+//!   each tagged `UNPORTED(<unit>)`: `DeleteEdge` (`topology.brep_p4`).
+//!   `SmBrep::Point3DClassify` goes through [`ProtoBrep::brep_point_3d_classify`],
+//!   which the B-reps' owner implements. `SmBrep::GlueVertices`
 //!   goes through [`BrepGlue`], which the B-reps' owner implements with
 //!   `topology::brep::p5` (so [`ProtoTopologyManager::glue_coincident_brep_vertices`]
 //!   takes the kernel and the B-reps mutably).

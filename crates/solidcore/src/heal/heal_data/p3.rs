@@ -674,12 +674,11 @@ impl<O: LoopObject> HealData<O> {
                     let Some(new_surface) = new_surface else {
                         continue;
                     };
-                    let Some((new_face, edits)) =
-                        ignore_soft(create_face_from_surface(b, old_region, new_surface))?
-                    else {
+                    let (made, edits) = create_face_from_surface(k, b, old_region, new_surface);
+                    changes.append(edits);
+                    let Some(new_face) = ignore_soft(made)? else {
                         continue;
                     };
-                    changes.append(edits);
                     self.new_faces_from_fix_degen_faces.push(new_face);
                     if !vertex_deleted {
                         for v in face_vertices(b, new_face)? {
@@ -1096,12 +1095,35 @@ fn delete_face(
         crate::topology::brep::p3::delete_face(k, b, env, &mut marks, f, opts)
     })
 }
-fn create_face_from_surface(_b: &mut Brep, _r: RegionId, _s: Surface) -> Result<(FaceId, Changes)> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceInRegionFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceInRegionFromSurface",
-        "topology.brep_p8",
-    ))
+/// `CreateFaceInRegionFromSurface(region, surface, surface->GetNaturalUVDomain(), ..)`
+/// (unit `topology.brep_p8`) under the edit tracker ([`tracked_edit`]): the new face or
+/// the status, and the tracked changes (also those of a failed call). The face owns its surface under its edit identity.
+fn create_face_from_surface(
+    k: &mut Kernel,
+    b: &mut Brep,
+    r: RegionId,
+    s: Surface,
+) -> (Result<FaceId>, Changes) {
+    let dom = s.natural_uv_domain();
+    let mut marks = Marks::default();
+    let (made, changes) = tracked_edit(k, b, |k, b, env| {
+        let key_of = env.key_of;
+        let this_face = move |f: FaceId| key_of(EntityRef::Face(f));
+        let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+            env,
+            marks: &mut marks,
+            this_face: &this_face,
+        };
+        crate::topology::brep::p8::create_face_in_region_from_surface(
+            k,
+            b,
+            Some(r),
+            Some(s),
+            &dom,
+            &mut fenv,
+        )
+    });
+    (made.map(|m| m.face), changes)
 }
 fn glue_vertices(k: &mut Kernel, b: &mut Brep, a: VertexId, d: VertexId) -> Result<Changes> {
     let ((), changes) = capture_changes(k, b, |k, b| {

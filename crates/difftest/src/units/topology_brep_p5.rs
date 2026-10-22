@@ -326,6 +326,27 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
     Ok(r)
 }
 
+/// Whether `b` holds a vertex use, edge use or shell its owner no longer lists (an
+/// unlinked record upstream deletes).
+fn has_unlinked_records(b: &Brep) -> bool {
+    let vu = b.vertexuses().iter().any(|(id, r)| {
+        r.vertex
+            .and_then(|v| b.vertex(v).ok())
+            .is_some_and(|v| !v.vertexuses.contains(&id))
+    });
+    let eu = b.edgeuses().iter().any(|(id, r)| {
+        r.edge
+            .and_then(|e| b.edge(e).ok())
+            .is_some_and(|e| !e.edgeuses.contains(&id))
+    });
+    let sh = b.shells().iter().any(|(id, r)| {
+        r.region
+            .and_then(|x| b.region(x).ok())
+            .is_some_and(|x| !x.shells.contains(&id))
+    });
+    vu || eu || sh
+}
+
 fn notification_record(b: &Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
     use solidcore::geom::attribute::ObjectKey;
     use solidcore::geom::context::NotifyCallback;
@@ -498,6 +519,13 @@ impl UnitDiff for Runner {
         }
         match rust_record(&mut Kernel::default(), &mut b, &i) {
             Ok(record) if i.op == 2 => Ok(Output::new().values("target_stage", record)),
+            // a use or shell the edit unlinked stays in its arena (append-only records)
+            // where upstream deletes it, and [`graph`] lists unreachable records too: the
+            // record erasure is the B-rep storage integration of topology.brep_p4
+            Ok(_) if has_unlinked_records(&b) => Ok(Output::deferred(
+                "topology.brep_p4",
+                "SmBrep::~SmBrep (stable owning record erasure)",
+            )),
             Ok(record) => Ok(graph(&b, record)),
             Err(e) => Output::unported(&e).ok_or_else(|| HarnessError::new(e.to_string())),
         }

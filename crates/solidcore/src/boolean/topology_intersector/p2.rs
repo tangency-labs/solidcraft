@@ -72,7 +72,8 @@
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::DeleteEdge` / `DeleteVertex`
 //!   (`topology.brep_p4`),
-//!   `SmFace::Point3DClassify` (`query.face_p1`), and the stubs of [`p1`](super::p1)
+//!   `SmFace::Point3DClassify` (`query.face_p1`), `MergeCurveClasses`
+//!   (`boolean.topology_intersector_p3`, ported in draft PR #211), and the stubs of [`p1`](super::p1)
 //!   for `SmFace::GetEdges` / `GetVertices` / `GetBrep` (`topology.face_p4`) and
 //!   `SmFace::FaceIntersect` (`topology.face_p3`). The code after a stub is ported in
 //!   full. `SmBrep::GlueEdgesGeneral` (`topology.brep_p7`) goes through

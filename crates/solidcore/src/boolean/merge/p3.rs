@@ -622,17 +622,25 @@ fn combine_brep(
     )
 }
 
+/// `SmBrep::CreateFaceFromSurface(surface, domain, face)`
+/// (`topology::brep::p8::create_face_from_surface`), notifying as [`copy_brep`]: an
+/// arena-only store, the new face owning its surface under its arena identity.
 fn create_face_from_surface(
-    _k: &mut Kernel,
-    _brep: &mut Brep,
-    _surface: Surface,
-    _domain: Extent2d,
+    k: &mut Kernel,
+    brep: &mut Brep,
+    surface: Surface,
+    domain: Extent2d,
 ) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
+    let mut env = state.env(None);
+    let mut marks = Marks::default();
+    let this_face = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    crate::topology::brep::p8::create_face_from_surface(k, brep, Some(surface), &domain, &mut fenv)
 }
 
 fn copy_base_surface(_k: &mut Kernel, _source: &Surface) -> Result<Surface> {

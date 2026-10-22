@@ -2175,11 +2175,8 @@ mod tests {
             fb.make_fillet_edge(None, Some(v[1]), None).unwrap_err(),
             SolidError::Upstream { .. }
         ));
-        // FilletBrep::new has no infinite region yet (SmBrep())
-        assert!(fb
-            .make_fillet_edge(Some(v[0]), Some(v[1]), None)
-            .unwrap_err()
-            .is_unported());
+        // FilletBrep::new has its infinite region (SmBrep(), topology.brep_p3)
+        fb.make_fillet_edge(Some(v[0]), Some(v[1]), None).unwrap();
     }
 
     #[test]
@@ -2202,11 +2199,13 @@ mod tests {
                 .unwrap_err(),
             SolidError::Upstream { .. }
         ));
-        // the allocation of the edge use needs the infinite region (SmBrep())
-        assert!(fb
-            .make_rail_edgeuse(g, 0, Some(v[0]), OrientType::Same, None, &solvers, &target)
-            .unwrap_err()
-            .is_unported());
+        // the edge use is allocated in the infinite region (SmBrep(), topology.brep_p3);
+        // the bare fillet geometry then fails upstream, no longer as Unported
+        assert!(matches!(
+            fb.make_rail_edgeuse(g, 0, Some(v[0]), OrientType::Same, None, &solvers, &target)
+                .unwrap_err(),
+            SolidError::Upstream { .. }
+        ));
     }
 
     #[test]

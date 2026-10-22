@@ -695,14 +695,15 @@ mod tests {
         let source = BrepId::from_index(0);
         let destination = BrepId::from_index(1);
         assert!(model.copy_edges(source, &[], destination)?.is_empty());
-        // The live shell-vertex constructor now reaches wire-edge topology creation.
+        // The wire-edge constructor (topology.brep_p3) is ported: the fixture's bare
+        // edge (no edge use) is rejected as upstream's missing primary edge use.
         let copied = model.copy_edges(source, &[EdgeId::from_index(0)], destination);
         assert!(
             matches!(
                 copied,
-                Err(SolidError::Unported {
-                    upstream: "SmBrep::MakeWireEdgeVertex",
-                    unit: "topology.brep_p3",
+                Err(SolidError::InvalidInput {
+                    operation: "topology::edge",
+                    ..
                 })
             ),
             "{copied:?}"
@@ -846,11 +847,12 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
+        // the scene copy (topology.brep_p3) is ported: HCR stops at its transform
         assert!(matches!(
             model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true),
             Err(SolidError::Unported {
-                upstream: "SmBrep::SmBrep(const SmBrep&)",
-                unit: "topology.brep_p3"
+                upstream: "SmBrep::Transform",
+                unit: "topology.brep_p5"
             })
         ));
         model.b[0].set_editing_enabled(false);

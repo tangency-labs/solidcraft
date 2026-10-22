@@ -1105,6 +1105,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::case::CaseSource;
     use solidcore::topology::{Vertexuse, VertexuseOwner};
 
     /// A B-rep with one shell vertex in its infinite region.
@@ -1144,5 +1145,22 @@ mod tests {
         let g = graph(&linked, vec![]);
         assert_ne!(g.ints, base.ints);
         assert!(g.diagnostics.is_none());
+    }
+
+    /// Fuzz 30000 (fuzz03460): op 2 on a wire, which has no face to select. The FFI
+    /// rejects the fixture; the Rust side must refuse it too instead of taking the
+    /// selector modulo zero faces.
+    #[test]
+    fn op_without_selected_entity_is_refused_not_a_panic() {
+        let case = Case {
+            unit: "boolean.merge_p1".into(),
+            name: "fuzz03460".into(),
+            source: CaseSource::Inline,
+            inputs: json!({"args":[2,1,0],"brep":{"curve":{"cpts":[[0,0,0,1],[4,0,0,1]],
+                "dim":3,"p":1,"u":[0,0,1,1]},"kind":"wire","t0":0.125,"t1":0.875},
+                "op":2,"tolerances":[0.001,1.0]}),
+        };
+        let e = Runner.run_rust(&case).unwrap_err();
+        assert!(e.to_string().contains("lacks selected entity"), "{e}");
     }
 }

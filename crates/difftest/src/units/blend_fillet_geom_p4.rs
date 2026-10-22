@@ -451,9 +451,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                 context: None,
                 key_of: &key_of,
             };
-            let r = rm
-                .fb
-                .make_face_brep(&mut k, gid, &solvers, &mut brep, &mut env);
+            let r = rm.fb.make_face_brep(&mut k, gid, &solvers, &mut brep, &mut env);
             o.push(status_of!(r));
         }
         Query::Blending { g } => {
@@ -598,8 +596,8 @@ fn gen_uv_curve(rng: &mut Rng) -> Option<Inputs> {
                     rng,
                     surface,
                     scale,
-                    on_surface(&rs, u, 0.1)?,
-                    on_surface(&rs, u, 0.8)?,
+                    on_surface(&k, &rs, u, 0.1)?,
+                    on_surface(&k, &rs, u, 0.8)?,
                     false,
                 ));
             }

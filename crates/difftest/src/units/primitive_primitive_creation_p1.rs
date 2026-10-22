@@ -284,7 +284,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                     .map(|_| ()),
                 1 => api::create_circle(&k, value(v, 7), value(v, 1), &frame).map(|_| ()),
                 2 => primitive.create_box(
-                    &k,
+                    &mut k,
                     &mut brep,
                     value(v, 1),
                     value(v, 2),
@@ -305,7 +305,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                     &mut notifications,
                 ),
                 4 => primitive.create_cone(
-                    &k,
+                    &mut k,
                     &mut brep,
                     value(v, 1),
                     value(v, 2),
@@ -323,7 +323,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                     &mut notifications,
                 ),
                 8 => PrimitiveCreation::create_cone_elliptic_ends(
-                    &k,
+                    &mut k,
                     &mut brep,
                     &EllipticCone {
                         radius_front: value(v, 1),

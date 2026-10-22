@@ -589,8 +589,8 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
 }
 
 /// Finds an edge index and parameter (`SmApiFindEdge`); missing match is `SM_ERR`.
-pub fn find_edge(brep: &Brep, point: Point3) -> Result<EdgePick> {
-    tools::find_edge(brep, point)?.ok_or(SolidError::sm_err(OP))
+pub fn find_edge(k: &Kernel, brep: &Brep, point: Point3) -> Result<EdgePick> {
+    tools::find_edge(k, brep, point)?.ok_or(SolidError::sm_err(OP))
 }
 
 /// Finds a face (`SmApiFindFaces`); missing match is `SM_ERR`.

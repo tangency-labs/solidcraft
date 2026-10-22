@@ -472,7 +472,7 @@ fn rust_curve(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
 }
 
 /// What a failed Rust op reports: the upstream status, or the deferral.
-enum Fail {
+pub(crate) enum Fail {
     Deferred(Box<Output>),
     Harness(HarnessError),
 }
@@ -517,7 +517,7 @@ const UNKNOWN_TYPE: i64 = 16999;
 /// (`0` regions, `1` shells, `2` face uses, `3` faces, `4` loop uses, `5` loops, `6` edge
 /// uses, `7` edges, `8` vertex uses, `9` vertices), in first-seen order.
 #[derive(Default)]
-struct Walk {
+pub(crate) struct Walk {
     lists: [Vec<u32>; 10],
     index: [BTreeMap<u32, i64>; 10],
 }
@@ -536,7 +536,7 @@ impl Walk {
     }
 
     /// The index of a link (`-1` null, `-3` an object the walk did not reach).
-    fn find(&self, k: usize, id: Option<u32>) -> f64 {
+    pub(crate) fn find(&self, k: usize, id: Option<u32>) -> f64 {
         match id {
             None => -1.0,
             Some(id) => self
@@ -547,11 +547,11 @@ impl Walk {
         }
     }
 
-    fn len(&self, k: usize) -> usize {
+    pub(crate) fn len(&self, k: usize) -> usize {
         self.lists.get(k).map_or(0, Vec::len)
     }
 
-    fn at(&self, k: usize, i: usize) -> Result<u32, Fail> {
+    pub(crate) fn at(&self, k: usize, i: usize) -> Result<u32, Fail> {
         self.lists
             .get(k)
             .and_then(|l| l.get(i))
@@ -655,7 +655,7 @@ const fn orient_code(o: OrientType) -> f64 {
 
 /// The fixture's `walk` over the Rust arena, in the same first-seen order.
 #[allow(clippy::too_many_lines)]
-fn walk(b: &Brep) -> Result<Walk, Fail> {
+pub(crate) fn walk(b: &Brep) -> Result<Walk, Fail> {
     let mut g = Walk::default();
     for r in must(bp1::regions(b, None))? {
         g.add(0, Some(r.index()));
@@ -899,7 +899,7 @@ fn put_graph(o: &mut Vec<f64>, b: &Brep) -> Result<(), Fail> {
     Ok(())
 }
 
-fn put_counts(o: &mut Vec<f64>, b: &Brep) -> Result<(), Fail> {
+pub(crate) fn put_counts(o: &mut Vec<f64>, b: &Brep) -> Result<(), Fail> {
     o.push(must(bp1::faces(b, None))?.len() as f64);
     o.push(must(bp1::edges(b, None))?.len() as f64);
     o.push(must(bp1::vertices(b, None))?.len() as f64);

@@ -62,6 +62,9 @@ const OP_PIPE: &str = "sweep::api_brep::create_pipe_sweep";
 const OP_PLANAR_PATH: &str = "sweep::api_brep::create_sweep_along_planar_path";
 const OP_CURVE_SWEEP: &str = "sweep::api_brep::create_curve_sweep";
 const OP_FROM_FACES: &str = "sweep::api_brep::create_curve_sweep_from_faces";
+
+const UNIT_P2: &str = "primitive.primitive_creation_p2";
+const UNIT_P3: &str = "primitive.primitive_creation_p3";
 const OP_FROM_EDGES: &str = "sweep::api_brep::create_curve_sweep_from_edges";
 const OP_TAPER: &str = "sweep::api_brep::create_taper_extrude";
 const OP_LINEAR_REPS: &str = "sweep::api_brep::create_linear_sweep_with_repetitions";

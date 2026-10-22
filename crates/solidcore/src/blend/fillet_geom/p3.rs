@@ -1518,8 +1518,18 @@ mod tests {
             .unwrap_err();
         // MakeRailEdgeuse (blend.fillet_geom_p5) needs the pseudo B-rep's region and
         // shell for its new edge use, which this bare FilletBrep lacks
-        assert_eq!(unit_of(&e), Some("topology.brep_p3"), "{e:?}");
-        assert_eq!(e.operation(), "SmBrep::SmBrep");
+        // (with topology.brep_p3 ported, this is a null pointer, not a deferral)
+        assert!(
+            matches!(
+                e,
+                SolidError::Upstream {
+                    operation: "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
+                    code: SM_ERR_NULL_POINTER,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
         // the end edge use was taken off the first rail before the stub
         assert!(!fb.brep().edge(rail0).unwrap().edgeuses.contains(&ends[0]));
         assert_eq!(fb.brep().edgeuse(ends[0]).unwrap().edge, None);

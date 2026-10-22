@@ -317,12 +317,8 @@ fn face_notify(
 
 /// `SmFace::GetVertices` (unit `topology.face_p4`).
 fn face_vertices(b: &Brep, f: FaceId) -> Result<Vec<VertexId>> {
-    let _ = (b, f);
-    // UNPORTED(topology.face_p4): SmFace::GetVertices
-    Err(SolidError::unported(
-        "SmFace::GetVertices",
-        "topology.face_p4",
-    ))
+    // Upstream defaults (SmFace.h:671): no attribute filter, all loops.
+    crate::topology::face::p4::vertices(b, f, None, false, None)
 }
 
 /// `SmBrep::MakeShellVertex(pRegion, crPoint, rpNewShell, rpNewVertex)`
@@ -2410,8 +2406,8 @@ fn make_wire_edge_in(
         .as_ref()
         .ok_or(null_deref("wire edge without curve"))?;
     let (p_start, p_end) = (
-        bound.evaluate_point(interval.min())?,
-        bound.evaluate_point(interval.max())?,
+        bound.evaluate_point(k, interval.min())?,
+        bound.evaluate_point(k, interval.max())?,
     );
     let mut tol_sq = b.tolerance();
     tol_sq = (tol_sq / 4.0) * (tol_sq / 4.0);
@@ -2912,7 +2908,7 @@ fn turn_to_nurbs_in(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Re
             let SurfaceKind::BSpline(new_bss) = new_surface.kind() else {
                 return Err(ner());
             };
-            let ext = new_bss.create_extended_surface(extend_distance, ContinuityType::G1)?;
+            let ext = new_bss.create_extended_surface(k, extend_distance, ContinuityType::G1)?;
             let face_ref = (env.key_of)(EntityRef::Face(f));
             p2::replace_surface(
                 k,
@@ -2987,7 +2983,7 @@ fn turn_to_nurbs_in(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Re
 
         // Approximate pCurve if we don't have a SmBSplineCurve yet (status ignored)
         if bsc.is_none() {
-            let (knots, _) = match curve.knots(None) {
+            let (knots, _) = match curve.knots(k, None) {
                 Ok(x) => x,
                 Err(err) if err.is_unported() => return Err(err),
                 Err(_) => (Vec::new(), Vec::new()),
@@ -3393,7 +3389,7 @@ fn orient_ray_votes(
 
             // get a point on the face far from its trim edges
             let ivl = curve.natural_interval();
-            let point_in_face = curve.evaluate_point(ivl.evaluate(test_param[1]))?;
+            let point_in_face = curve.evaluate_point(k, ivl.evaluate(test_param[1]))?;
 
             // Get Surface Normal for this point.
             let dom = b.face(face)?.uv_domain;
@@ -3410,6 +3406,7 @@ fn orient_ray_votes(
             let sol = *sols.get(0).ok_or_else(ser)?;
             let uv = crate::math::Point2::new(sol.start.param(0)?, sol.start.param(1)?);
             let normal = surface.evaluate_normal(
+                k,
                 uv,
                 crate::nurbs::knots::Side::Left,
                 crate::nurbs::knots::Side::Left,
@@ -3441,7 +3438,7 @@ fn orient_ray_votes(
                 for (num_variables, param) in solutions {
                     // when the solution was a face/curve intersection
                     if num_variables == 3 {
-                        let p = line.evaluate_point(param)?;
+                        let p = line.evaluate_point(k, param)?;
                         if !points.iter().any(|q| p.distance(*q) < tolerance) {
                             points.push(p);
                         }

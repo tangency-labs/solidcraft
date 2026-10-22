@@ -541,8 +541,8 @@ fn create_wire_edge_from_curve_in(
     interval: Extent1d,
     env: &mut EditNotifyEnv<'_>,
 ) -> Result<EdgeId> {
-    let start = curve.evaluate_point(interval.min())?;
-    let end = curve.evaluate_point(interval.max())?;
+    let start = curve.evaluate_point(k, interval.min())?;
+    let end = curve.evaluate_point(k, interval.max())?;
     let region = b
         .infinite_region()
         .ok_or_else(|| SolidError::null_pointer(OP))?;

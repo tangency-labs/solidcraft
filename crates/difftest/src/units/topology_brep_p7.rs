@@ -1013,6 +1013,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     orient_of(*orient)?,
                     &p7::MakeFaceOptions::default(),
                     &this_face,
+                    &mut env,
                 );
                 return new_face_record(&b, &r);
             }

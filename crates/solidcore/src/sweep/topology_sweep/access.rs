@@ -427,17 +427,32 @@ pub trait SweepAccess {
         smooth: bool,
         silhouettes: bool,
     ) -> Result<SweepScene> {
-        let mut hcr = Hcr::with_transform(
-            self.kernel(brep)?,
-            self.brep(brep)?,
-            &inverse,
-            HcrOptions {
-                approx_tol_3d: tolerance,
-                ang_tol_rad: angle,
-                display_seams: seams,
-                display_smooth_edges: smooth,
-            },
-        )?;
+        // The scene copy notifies through an arena-only store with the source in a
+        // key namespace of its own, as boolean::merge::p3's list-operand copies.
+        fn source_ref(e: EntityRef) -> ObjectRef {
+            let r = crate::topology::loopuse::notify_ref(e);
+            ObjectRef {
+                type_code: r.type_code,
+                key: crate::geom::attribute::ObjectKey(r.key.0 | 1 << 40),
+            }
+        }
+        let opts = HcrOptions {
+            approx_tol_3d: tolerance,
+            ang_tol_rad: angle,
+            display_seams: seams,
+            display_smooth_edges: smooth,
+        };
+        let mut hcr = self.with_brep_mut(brep, |kernel, model, _, _| {
+            let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
+            Hcr::with_transform(
+                kernel,
+                &mut state.env(None),
+                model,
+                &source_ref,
+                &inverse,
+                opts,
+            )
+        })?;
         hcr.set_hcr_for_silhouettes(silhouettes);
         crate::error::ignore_status(hcr.compute_global_visibility(self.kernel_mut(brep)?))?;
         Ok(SweepScene {

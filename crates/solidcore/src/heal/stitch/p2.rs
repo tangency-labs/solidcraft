@@ -37,12 +37,12 @@
 //! - `SmBrep::Notify(SM_NO_PRE_EDIT)` is `super::p1::brep_notify_pre_edit`
 //!   (`topology::brep::p2::notify`), which still defers inside `topology.brep_p2`.
 //!   This file's own stubs return [`SolidError::Unported`]: `CalculateBoundingBox`
-//!   (`query.brep`) and `FindAndSetInfiniteRegion`
-//!   (`topology.brep_p5`, ported there but not wired here yet: it needs the `Kernel`
-//!   and a typed void-type argument). `SqueezeEdge`, `GlueVertices`, `GlueEdgesGeneral`
-//!   and `MakeVertexSplitEdge` (through [`test_and_split_edge`]) defer only where their
-//!   own units still do. `DeleteFace` and `SqueezeEdge` are `topology.brep_p3`'s,
-//!   notifying through the kernel context's callbacks.
+//!   (`query.brep`) and `FindAndSetInfiniteRegion` (`topology.brep_p5`, ported there but
+//!   not wired here yet: it needs the `Kernel` and a typed void-type argument).
+//!   `DeleteFace` and `SqueezeEdge` are `topology.brep_p3`'s, notifying through the
+//!   kernel context's callbacks; `GlueVertices`, `GlueEdgesGeneral` and
+//!   `MakeVertexSplitEdge` (through [`test_and_split_edge`]) defer only where their own
+//!   units still do.
 
 use super::p1::{
     brep_notify_pre_edit, glue_edges_general, glue_vertices, set_point, sort_by_param,

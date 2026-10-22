@@ -1039,13 +1039,11 @@ impl ArenaPair<'_> {
         f: impl FnOnce(&mut Brep, &mut ed::NotifyEnv<'_>) -> crate::Result<R>,
     ) -> crate::Result<R> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
-        let namespace = self.namespace;
         let b = self
             .breps
             .get_mut(slot)
             .and_then(Option::as_deref_mut)
             .ok_or_else(|| invalid("handle names an absent B-rep"))?;
-        let key_of = |e| super::kernel_adapter::notification_key(namespace, brep.b == 1, e);
         let mut env = ed::NotifyEnv {
             records: self.records,
             attributes: self.attributes,
@@ -1056,7 +1054,7 @@ impl ArenaPair<'_> {
             } else {
                 self.primary_context
             }),
-            key_of: &key_of,
+            key_of: &|e| self.keys.object(brep.b == 1, e),
         };
         f(b, &mut env)
     }

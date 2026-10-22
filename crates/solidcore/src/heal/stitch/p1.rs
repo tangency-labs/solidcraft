@@ -2047,7 +2047,7 @@ pub(crate) fn glue_edges_general(
             inside_faceuses,
             &mut env,
         )
-    })
+    })?
 }
 
 /// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`,

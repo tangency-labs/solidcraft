@@ -563,7 +563,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             self.topology_deleted = self.intersector.topology_deleted;
             *made_new_topology = result?;
             Ok(())
-        })
+        })?
     }
 
     fn fix_gaps(
@@ -1599,6 +1599,7 @@ mod tests {
                             Ok(())
                         }
                     })
+                    .and_then(|r| r)
                 });
             assert_eq!(result.is_err(), fail);
             assert_eq!(a.vertex(av).unwrap().point, Vec3::Y);

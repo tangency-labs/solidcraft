@@ -2300,6 +2300,22 @@ impl<'a> NotifyState<'a> {
         })
     }
 
+    /// Like [`Self::with_env`] for an edit that also needs the kernel: a kernel-bound
+    /// state lends the kernel context for the edit
+    /// ([`Context::with_notification_context`]); an external one keeps its context.
+    pub(crate) fn with_kernel_env<T>(
+        &mut self,
+        kernel: &mut Kernel,
+        run: impl FnOnce(&mut Kernel, &mut NotifyEnv<'_>) -> Result<T>,
+    ) -> Result<T> {
+        match self.context {
+            NotifyContext::External(_) => self.with_context(None, |env| run(kernel, env)),
+            NotifyContext::Kernel => Context::with_notification_context(kernel, |kernel, ctx| {
+                self.with_context(Some(ctx), |env| run(kernel, env))
+            })?,
+        }
+    }
+
     /// Preserves the legacy two-context Boolean scope, or scopes the single kernel
     /// context once when stores are kernel-bound. Restores state on every `Result` exit.
     pub(crate) fn with_doing_boolean<T>(

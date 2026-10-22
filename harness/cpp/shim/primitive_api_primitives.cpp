@@ -230,8 +230,11 @@ void put_torus(std::vector<double>& o, SmTorus* t)
     put_grid(o, t, d, true);
 }
 
-// The status, then on success `has` and the B-rep's face, edge and vertex counts.
-void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep* b)
+// The status, then on success `has` and the B-rep's face, edge and vertex counts. `b` is
+// taken by reference: call sites pass the out-parameter of the call that is their status
+// argument, and a by-value `b` could be read before that call writes it (unspecified
+// argument evaluation order).
+void put_brep(std::vector<double>& o, SmApiStatus s, SmBrep*& b)
 {
     o.push_back(st(s));
     if (s != SM_SUCCESS)

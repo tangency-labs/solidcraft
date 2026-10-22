@@ -649,7 +649,7 @@ fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>>
             }
         }
         12 => {
-            let hit = api::find_edge(b, point)?;
+            let hit = api::find_edge(k, b, point)?;
             o.push(hit.index as f64);
             o.push(hit.parameter);
         }

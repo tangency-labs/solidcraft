@@ -399,11 +399,23 @@ int32_t p5_run(int32_t op, Rd& rd, std::vector<double>& o)
         if (r == SM_SUCCESS)
         {
             // the geometry's rail and its two new vertices (appended to the model's vertex list
-            // in creation order, as the Rust model lists every live vertex) are in the export
+            // in creation order, as the Rust model lists every live vertex) are in the export.
+            // MakeRailEdge creates the start vertex (EU1's, first in the rail's use list) before
+            // the end vertex (EU2's). Not GetVertices: the new uses are not SM_OT_SAME, so it
+            // returns (end, start).
             SmVertex* nvs = NULL;
             SmVertex* nve = NULL;
             if (ne != NULL)
-                ne->GetVertices(nvs, nve);
+            {
+                SmTArray<SmEdgeuse*> neus;
+                ne->GetEdgeuses(neus);
+                if (neus.GetSize() == 2 && neus[0]->GetVertexuse() != NULL
+                    && neus[1]->GetVertexuse() != NULL)
+                {
+                    nvs = neus[0]->GetVertexuse()->GetVertex();
+                    nve = neus[1]->GetVertexuse()->GetVertex();
+                }
+            }
             size_t nverts = M.verts.size();
             if (nvs != NULL)
                 M.verts.push_back((SmFilletVertex*)nvs);

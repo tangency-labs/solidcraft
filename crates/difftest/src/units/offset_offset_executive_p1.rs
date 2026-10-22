@@ -2338,11 +2338,11 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
                 &mut Brep::new(),
             )
         }
-        Probe::SideWallNull => executive.build_side_wall_of_edgeuse(&kernel, &mut original, None),
+        Probe::SideWallNull => executive.build_side_wall_of_edgeuse(&mut kernel, &mut original, None),
         Probe::SideWallUnmapped => {
             let edge = unit_wire(k, &mut original, 0.0)?;
             let eu = primary(&original, edge)?;
-            executive.build_side_wall_of_edgeuse(&kernel, &mut original, Some(eu))
+            executive.build_side_wall_of_edgeuse(&mut kernel, &mut original, Some(eu))
         }
         Probe::FillEmpty => {
             executive.fill_gap_edgeuses(&kernel, EdgeId::from_index(u32::MAX), &[], &[])
@@ -3321,9 +3321,10 @@ mod tests {
 
     #[test]
     fn face_tail_fixture_reaches_the_kernel_face_constructor() {
-        // The shared MakeFaceWithCurves fixture builds its wire loop (topology.brep_p2 and
-        // topology.brep_p3 are ported) and defers at curve.curve_p2's SmCurve::GetOwner
-        // rather than failing as a harness error.
+        // The shared MakeFaceWithCurves fixture builds its wire edges
+        // (SmBrep::MakeWireEdgeVertex, topology.brep_p3) and defers in
+        // MakeFaceTopology (ported in full, topology.brep_p6) at the UV trim
+        // curve's SmSurface::DropCurve rather than failing as a harness error.
         let input: Inputs = serde_json::from_value(serde_json::json!({
             "op": "face_tail",
             "offset_distance": 0.25,
@@ -3336,7 +3337,11 @@ mod tests {
         }))
         .unwrap();
         let output = Runner.run_rust(&case(&input)).unwrap();
-        assert_eq!(output.deferred.unwrap().unit, "curve.curve_p2");
+        let deferred = output.deferred.unwrap();
+        assert_eq!(
+            (deferred.unit.as_str(), deferred.symbol.as_str()),
+            ("intersect.surface_drop_lib_p3", "SmSurface::DropCurve")
+        );
     }
 
     #[test]

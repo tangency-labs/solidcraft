@@ -124,10 +124,13 @@ pub trait PrimitiveAccess: SweepAccess {
     fn delete_primitive_faces(&mut self, brep: BrepId, faces: &[FaceId]) -> Result<()>;
     /// Stitch and orient the primitive's resulting B-rep.
     fn stitch_and_orient(&mut self, brep: BrepId) -> Result<()> {
-        crate::topology::brep::p5::stitch_and_orient(
-            self.brep_mut(brep)?,
-            &crate::topology::brep::p5::StitchAndOrientOptions::default(),
-        )
+        self.with_brep_mut(brep, |kernel, model, _, _| {
+            crate::topology::brep::p5::stitch_and_orient(
+                kernel,
+                model,
+                &crate::topology::brep::p5::StitchAndOrientOptions::default(),
+            )
+        })
     }
     /// Transform the complete B-rep, including pre-existing topology.
     fn transform_primitive(&mut self, brep: BrepId, placement: &Axis2Placement) -> Result<()> {

@@ -74,9 +74,9 @@
 //!   (UB-120) cannot be passed.
 //! - **`CheckLoop`** takes the surface separately, as upstream; `CheckFace` passes a
 //!   copy of the face's surface (the edge use UV extremes need the B-rep mutably).
-//! - **Unported callees** return [`SolidError::Unported`]: `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`),
-//!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`),
-//!   `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
+//! - **Callees.** `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`) and
+//!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`) call their ports. Unported callees
+//!   return [`SolidError::Unported`]: `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
 //!   `SmFace::GetEdges` and `SmFace::HasSeamProblem` (`topology.face_p4`).
 //! - The other members of the class (`FindLoopCurveOrientations`,
 //!   `ComputeLoopOrientation`, `CopyNonDegenerate`, `OrientUVLoops`,
@@ -291,13 +291,52 @@ fn make_face_with_curves(
 }
 
 /// `SmBrep::MakeFacesWithCurves(region, loops, 3d curves, NULL, ...)` (unit
-/// `topology.brep_p8`).
-fn make_faces_with_curves(_b: &mut Brep, _input: TrimInput) -> Result<Vec<FaceId>> {
-    // UNPORTED(topology.brep_p8): SmBrep::MakeFacesWithCurves
-    Err(SolidError::unported(
-        "SmBrep::MakeFacesWithCurves",
-        "topology.brep_p8",
-    ))
+/// `topology.brep_p8`). The new faces own their surfaces under the face identities
+/// `(SmFace_TYPE, 1 + index)`, as [`make_face_with_curves`].
+fn make_faces_with_curves(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: RegionId,
+    input: TrimInput,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<Vec<FaceId>> {
+    let TrimInput {
+        loop_counts,
+        curves,
+        orientations,
+        loop_points,
+        surface,
+        uv_domain,
+        surface_orientation,
+    } = input;
+    let curves_input = crate::topology::brep::p7::FaceCurvesInput {
+        loops: loop_counts,
+        curves_3d: Some(curves.into_iter().map(Some).collect()),
+        uv_curves: None,
+        orientations,
+        loop_points,
+    };
+    let face_ref = |f: FaceId| crate::geom::object::ObjectRef {
+        type_code: fp2::TYPE,
+        key: crate::geom::attribute::ObjectKey(1 + u64::from(f.index())),
+    };
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env,
+        marks: &mut marks,
+        this_face: &face_ref,
+    };
+    let made = crate::topology::brep::p8::make_faces_with_curves(
+        k,
+        b,
+        Some(region),
+        curves_input,
+        surface,
+        &uv_domain,
+        surface_orientation,
+        &mut fenv,
+    )?;
+    Ok(made.faces)
 }
 
 /// `SmFace::CreateUVTrimCurves(FALSE, NULL, NULL, ...)`.
@@ -500,7 +539,7 @@ pub fn trim_surface_with_model_space_curves(
         vec![make_face_with_curves(k, b, region, input, env)?]
     } else {
         // MakeFacesWithCurves, then clear the UV trim curves of the new faces
-        let faces = make_faces_with_curves(b, input)?;
+        let faces = make_faces_with_curves(k, b, region, input, env)?;
         for &f in &faces {
             clear_uv_trim_curves(b, f)?;
         }
