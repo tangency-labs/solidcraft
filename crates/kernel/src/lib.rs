@@ -35,7 +35,6 @@ mod corner_g2;
 mod delete_face;
 mod distance;
 mod emboss;
-mod face_params;
 #[cfg(test)]
 mod face_source_tests;
 mod fair;
@@ -91,7 +90,6 @@ mod numbered;
 mod offset;
 mod offset_backend;
 mod ops;
-mod outline;
 #[cfg(test)]
 mod outline_tests;
 mod par;
