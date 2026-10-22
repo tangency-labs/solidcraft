@@ -3338,9 +3338,9 @@ mod tests {
     #[test]
     fn face_tail_fixture_reaches_the_kernel_face_constructor() {
         // The shared MakeFaceWithCurves fixture builds its wire edges
-        // (SmBrep::MakeWireEdgeVertex, topology.brep_p3) and runs MakeFaceTopology
-        // (topology.brep_p6) through the UV trim curve's SmSurface::DropCurve to the
-        // end, rather than failing as a harness error.
+        // (SmBrep::MakeWireEdgeVertex, topology.brep_p3) and its face
+        // (MakeFaceTopology, topology.brep_p6, through the UV trim curve's
+        // SmSurface::DropCurve), and the tail maps every edge use.
         let input: Inputs = serde_json::from_value(serde_json::json!({
             "op": "face_tail",
             "offset_distance": 0.25,
@@ -3353,8 +3353,9 @@ mod tests {
         }))
         .unwrap();
         let output = Runner.run_rust(&case(&input)).unwrap();
-        assert!(output.deferred.is_none() && output.error.is_none() && output.rejected.is_none());
-        assert!(output.ints.contains_key("status"));
+        assert!(output.deferred.is_none(), "{:?}", output.deferred);
+        assert_eq!(output.ints["status"], [1000]);
+        assert_eq!(output.ints["mapped"], [1, 1, 1, 1]);
     }
 
     #[test]

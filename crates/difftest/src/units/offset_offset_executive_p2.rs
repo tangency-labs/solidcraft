@@ -2496,8 +2496,7 @@ mod tests {
 
     #[test]
     fn face_geometry_paths_reach_distinct_actual_callees() {
-        // MakeWireEdgeVertex now runs; its UV-curve construction runs DropCurve, and the
-        // extended sheets stop later, at the edge-use offset adapter.
+        // MakeWireEdgeVertex runs; its UV-curve construction gets through DropCurve.
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2516,8 +2515,13 @@ mod tests {
             ),
             (
                 "member_sheet_round_skip_true_still_real_geometry",
-                "intersect.surface_drop_lib_p3",
-                "SmSurface::DropCurve",
+                "curve.crv_on_surf",
+                "SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)",
+            ),
+            (
+                "member_sheet_extended_dispatch_ignores_skip",
+                "offset.offset_executive_p1",
+                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
             ),
             (
                 "member_sheet_extended_dispatch_ignores_skip",
