@@ -131,6 +131,18 @@ impl Assembly {
         Ok(Assembly { tolerance: b.tolerance, vertices: b.vertices.clone(), edges, faces, regions: b.regions.clone(), shells: b.shells.len() })
     }
 
+    /// An empty sheet to build faces into: one open shell (shell 0) in the infinite region.
+    pub(crate) fn sheet(tolerance: f64) -> Assembly {
+        Assembly {
+            tolerance,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+            faces: Vec::new(),
+            regions: vec![Region { shells: vec![0], void: false }],
+            shells: 1,
+        }
+    }
+
     /// A new vertex at `p`.
     pub(crate) fn vertex(&mut self, p: Vec3) -> Result<u32> {
         if !p.is_finite() {
