@@ -82,7 +82,7 @@ const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
 const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 /// `kernel-cases`'s lines in the usage.
-const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR]\n      (the kernel regression rig, tests/kernel-cases; SOLIDCRAFT_KERNEL picks the kernel; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>)\n";
+const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [--json] [--dumps=DIR]\n      (the kernel regression rig, tests/kernel-cases, on SMLib; --dumps: each case's\n       failing SMLib calls leave their inputs for replay in DIR/<area>-<case>)\n";
 /// `fuzz`'s lines in the usage.
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";

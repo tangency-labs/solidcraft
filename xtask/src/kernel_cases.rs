@@ -1,9 +1,12 @@
 //! `cargo xtask kernel-cases`: the kernel regression rig. Runs every case in
-//! `tests/kernel-cases/<area>/<id>/` through `solidcraft-cli kernel-cases`, one process per case
-//! (so a crash or a hang is that case's result, not the run's), with each kernel asked for, and
-//! writes `docs/kernel-cases.md`: results per case and kernel, coverage per area and per source,
-//! and the issues and PRs looked at and skipped. Each kernel is graded against the cases' own
-//! answers, never against the other kernel.
+//! `tests/kernel-cases/<area>/<id>/` through `solidcraft-cli kernel-cases` on SMLib, one process
+//! per case (so a crash or a hang is that case's result, not the run's), and writes
+//! `docs/kernel-cases.md`: results per case, coverage per area and per source, and the issues and
+//! PRs looked at and skipped. Each case is graded against its own answer.
+//!
+//! The run's output folder (`--out`, default `target/kernel-cases`) holds `results.json`, every
+//! case's full result, and `dumps/<area>-<case>/`, the inputs of each SMLib call a case's run
+//! failed in (`solidcraft-cli kernel-cases --dumps`), for replay.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,30 +20,33 @@ use crate::{cargo, root};
 
 const DEFAULT_TIMEOUT_S: u64 = 180;
 
-/// Per kernel, how many cases ended in each status.
-type StatusCounts = BTreeMap<String, BTreeMap<String, usize>>;
+/// How many cases ended in each status.
+type StatusCounts = BTreeMap<String, usize>;
 
 pub(crate) struct Options {
-    pub(crate) kernels: Vec<String>,
     cli: Option<String>,
     area: Option<String>,
     timeout: Duration,
     pub(crate) jobs: usize,
-    /// Where to keep every case's full result as JSON.
-    results: Option<String>,
+    /// The run's output folder: `results.json` and the SMLib dumps (`dumps/`).
+    out: PathBuf,
 }
 
-pub(crate) fn options(rest: &[&str]) -> Result<Options, String> {
+/// The run's options; `out` is its output folder unless `--out` gives one.
+pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
     let arg = |name: &str| rest.iter().position(|a| *a == name).and_then(|i| rest.get(i + 1)).map(|s| s.to_string());
-    let kernels = match arg("--kernel").as_deref() {
-        None | Some("default") => vec!["default".to_string()],
-        Some("smlib") => vec!["smlib".to_string()],
-        Some("both") => vec!["default".to_string(), "smlib".to_string()],
-        Some(k) => return Err(format!("--kernel {k}: default, smlib or both")),
-    };
     let secs = arg("--timeout").map(|t| t.parse::<u64>().map_err(|e| format!("--timeout: {e}"))).transpose()?.unwrap_or(DEFAULT_TIMEOUT_S);
     let jobs = arg("--jobs").map(|j| j.parse::<usize>().map_err(|e| format!("--jobs: {e}"))).transpose()?.unwrap_or(4).clamp(1, 32);
-    Ok(Options { kernels, cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, results: arg("--results") })
+    let out = arg("--out").map_or_else(|| root().join(out), PathBuf::from);
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out })
+}
+
+/// Every case's full result as JSON, into the run's output folder.
+pub(crate) fn save_results(o: &Options, results: &[Value]) -> Result<(), String> {
+    std::fs::create_dir_all(&o.out).map_err(|e| format!("{}: {e}", o.out.display()))?;
+    let path = o.out.join("results.json");
+    let text = serde_json::to_string_pretty(results).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub(crate) fn read(path: &Path) -> Value {
@@ -66,35 +72,32 @@ fn cases(dir: &Path, only: Option<&str>) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
-/// One case on one kernel, in its own process, killed after the timeout; `path` is the case's
-/// directory under `tests/kernel-cases/`.
-fn run_one(o: &Options, kernel: &str, case: &Path) -> Value {
-    let mut r = run_case(o, kernel, case);
+/// One case, in its own process, killed after the timeout; `path` is the case's directory under
+/// `tests/kernel-cases/`.
+fn run_one(o: &Options, case: &Path) -> Value {
+    let mut r = run_case(o, case);
     let base = root().join("tests/kernel-cases");
     r["path"] = json!(case.strip_prefix(&base).unwrap_or(case).to_string_lossy().replace('\\', "/"));
     r
 }
 
-fn run_case(o: &Options, kernel: &str, case: &Path) -> Value {
+fn run_case(o: &Options, case: &Path) -> Value {
     let rel = case.strip_prefix(root()).unwrap_or(case).to_path_buf();
     let mut cmd = match &o.cli {
         Some(bin) => Command::new(bin),
         None => {
             let mut c = cargo();
-            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--"]);
+            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--features", "smlib", "--"]);
             c
         }
     };
-    cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
-    if kernel == "default" {
-        cmd.env_remove("SOLIDCRAFT_KERNEL");
-    } else {
-        cmd.env("SOLIDCRAFT_KERNEL", kernel);
-    }
+    let mut dumps = std::ffi::OsString::from("--dumps=");
+    dumps.push(o.out.join("dumps"));
+    cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps).arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
     let base = |status: &str, error: String| {
         let area = case.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let id = case.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        json!({"case": id, "area": area, "kernel": kernel, "status": status, "error": error})
+        json!({"case": id, "area": area, "status": status, "error": error})
     };
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -135,12 +138,11 @@ fn run_case(o: &Options, kernel: &str, case: &Path) -> Value {
 }
 
 pub(crate) fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
-    let jobs: Vec<(String, PathBuf)> = o.kernels.iter().flat_map(|k| list.iter().map(move |c| (k.clone(), c.clone()))).collect();
     let next = Arc::new(Mutex::new(0usize));
-    let results = Arc::new(Mutex::new(vec![Value::Null; jobs.len()]));
+    let results = Arc::new(Mutex::new(vec![Value::Null; list.len()]));
     std::thread::scope(|s| {
-        for _ in 0..o.jobs.min(jobs.len().max(1)) {
-            let (next, results, jobs) = (Arc::clone(&next), Arc::clone(&results), &jobs);
+        for _ in 0..o.jobs.min(list.len().max(1)) {
+            let (next, results) = (Arc::clone(&next), Arc::clone(&results));
             s.spawn(move || {
                 loop {
                     let i = {
@@ -149,13 +151,9 @@ pub(crate) fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
                         *n += 1;
                         i
                     };
-                    let Some((kernel, case)) = jobs.get(i) else { return };
-                    let r = run_one(o, kernel, case);
-                    println!(
-                        "{:<11} {} [{kernel}]",
-                        r["status"].as_str().unwrap_or("?").to_uppercase(),
-                        case.strip_prefix(root()).unwrap_or(case).display()
-                    );
+                    let Some(case) = list.get(i) else { return };
+                    let r = run_one(o, case);
+                    println!("{:<11} {}", r["status"].as_str().unwrap_or("?").to_uppercase(), case.strip_prefix(root()).unwrap_or(case).display());
                     if let Ok(mut all) = results.lock()
                         && let Some(slot) = all.get_mut(i)
                     {
@@ -241,13 +239,10 @@ fn source_kinds(dir: &Path, cited: &BTreeMap<String, Vec<String>>) -> Result<Str
     Ok(md)
 }
 
-fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) -> Result<String, String> {
+fn write_report(dir: &Path, list: &[PathBuf], results: &[Value]) -> Result<String, String> {
     let key = |r: &Value| (r["area"].as_str().unwrap_or("").to_string(), r["case"].as_str().unwrap_or("").to_string());
-    let mut by_case: BTreeMap<(String, String), BTreeMap<String, Value>> = BTreeMap::new();
-    for r in results {
-        by_case.entry(key(r)).or_default().insert(r["kernel"].as_str().unwrap_or("").to_string(), r.clone());
-    }
-    // Coverage: per area, cases and their statuses per kernel; per source, its cases.
+    let by_case: BTreeMap<(String, String), &Value> = results.iter().map(|r| (key(r), r)).collect();
+    // Coverage: per area, cases and their statuses; per source, its cases.
     let mut areas: BTreeMap<String, (usize, StatusCounts)> = BTreeMap::new();
     let mut per_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
@@ -258,55 +253,35 @@ fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) ->
         let id = case.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let entry = areas.entry(area.clone()).or_default();
         entry.0 += 1;
-        let runs = by_case.get(&(area.clone(), id.clone()));
-        for k in &o.kernels {
-            let status = runs.and_then(|r| r.get(k)).and_then(|r| r["status"].as_str()).unwrap_or("not run").to_string();
-            *entry.1.entry(k.clone()).or_default().entry(status).or_default() += 1;
-        }
+        let run = by_case.get(&(area.clone(), id.clone())).copied();
+        let status = run.and_then(|r| r["status"].as_str()).unwrap_or("not run").to_string();
+        *entry.1.entry(status).or_default() += 1;
         let sources = sources_of(&want);
         for s in &sources {
             per_source.entry(s.clone()).or_default().push(format!("{area}/{id}"));
         }
         *kinds.entry(want["source"].as_str().unwrap_or("?").split_whitespace().next().unwrap_or("?").to_string()).or_default() += 1;
-        let cells: Vec<String> = o.kernels.iter().map(|k| cell(runs.and_then(|r| r.get(k)))).collect();
         rows += &format!(
             "| {area}/{id} | {} | {} | {} | {} |\n",
             sources.iter().map(|s| link(s)).collect::<Vec<_>>().join(" "),
             want["what"].as_str().unwrap_or("").replace('|', "/"),
             want["source"].as_str().unwrap_or("?"),
-            cells.join(" | ")
+            cell(run)
         );
     }
     let mut md = String::from(
-        "# Kernel regression rig\n\nGenerated by `cargo xtask kernel-cases`. Every geometry case the old kernel (truck) got wrong, as an issue, a PR or a crash report recorded it, is a use case in [`tests/kernel-cases/`](../tests/kernel-cases/) with its own right answer: numbers from analysis or a hand calculation (**analytic**) where the geometry has them, and otherwise the invariants (**invariants**): the operation succeeds, or refuses cleanly where that is the right answer; each body is one closed shell that passes the record's structure and geometry checks and, in builds with SMLib, SMLib's own check; the expected face, edge and vertex counts. Never a kernel's output, and never a commercial kernel's.\n\nEach kernel is graded against the case, never against the other kernel. **default** is the kernel SolidCraft ships today; **smlib** runs with `SOLIDCRAFT_KERNEL=smlib`. A failing case stays failing until its kernel is fixed; there is no workaround on SolidCraft's side. See [`tests/kernel-cases/README.md`](../tests/kernel-cases/README.md) for the format.\n\n",
+        "# Kernel regression rig\n\nGenerated by `cargo xtask kernel-cases`. Every geometry case the old kernel (truck) got wrong, as an issue, a PR or a crash report recorded it, is a use case in [`tests/kernel-cases/`](../tests/kernel-cases/) with its own right answer: numbers from analysis or a hand calculation (**analytic**) where the geometry has them, and otherwise the invariants (**invariants**): the operation succeeds, or refuses cleanly where that is the right answer; each body is one closed shell that passes the record's structure and geometry checks and SMLib's own check; the expected face, edge and vertex counts. Never a kernel's output, and never a commercial kernel's.\n\nThe cases run on SMLib, SolidCraft's kernel. A failing case stays failing until the kernel is fixed; there is no workaround on SolidCraft's side. A failed SMLib call leaves its inputs for replay in the run's output folder (`target/kernel-cases/dumps/<area>-<case>/`). See [`tests/kernel-cases/README.md`](../tests/kernel-cases/README.md) for the format.\n\n",
     );
-    md += "## Coverage\n\n| Area | Cases |";
-    for k in &o.kernels {
-        md += &format!(" {k} |");
-    }
-    md += "\n|---|---|";
-    md += &"---|".repeat(o.kernels.len());
-    md += "\n";
+    md += "## Coverage\n\n| Area | Cases | Results |\n|---|---|---|\n";
     for (area, (n, statuses)) in &areas {
-        md += &format!("| {area} | {n} |");
-        for k in &o.kernels {
-            let s = statuses.get(k).map(|m| m.iter().map(|(s, c)| format!("{c} {s}")).collect::<Vec<_>>().join(", ")).unwrap_or_default();
-            md += &format!(" {s} |");
-        }
-        md += "\n";
+        md += &format!("| {area} | {n} | {} |\n", statuses.iter().map(|(s, c)| format!("{c} {s}")).collect::<Vec<_>>().join(", "));
     }
     md += &format!(
-        "\n{} cases from {} sources; answers: {}.\n\n## Results\n\n| Case | Sources | What went wrong | Answer |",
+        "\n{} cases from {} sources; answers: {}.\n\n## Results\n\n| Case | Sources | What went wrong | Answer | Result |\n|---|---|---|---|---|\n",
         list.len(),
         per_source.len(),
         kinds.iter().map(|(k, v)| format!("{v} {k}")).collect::<Vec<_>>().join(", ")
     );
-    for k in &o.kernels {
-        md += &format!(" {k} |");
-    }
-    md += "\n|---|---|---|---|";
-    md += &"---|".repeat(o.kernels.len());
-    md += "\n";
     md += &rows;
     md += "\n## Sources\n\n| Source | Cases |\n|---|---|\n";
     for (s, cs) in &per_source {
@@ -344,32 +319,22 @@ fn write_report(o: &Options, dir: &Path, list: &[PathBuf], results: &[Value]) ->
         md += "None yet.\n";
     }
     std::fs::write(root().join("docs/kernel-cases.md"), md).map_err(|e| format!("docs/kernel-cases.md: {e}"))?;
-    let summary: Vec<String> = o
-        .kernels
-        .iter()
-        .map(|k| {
-            let n = results.iter().filter(|r| r["kernel"] == k.as_str() && r["status"] == "pass").count();
-            format!("{k}: {n}/{} pass", list.len())
-        })
-        .collect();
-    Ok(format!("kernel-cases: {} → docs/kernel-cases.md ({skipped} skipped sources listed)", summary.join(", ")))
+    let pass = results.iter().filter(|r| r["status"] == "pass").count();
+    Ok(format!("kernel-cases: {pass}/{} pass → docs/kernel-cases.md ({skipped} skipped sources listed)", list.len()))
 }
 
 pub fn run(rest: &[&str]) -> Result<(), String> {
     if rest.contains(&"--ladder") {
         return crate::kernel_ladder::run(rest);
     }
-    let o = options(rest)?;
+    let o = options(rest, "target/kernel-cases")?;
     let dir = root().join("tests/kernel-cases");
     let list = cases(&dir, o.area.as_deref())?;
     if list.is_empty() {
         return Err(format!("no cases (recipe.json + expected.json) under {}", dir.display()));
     }
     let results = run_all(&o, &list);
-    if let Some(path) = &o.results {
-        let text = serde_json::to_string_pretty(&results).map_err(|e| e.to_string())?;
-        std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
-    }
-    println!("{}", write_report(&o, &dir, &list, &results)?);
+    save_results(&o, &results)?;
+    println!("{}", write_report(&dir, &list, &results)?);
     Ok(())
 }
