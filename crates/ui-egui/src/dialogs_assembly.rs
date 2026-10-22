@@ -786,7 +786,7 @@ fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, 
     for hit in r["overlaps"].as_array().into_iter().flatten() {
         let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
         if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.tessellate((o.size() * 2e-3).max(1e-3))
+            && let Ok(m) = o.mesh(&solidcraft_engine::kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3)))
         {
             meshes.push(m);
         }

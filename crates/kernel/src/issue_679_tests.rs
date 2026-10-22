@@ -74,7 +74,7 @@ fn a_pad_half_past_the_edge_of_its_face_fuses() {
         let (r, d) = fused(a, b);
         assert_one_solid(&r, want, 1e-6 * want, "#674");
         assert!(d.events.is_empty(), "an exact join: {d:?}");
-        let bounds = r.tessellate(0.01).unwrap().bounds();
+        let bounds = r.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().bounds();
         assert!((bounds.min.y + 2.5).abs() < 1e-9 && (bounds.min.z + 5.0).abs() < 0.01, "{bounds:?}");
     }
 }

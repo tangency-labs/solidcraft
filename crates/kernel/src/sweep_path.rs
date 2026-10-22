@@ -814,7 +814,7 @@ fn smooth_closed_walls(plane: &Plane, profile: &NumberedLoop, st: &[Station], of
         sides.extend(smooth_loft_faces(wires.get(middle..).ok_or_else(fail)?, numbers.get(middle..).ok_or_else(fail)?, true)?);
         let b = close_sweep(sides)?;
         let tol = (profile.lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
-        if b.tessellate(tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs()) { Ok(b) } else { Err(fail()) }
+        if b.mesh(&crate::MeshTolerance::chord(tol)).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs()) { Ok(b) } else { Err(fail()) }
     })
 }
 
@@ -861,7 +861,7 @@ fn smooth_walls(plane: &Plane, profile: &NumberedLoop, st: &[Station], expected:
         let tol = (lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
         for ws in [walls.clone(), walls.iter().map(|(f, prov)| (f.inverse(), prov.clone())).collect()] {
             if let Ok(b) = cap_and_close(ws, std::slice::from_ref(&w0), std::slice::from_ref(&w1), false)
-                && b.tessellate(tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
+                && b.mesh(&crate::MeshTolerance::chord(tol)).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
             {
                 return Ok(b);
             }
@@ -895,7 +895,7 @@ mod tests {
         let plane = Plane::from_normal(path[0], t0).unwrap();
         let b = sweep_path(&plane, &circle(2.0), &path).unwrap();
         let len: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
-        let v = b.tessellate(0.01).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = std::f64::consts::PI * 4.0 * len;
         assert!((v - want).abs() < 0.02 * want, "{v} vs {want}");
         // One wall per profile segment and two caps (ruled walls would give dozens).
@@ -906,7 +906,7 @@ mod tests {
         let sq = |h: f64| Loop2::polygon(&[Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)]);
         let region = Region2 { outer: sq(3.0), holes: vec![sq(1.0).reversed()] };
         let b = sweep_path(&plane, &region, &path).unwrap();
-        let v = b.tessellate(0.01).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = 32.0 * 40.0;
         assert!((v - want).abs() < 0.03 * want, "{v} vs {want}");
         assert!(sweep_path(&plane, &region, &[Vec3::ZERO]).is_err());
@@ -929,14 +929,14 @@ mod tests {
         let small = big * k;
         let ctl = SweepControl { scale: k, ..SweepControl::default() };
         let b = crate::sweep_with(&Plane::XY, &circle(big), &up(h), &ctl).unwrap();
-        let m = b.tessellate(0.005).unwrap().measure();
+        let m = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap().measure();
         let volume = PI * h * (big * big + big * small + small * small) / 3.0;
         let lateral = PI * (big + small) * (h * h + (big - small).powi(2)).sqrt();
         let caps = PI * (big * big + small * small);
         assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
         assert!((m.area - caps - lateral).abs() < 2e-3 * lateral, "lateral {} vs {lateral}", m.area - caps);
         // The end cap is the scaled circle.
-        let top = b.tessellate(0.005).unwrap().positions.iter().filter(|p| (p.z - h).abs() < 1e-6).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+        let top = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap().positions.iter().filter(|p| (p.z - h).abs() < 1e-6).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
         assert!((top - small).abs() < 1e-3, "end radius {top}");
         // The surface sweep of the circle's curve: the frustum's lateral face alone.
         let sheet = crate::sweep_sheet_with(&Plane::XY, std::slice::from_ref(&circle(big).outer.segs), &up(h), &ctl).unwrap();
@@ -946,7 +946,7 @@ mod tests {
 
     /// The corners of a twisted square: each seam edge's angle at `z`.
     fn corner_angles(b: &crate::Body, z: f64) -> Vec<f64> {
-        let mesh = b.tessellate(0.002).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.002)).unwrap();
         let mut out = Vec::new();
         for e in &mesh.edges {
             for w in e.windows(2) {
@@ -968,7 +968,7 @@ mod tests {
         let ctl = SweepControl { twist, ..SweepControl::default() };
         let b = crate::sweep_with(&Plane::XY, &square(5.0), &up(h), &ctl).unwrap();
         // Twisted walls are saddles: a fine mesh to measure them.
-        let v = b.tessellate(0.0005).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap().measure().volume;
         assert!((v - 100.0 * h).abs() < 2e-3 * 100.0 * h, "volume {v}");
         // Corners start at 45 deg (and 135, -45, -135): each seam turns by the twist so far.
         let off = |a: f64, want: f64| {
@@ -1005,7 +1005,7 @@ mod tests {
         let rise = r * FRAC_PI_4.sin();
         let ctl = SweepControl { orientation: SweepOrientation::Parallel, ..SweepControl::default() };
         let b = sweep_path_with(&Plane::XY, &square(3.0), &path, &ctl).unwrap();
-        let mesh = b.tessellate(0.005).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         let v = mesh.measure().volume;
         let want = 36.0 * rise;
         assert!((v - want).abs() < 5e-3 * want, "volume {v} vs {want}");
@@ -1036,7 +1036,7 @@ mod tests {
             .collect();
         let ctl = SweepControl { orientation: SweepOrientation::Direction(Vec3::Y), ..SweepControl::default() };
         let b = sweep_path_with(&Plane::XY, &square(3.0), &path, &ctl).unwrap();
-        let mesh = b.tessellate(0.005).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         let len = r * FRAC_PI_2;
         assert!((mesh.measure().volume - 36.0 * len).abs() < 5e-3 * 36.0 * len);
         // The sides facing ±Y stay at y = ±3.

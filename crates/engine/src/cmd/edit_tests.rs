@@ -87,7 +87,7 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     let volume = |s: &Session| {
         let bodies = &s.model.state().bodies;
         assert_eq!(bodies.len(), 1);
-        bodies.first().unwrap().body.tessellate(0.0001).unwrap().measure().volume
+        bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
     };
     let expected = |r: f64| 12000.0 - 40.0 * 113.0 / 756.0 * r.powi(2) + 13711.0 / 486486.0 * r.powi(3);
     let actual = volume(&s);

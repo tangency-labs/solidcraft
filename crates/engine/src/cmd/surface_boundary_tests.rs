@@ -115,7 +115,7 @@ fn a_network_of_3d_lines_is_a_hyperbolic_paraboloid() {
     // cent of the body); the measuring mesh is refined onto the surface.
     assert!((face - want).abs() < 1e-2 * want && (total - want).abs() < 1e-3 * want, "{face} / {total} vs {want}");
     let st = s.world_state();
-    let mesh = st.body(&body).map(|b| b.body.tessellate(0.01)).and_then(Result::ok).unwrap_or_default();
+    let mesh = st.body(&body).map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01))).and_then(Result::ok).unwrap_or_default();
     assert!(!mesh.positions.is_empty());
     for p in &mesh.positions {
         assert!((p.z - p.x * p.y / 10.0).abs() < 1e-6, "{p:?} is off the paraboloid");

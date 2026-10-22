@@ -279,7 +279,7 @@ fn a_law_running_to_zero_along_a_curved_edge_is_refused() {
         // where nothing closes it.
         let made = fillet_variable(&body, mid, start, 3.0, 2.4).unwrap();
         assert!(made.validity().is_empty(), "{:?}", made.validity());
-        let mesh = made.tessellate_with(5e-4, true).unwrap();
+        let mesh = made.mesh(&crate::MeshTolerance::chord(5e-4)).unwrap();
         let about = |o: Vec3| {
             mesh.triangles
                 .iter()

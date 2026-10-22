@@ -90,8 +90,8 @@ fn verified<'a>(r: &'a Body, operands: &[&Body], tol: f64) -> &'a History {
 pub(crate) fn checked<'a>(r: &'a Body, operands: &[&Body], tol: f64, at: Reach, generated: &dyn Fn(usize) -> bool) -> &'a History {
     let h = r.history().expect("the operation reports its history");
     h.check(r, operands).unwrap();
-    let rm = r.tessellate(tol).unwrap();
-    let ms: Vec<Mesh> = operands.iter().map(|b| b.tessellate(tol).unwrap()).collect();
+    let rm = r.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let ms: Vec<Mesh> = operands.iter().map(|b| b.mesh(&crate::MeshTolerance::chord(tol)).unwrap()).collect();
     let near = 4.0 * tol + r.size() * 1e-6;
     let on = |o: &FaceOrigin, p: Vec3| match *o {
         FaceOrigin::Face { operand, face } => to_face(&ms[operand], face, p) < near.max(at.moved),
@@ -414,7 +414,7 @@ fn nudged_tool_composes() {
 #[test]
 fn faceted_tool() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let tool = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0).tessellate(0.1).unwrap();
+    let tool = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0).mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
     let r = crate::faceted_boolean(&a, &tool, BoolOp::Cut, 0.01).unwrap().unwrap();
     let h = r.history().expect("the faceted boolean reports its history");
     h.check_counts((r.face_count(), r.edge_count()), &[(a.face_count(), a.edge_count()), (tool.triangles.len(), 0)]).unwrap();

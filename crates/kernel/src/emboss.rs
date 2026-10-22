@@ -615,9 +615,9 @@ mod tests {
             Region2 { outer: Loop2::polygon(&[Vec2::new(-5., 5.), Vec2::new(-1., 5.), Vec2::new(-1., 10.), Vec2::new(-5., 10.)]), holes: vec![] };
         let (_, other_anchor) = infer_cylinder_emboss(&near, &shifted, std::slice::from_ref(&shifted_profile), 1.).unwrap().unwrap();
         assert!(other_anchor.dist(anchor) < 1e-10);
-        let before = near.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let before = near.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let result = emboss_cylinder_at(&near, other_anchor, &shifted, &[shifted_profile], 1.).unwrap();
-        assert!((result.tessellate_with(1e-4, true).unwrap().measure().volume - before - 21.).abs() < 0.02);
+        assert!((result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - before - 21.).abs() < 0.02);
         assert!(infer_cylinder_emboss(&near, &plane(), &regions, -10.).is_err());
         let inward = Plane::new(Vec3::Y * 10., Vec3::X, Vec3::Z).unwrap();
         assert!(infer_cylinder_emboss(&near, &inward, &regions, 1.).unwrap_err().to_string().contains("outwards"));
@@ -629,16 +629,16 @@ mod tests {
         ring.holes.push(Loop2::polygon(&[Vec2::new(-1., 6.), Vec2::new(1., 6.), Vec2::new(1., 9.), Vec2::new(-1., 9.)]));
         let island =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-0.5, 6.5), Vec2::new(0.5, 6.5), Vec2::new(0.5, 8.5), Vec2::new(-0.5, 8.5)]), holes: vec![] };
-        let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         for depth in [1., -1.] {
             for regions in [vec![ring.clone(), island.clone()], vec![island.clone(), ring.clone()]] {
                 let result = emboss_cylinder(&body, &plane(), &regions, depth).unwrap();
                 assert_eq!(result.shell_count(), 1);
                 assert!(result.validity().is_empty());
-                let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
                 let expected = 16. * (depth + depth * depth / 20.);
                 assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
-                let mesh = result.tessellate_with(0.001, true).unwrap();
+                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 for (s, raised) in [(0., true), (0.75, false), (1.5, true)] {
                     let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
                     let radius = if depth > 0. { 10.5 } else { 9.5 };
@@ -655,11 +655,11 @@ mod tests {
             let result = emboss_cylinder(&body, &plane(), &[profile()], depth).unwrap();
             assert_eq!(result.shell_count(), 1);
             assert!(result.validity().is_empty());
-            let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
-            let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+            let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+            let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
             let expected = if depth > 0. { 21. } else { -19. };
             assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
-            let mesh = result.tessellate_with(0.001, true).unwrap();
+            let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
             for s in [-1.5, 0., 1.5] {
                 let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
                 assert_eq!(mesh.contains(radial * (if depth > 0. { 10.5 } else { 9.5 }) + Vec3::Z * 7.5), depth > 0.);
@@ -692,12 +692,12 @@ mod tests {
             for depth in [1., -1.] {
                 let result = emboss_cylinder_at(&body, origin + radial * 10.0 + axis * 7.5, &plane, std::slice::from_ref(&profile), depth).unwrap();
                 assert_eq!(result.shell_count(), 1);
-                let before = body.tessellate_with(1e-4, true).unwrap().measure().volume;
-                let after = result.tessellate_with(1e-4, true).unwrap().measure().volume;
+                let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
                 let want = profile.area().abs() * (depth + depth * depth / 20.0);
                 assert!((after - before - want).abs() < 0.02, "{} vs {want}", after - before);
                 let point = |s: f64, z: f64, r: f64| origin + axis * z + (radial * (s / 10.0).cos() + tangent * (s / 10.0).sin()) * r;
-                let mesh = result.tessellate_with(0.001, true).unwrap();
+                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 for (s, z) in [(-1.5, 7.5), (1.5, 7.5), (0.5, 6.5)] {
                     let material = profile.contains(Vec2::new(s, z));
                     assert_eq!(mesh.contains(point(s, z, if depth > 0. { 10.5 } else { 9.5 })), if depth > 0. { material } else { !material });
@@ -707,7 +707,7 @@ mod tests {
                 assert_eq!(imported.bodies.len(), 1);
                 let round = imported.bodies.first().unwrap();
                 assert!(round.body.validity().is_empty());
-                let roundmesh = round.body.tessellate_with(0.001, true).unwrap();
+                let roundmesh = round.body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
                 assert_eq!(roundmesh.contains(point(-1.5, 7.5, if depth > 0. { 10.5 } else { 9.5 })), depth > 0.);
                 let cut = crate::boolean(
                     &round.body,
@@ -716,7 +716,7 @@ mod tests {
                 )
                 .unwrap()
                 .unwrap();
-                assert!(!cut.tessellate(0.01).unwrap().contains(point(-1.5, 7.5, 9.0)));
+                assert!(!cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(point(-1.5, 7.5, 9.0)));
             }
         }
     }

@@ -14,7 +14,7 @@ fn nested_island() -> Body {
 
 fn assert_material(body: &Body, expected: f64, probes: &[(Vec3, bool)]) {
     assert!(body.validity().is_empty(), "{:?}", body.validity());
-    let mesh = body.tessellate_with(0.01, true).unwrap();
+    let mesh = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     assert!((mesh.measure().volume - expected).abs() < expected * 1e-6, "{} vs {expected}", mesh.measure().volume);
     for (p, want) in probes {
         assert_eq!(mesh.contains(*p), *want, "material at {p:?}");
@@ -31,7 +31,7 @@ fn check_nested(body: &Body) {
     for (got, want) in volumes.iter().zip([56_000.0, 488_000.0]) {
         assert!((got - want).abs() < 1e-6, "{volumes:?}");
     }
-    let meshes: Vec<_> = lumps.iter().map(|b| b.tessellate_with(0.01, true).unwrap()).collect();
+    let meshes: Vec<_> = lumps.iter().map(|b| b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap()).collect();
     for (p, want) in probes {
         assert_eq!(meshes.iter().filter(|m| m.contains(p)).count(), usize::from(want), "lump material at {p:?}");
     }
@@ -54,7 +54,7 @@ fn sphere_cut_far_from_a_void_keeps_the_void() {
     let got = measure(&cut).unwrap().volume;
     assert!((got - want).abs() < want * 1e-3, "volume {got}, want {want}");
     assert_eq!(cut.solid.boundaries().len(), 2, "the cavity stays a sealed second shell");
-    let mesh = cut.tessellate_with(0.01, true).unwrap();
+    let mesh = cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     for (p, material) in [(Vec3::new(27.5, 27.5, 27.5), false), (Vec3::new(1.0, 1.0, 39.0), false), (Vec3::new(20.0, 20.0, 20.0), true)] {
         assert_eq!(mesh.contains(p), material, "material at {p:?}");
     }
@@ -108,7 +108,7 @@ fn nested_voids_survive_step_round_trip_and_further_cuts() {
     for lump in &lumps {
         if let Some(cut) = boolean(lump, &opening, BoolOp::Cut).unwrap() {
             cut_volume += measure(&cut).unwrap().volume;
-            assert!(!cut.tessellate_with(0.01, true).unwrap().contains(Vec3::X * 15.0));
+            assert!(!cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(Vec3::X * 15.0));
         }
     }
     // Only x=10..20 is material along this 4×4 opening: 160 mm³ removed.
@@ -132,7 +132,7 @@ fn curved_internal_void_and_disconnected_material_keep_analytic_volume() {
     for (got, want) in volumes.iter().zip(want) {
         assert!((got - want).abs() < want * 0.002, "{got} vs {want}");
     }
-    let meshes: Vec<_> = lumps.iter().map(|b| b.tessellate_with(0.01, true).unwrap()).collect();
+    let meshes: Vec<_> = lumps.iter().map(|b| b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap()).collect();
     for (p, want) in [(Vec3::ZERO, 0), (Vec3::X * 3.0, 1), (Vec3::X * 7.0, 0), (Vec3::X * 15.0, 1)] {
         assert_eq!(meshes.iter().filter(|m| m.contains(p)).count(), want);
     }
@@ -142,7 +142,7 @@ fn curved_internal_void_and_disconnected_material_keep_analytic_volume() {
     // two bodies.
     let imported: Vec<_> = imported.bodies.into_iter().map(|b| b.body).collect();
     assert_eq!(imported.len(), 2);
-    let imported_meshes: Vec<_> = imported.iter().map(|b| b.tessellate_with(0.01, true).unwrap()).collect();
+    let imported_meshes: Vec<_> = imported.iter().map(|b| b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap()).collect();
     for (p, want) in [(Vec3::ZERO, 0), (Vec3::X * 3.0, 1), (Vec3::X * 7.0, 0), (Vec3::X * 15.0, 1)] {
         assert_eq!(imported_meshes.iter().filter(|m| m.contains(p)).count(), want);
     }
@@ -177,7 +177,7 @@ fn unowned_overlapping_and_touching_cavities_are_errors_not_dropped_geometry() {
 
 #[test]
 fn shell_grouping_preserves_large_disconnected_patterns_and_bounds_hostile_work() {
-    let mesh = cube(1.0).tessellate_with(0.01, true).unwrap();
+    let mesh = cube(1.0).mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     let copies: Vec<_> = (0..512)
         .map(|i| {
             let mut m = mesh.clone();
@@ -202,7 +202,7 @@ fn shell_grouping_preserves_large_disconnected_patterns_and_bounds_hostile_work(
     };
     let (repeated, lifted) = (slanted(0.0), slanted(1e-3));
     assert!(shell_groups::groups(&[repeated, lifted], &[8.0, 8.0], 1e-8).unwrap_err().to_string().contains("boundary work"));
-    let mut outer = cube(2.0).tessellate_with(0.01, true).unwrap();
+    let mut outer = cube(2.0).mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     let mut inner = mesh;
     outer.triangles = outer.triangles.iter().copied().cycle().take(4000).collect();
     inner.triangles = inner.triangles.iter().copied().cycle().take(4000).collect();
@@ -222,9 +222,9 @@ fn translated_and_scaled_nested_voids_keep_material_membership() {
         .unwrap();
         let lumps = transformed
             .lumps()
-            .unwrap_or_else(|e| panic!("scale={scale}: {e}; bounds={:?}", transformed.tessellate_with(1e-4, true).unwrap().bounds()));
+            .unwrap_or_else(|e| panic!("scale={scale}: {e}; bounds={:?}", transformed.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().bounds()));
         assert_eq!(lumps.len(), 2);
-        let meshes: Vec<_> = lumps.iter().map(|b| b.tessellate_with((scale * 0.01).max(1e-5), true).unwrap()).collect();
+        let meshes: Vec<_> = lumps.iter().map(|b| b.mesh(&crate::MeshTolerance::chord((scale * 0.01).max(1e-5))).unwrap()).collect();
         for (x, want) in [(0.0, 0), (15.0, 1), (30.0, 0), (45.0, 1)] {
             assert_eq!(meshes.iter().filter(|m| m.contains(origin + Vec3::X * (x * scale))).count(), want);
         }
@@ -311,7 +311,7 @@ fn grouping_lumps_preserves_only_unchanged_face_certificates_and_trimmed_caps() 
             }
             total_faces += 1;
         }
-        let mesh = lump.tessellate(1e-5).unwrap();
+        let mesh = lump.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         if mesh.contains(Vec3::new(21., 21., 0.5)) {
             assert!(!mesh.contains(Vec3::new(25., 25., 0.5)), "trimmed stop hole must not refill");
             assert!((mesh.measure().volume - (100. - 4. * std::f64::consts::PI)).abs() < 0.002);
@@ -343,7 +343,7 @@ fn a_long_thin_cylinder_comes_out_outward() {
     for (lo, seam) in [(-181.0, 0.613), (-100.0, 0.613), (-10.0, 0.613), (-181.0, 0.0)] {
         let disc = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 0.5, seam), holes: vec![] };
         let tool = crate::extrude(&plane, &[disc], lo, 0.9).unwrap().pop().unwrap();
-        let volume = tool.tessellate(0.01).unwrap().measure().volume;
+        let volume = tool.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = std::f64::consts::PI * 0.25 * (0.9 - lo);
         assert!((volume - want).abs() < want * 0.02, "{lo} {seam}: {volume} vs {want}");
     }

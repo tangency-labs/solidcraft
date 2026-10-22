@@ -109,7 +109,7 @@ fn what_reads_the_display_mesh_of_a_large_sheet_answers_as_before() {
     let st = s.world_state();
     let b = &st.bodies[0];
     let m = b.mesh();
-    let coarse = b.body.display_mesh((b.body.size() * 1e-3).max(1e-3)).unwrap();
+    let coarse = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord((b.body.size() * 1e-3).max(1e-3))).unwrap();
     // Bounds: the sheet's box is set by flat faces, so the rounder bends move nothing.
     let (now, before) = (m.bounds(), coarse.bounds());
     assert!(now.min.dist(before.min) < 1e-9 && now.max.dist(before.max) < 1e-9, "{now:?} {before:?}");

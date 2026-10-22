@@ -38,8 +38,8 @@ fn regions_cut_from_a_body_keeping_its_meshes_are_unchanged() {
     assert_eq!(memo.shells.lock().unwrap().len(), 1, "one tolerance, one meshing");
     assert!(!memo.made.lock().unwrap().is_empty());
     // A mesh from the memo is the mesh made afresh.
-    let (a, b) = (kept.tessellate_with(0.05, true).unwrap(), plate.tessellate_with(0.05, true).unwrap());
-    let (a2, _) = (kept.tessellate_with(0.05, true).unwrap(), ());
+    let (a, b) = (kept.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), plate.mesh(&crate::MeshTolerance::chord(0.05)).unwrap());
+    let (a2, _) = (kept.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), ());
     for m in [&a, &a2] {
         assert_eq!(m.triangles, b.triangles);
         assert!(
@@ -58,8 +58,8 @@ fn a_copy_with_another_solid_makes_its_own_meshes() {
     let other = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     let mut swapped = kept.clone();
     swapped.solid = other.solid.clone();
-    let _ = kept.tessellate_with(0.5, true).unwrap();
-    let m = swapped.tessellate_with(0.5, true).unwrap();
-    assert_eq!(m.triangles.len(), other.tessellate_with(0.5, true).unwrap().triangles.len());
+    let _ = kept.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
+    let m = swapped.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
+    assert_eq!(m.triangles.len(), other.mesh(&crate::MeshTolerance::chord(0.5)).unwrap().triangles.len());
     assert!(swapped.boolean_meshes(0.01).is_none());
 }

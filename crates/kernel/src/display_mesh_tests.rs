@@ -156,8 +156,8 @@ fn a_small_bend_on_a_large_sheet_is_meshed_round() {
     let tol = display_tol(&b);
     // The tolerance is larger than either side's sagitta: 1 - cos 45° of the radius.
     assert!(tol > 3.0 * (1.0 - (PI / 4.0).cos()));
-    let coarse = b.display_mesh(tol).unwrap();
-    let round = b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     // A quarter turn in facets of at most DISPLAY_ANGLE.
     let facets = (FRAC_PI_2 / DISPLAY_ANGLE).ceil() as usize;
     assert_eq!(facets, 5);
@@ -197,8 +197,8 @@ fn a_small_bend_on_a_large_sheet_is_meshed_round() {
 fn the_round_display_mesh_stays_closed_and_keeps_its_edges_and_bounds() {
     let b = bent_sheet(3000.0);
     let tol = display_tol(&b);
-    let coarse = b.display_mesh(tol).unwrap();
-    let round = b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     // Neighbouring faces share the points of the edge between them.
     assert_eq!(open_sides(&round, 1e-6), 0);
     // The same edges in the same order, between the same faces, with the same ends and flags.
@@ -223,8 +223,8 @@ fn a_small_hole_on_a_large_plate_has_a_round_rim() {
     let b = plate_with_holes(&[centre], 2.0);
     let tol = display_tol(&b);
     assert!(tol > 2.0, "the hole's radius is below the chord tolerance");
-    let coarse = b.display_mesh(tol).unwrap();
-    let round = b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     let segments = (TAU / DISPLAY_ANGLE).ceil() as usize;
     assert_eq!(segments, 18);
     for z in [0.0, 2.0] {
@@ -249,15 +249,15 @@ fn a_small_hole_on_a_large_plate_has_a_round_rim() {
 fn an_arc_the_chord_tolerance_already_divides_finely_is_left_alone() {
     // A 40 mm cylinder at a tolerance of 0.01 mm: 64 facets around, far inside the angle.
     let b = crate::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 30.0).unwrap();
-    let coarse = b.display_mesh(0.01).unwrap();
-    let round = b.display_mesh_angular(0.01, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(DISPLAY_ANGLE) }).unwrap();
     assert_eq!(round.positions, coarse.positions);
     assert_eq!(round.triangles, coarse.triangles);
     assert_eq!(round.edges, coarse.edges);
     // And a body with nothing curved at any tolerance.
     let b = crate::box_solid(Vec3::ZERO, Vec3::new(3000.0, 1000.0, 2.0)).unwrap();
     let tol = display_tol(&b);
-    assert_eq!(b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap().positions, b.display_mesh(tol).unwrap().positions);
+    assert_eq!(b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap().positions, b.mesh(&crate::MeshTolerance::chord(tol)).unwrap().positions);
 }
 
 #[test]
@@ -268,14 +268,14 @@ fn a_radius_far_below_the_tolerance_keeps_its_chord_facets() {
     let centre = Vec2::new(30.0, 20.0);
     let b = plate_with_holes(&[centre], 0.002);
     let tol = display_tol(&b);
-    let coarse = b.display_mesh(tol).unwrap();
-    let round = b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     assert_eq!(round.triangles.len(), coarse.triangles.len());
     assert_eq!(round.edges, coarse.edges);
     // Just above the floor the rim is divided, but coarsely: the angle stops where the sag
     // falls below the floor, not where the facets reach the angle.
     let b = plate_with_holes(&[centre], 0.01);
-    let round = b.display_mesh_angular(display_tol(&b), DISPLAY_ANGLE).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: display_tol(&b), angle: Some(DISPLAY_ANGLE) }).unwrap();
     let (n, _) = rim(&round, centre, 0.01, 2.0);
     assert!((3..18).contains(&n), "{n} segments");
 }
@@ -288,8 +288,8 @@ fn a_face_crowded_with_holes_gets_a_coarser_angle_and_bounded_work() {
     let centres: Vec<Vec2> = (0..50).flat_map(|i| (0..20).map(move |j| Vec2::new(30.0 + 60.0 * i as f64, 25.0 + 50.0 * j as f64))).collect();
     let b = plate_with_holes(&centres, 2.0);
     let tol = display_tol(&b);
-    let coarse = b.display_mesh(tol).unwrap();
-    let round = b.display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+    let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     let boundary = |m: &Mesh, z: f64| m.edges.iter().filter(|e| e.iter().all(|p| (p.z - z).abs() < 1e-6)).map(|e| e.len() - 1).sum::<usize>();
     let budget = truck_meshalgo::tessellation::Deflection::MAX_ANGLE_BOUNDARY;
     for z in [0.0, 2.0] {
@@ -313,7 +313,7 @@ fn a_face_crowded_with_holes_gets_a_coarser_angle_and_bounded_work() {
     assert_eq!(open_sides(&round, 1e-6), 0);
     // A plate with few holes keeps the full angle.
     let few = plate_with_holes(&centres[..40], 2.0);
-    let round = few.display_mesh_angular(display_tol(&few), DISPLAY_ANGLE).unwrap();
+    let round = few.mesh(&crate::MeshTolerance { chord: display_tol(&few), angle: Some(DISPLAY_ANGLE) }).unwrap();
     assert!(rim(&round, centres[0], 2.0, 2.0).0 >= 18);
 }
 
@@ -340,8 +340,8 @@ fn round_faces_of_every_kind_are_divided_by_the_angle() {
             .fold(0.0, f64::max)
     };
     let check = |name: &str, b: &Body| {
-        let coarse = b.display_mesh(3.0).unwrap();
-        let round = b.display_mesh_angular(3.0, DISPLAY_ANGLE).unwrap();
+        let coarse = b.mesh(&crate::MeshTolerance::chord(3.0)).unwrap();
+        let round = b.mesh(&crate::MeshTolerance { chord: 3.0, angle: Some(DISPLAY_ANGLE) }).unwrap();
         // The chord tolerance alone leaves facets coarser than the angle (the size rules' longest
         // side and aspect limit already keep them near 40°), so the angle has work to do.
         assert!(turn(b, &coarse) > 1.5 * DISPLAY_ANGLE, "{name}: the chord tolerance leaves facets of {} degrees", turn(b, &coarse).to_degrees());
@@ -377,7 +377,7 @@ fn a_cylinder_wall_split_along_its_seam_meshes_round() {
         .collect();
     assert_eq!(outer.iter().filter(|o| **o).count(), 2);
     for tol in [display_tol(&cup), 0.1, 0.01] {
-        let m = cup.tessellate(tol).unwrap();
+        let m = cup.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         assert_eq!(open_sides(&m, 1e-6), 0);
         let v = mesh_volume(&m);
         assert!((v - exact).abs() < exact * 0.01, "tolerance {tol}: mesh volume {v:.1}, exact {exact:.1}");
@@ -403,7 +403,7 @@ fn outline_bounds_hold_the_display_mesh() {
     let rod = crate::cylinder(Vec3::new(5., 5., 0.), Vec3::Z, 4., 25.).unwrap();
     for body in [cube, rounded, rod] {
         let outline = body.outline_bounds();
-        let mesh = body.reference_display_mesh_angular(body.size() * 1e-3, crate::DISPLAY_ANGLE).unwrap().bounds();
+        let mesh = body.mesh(&crate::MeshTolerance { chord: body.size() * 1e-3, angle: Some(crate::DISPLAY_ANGLE) }).unwrap().bounds();
         let slack = body.size() * 1e-6;
         for (lo, hi, m_lo, m_hi) in [
             (outline.min.x, outline.max.x, mesh.min.x, mesh.max.x),

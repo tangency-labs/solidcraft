@@ -124,7 +124,7 @@ const MAX_PAIRS: usize = 2_000_000;
 impl<'a> Clearance<'a> {
     /// `chord`: the chord error of the mesh the body is asked on.
     pub fn new(body: &'a Body, chord: f64) -> Option<Clearance<'a>> {
-        let mesh = body.tessellate_with(chord, true).ok()?;
+        let mesh = body.mesh(&crate::MeshTolerance::chord(chord)).ok()?;
         (!mesh.triangles.is_empty()).then(|| Clearance { body, mesh, sag: 2.0 * chord, tol: (body.size() * 1e-7).max(1e-9), exact: false })
     }
 

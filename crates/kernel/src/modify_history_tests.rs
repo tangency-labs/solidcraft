@@ -51,7 +51,7 @@ fn edge_at(b: &Body, p: Vec3) -> usize {
 
 /// The index of the face of `b` holding `p`.
 fn face_at(b: &Body, p: Vec3) -> usize {
-    let m = b.tessellate(TOL).unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
     (0..b.face_count()).min_by(|x, y| to_face(&m, *x, p).total_cmp(&to_face(&m, *y, p))).unwrap()
 }
 
@@ -394,7 +394,7 @@ fn mirrored_copy_keeps_every_face_and_edge() {
     let h = r.history().unwrap();
     h.check(&r, &[&b]).unwrap();
     // Each edge is the mirror image of the one it says it is.
-    let (rm, bm) = (r.tessellate(TOL).unwrap(), b.tessellate(TOL).unwrap());
+    let (rm, bm) = (r.mesh(&crate::MeshTolerance::chord(TOL)).unwrap(), b.mesh(&crate::MeshTolerance::chord(TOL)).unwrap());
     for (j, e) in h.edges.iter().enumerate() {
         let [EdgeOrigin::Edge { edge, .. }] = e.origins[..] else { panic!("edge {j}: {e:?}") };
         for p in &rm.edges[j] {
@@ -599,7 +599,7 @@ mod smlib {
         let t = offset_backend::thicken(&s, 2.0, false).unwrap();
         assert!((volume(&t) - 200.0).abs() < 1e-6, "{}", volume(&t));
         // Along the sheet's normal (+Z).
-        let m = t.tessellate(TOL).unwrap();
+        let m = t.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
         let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
         assert!(lo.abs() < 1e-9 && (hi - 2.0).abs() < 1e-9, "z {lo}..{hi}");
         let h = verified(&t, &s, reach(2.0));
@@ -607,7 +607,7 @@ mod smlib {
         assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1, "{h:?}");
         assert_eq!(blends(h).len(), 4, "{h:?}");
         let both = offset_backend::thicken(&s, 2.0, true).unwrap();
-        let m = both.tessellate(TOL).unwrap();
+        let m = both.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
         let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
         assert!((lo + 1.0).abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "z {lo}..{hi}");
         let h = verified(&both, &s, reach(1.0));

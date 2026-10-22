@@ -487,7 +487,7 @@ fn rounded_enclosure_shell_side_and_floor_attach_through_width_wall_and_reopen()
         assert!((state.sketch(side).unwrap().plane.origin.x - 50.).abs() < 1e-6);
         assert!((state.sketch(floor).unwrap().plane.origin.z - 3.).abs() < 1e-6);
         assert!(state.sketch(floor).unwrap().plane.normal().dot(Vec3::Z) > 0.999);
-        let mesh = state.body("Case").unwrap().body.tessellate_with(1e-4, true).unwrap();
+        let mesh = state.body("Case").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
         let case = &state.body("Case").unwrap().body;
         let corners: Vec<_> = (0..case.face_count()).filter(|i| matches!(solidcraft_kernel::face_surface(case, *i), Some(solidcraft_kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 6.).abs() < 1e-6)).collect();
         assert_eq!(corners.len(), 4, "later port/boss features must not subdivide untouched outer corners");
@@ -552,7 +552,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
     assert_eq!(solidcraft_kernel::step_export(&[&control], "control snapshot").unwrap(), before_control);
     let state = s.model.state();
     let body = state.body("Stock").unwrap();
-    let display = body.body.display_mesh(0.01).unwrap();
+    let display = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let face = body
         .body
         .faces(0.01)
@@ -573,14 +573,14 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
         let sketch = &state.sketch(attached).unwrap().sketch;
         assert!(sketch.links.iter().all(|link| !link.lost));
         assert_eq!(sketch.curves.len(), 4, "whole outer-wall rectangle has no floor-height stations");
-        let mesh = state.body("Stock").unwrap().body.display_mesh(0.01).unwrap();
+        let mesh = state.body("Stock").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         assert!(mesh.contains(Vec3::new(0., 0., 0.5)));
         assert!(!mesh.contains(Vec3::new(0., 0., 5.)));
         assert!(mesh.contains(Vec3::new(28., 0., 5.)));
         let control = &state.body("Control").unwrap().body;
         assert_eq!(control.faces(0.01).unwrap().len(), 6);
         assert_eq!(control.edges(0.01).unwrap().len(), 12);
-        let control_mesh = control.tessellate(0.01).unwrap();
+        let control_mesh = control.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         assert!((control_mesh.measure().volume - 160.).abs() < 1e-6);
         assert!(control_mesh.contains(Vec3::new(102., 102., 0.5)));
         assert!(control_mesh.contains(Vec3::new(102., 102., 5.)));

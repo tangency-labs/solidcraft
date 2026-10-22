@@ -529,7 +529,7 @@ fn cylinder_badge() -> Session {
 }
 
 fn exact_cylinder_volume(s: &Session) -> f64 {
-    s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume
+    s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume
 }
 
 #[test]
@@ -546,7 +546,7 @@ fn cylinder_emboss_persists_selection_and_replays_radial_depth() {
     let state = s.model.state();
     let body = &state.body("Sleeve").unwrap().body;
     assert_eq!(body.shell_count(), 1);
-    let mesh = body.tessellate_with(0.001, true).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
     assert!(mesh.contains(Vec3::new(-10.5 * 0.15_f64.sin(), 10.5 * 0.15_f64.cos(), 7.5)));
     let feature = s.doc.find_feature("Raised Badge").unwrap();
     assert!(
@@ -630,7 +630,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
             .world_state()
             .bodies
             .iter()
-            .find(|b| b.body.tessellate_with(0.001, true).unwrap().contains(solidcraft_geom::Vec3::new(40.5 + pick_offset, 0., 7.5)))
+            .find(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(40.5 + pick_offset, 0., 7.5)))
             .unwrap()
             .name
             .clone();
@@ -654,7 +654,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
         assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
         let world = s.world_state();
         for x in [39.5, 119.5] {
-            assert!(world.bodies.iter().any(|b| b.body.tessellate_with(0.001, true).unwrap().contains(solidcraft_geom::Vec3::new(x, 0., 7.5))));
+            assert!(world.bodies.iter().any(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(x, 0., 7.5))));
         }
         let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
         loaded.refresh();
@@ -802,7 +802,7 @@ fn check_body_offset(auto: bool) {
     assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
     assert_eq!(s.doc.body_offsets["Sleeve"], offset);
     assert_eq!(s.doc.body_component("Sleeve", s.model.state().body("Sleeve").unwrap().feature), holder);
-    assert!(s.world_state().body("Sleeve").unwrap().body.tessellate_with(0.001, true).unwrap().contains(solidcraft_geom::Vec3::new(0., 10.5, 7.5)));
+    assert!(s.world_state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(0., 10.5, 7.5)));
 }
 
 #[test]
@@ -984,7 +984,7 @@ fn cylinder_auto_inference_saves_a_profile_anchor_and_replays_both_depth_signs()
         let body = &state.body("Sleeve").unwrap().body;
         assert_eq!(body.shell_count(), 1);
         assert_eq!(
-            body.tessellate_with(0.001, true).unwrap().contains(Vec3::new(0., if mode == "emboss" { 10.5 } else { 9.5 }, 7.5)),
+            body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(Vec3::new(0., if mode == "emboss" { 10.5 } else { 9.5 }, 7.5)),
             mode == "emboss"
         );
         run(&mut s, "edit.undo", json!({}));
@@ -1019,10 +1019,10 @@ fn cylinder_auto_inference_ignores_remote_finite_tangent_walls_in_each_body_orde
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-2,5],"p1":[2,10]}));
         run(&mut s, "sketch.finish", json!({}));
         let before = exact_cylinder_volume(&s);
-        let remote = s.model.state().body("Remote").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let remote = s.model.state().body("Remote").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         run(&mut s, "solid.emboss", json!({"sketch":"Badge","depth":1}));
         assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
-        assert_eq!(s.model.state().body("Remote").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume, remote);
+        assert_eq!(s.model.state().body("Remote").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume, remote);
     }
 }
 
@@ -1043,7 +1043,7 @@ fn cylinder_auto_inference_retains_selected_holes_and_nested_islands() {
         let st = s.model.state();
         let body = &st.body("Sleeve").unwrap().body;
         assert_eq!(body.shell_count(), 1);
-        let mesh = body.tessellate_with(0.001, true).unwrap();
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
         for (s, raised) in [(0., true), (0.75, false), (1.5, true)] {
             let theta = s / 10.0_f64;
             let radius = if mode == "emboss" { 10.5 } else { 9.5 };
@@ -1113,7 +1113,7 @@ fn loft_joined_onto_a_box_exports_one_connected_mesh() {
     let v = volume(&mut s);
     assert!(rel(v, 24000.0 + loft) < 1e-5, "{v} vs {}", 24000.0 + loft);
     // The exported mesh, its vertices merged, is one connected piece.
-    let mesh = s.model.state().body("Box").unwrap().body.tessellate(0.01).unwrap();
+    let mesh = s.model.state().body("Box").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let (positions, triangles) = solidcraft_io::weld(&mesh.positions, &mesh.triangles, 1e-4);
     let mut piece: Vec<usize> = (0..positions.len()).collect();
     let root = |piece: &mut Vec<usize>, mut i: usize| {
@@ -1610,7 +1610,7 @@ fn knife_edge_part() -> Session {
 /// the concave arc). It holds to about 1e-3 of what a blend removes here; the bounds below are
 /// about twice what each test reads.
 fn planned(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.display_plan(2e-4).unwrap().evaluate().measure().volume).sum()
+    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
 }
 
 /// The middle of the part's arc.

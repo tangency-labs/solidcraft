@@ -41,7 +41,7 @@ fn a_lens_thinner_than_the_tolerance_is_meshed() {
     assert!(union.validity().is_empty(), "{:?}", union.validity());
     let size = union.size();
     for tol in [size * 1e-2, size * 2.5e-3, size * 1e-3] {
-        let mesh = union.tessellate(tol).unwrap();
+        let mesh = union.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let faces: std::collections::HashSet<u32> = mesh.tri_face.iter().copied().collect();
         assert_eq!(faces.len(), union.face_count(), "faces with triangles at {tol}");
         assert_eq!(open_sides(&mesh), 0, "open sides at {tol}");
@@ -96,7 +96,7 @@ fn sphere_touching_a_box_edge_unites_soundly() {
     assert!(union.validity().is_empty(), "{:?}", union.validity());
     let size = union.size();
     for tol in [size * 1e-2, size * 2.5e-3, size * 6e-4] {
-        let faces: std::collections::HashSet<u32> = union.tessellate(tol).unwrap().tri_face.into_iter().collect();
+        let faces: std::collections::HashSet<u32> = union.mesh(&crate::MeshTolerance::chord(tol)).unwrap().tri_face.into_iter().collect();
         assert_eq!(faces.len(), union.face_count(), "at {tol}");
     }
 }

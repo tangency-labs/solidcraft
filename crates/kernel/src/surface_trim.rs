@@ -109,7 +109,7 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
 
 /// For each point, the face of `body` nearest it (over one tessellation).
 fn nearest_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
-    let m = body.tessellate(body.size() * 2e-3)?;
+    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
     at.iter()
         .map(|p| {
             let mut best: Option<(f64, u32)> = None;
@@ -157,7 +157,7 @@ fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) 
     let side = ToolSide::of(tool)?;
     let size = x.size();
     let touch = size * 1e-6 + 1e-9;
-    let m = x.tessellate(size * 2e-3)?;
+    let m = x.mesh(&crate::MeshTolerance::chord(size * 2e-3))?;
     let (mut lo, mut hi, mut near) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY);
     for p in &m.positions {
         let v = side.at(*p);

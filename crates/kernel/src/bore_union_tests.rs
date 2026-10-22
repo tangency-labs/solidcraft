@@ -24,8 +24,8 @@ fn fixture() -> (Body, Body, Vec3, f64) {
     let region = Region2 { outer: Loop2::circle(Vec2::new(20., 15.), 8.), holes: vec![Loop2::circle(Vec2::new(20., 15.), 5.).reversed()] };
     let ring = extrude(&Plane::XY, &[region], 14., 24.).unwrap().remove(0);
     let web_volume = 0.02 * 2. * (24f64.sqrt() + 25. * 0.2f64.asin());
-    let fine_target = target.tessellate_with(1e-4, true).unwrap();
-    let added = fine_target.measure().volume - bored.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let fine_target = target.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
+    let added = fine_target.measure().volume - bored.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((added - web_volume).abs() < 0.005, "actual connected web adds {added}, expected {web_volume}");
     for x in [16., 20., 24.] {
         for y in [14.2, 15., 15.8] {
@@ -45,15 +45,15 @@ fn thin_connected_web_between_bore_stations_survives_union() {
     let ring_before = step_export(&[&ring], "ring").unwrap();
     let size = target.size().max(ring.size());
     let tol = (size * 5e-4).max(size * 1e-5);
-    let ma = target.tessellate_with(tol, true).unwrap();
-    let mb = ring.tessellate_with(tol, true).unwrap();
+    let ma = target.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let mb = ring.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
     assert!(ma.contains(probe), "fixture must contain the real connected web");
     assert!(!mb.contains(probe));
     let va = ma.measure().volume;
     let vb = mb.measure().volume;
     let slack = 2e-3 * (va + vb) + 1e-9;
     let accept = |body: &Body| {
-        let mr = body.tessellate_with(tol, true).unwrap();
+        let mr = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let v = mr.measure().volume;
         let mismatch = super::mismatch(&ma, &mb, &mr, BoolOp::Union);
         eprintln!("fallback candidate V={v}, expected={expected}, web={}, mismatch={mismatch:?}", mr.contains(probe));
@@ -73,10 +73,10 @@ fn thin_connected_web_between_bore_stations_survives_union() {
             std::fs::write(dir.join("public-union.step"), step_export(&[result], "public union").unwrap()).unwrap();
         }
     }
-    let direct_keeps_web = direct.as_ref().is_none_or(|result| result.tessellate_with(1e-3, true).unwrap().contains(probe));
+    let direct_keeps_web = direct.as_ref().is_none_or(|result| result.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().contains(probe));
     let public_keeps_web = match &public {
         Ok(Some(result)) => {
-            let keep = result.tessellate_with(1e-3, true).unwrap().contains(probe);
+            let keep = result.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().contains(probe);
             eprintln!("public Union result web={keep}");
             keep
         }
@@ -111,7 +111,7 @@ fn unproved_curved_boundary_between_clear_endpoints_refuses_recut() {
     };
     let body = extrude(&Plane::XY, &[region], 16.05, 16.07).unwrap().remove(0);
     assert!(a.len() > 5. && b.len() > 5., "endpoint samples miss the interior excursion");
-    assert!(body.tessellate_with(1e-4, true).unwrap().contains(Vec3::new(4.5, 0., 16.06)));
+    assert!(body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().contains(Vec3::new(4.5, 0., 16.06)));
     let before = step_export(&[&body], "curved source").unwrap();
     assert!(crate::bore_guard::boundaries_clear(&body, &[], Vec3::ZERO, UnitVec3::Z, 5., 14., 24., 1e-6).is_none());
     assert_eq!(step_export(&[&body], "curved source").unwrap(), before);
@@ -129,7 +129,7 @@ fn coplanar_faces_apart_from_each_other_do_not_coincide() {
     // A post over the first one's top does meet it there.
     assert!(!crate::coplanar::coincident_planes(&with_one, &cylinder(Vec3::new(12., 30., 7.), Vec3::Z, 3., 6.).unwrap()).is_empty());
     let joined = boolean(&with_one, &post(60.), BoolOp::Union).unwrap().unwrap();
-    let v = joined.tessellate_with(1e-3, true).unwrap().measure().volume;
+    let v = joined.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
     let expected = 80. * 60. * 2. + 2. * std::f64::consts::PI * 9. * 5.;
     assert!((v - expected).abs() < 0.5, "volume {v}, expected {expected}");
 }

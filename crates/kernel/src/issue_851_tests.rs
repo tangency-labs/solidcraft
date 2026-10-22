@@ -164,7 +164,7 @@ fn arc_top_removed(size: f64, round: bool) -> f64 {
 /// Volume through the display planner (the mesh the app draws): closed and exact where the
 /// legacy mesher behind `measure` can leak at a zero-angle corner like the one at the tip.
 pub(crate) fn planned_volume(b: &Body) -> f64 {
-    let mesh = b.display_plan(2e-4).unwrap().evaluate();
+    let mesh = b.mesh_plan(&crate::MeshTolerance::chord(2e-4)).unwrap().evaluate();
     let key = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
     let mut uses: std::collections::HashMap<([u64; 3], [u64; 3]), i32> = std::collections::HashMap::new();
     for t in &mesh.triangles {

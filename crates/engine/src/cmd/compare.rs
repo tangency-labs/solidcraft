@@ -161,7 +161,7 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     // Meshed within a quarter of the tolerance (the kernel goes no finer than a millionth of a
     // body's size), so two meshes of one surface agree well within it.
     let chord = tolerance / 4.0;
-    let mut done = solidcraft_kernel::map_on_threads(&[ba, bb], 2, |b| (super::inspect::measure_json(b), b.body.tessellate_with(chord, true)))
+    let mut done = solidcraft_kernel::map_on_threads(&[ba, bb], 2, |b| (super::inspect::measure_json(b), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(chord))))
         .into_iter()
         .zip([&na, &nb]);
     let mut next = || -> Result<(Value, solidcraft_geom::Mesh)> {

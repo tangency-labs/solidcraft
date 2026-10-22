@@ -52,7 +52,7 @@ pub(crate) struct ContactMeshes(HashMap<u64, ContactMesh>);
 /// Tessellate `body` for contact checks and measure how thin it is.
 fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let mesh = body.body.tessellate(tolerance)?;
+    let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
     if mesh.triangles.len() > MAX_TRIANGLES || mesh.positions.len().saturating_add(mesh.triangles.len().saturating_mul(4)) > 200_000 {
         return Err(limit("body exceeds contact sweep tessellation budget"));
     }

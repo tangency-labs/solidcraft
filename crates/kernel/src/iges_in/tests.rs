@@ -138,7 +138,7 @@ fn an_arc_revolved_about_its_centre_is_a_cap_not_a_ball() {
     ];
     let imp = iges_import(&iges_file_placed(&ents)).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let mesh = imp.bodies[0].body.tessellate(0.01).unwrap();
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
     for p in &mesh.positions {
         for (k, x) in [p.x, p.y, p.z].into_iter().enumerate() {

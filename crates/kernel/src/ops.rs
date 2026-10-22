@@ -668,16 +668,16 @@ mod shortcut_tests {
     fn curved_near_contact_never_uses_a_shell_only_boolean_candidate() {
         let direction = Vec3::new(1.0, 2.0, 3.0).normalized().unwrap();
         let outer = crate::sphere(Vec3::ZERO, 10.0).unwrap();
-        let mesh = outer.tessellate(0.03).unwrap();
+        let mesh = outer.mesh(&crate::MeshTolerance::chord(0.03)).unwrap();
         for distance in [19.999, 20.001] {
             let other = crate::sphere(direction * distance, 10.0).unwrap();
-            let other_mesh = other.tessellate(0.03).unwrap();
+            let other_mesh = other.mesh(&crate::MeshTolerance::chord(0.03)).unwrap();
             let counts = record::counts(&[&outer, &other]);
             assert!(trivial(&outer, &other, BoolOp::Union, &mesh, &other_mesh, &counts, 0.09).is_none());
             assert!(trivial(&other, &outer, BoolOp::Union, &other_mesh, &mesh, &counts, 0.09).is_none());
         }
         let protruding = crate::sphere(direction * 9.001, 1.0).unwrap();
-        let protruding_mesh = protruding.tessellate(0.03).unwrap();
+        let protruding_mesh = protruding.mesh(&crate::MeshTolerance::chord(0.03)).unwrap();
         let counts = record::counts(&[&outer, &protruding]);
         assert!(trivial(&outer, &protruding, BoolOp::Cut, &mesh, &protruding_mesh, &counts, 0.09).is_none());
     }
@@ -719,7 +719,7 @@ mod shortcut_tests {
         // Off the axis by 0.01 mm the pin shares a crescent with the tube: not taken for apart.
         let (ma, mb) = (pin(Vec3::new(0.01, 0.0, 0.0), -2.35, 9.65), tube.clone());
         let counts = record::counts(&[&ma, &mb]);
-        let (sa, sb) = (ma.tessellate_with(0.009, true).unwrap(), mb.tessellate_with(0.009, true).unwrap());
+        let (sa, sb) = (ma.mesh(&crate::MeshTolerance::chord(0.009)).unwrap(), mb.mesh(&crate::MeshTolerance::chord(0.009)).unwrap());
         assert!(trivial(&ma, &mb, BoolOp::Intersect, &sa, &sb, &counts, 0.027).is_none_or(|(_, sure)| !sure));
     }
 
@@ -795,7 +795,7 @@ mod shortcut_tests {
         let tube = boolean(&boolean(&outer, &wide, BoolOp::Cut).unwrap().unwrap(), &narrow, BoolOp::Cut).unwrap().unwrap();
         let pin = crate::cylinder(Vec3::new(0.0, 0.0, -2.0), Vec3::Z, 3.0, 11.05).unwrap();
         let counts = record::counts(&[&pin, &tube]);
-        let (ma, mb) = (pin.tessellate_with(0.009, true).unwrap(), tube.tessellate_with(0.009, true).unwrap());
+        let (ma, mb) = (pin.mesh(&crate::MeshTolerance::chord(0.009)).unwrap(), tube.mesh(&crate::MeshTolerance::chord(0.009)).unwrap());
         for op in [BoolOp::Intersect, BoolOp::Cut] {
             assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.027).is_none_or(|(_, sure)| !sure), "{op:?}");
         }
@@ -816,7 +816,7 @@ mod shortcut_tests {
         let pin = crate::cylinder(Vec3::new(0.0, 0.0, -3.0), Vec3::Z, r, length + 6.0).unwrap();
         // Faceted as the boolean does for bodies of this size (0.015 mm deep crossings seen).
         let counts = record::counts(&[&pin, &tube]);
-        let (ma, mb) = (pin.tessellate_with(0.005, true).unwrap(), tube.tessellate_with(0.005, true).unwrap());
+        let (ma, mb) = (pin.mesh(&crate::MeshTolerance::chord(0.005)).unwrap(), tube.mesh(&crate::MeshTolerance::chord(0.005)).unwrap());
         for op in [BoolOp::Intersect, BoolOp::Cut] {
             assert!(trivial(&pin, &tube, op, &ma, &mb, &counts, 0.015).is_none_or(|(_, sure)| !sure), "{op:?}");
         }
@@ -835,7 +835,7 @@ mod shortcut_tests {
         let a = cube(0.0, 0.0);
         // A 0.01 slab between parallel faces (0.1 % of each cube), and a 0.02 x 0.02 corner.
         for (b, want) in [(cube(9.99, 0.0), 1.0), (cube(9.98, 9.98), 0.004)] {
-            let (ma, mb) = (a.tessellate(0.001).unwrap(), b.tessellate(0.001).unwrap());
+            let (ma, mb) = (a.mesh(&crate::MeshTolerance::chord(0.001)).unwrap(), b.mesh(&crate::MeshTolerance::chord(0.001)).unwrap());
             let counts = record::counts(&[&a, &b]);
             for op in [BoolOp::Intersect, BoolOp::Cut, BoolOp::Union] {
                 assert!(trivial(&a, &b, op, &ma, &mb, &counts, 0.003).is_none_or(|(_, sure)| !sure), "{op:?} {want}");
@@ -847,10 +847,10 @@ mod shortcut_tests {
         }
         // Touching on a face, and one cube well inside the other, still take the shortcut.
         let (touching, inner) = (cube(10.0, 0.0), crate::box_solid(Vec3::new(2.0, 2.0, 2.0), Vec3::new(8.0, 8.0, 8.0)).unwrap());
-        let ma = a.tessellate(0.001).unwrap();
+        let ma = a.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         for (b, op) in [(&touching, BoolOp::Intersect), (&inner, BoolOp::Intersect), (&inner, BoolOp::Union)] {
             let counts = record::counts(&[&a, b]);
-            assert!(trivial(&a, b, op, &ma, &b.tessellate(0.001).unwrap(), &counts, 0.003).is_some_and(|(_, sure)| sure), "{op:?}");
+            assert!(trivial(&a, b, op, &ma, &b.mesh(&crate::MeshTolerance::chord(0.001)).unwrap(), &counts, 0.003).is_some_and(|(_, sure)| sure), "{op:?}");
         }
     }
 }
@@ -1092,7 +1092,7 @@ fn cut_around_voids(a: &Body, b: &Body, whole: &dyn Fn(&Body, &Body, BoolOp) -> 
     for sh in &shells {
         let piece =
             guard("void shell", || Body::new(Solid::try_new(vec![sh.clone()]).map_err(|e| KernelError::Failed(format!("void shell: {e}")))?))?;
-        let m = piece.tessellate(tol)?;
+        let m = piece.mesh(&crate::MeshTolerance::chord(tol))?;
         if m.positions.is_empty() {
             return Ok(None);
         }
@@ -1106,7 +1106,7 @@ fn cut_around_voids(a: &Body, b: &Body, whole: &dyn Fn(&Body, &Body, BoolOp) -> 
     };
     let Some(outer) = (0..shells.len()).max_by(|i, j| extent(*i).total_cmp(&extent(*j))) else { return Ok(None) };
     let Some(ob) = boxes.get(outer) else { return Ok(None) };
-    let tm = b.tessellate((b.size() * 1e-3).max(1e-3))?;
+    let tm = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     let tb = tm.bounds();
     // Clear of the tool by more than both meshes' deflection.
     let gap = 4.0 * tol + (b.size() * 1e-3).max(1e-3);
@@ -1375,7 +1375,7 @@ where
             return Ok(Some(body.clone()));
         }
     }
-    let mut meshes = (a.tessellate_with(tol_m, true).ok(), b.tessellate_with(tol_m, true).ok());
+    let mut meshes = (a.mesh(&crate::MeshTolerance::chord(tol_m)).ok(), b.mesh(&crate::MeshTolerance::chord(tol_m)).ok());
     // The vertex boxes above miss a curved operand's reach (a cylinder has only seam vertices),
     // so a thin meeting region of curved bodies kept the coarse step: a sliver 0.5 mm thick was
     // faceted at 0.017 mm and a correct result failed the membership test. The meshes just made
@@ -1393,7 +1393,7 @@ where
     if let Some(refined) = refined
         && refined < tol_m * 0.5
     {
-        let again = (a.tessellate_with(refined, true).ok(), b.tessellate_with(refined, true).ok());
+        let again = (a.mesh(&crate::MeshTolerance::chord(refined)).ok(), b.mesh(&crate::MeshTolerance::chord(refined)).ok());
         if again.0.is_some() && again.1.is_some() {
             tol_m = refined;
             meshes = again;
@@ -1428,7 +1428,7 @@ where
             reject(reason);
             return (false, f64::NAN);
         }
-        let Ok(mr) = r.tessellate_with(tol_m, true) else { return (false, f64::NAN) };
+        let Ok(mr) = r.mesh(&crate::MeshTolerance::chord(tol_m)) else { return (false, f64::NAN) };
         let v = mr.measure().volume;
         let bounds = plausible(v, op, va, vb, slack);
         if !bounds {
@@ -1486,7 +1486,7 @@ where
                 // Measured as the operands were: a coarser mesh of a plate with many holes
                 // overstates its volume by more than the slack.
                 let v = match &meshes {
-                    (Some(_), Some(_)) => body.tessellate_with(tol_m, true).map(|m| m.measure().volume).unwrap_or(f64::NAN),
+                    (Some(_), Some(_)) => body.mesh(&crate::MeshTolerance::chord(tol_m)).map(|m| m.measure().volume).unwrap_or(f64::NAN),
                     _ => volume(&body),
                 };
                 if plausible(v, op, va, vb, slack) {
@@ -1983,7 +1983,7 @@ const SCREWS: [([f64; 3], [f64; 3]); 3] =
 /// length): the slivers a nudged tool leaves where it was pushed into a face it touched.
 fn sliver_faces(b: &Body, size: f64) -> usize {
     use std::collections::HashMap;
-    let Ok(m) = b.tessellate((size * 1e-3).max(1e-4)) else { return usize::MAX };
+    let Ok(m) = b.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-4))) else { return usize::MAX };
     let q = (size * 1e-7).max(1e-12);
     let key = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
     // Per face: its area, and how many of its triangles use each mesh edge (its boundary once).
@@ -2053,7 +2053,7 @@ pub(crate) fn truck_boolean(a: &Body, b: &Body, op: BoolOp, shift: Option<mt::Ve
 /// A boolean of `a` and `b` given as their pieces (`la`, `lb`); the result's pieces in one body.
 pub(crate) fn by_lumps(a: &Body, b: &Body, la: Vec<Body>, lb: Vec<Body>, op: BoolOp) -> Result<Option<Body>> {
     let boxes_meet = |x: &Body, y: &Body| -> bool {
-        let (Ok(mx), Ok(my)) = (x.tessellate(x.size() * 0.05 + 1e-3), y.tessellate(y.size() * 0.05 + 1e-3)) else { return true };
+        let (Ok(mx), Ok(my)) = (x.mesh(&crate::MeshTolerance::chord(x.size() * 0.05 + 1e-3)), y.mesh(&crate::MeshTolerance::chord(y.size() * 0.05 + 1e-3))) else { return true };
         let (bx, by) = (mx.bounds(), my.bounds());
         let g = (x.size() + y.size()) * 0.01;
         bx.min.x <= by.max.x + g
@@ -2139,7 +2139,7 @@ fn union_apart_untimed(bodies: &[Body]) -> Result<Option<Body>> {
         // A coarse mesh is enough: the chord tolerance bounds how far the true surface lies
         // outside it, and the box grows by twice that.
         let tol = (b.size() * 0.02).max(1e-3);
-        let bb = b.tessellate(tol)?.bounds();
+        let bb = b.mesh(&crate::MeshTolerance::chord(tol))?.bounds();
         if bb.is_empty() {
             return Ok(None);
         }

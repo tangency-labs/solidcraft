@@ -273,7 +273,7 @@ fn a_cone_bounded_only_by_its_base_circle_reaches_its_point() {
         let m = measure(body).unwrap();
         let exact = PI * r * r * h / 3.0;
         assert!(rel(m.volume, exact) < 2e-3, "vertex loop {apex_loop}: volume {} vs {exact}", m.volume);
-        let top = body.tessellate(0.01).unwrap().positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+        let top = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
         assert!((top - h).abs() < 1e-6, "vertex loop {apex_loop}: reaches z = {top}, not {h}");
     }
 }

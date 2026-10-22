@@ -156,7 +156,7 @@ pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcraft_geom::Plane, pul
 /// The face of `b` under each point: the face of the nearest triangle, within the picking reach.
 fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     let reach = pick_tolerance(b);
-    let mesh = b.tessellate((b.size() * 1e-3).max(1e-3))?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     let mut out: Vec<usize> = Vec::new();
     for p in at {
         let near = mesh
@@ -179,7 +179,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
 
 /// One point inside each face `faces` of `b`: the centroid of its largest triangle.
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
-    let mesh = b.tessellate((b.size() * 1e-3).max(1e-3))?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     faces
         .iter()
         .map(|f| {
@@ -205,8 +205,8 @@ fn area([a, b, c]: &[Vec3; 3]) -> f64 {
 /// where its faces meet. `None` where a face cannot be measured.
 fn with_offsets(result: &Body, input: &Body, mut h: History, distance: f64) -> Option<History> {
     let chord = (input.size().max(result.size()) * 1e-3).min(distance / 8.0).max(1e-6);
-    let source = input.tessellate(chord).ok()?;
-    let made = result.tessellate(chord).ok()?;
+    let source = input.mesh(&crate::MeshTolerance::chord(chord)).ok()?;
+    let made = result.mesh(&crate::MeshTolerance::chord(chord)).ok()?;
     let at = |mesh: &solidcraft_geom::Mesh, face: usize| -> Vec<[Vec3; 3]> {
         mesh.triangles.iter().zip(&mesh.tri_face).filter(|(_, t)| **t as usize == face).filter_map(|(t, _)| mesh.tri(t)).collect()
     };

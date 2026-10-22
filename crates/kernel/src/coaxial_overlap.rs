@@ -341,7 +341,7 @@ fn flush(x: &Body, y: &Body, same: f64, depth: f64) -> Vec<usize> {
         return Vec::new();
     }
     let tol = (x.size().max(y.size()) * 2e-3).max(1e-4);
-    let (Ok(mx), Ok(my)) = (x.tessellate(tol), y.tessellate(tol)) else { return Vec::new() };
+    let (Ok(mx), Ok(my)) = (x.mesh(&crate::MeshTolerance::chord(tol)), y.mesh(&crate::MeshTolerance::chord(tol))) else { return Vec::new() };
     // At most this many facets of a face are sampled.
     const SAMPLES: usize = 64;
     level
@@ -379,7 +379,7 @@ fn cylinders(b: &Body) -> Vec<Wall> {
 /// its material is on and where they run along the axis. `None` when the body can't be meshed.
 fn walls(b: &Body, cylinders: Vec<Wall>, same: f64) -> Option<Vec<Wall>> {
     let mut out: Vec<Wall> = Vec::new();
-    let mesh = b.tessellate_with((b.size() * 1e-3).max(1e-4), true).ok()?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-4))).ok()?;
     for Wall { faces, origin, axis, radius, .. } in cylinders {
         let Some(&face) = faces.first() else { continue };
         // Which way the face looks: out of the axis for a pin, toward it for a hole.

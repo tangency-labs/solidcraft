@@ -180,7 +180,7 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
             let Some(body) = state.bodies.iter().find(|b| b.definition_name() == definition && placed.model_body_component(b) == component) else {
                 continue;
             };
-            let mesh = body.body.tessellate(0.01).unwrap();
+            let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
             for index in 0..body.body.face_count() {
                 if body.body.planar_face(index).is_none() {
                     continue;

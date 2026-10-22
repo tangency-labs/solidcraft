@@ -2690,7 +2690,7 @@ mod planar_tests {
         let mut upper = 0;
         for lump in &lumps {
             assert!(lump.validity().is_empty());
-            let mesh = lump.tessellate(1e-5).unwrap();
+            let mesh = lump.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
             if mesh.contains(Vec3::new(21., 21., 0.5)) {
                 lower += 1;
                 assert!(!mesh.contains(Vec3::new(25., 25., 0.5)));
@@ -2765,7 +2765,7 @@ mod planar_tests {
         let shell = crate::shell(&stock, &[Vec3::new(0., 0., 24.)], 1.).unwrap();
         assert_eq!(coplanar_joins(&shell), 0, "Shell must not add internal edges across continuous planar walls");
         assert!(shell.validity().is_empty());
-        let mesh = shell.tessellate(1e-5).unwrap();
+        let mesh = shell.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         let expected = 40. * 30. * 24. + 8. * 10. * 8. - (38. * 28. * 23. + 6. * 10. * 6.);
         assert!((mesh.measure().volume - expected).abs() < 1e-6);
         for (point, material) in [
@@ -2784,7 +2784,7 @@ mod planar_tests {
         let body = &reopened.bodies[0].body;
         assert_eq!(body.face_count(), shell.face_count());
         assert_eq!(coplanar_joins(body), 0);
-        assert!((body.tessellate(1e-5).unwrap().measure().volume - expected).abs() < 1e-6);
+        assert!((body.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume - expected).abs() < 1e-6);
         assert_eq!(crate::step_export(&[&stock], "unchanged stock").unwrap(), snapshot);
     }
 
@@ -2822,7 +2822,7 @@ mod planar_tests {
             }
             assert!(old.face_sources().is_none_or(|s| s.iter().all(Option::is_none)));
             let expected = if curved { std::f64::consts::PI * (100. * 20. - 25. * 18.) } else { 400. * 20. - 100. * 18. };
-            let mesh = merged.tessellate(1e-5).unwrap();
+            let mesh = merged.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
             assert!((mesh.measure().volume - expected).abs() < 0.03);
             assert!(mesh.contains(Vec3::new(0., 0., 1.)));
             assert!(!mesh.contains(Vec3::new(0., 0., 10.)));
@@ -2849,7 +2849,7 @@ mod planar_tests {
             // Independent circular chord-volume bound: 2*pi*(10*20+5*18)*1e-5 < .019.
             let expected = std::f64::consts::PI * (100. * 20. - 25. * 18.);
             for body in [&output, &merged] {
-                let mesh = body.tessellate(1e-5).unwrap();
+                let mesh = body.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
                 assert!((mesh.measure().volume - expected).abs() < 0.03);
                 assert!(mesh.contains(Vec3::new(0., 0., 1.)));
                 assert!(!mesh.contains(Vec3::new(0., 0., 10.)));
@@ -2885,7 +2885,7 @@ mod planar_tests {
         let result = stack_boolean(&stock, &tool, BoolOp::Cut).expect("qualified overlapping stacks").unwrap().unwrap();
         assert_eq!(result.shell_count(), 1);
         assert!(result.validity().is_empty());
-        let mesh = result.tessellate(1e-5).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         let expected = (1200.0 - 25.0 * std::f64::consts::PI) * 30.0;
         // An inscribed circular mesh at radial chord error 1e-5 has volume
         // deficit below 2*pi*R*height*error, conservatively 0.01 mm^3 here.
@@ -2914,7 +2914,7 @@ mod planar_tests {
                     let result = stack_boolean(&stock, &tool, BoolOp::Cut).expect("exact aligned cut path").unwrap().unwrap();
                     assert_eq!(result.shell_count(), shells);
                     assert!(result.validity().is_empty());
-                    let mesh = result.tessellate(1e-5).unwrap();
+                    let mesh = result.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
                     assert!((mesh.measure().volume - retained * area).abs() < 0.02);
                     let at = |x: f64, y: f64, z: f64| plane.to_world(Vec2::new(x, y)) + plane.normal() * z;
                     for z in [2.5, 12.5, 32.5] {
@@ -2924,15 +2924,15 @@ mod planar_tests {
                         assert_eq!(mesh.contains(at(25.2, 15.0, z)), material);
                     }
                     let public = crate::boolean(&stock, &tool, BoolOp::Cut).unwrap().unwrap();
-                    assert!((public.tessellate(1e-5).unwrap().measure().volume - retained * area).abs() < 0.02);
+                    assert!((public.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume - retained * area).abs() < 0.02);
                     if lo == 30.0 && hi > 35.0 {
                         let imported = crate::step_import(&crate::step_export(&[&result], "inward annular cut").unwrap()).unwrap();
                         assert!(imported.warnings.is_empty());
                         let saved = &imported.bodies.first().unwrap().body;
-                        assert!((saved.tessellate(1e-5).unwrap().measure().volume - 30.0 * area).abs() < 0.02);
+                        assert!((saved.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume - 30.0 * area).abs() < 0.02);
                         let next = crate::extrude(&plane, std::slice::from_ref(&region), 25.0, 31.0).unwrap().pop().unwrap();
                         let shortened = crate::boolean(saved, &next, BoolOp::Cut).unwrap().unwrap();
-                        let next_volume = shortened.tessellate(1e-5).unwrap().measure().volume;
+                        let next_volume = shortened.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
                         assert!(
                             (next_volume - 25.0 * area).abs() < 0.02,
                             "seam {seam}, plane {plane:?}, next cut volume {next_volume}, expected {}",
@@ -2947,8 +2947,8 @@ mod planar_tests {
                 assert!(stack_boolean(&stock, &clear, BoolOp::Cut).is_none());
                 let unchanged = crate::boolean(&stock, &clear, BoolOp::Cut).unwrap().unwrap();
                 assert!(std::sync::Arc::ptr_eq(&stock.solid, &unchanged.solid), "disjoint Cut must retain exact source topology");
-                let unchanged_mesh = unchanged.tessellate(1e-5).unwrap();
-                let source_mesh = stock.tessellate(1e-5).unwrap();
+                let unchanged_mesh = unchanged.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
+                let source_mesh = stock.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
                 assert_eq!(unchanged_mesh.measure().volume, source_mesh.measure().volume);
                 // tessellate() floors tolerance at body.size()*1e-6. The arc
                 // polygon's area error is at most perimeter*radial chord error.
@@ -2972,7 +2972,7 @@ mod planar_tests {
         let tool = crate::extrude(&Plane::XY, &[larger_hole], 30.0, 36.0).unwrap().pop().unwrap();
         let result = stack_boolean(&stock, &tool, BoolOp::Cut).unwrap().unwrap().unwrap();
         let expected = (1200.0 - 25.0 * std::f64::consts::PI) * 30.0 + std::f64::consts::PI * (5.1_f64.powi(2) - 25.0) * 5.0;
-        let mesh = result.tessellate(1e-5).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         assert!((mesh.measure().volume - expected).abs() < 0.02);
         assert!(mesh.contains(Vec3::new(25.05, 15.0, 32.0)));
         assert!(!mesh.contains(Vec3::new(25.2, 15.0, 32.0)));
@@ -3035,7 +3035,7 @@ mod planar_tests {
             assert!(result.validity().is_empty());
             assert_eq!(result.shell_count(), 1);
             assert!((crate::measure(&result).unwrap().volume - 14_725.).abs() < 1e-6);
-            let mesh = result.tessellate(1e-4).unwrap();
+            let mesh = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
             for (point, material) in [
                 (Vec3::new(22.5, 25., 0.5), false),
                 (Vec3::new(22.5, 25., 2.), true),

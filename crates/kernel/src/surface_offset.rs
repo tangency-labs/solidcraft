@@ -400,7 +400,7 @@ mod tests {
         let cover = crate::patch_edges(&cup, &rim).unwrap();
         let face = cover.solid.face_iter().next().unwrap().clone();
         let out = offset_surface(&cover, &[0], 1.5, 0.01).unwrap();
-        let mesh = out.tessellate(0.05).unwrap();
+        let mesh = out.mesh(&crate::MeshTolerance::chord(0.05)).unwrap();
         let s = face.surface();
         for p in mesh.positions.iter().step_by(7) {
             let (u, v) = s.search_nearest_parameter(p3(*p), None, 100).unwrap();

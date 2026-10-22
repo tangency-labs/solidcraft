@@ -65,7 +65,7 @@ pub(crate) fn local_prism_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Resu
     let axes = [frame.x, frame.y, d];
     // Extents come from meshes this close to the faces, widened by as much.
     let mesh_tol = (size * 1e-3).max(1e-4);
-    let tool = widened(extent(&b.tessellate(mesh_tol).ok()?.positions, axes)?, mesh_tol);
+    let tool = widened(extent(&b.mesh(&crate::MeshTolerance::chord(mesh_tol)).ok()?.positions, axes)?, mesh_tol);
     let gap = size * 1e-4 + 1e-6;
     let pieces = survey(a, d, tol, mesh_tol, axes)?.pieces;
     if pieces.is_empty() {
@@ -246,7 +246,7 @@ fn survey(body: &Body, d: Vec3, tol: f64, mesh_tol: f64, axes: [Vec3; 3]) -> Opt
             }
         })
         .collect();
-    let mesh = body.tessellate(mesh_tol).ok()?;
+    let mesh = body.mesh(&crate::MeshTolerance::chord(mesh_tol)).ok()?;
     let here = widened(extent(&mesh.positions, axes)?, mesh_tol);
     let mut pieces = Vec::new();
     if off.iter().any(|x| *x) {

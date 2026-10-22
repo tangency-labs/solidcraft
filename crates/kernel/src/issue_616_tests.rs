@@ -54,7 +54,7 @@ fn moved_outside(from: &Mesh, onto: &Mesh, region: &Aabb3, tol: f64) -> Option<V
 /// (a slit, a moved face) and none lost, outside the tool's box.
 fn assert_local(target: &Body, tool: &Body, joined: &Body, what: &str) {
     let tol = 1e-3;
-    let (mt, mtool, mj) = (target.tessellate(0.01).unwrap(), tool.tessellate(0.01).unwrap(), joined.tessellate(0.01).unwrap());
+    let (mt, mtool, mj) = (target.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(), tool.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(), joined.mesh(&crate::MeshTolerance::chord(0.01)).unwrap());
     let mut region = mtool.bounds();
     region.min -= Vec3::new(0.01, 0.01, 0.01);
     region.max += Vec3::new(0.01, 0.01, 0.01);
@@ -80,7 +80,7 @@ fn ribs_joined_flush_to_the_lid_change_nothing_else() {
         assert_local(&b, &tool, &r, &format!("{c:?}"));
         b = r;
     }
-    let bounds = b.tessellate(0.01).unwrap().bounds();
+    let bounds = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().bounds();
     assert!((bounds.max.z - 14.1).abs() < 1e-9, "the ribs keep their height: {}", bounds.max.z);
 }
 

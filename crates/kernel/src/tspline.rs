@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(shell.shell_condition(), mt::ShellCondition::Oriented, "neighbours share edges, run opposite ways");
         let euler = body.vertex_count() as i64 - body.edge_count() as i64 + body.face_count() as i64;
         assert_eq!(euler, 1, "one sewn sheet (a disc)");
-        let mesh = body.tessellate(0.01).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!(!mesh.triangles.is_empty());
         // Mesh points lie on the surface (not merely within the tessellation tolerance).
         let step = (mesh.positions.len() / 300).max(1);
@@ -227,12 +227,12 @@ mod tests {
         for pts in cases {
             let Ok(ts) = TSpline::new(mesh.clone(), [3, 3], &pts, &vec![1.0; n]) else { continue };
             if let Ok(body) = tspline_sheet(&ts) {
-                let _ = body.tessellate(0.01);
+                let _ = body.mesh(&crate::MeshTolerance::chord(0.01));
             }
             if let Ok(r) = ts.refine(&[Cut::S { s: 0.33, t0: 0.3, t1: 0.6 }])
                 && let Ok(body) = tspline_sheet(&r)
             {
-                let _ = body.tessellate(0.01);
+                let _ = body.mesh(&crate::MeshTolerance::chord(0.01));
             }
         }
     }

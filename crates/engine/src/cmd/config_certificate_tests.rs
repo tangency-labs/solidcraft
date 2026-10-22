@@ -20,7 +20,7 @@ fn painted_radius(session: &Session, name: &str, radius: f64) -> usize {
     let body =
         state.body(name).unwrap_or_else(|| panic!("missing {name}; bodies {:?}", state.bodies.iter().map(|body| &body.name).collect::<Vec<_>>()));
     let painted = session.doc.face_colors(body);
-    let mesh = body.body.tessellate(0.001).unwrap();
+    let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
     let inverse = solidcraft_doc::mat_inverse(&body.source_transform).unwrap();
     for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if painted.iter().any(|(index, _)| *index == *face as usize) {
@@ -90,7 +90,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     let step = solidcraft_kernel::step_export(&[&cylinder], "legacy anchored cylinder").unwrap();
     let source = imported(&mut s, step, "Sleeve");
     run(&mut s, "material.assign", json!({"bodies":["Sleeve"],"material":"Steel"}));
-    let before_volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let before_volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let legacy_names = solidcraft_doc::naming::face_names(s.model.state().body("Sleeve").unwrap());
     assert!(legacy_names.iter().all(|name| name.starts_with(&format!("F{source}:face:"))));
     run(&mut s, "appearance.assign", json!({"faces":[{"body":"Sleeve","point":[6,0,20]}],"appearance":"ABS - Blue"}));
@@ -104,7 +104,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     run(&mut s, "solid.emboss", json!({"sketch":"Badge","profiles":"all","depth":1,"targets":["Sleeve"],"name":"Raised Badge"}));
     let anchored = s.doc.find_feature("Raised Badge").unwrap().clone();
     assert!(matches!(anchored.kind, FeatureKind::Emboss { face: None, .. }));
-    let volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((volume - std::f64::consts::PI * 2000. - 16.).abs() < 0.1, "volume {volume}");
     assert!((volume - before_volume - 16.).abs() < 0.01, "addedvolume {} baseline {before_volume}", volume - before_volume);
     let paint = s.doc.appearances.faces.clone();
@@ -138,7 +138,7 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     assert!(reopened.model.result(anchored.id).unwrap().error.is_none());
     let state = reopened.model.state();
     let body = state.body("Sleeve").unwrap();
-    assert!((body.body.tessellate_with(1e-4, true).unwrap().measure().volume - volume).abs() < 1e-8);
+    assert!((body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume).abs() < 1e-8);
     assert!(!reopened.doc.face_colors(body).is_empty());
 }
 
@@ -190,7 +190,7 @@ fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
     assert_eq!(feature.face_names, vec![name]);
     assert!(feature.face_names.iter().all(|name| names.contains(name)));
     let feature_id = feature.id;
-    let volume = s.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = s.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((volume - std::f64::consts::PI * 380. - 21.).abs() < 0.2, "volume {volume}");
     let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     legacy["format"] = json!("solidcraft/9");
@@ -203,7 +203,7 @@ fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
     assert!(reopened.model.result(feature_id).unwrap().error.is_none());
-    assert!((reopened.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - volume).abs() < 1e-8);
+    assert!((reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume).abs() < 1e-8);
 }
 
 #[test]

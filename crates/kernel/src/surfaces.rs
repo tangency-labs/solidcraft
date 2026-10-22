@@ -601,7 +601,7 @@ pub fn remove_faces(body: &Body, faces: &[usize]) -> Result<Body> {
 
 /// Index of the face nearest a point (over its mesh triangles).
 pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
-    let m = body.tessellate(body.size() * 2e-3)?;
+    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
     let mut best: Option<(f64, u32)> = None;
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         let Some([a, b, c]) = m.tri(t) else { continue };
@@ -1467,7 +1467,7 @@ mod tests {
         // Δφ·[R((r+1)² − r²)/2·Δθ + ((r+1)³ − r³)/3·(sin θ1 − sin θ0)].
         let ring = torus(Vec3::ZERO, 20.0, 5.0).unwrap();
         let face = copy_faces(&ring, &[Vec3::new(25.0, 0.0, 0.0)]).unwrap();
-        let mesh = face.tessellate(0.01).unwrap();
+        let mesh = face.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let angles: Vec<(f64, f64)> = mesh.positions.iter().map(|p| (p.z.atan2((p.x * p.x + p.y * p.y).sqrt() - 20.0), p.y.atan2(p.x))).collect();
         let span = |f: &dyn Fn(&(f64, f64)) -> f64| {
             let (lo, hi) = angles.iter().map(f).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));

@@ -211,7 +211,7 @@ mod imp {
     fn roles(body: &Body, start: &Plane, end: Option<&Plane>, edges: &[Seed], inside: &[Seed], rest_is_end: bool) -> Result<Vec<Role>> {
         let size = body.size().max(1e-9);
         let mesh_tol = (size * 2e-4).max(1e-6);
-        let m = body.tessellate(mesh_tol)?;
+        let m = body.mesh(&crate::MeshTolerance::chord(mesh_tol))?;
         let faces = face_tris(&m);
         let n = body.face_count();
         let flat_tol = size * 1e-5 + 1e-9;

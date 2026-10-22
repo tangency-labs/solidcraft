@@ -42,7 +42,7 @@ fn operands() -> (Body, Body) {
 
 fn reach(a: &Body, b: &Body) -> Reach {
     let size = a.size().max(b.size());
-    let meshes = (a.tessellate_with(size * 5e-4, true).unwrap(), b.tessellate_with(size * 5e-4, true).unwrap());
+    let meshes = (a.mesh(&crate::MeshTolerance::chord(size * 5e-4)).unwrap(), b.mesh(&crate::MeshTolerance::chord(size * 5e-4)).unwrap());
     Reach::new(a, b, (Some(&meshes.0), Some(&meshes.1)), size).unwrap()
 }
 
@@ -100,7 +100,7 @@ fn large_faces_still_mesh() {
     let plate = crate::box_solid(Vec3::new(-2500.0, -2500.0, 0.0), Vec3::new(2500.0, 2500.0, 3.0)).unwrap();
     let rod = crate::cylinder(Vec3::ZERO, Vec3::Z, 0.5, 3000.0).unwrap();
     for body in [plate, rod] {
-        assert!(!body.tessellate_with(0.05, true).unwrap().triangles.is_empty());
+        assert!(!body.mesh(&crate::MeshTolerance::chord(0.05)).unwrap().triangles.is_empty());
         assert_eq!(body.unmeshed_faces(), 0);
     }
 }

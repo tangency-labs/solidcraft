@@ -65,7 +65,7 @@ fn through_cut_preserves_a_larger_blind_pocket() {
         let m = measure(&result).unwrap();
         assert!(rel(m.volume, expected) < 5e-4, "reverse={reverse}: {} vs {expected}", m.volume);
         assert_eq!(m.merged.faces, 9);
-        assert!(!result.tessellate(0.01).unwrap().contains(Vec3::new(10.0, 0.0, 3.0)));
+        assert!(!result.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(Vec3::new(10.0, 0.0, 3.0)));
     }
 }
 
@@ -718,7 +718,7 @@ fn loft_and_sweep() {
     ];
     let t = sweep(&Plane::XY, &disc, &path).unwrap();
     for tol in [0.1, 0.01, 0.003, 0.001] {
-        println!("tube tess {tol}: {}", t.tessellate(tol).unwrap().measure().volume);
+        println!("tube tess {tol}: {}", t.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
     }
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
@@ -1032,11 +1032,11 @@ fn similar_spheres_meet() {
 fn debug_convergence() {
     let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
     for t in [0.1, 0.05, 0.02, 0.01, 0.005, 0.002] {
-        let m = b.tessellate(t).unwrap();
+        let m = b.mesh(&crate::MeshTolerance::chord(t)).unwrap();
         let mm = m.measure();
         println!("tol {t}: tris {} vol {} err {:.3e}", m.triangles.len(), mm.volume, mm.volume / (PI * 225.0 * 50.0) - 1.0);
     }
-    let m = b.tessellate(0.05).unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(0.05)).unwrap();
     for f in 0..4u32 {
         let ns: Vec<Vec3> =
             m.triangles.iter().zip(&m.tri_face).filter(|(_, ff)| **ff == f).flat_map(|(t, _)| t.iter().map(|k| m.normals[*k as usize])).collect();
@@ -1152,7 +1152,7 @@ fn chamfer_sloped_basin_rim() {
     assert_eq!(after.merged.faces, before.merged.faces + 1);
     assert_eq!(result.lumps().unwrap().len(), 1);
     assert!(result.validity().is_empty());
-    let mesh = result.tessellate(0.01).unwrap();
+    let mesh = result.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     assert!(!mesh.contains(Vec3::new(50.0, 3.5, 29.9)));
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
@@ -1194,7 +1194,7 @@ fn debug_chamfer_cut() {
         println!("face {} area {:.3} c {:?} n {:?}", f.index, f.area, f.centroid, f.plane_normal);
     }
     for tol in [0.1, 0.01, 0.001] {
-        println!("tess {tol}: {}", r.tessellate(tol).unwrap().measure().volume);
+        println!("tess {tol}: {}", r.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
     }
 }
 
@@ -1402,7 +1402,7 @@ fn debug_cube_sphere_measure() {
     let r = guard("t", || Ok(truck_shapeops::and(&b.deep_copy(), &s.deep_copy(), 0.05))).unwrap().unwrap();
     let body = Body::new(r).unwrap();
     for tol in [0.5, 0.1, 0.02] {
-        let m = body.tessellate(tol).unwrap();
+        let m = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let mm = m.measure();
         println!("tol {tol}: vol {} area {} tris {}", mm.volume, mm.area, m.triangles.len());
     }
@@ -1979,7 +1979,7 @@ fn fillet_an_open_curved_edge() {
     let f = fillet(&b, &[Vec3::new(0.0, 10.0, 15.0)], 2.0).unwrap();
     // (A fine tessellation: the difference of two measured volumes magnifies their error.)
     let _ = v0;
-    let fine = |x: &Body| x.tessellate_with(0.002, true).unwrap().measure().volume;
+    let fine = |x: &Body| x.mesh(&crate::MeshTolerance::chord(0.002)).unwrap().measure().volume;
     let removed = fine(&b) - fine(&f);
     // Pappus: the corner's cross-section r²(1 − π/4), its centroid 0.2234 r in from the wall.
     let r = 2.0;
@@ -2019,7 +2019,7 @@ fn fillet_smooth_arc_and_line_loop_keeps_exact_removal() {
     let area = r * r * (1.0 - PI / 4.0);
     let centroid = r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
     let want = area * (40.0 + 2.0 * PI * (10.0 - centroid));
-    let fine = |b: &Body| b.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let removed = fine(&body) - fine(&blended);
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
@@ -2057,7 +2057,7 @@ fn fillet_rounded_rectangle_with_tiny_end_edges() {
     let area = radius * radius * (1.0 - PI / 4.0);
     let centroid = radius * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
     let removed = area * (2.0 * (w + h - 4.0 * r) + 2.0 * PI * (r - centroid));
-    let fine = |b: &Body| b.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let initial = fine(&body);
     // Every rim edge, the tiny end alone (tangent chain), and the opposite selection order.
     for selection in [picks.to_vec(), vec![picks[3]], picks.into_iter().rev().collect()] {
@@ -2084,7 +2084,7 @@ fn fillet_sharp_arc_and_arc_loop() {
     let body = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
     let blended = fillet(&body, &[Vec3::new(5.0, 0.0, 15.0), Vec3::new(-5.0, 0.0, 15.0)], 0.5).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-    let mesh = blended.tessellate_with(1e-4, true).unwrap();
+    let mesh = blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
     for p in &mesh.positions {
         assert!((p.x - 5.0).hypot(p.y) <= 10.0 + 1e-3 && (p.x + 5.0).hypot(p.y) <= 10.0 + 1e-3, "outside the lens: {p:?}");
     }
@@ -2096,7 +2096,7 @@ fn fillet_sharp_arc_and_arc_loop() {
             (area(10.0) - area(10.0 - 0.5 * (1.0 - theta.cos()))) * 0.5 * theta.cos() * dt
         })
         .sum();
-    let removed = body.tessellate_with(1e-4, true).unwrap().measure().volume - mesh.measure().volume;
+    let removed = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - mesh.measure().volume;
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
 
@@ -2138,7 +2138,7 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
         let picks: Vec<_> = edges.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, p)| *p).collect();
         let blended = fillet(&inner, &picks, 0.5).unwrap_or_else(|e| panic!("{picks:?}: {e}"));
         assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-        let mesh = blended.display_mesh(0.01).unwrap();
+        let mesh = blended.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         for p in &mesh.positions {
             let inside = p.x.hypot(p.y) <= 25.001
                 || (p.x.abs() <= 4.001 && p.y >= y - 0.001 && p.y <= corner_y)
@@ -2194,9 +2194,9 @@ fn fillet_mixed_arc_and_line_perimeter_edges() {
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
     let display_tol = (blended.size() * 1e-3).max(1e-3);
     for mesh in [
-        blended.tessellate_with(1e-4, true).unwrap(),
-        blended.display_mesh_angular(display_tol, crate::DISPLAY_ANGLE).unwrap(),
-        blended.reference_display_mesh_angular(display_tol, crate::DISPLAY_ANGLE).unwrap(),
+        blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap(),
+        blended.mesh(&crate::MeshTolerance { chord: display_tol, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+        blended.mesh(&crate::MeshTolerance { chord: display_tol, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
     ] {
         let bounds = mesh.bounds();
         let tol = 1e-3;
@@ -2236,7 +2236,7 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
     let body = mixed_arc_and_line_prism();
     let source_exact = PI * 100.0 * 15.0 / 2.0;
     let tolerances = [1e-4, 2.5e-5];
-    let source_volumes = tolerances.map(|tol| body.tessellate_with(tol, true).unwrap().measure().volume);
+    let source_volumes = tolerances.map(|tol| body.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
     for r in [0.5, 0.25] {
         let want = d_fillet_removed_reference(r, 8192);
         assert!((want - d_fillet_removed_reference(r, 4096)).abs() < 1e-7, "reference quadrature must converge");
@@ -2246,7 +2246,7 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
         let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
         let mut previous = None;
         for (tol, source) in tolerances.into_iter().zip(source_volumes) {
-            let volume = blended.tessellate_with(tol, true).unwrap().measure().volume;
+            let volume = blended.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume;
             // Equal chord tolerances reduce (not necessarily cancel) the error from the
             // unchanged walls. The convergence and exact-source checks below guard this.
             let removed = source - volume;
@@ -2289,7 +2289,7 @@ fn loop_chamfer_mixed_arc_and_line_uses_offset_intersections() {
         })
         .sum();
     // The cone's triangulation needs this chord tolerance for the small volume difference.
-    let fine = |b: &Body| b.tessellate_with(2.5e-5, true).unwrap().measure().volume;
+    let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(2.5e-5)).unwrap().measure().volume;
     let removed = fine(&body) - fine(&blended);
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
@@ -2337,7 +2337,7 @@ fn fillet_partial_mixed_arc_and_line_perimeter_run() {
     let body = partial_mixed_run_prism();
     let blended = fillet(&body, &[Vec3::new(35.0, 20.0, 15.0), Vec3::new(20.0, 30.0, 15.0), Vec3::new(5.0, 20.0, 15.0)], 0.5).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-    let mesh = blended.tessellate_with(1e-4, true).unwrap();
+    let mesh = blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
     let bounds = mesh.bounds();
     let tol = 1e-3;
     assert!(
@@ -2719,7 +2719,7 @@ fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
         let body = box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.) * scale).unwrap();
         let tol = (body.size() * 0.01).max(1e-3);
-        let mesh = body.tessellate(tol).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let mut present = vec![false; body.face_count()];
         for face in mesh.tri_face {
             present[face as usize] = true;

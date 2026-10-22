@@ -72,7 +72,7 @@ fn periodic_step_seam_survives_identity_rotation_and_translation() {
     let source_vertices: Vec<_> = body.solid.vertex_iter().map(|v| from_p3(v.point())).collect();
     let source_faces = body.solid.face_iter().count();
     let unchanged = crate::step_export(&[body], "source snapshot").unwrap();
-    let before = body.tessellate_with(1e-3, true).unwrap().measure().volume;
+    let before = body.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
     assert!((before - 2000. * std::f64::consts::PI).abs() < 1.);
     for matrix in [
         [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]],
@@ -83,11 +83,11 @@ fn periodic_step_seam_survives_identity_rotation_and_translation() {
         assert_topology(body, &moved, matrix);
         assert_eq!(moved.solid.face_iter().count(), source_faces);
         assert_eq!(moved.solid.vertex_iter().count(), source_vertices.len());
-        let after = moved.tessellate_with(1e-3, true).unwrap().measure().volume;
+        let after = moved.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
         assert!((after - before).abs() < 1e-5, "{after} vs {before}");
         let roundtrip = crate::step_import(&crate::step_export(&[&moved], "placement regression").unwrap()).unwrap();
         assert!(roundtrip.warnings.is_empty(), "{:?}", roundtrip.warnings);
-        assert!((roundtrip.bodies.first().unwrap().body.tessellate_with(1e-3, true).unwrap().measure().volume - before).abs() < 1e-4);
+        assert!((roundtrip.bodies.first().unwrap().body.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume - before).abs() < 1e-4);
     }
     let rigid = transform(body, Vec3::new(10., 10., 30.), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2).unwrap();
     assert_topology(body, &rigid, [[0., 1., 0., 0.], [-1., 0., 0., 0.], [0., 0., 1., 0.], [10., 10., 30., 1.]]);

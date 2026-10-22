@@ -75,7 +75,7 @@ impl PlacedMesh {
         let source = cell
             .get_or_init(|| {
                 let plan = definition_plan(&self.body, self.plans.get(q.index())?, q, name)?;
-                self.body.display_mesh_of(&plan).ok().map(Arc::new)
+                self.body.mesh_of(&plan).ok().map(Arc::new)
             })
             .clone()?;
         Some((source, self.transform))
@@ -105,7 +105,7 @@ pub(super) fn definition_plan(
     q: crate::display_quality::DisplayQuality,
     name: &str,
 ) -> Option<Arc<TessPlan>> {
-    cell.get_or_init(|| match body.display_plan_angular(q.chord(body.size()), q.angle()) {
+    cell.get_or_init(|| match body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.chord(body.size()), angle: Some(q.angle()) }) {
         Ok(plan) => Some(Arc::new(plan)),
         Err(e) => {
             log::debug!("{name}: no display plan ({e})");
@@ -117,7 +117,7 @@ pub(super) fn definition_plan(
 
 pub(super) fn reference_mesh(body: &Body, mesh: &OnceLock<Arc<Mesh>>, tolerance: f64) -> Arc<Mesh> {
     mesh.get_or_init(|| {
-        let mut mesh = body.reference_display_mesh_angular(tolerance, kernel::DISPLAY_ANGLE).unwrap_or_default();
+        let mut mesh = body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(kernel::DISPLAY_ANGLE) }).unwrap_or_default();
         if let Some((positions, triangles)) = body.triangle_mesh() {
             mesh.edges = mesh_outlines(positions, triangles);
             mesh.display_only_edges = true;

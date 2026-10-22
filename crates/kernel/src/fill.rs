@@ -438,7 +438,7 @@ mod tests {
     /// The fill's mesh: every normal finite, and no triangle folded over (all face the same way
     /// as the mesh's total area vector, by a clear margin).
     fn mesh_is_clean(fill: &Body) -> f64 {
-        let m = fill.tessellate(0.01).unwrap();
+        let m = fill.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!(!m.triangles.is_empty());
         assert!(m.normals.iter().all(|n| n.is_finite() && n.len() > 0.5), "a mesh normal is not finite");
         let tri = |t: &[u32; 3]| m.tri(t).unwrap();

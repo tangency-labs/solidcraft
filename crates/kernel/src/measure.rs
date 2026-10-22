@@ -89,7 +89,7 @@ pub struct MassMeasure {
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     if let Some((pos, tris)) = b.triangle_mesh() {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
-        let m = b.tessellate(1.0)?;
+        let m = b.mesh(&crate::MeshTolerance::chord(1.0))?;
         let mm = m.measure();
         let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
         let merged =
@@ -112,7 +112,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let chosen = crate::measure_backend::choose(b, &mut m);
     let topo = match topo {
         Some(t) => t,
-        None => b.tessellate((b.size() * 1e-3).max(1e-3))?,
+        None => b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?,
     };
     Ok(BodyMeasure {
         volume: m.volume,
@@ -150,7 +150,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
 fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
     let size = b.size();
     let coarse_tol = (size * 1e-3).max(1e-3);
-    let coarse = b.tessellate_with(coarse_tol, true)?;
+    let coarse = b.mesh(&crate::MeshTolerance::chord(coarse_tol))?;
     // Chord error relative to a radius sets the volume error: keep it near 3e-4 of the
     // smallest radius (thin tubes, small fillets).
     let tight = min_edge_radius(&coarse).map(|r| r * 3e-4).unwrap_or(f64::INFINITY);
@@ -168,7 +168,7 @@ fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
     #[cfg(target_arch = "wasm32")]
     let threads = 1;
     let made = crate::profile::timed(crate::profile::Kind::Tessellate, || {
-        crate::par::map_on_threads(&jobs, threads, |&(tol, refine)| b.tessellate_with(tol, refine))
+        crate::par::map_on_threads(&jobs, threads, |&(tol, refine)| b.mesh(&crate::MeshTolerance::chord(tol)))
     });
     let mut made = made.into_iter().map(|m| m.unwrap_or_else(|| Err(crate::KernelError::Internal("tessellation failed".into()))));
     let missing = || crate::KernelError::Internal("tessellation missing".into());

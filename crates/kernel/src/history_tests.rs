@@ -37,7 +37,7 @@ fn a_transform_keeps_every_face_and_edge_in_place() {
     assert_eq!(ea, em);
     assert!(h.edges.iter().all(|e| e.faces.len() == 2 && e.origins.len() == 1));
     // The history's edges are the tessellation's edges, bounding the same faces.
-    let mesh = moved.tessellate(1e-3).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
     let mesh_faces: Vec<Vec<usize>> = mesh.edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize).collect()).collect();
     assert_eq!(mesh_faces, h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>());
 }

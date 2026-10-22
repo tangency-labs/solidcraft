@@ -560,9 +560,9 @@ mod tests {
         let near = |a: f64| (a - want).abs() < 0.25;
         let faces = body.faces(0.01).unwrap();
         assert!(faces.len() == 1 && near(faces[0].area), "faces: {faces:?}");
-        let tess = body.tessellate(0.01).unwrap().measure().area;
+        let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.display_mesh(0.01).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
     }
 
@@ -586,9 +586,9 @@ mod tests {
         let near = |a: f64| (a - want).abs() < 0.2;
         let faces = body.faces(0.01).unwrap();
         assert!(near(faces[0].area), "faces: {faces:?}");
-        let tess = body.tessellate(0.01).unwrap().measure().area;
+        let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.display_mesh(0.01).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
         // Two collapsed sides are no patch.
         let p = |l: &str, q: Vec3| BoundaryCurve { label: l.into(), source: CurveSource::Point(q), continuity: Continuity::G0 };

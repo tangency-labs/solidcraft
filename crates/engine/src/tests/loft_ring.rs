@@ -37,7 +37,7 @@ fn a_ring_section_keeps_its_hole_and_rejects_a_disc() {
     for face in 0..body.body.face_count() {
         assert!(solidcraft_doc::naming::face_name_exact(body, face), "face {face} lost its sketch-curve provenance");
     }
-    assert!(!body.body.tessellate(0.001).unwrap().contains(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0)));
+    assert!(!body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0)));
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().bodies.is_empty());
     run(&mut s, "edit.redo", json!({}));

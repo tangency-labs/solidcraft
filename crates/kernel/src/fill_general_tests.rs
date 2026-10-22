@@ -171,7 +171,7 @@ fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
         off = off.max(from_p3(s.subs(uv.0, uv.1)).dist(p));
     }
     assert!(off <= tol * 1.01, "{name}: an edge is {off} off the face (tolerance {tol})");
-    let m = fill.tessellate(0.01).unwrap();
+    let m = fill.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     assert!(!m.triangles.is_empty(), "{name}: the face meshes");
     for t in &m.triangles {
         let [a, b, c] = m.tri(t).unwrap();

@@ -828,7 +828,7 @@ mod tests {
         let edge = [Vec3::new(14.0, 0.0, z(14.0))];
         let s = ruled_surface(&cover, &edge, &ruled(RuledMode::Normal, 3.0, Vec3::new(0.0, 0.0, 12.0))).unwrap();
         assert!(s.face_count() == 1 && face_surface(&s, 0).is_none(), "{:?}", face_surface(&s, 0));
-        let mesh = s.tessellate(0.01).unwrap();
+        let mesh = s.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let from_line = |p: &Vec3| Vec3::new(p.x - 14.0, 0.0, p.z - z(14.0)).len();
         let far = mesh.positions.iter().map(from_line).fold(0.0, f64::max);
         assert!((far - 3.0).abs() < 2e-3, "{far}");

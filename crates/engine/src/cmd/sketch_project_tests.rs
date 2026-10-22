@@ -662,7 +662,7 @@ fn a_rectangle_put_onto_a_projected_edge_stays_a_closed_profile() {
     // Picked by a point inside, it extrudes to a 20 x 15 x 10 block of its own.
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": id, "profiles": [{"point": [15, 7.5]}], "distance": 10, "operation": "new", "body_name": "Pad"}));
-    let volume = |s: &Session, name: &str| s.model.state().body(name).unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = |s: &Session, name: &str| s.model.state().body(name).unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((volume(&s, "Pad") - 3000.0).abs() < 1e-6, "{}", volume(&s, "Pad"));
     assert!((volume(&s, &block) - 24000.0).abs() < 1e-6, "{}", volume(&s, &block));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());

@@ -265,7 +265,7 @@ mod tests {
         let tool = crate::SplitTool::Curves { plane: Plane::XY, curves: vec![ring], along: None };
         let holed = crate::trim(&sheet, &tool, Vec3::new(9., 9., 0.)).unwrap();
         assert!(holed.solid.edge_iter().any(|e| e.front().id() == e.back().id()), "a closed edge");
-        let mesh = holed.tessellate(0.02).unwrap();
+        let mesh = holed.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         let (smooth, sharp) = classify(&holed, &mesh, WORK);
         assert_eq!((smooth.len(), sharp.len()), (mesh.edges.len(), mesh.edges.len()));
     }
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn periodic_ring_hides_only_whole_smooth_wall_joins() {
         let body = ring(256);
-        let mesh = body.display_mesh(0.02).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         assert_eq!(mesh.edges.len(), 1536);
         assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 512);
         for (index, (line, smooth)) in mesh.edges.iter().zip(&mesh.smooth_edges).enumerate() {
@@ -284,7 +284,7 @@ mod tests {
             }
         }
         // Smoothing flags are display-only: the edges and faces keep the body's identities.
-        let raw = body.tessellate(0.02).unwrap();
+        let raw = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         assert_eq!(mesh.edges.len(), raw.edges.len());
         assert_eq!(mesh.edge_faces, raw.edge_faces);
         for (a, b) in mesh.edges.iter().zip(&raw.edges) {
@@ -293,13 +293,13 @@ mod tests {
         let faces = |m: &Mesh| m.tri_face.iter().copied().collect::<std::collections::BTreeSet<u32>>();
         assert_eq!(faces(&mesh), faces(&raw));
         let moved = crate::transform_matrix(&body, [[1., 0., 0., 0.], [0., 0., 1., 0.], [0., -1., 0., 0.], [30., 20., 10., 1.]]).unwrap();
-        assert_eq!(moved.display_mesh(0.02).unwrap().smooth_edges.iter().filter(|f| **f).count(), 512);
+        assert_eq!(moved.mesh(&crate::MeshTolerance::chord(0.02)).unwrap().smooth_edges.iter().filter(|f| **f).count(), 512);
     }
 
     #[test]
     fn authored_split_unknown_adjacency_and_exhausted_work_stay_visible() {
         let body = ring(8);
-        let mesh = body.display_mesh(0.02).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         let index = mesh.smooth_edges.iter().position(|f| *f).unwrap();
         let split = body.clone().with_split_lines(Some(std::sync::Arc::new(vec![mesh.edges[index].clone()])));
         assert!(!flags(&split, &mesh).0[index]);
@@ -325,7 +325,7 @@ mod tests {
             p1.x += (p1.y - p0.y) * 1e-6;
         }
         let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 3.).unwrap().remove(0);
-        let mesh = body.display_mesh(0.02).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 7);
         let crease = mesh
             .edges
@@ -354,7 +354,7 @@ mod tests {
         let split = crate::split_faces(&body, &[face], &tool).unwrap();
         assert!(split.face_count() > body.face_count());
         assert!(!split.split_keep().is_empty());
-        let mesh = split.display_mesh(0.02).unwrap();
+        let mesh = split.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         let authored: Vec<_> =
             mesh.edges.iter().enumerate().filter(|(_, line)| crate::heal::on_split_line(line, split.split_keep())).map(|(i, _)| i).collect();
         assert!(!authored.is_empty());

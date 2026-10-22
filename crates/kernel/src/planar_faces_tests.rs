@@ -52,7 +52,7 @@ fn plane_faces(b: &Body) -> usize {
 }
 
 fn volume(b: &Body) -> f64 {
-    b.tessellate_with(1e-3, true).unwrap().measure().volume
+    b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn join_checked(a: &Body, b: &Body, walls: &[(f64, f64)], turn: f64) {
     // Decided in 2D: the walls come back as arcs, not as splines.
     assert_eq!(free_form_faces(&joined), 0);
     let want = HEIGHT * union_plan_area(walls, turn);
-    let got = joined.tessellate_with(1e-2, true).unwrap().measure().volume;
+    let got = joined.mesh(&crate::MeshTolerance::chord(1e-2)).unwrap().measure().volume;
     assert!((got - want).abs() < 5e-3 * want, "{got} vs {want}");
 }
 

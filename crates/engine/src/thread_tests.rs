@@ -19,7 +19,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 /// measurement of its thousands of faces.
 fn volume(s: &mut Session, b: &str) -> f64 {
     let st = s.model.state();
-    st.body(b).map(|mb| mb.body.tessellate(1e-3).unwrap().measure().volume).unwrap_or(0.0)
+    st.body(b).map(|mb| mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().measure().volume).unwrap_or(0.0)
 }
 
 const SIZES: [(f64, f64); 9] = [(3.0, 0.5), (4.0, 0.7), (5.0, 0.8), (6.0, 1.0), (8.0, 1.25), (10.0, 1.5), (12.0, 1.75), (16.0, 2.0), (20.0, 2.5)];
@@ -319,8 +319,8 @@ fn faceted_flange_thread_preserves_thin_crest_boundaries() {
     let groove = kernel::sweep_helix_mesh(&plane, &section, base, *cylinder.axis, pitch, (end - start) / pitch, 48).unwrap();
     let cut = kernel::faceted_boolean(body, &groove, kernel::BoolOp::Cut, pitch * 0.005).unwrap().unwrap();
     assert!(cut.validity().is_empty(), "{:?}", cut.validity());
-    let before = body.tessellate(0.001).unwrap().measure().volume;
-    let after = cut.tessellate(0.001).unwrap().measure().volume;
+    let before = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume;
+    let after = cut.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume;
     assert!(before - after > 700.0 && before - after < 1800.0, "removed {}", before - after);
 }
 

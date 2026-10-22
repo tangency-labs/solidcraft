@@ -2,7 +2,7 @@ use crate::{FaceSource, extrude, transform_matrix};
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn assert_exact_planes(body: &crate::Body) {
-    let mesh = body.tessellate(0.001).unwrap();
+    let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
     for (index, _) in body.face_sources().unwrap().iter().enumerate() {
         let Some(plane) = body.face_plane(index) else { continue };
         let mut count = 0;
@@ -81,7 +81,7 @@ fn cap_roles_follow_exact_offset_planes_and_canonical_profile_memberships() {
             assert_eq!(caps.len(), 2);
             assert_exact_planes(&body);
             let expected = (400. - 5. * std::f64::consts::PI) * (end - start).abs();
-            assert!((body.tessellate(1e-4).unwrap().measure().volume - expected).abs() < 0.03);
+            assert!((body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - expected).abs() < 0.03);
         }
     }
 }
@@ -120,7 +120,7 @@ fn material_changes_preserve_only_unchanged_planar_support_certificates() {
     let base = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().with_box_certificate(42).unwrap();
     let tool = crate::box_solid(Vec3::new(5., -1., -1.), Vec3::new(11., 11., 11.)).unwrap();
     let cut = crate::boolean(&base, &tool, crate::BoolOp::Cut).unwrap().unwrap();
-    assert!((cut.tessellate(1e-4).unwrap().measure().volume - 500.).abs() < 1e-8);
+    assert!((cut.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - 500.).abs() < 1e-8);
     // Unchanged uniquely certified supports retain their role; a newly cut
     // support must never inherit the removed opposite wall's source identity.
     let mut retained = 0;
@@ -236,7 +236,7 @@ fn constructed_annulus_sides_follow_exact_source_edges() {
         let body = &bodies[0];
         let sources = body.face_sources().unwrap();
         assert_eq!(sources.len(), body.face_count());
-        let mesh = body.tessellate(0.001).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         let mut inner = 0;
         let mut outer = 0;
         for (index, source) in sources.iter().enumerate() {
@@ -301,7 +301,7 @@ fn constructed_large_arc_split_and_reversal_preserve_one_source_segment() {
         assert_eq!(arcs.len(), 2, "large input arc explicitly creates two actual boundary edges");
         assert!(arcs.iter().all(|(radius, sweep)| (**radius - 10.).abs() < 1e-12 && (sweep.abs() - std::f64::consts::PI * 5. / 3.).abs() < 1e-12));
         assert_eq!(sources.iter().filter(|source| matches!(source, Some(FaceSource::ExtrudeSide { segment: Seg2::Line { .. }, .. }))).count(), 1);
-        let mesh = body.tessellate(0.001).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
             if matches!(sources[*face as usize], Some(FaceSource::ExtrudeSide { segment: Seg2::Arc { .. }, .. })) {
                 assert!(mesh.tri(triangle).unwrap().iter().all(|point| (point.x.hypot(point.y) - 10.).abs() < 1e-7));
