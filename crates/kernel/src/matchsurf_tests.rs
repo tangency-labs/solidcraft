@@ -7,7 +7,6 @@ use crate::bridge::{Continuity, Frame};
 use crate::build::SEAM_ANGLE;
 use crate::{cylinder, stitch};
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
 
 /// The radius of the cylinder a sheet is matched to, the radius the sheet starts at, its height,
 /// and how far round the cylinder the sheet runs.
@@ -54,33 +53,31 @@ fn sheet_and_pick() -> (Body, [Vec3; 1]) {
     (cylinder_sheet(R_SHEET, SEAM_ANGLE, SEAM_ANGLE + SPAN, 9), [at(SEAM_ANGLE, R_SHEET, HEIGHT * 0.5)])
 }
 
-/// The middle of the edge of `body`'s first face nearest `p`.
-fn edge_at(body: &Body, p: Vec3) -> mt::Edge {
-    let face = body.solid.face_iter().next().unwrap();
-    let mut best: Option<(f64, mt::Edge)> = None;
-    for e in face.edge_iter() {
-        let c = e.curve();
-        let (t0, t1) = c.range_tuple();
-        let m = from_p3(c.subs(0.5 * (t0 + t1)));
+/// The edge of `body`'s first face whose middle is nearest `p`, as a one-edge chain.
+fn edge_at(body: &Body, p: Vec3) -> Chain {
+    let r = body.record();
+    let b::Loop::Edges { edges } = &r.faces[0].loops[0] else { panic!("an edge loop") };
+    let mut best: Option<(f64, usize)> = None;
+    for u in edges {
+        let e = &r.edges[u.edge as usize];
+        let m = CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
         let d = m.dist(p);
-        if best.as_ref().is_none_or(|(b, _)| d < *b) {
-            best = Some((d, e.clone()));
+        if best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, u.edge as usize));
         }
     }
-    best.unwrap().1
+    vec![(best.unwrap().1, true)]
 }
 
 /// How far the rebuilt face's far boundary lies from the original one, in mm: the far row of the
 /// rebuilt surface sampled at its own stations, against the original boundary edge's own points.
 fn far_drift(made: &Body, sheet: &Body, far_mid: Vec3) -> f64 {
-    let face = made.solid.face_iter().next().unwrap();
-    let surf = face.surface();
-    let (Some((u0, u1)), Some((_, v1))) = surf.try_range_tuple() else { panic!("unbounded") };
-    let edge = edge_at(sheet, far_mid);
-    let poly = chain_polyline(&[edge]).unwrap();
+    let patch = Patch::of(&made.record(), 0).unwrap();
+    let ((u0, u1), (_, v1)) = (patch.ranges[0], patch.ranges[1]);
+    let poly = chain_polyline(&sheet.record(), &edge_at(sheet, far_mid)).unwrap();
     let mut worst = 0.0f64;
     for k in 0..=8 {
-        let p = from_p3(surf.subs(u0 + (u1 - u0) * k as f64 / 8.0, v1));
+        let p = patch.surface.point([u0 + (u1 - u0) * k as f64 / 8.0, v1]).unwrap();
         worst = worst.max(chain_distance(&poly, p));
     }
     worst
@@ -90,9 +87,7 @@ fn far_drift(made: &Body, sheet: &Body, far_mid: Vec3) -> f64 {
 /// point, the unit tangent, the curvature vector and the change of that curvature, read off the
 /// finished surface (never from the construction).
 fn seam_at(body: &Body, t: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let ranges = super::ranges(face).unwrap();
-    super::seam_shape(&face.surface(), &ranges, Side::V0, t).unwrap()
+    Patch::of(&body.record(), 0).unwrap().seam_shape(Side::V0, t).unwrap()
 }
 
 /// The stations a seam is measured at, as fractions of its length.
@@ -127,8 +122,7 @@ fn a_g2_match_meets_a_cylinder_with_its_own_curvature() {
     println!("g2: far boundary drift {drift:e} mm");
     assert!(drift < 1e-9, "the far boundary drifted {drift:e} mm");
     // The interior stays near the original: the crowning that leaves it closest.
-    let (face, original) = (made.solid.face_iter().next().unwrap().clone(), sheet.solid.face_iter().next().unwrap().clone());
-    let stray = deviation(&face, &original).unwrap();
+    let stray = deviation(&Patch::of(&made.record(), 0).unwrap(), &Patch::of(&sheet.record(), 0).unwrap()).unwrap();
     println!("g2: interior stray {stray:.6} mm rms");
     // The seam moved 1 mm, so the face cannot be closer than that at the seam itself: over the
     // whole face the root mean square distance is well under half of it.
@@ -209,7 +203,7 @@ fn a_target_that_jumps_in_curvature_supplies_only_g1() {
     }
     let plane = bridge::bridge(&a, &b, [Continuity::G2, Continuity::G2], [0.0, 0.0]).unwrap();
     let joined = stitch(&[&wall, &plane], 1e-6).unwrap();
-    assert_eq!(joined.solid.face_iter().count(), 2, "the two sheets sewed into one body");
+    assert_eq!(joined.face_count(), 2, "the two sheets sewed into one body");
     let picks = [at(SEAM_ANGLE, R_TARGET, 6.0), at(SEAM_ANGLE, R_TARGET, 24.0)];
     let (sheet, pick) = sheet_and_pick();
     // The seam is smooth enough to match, so G1 goes through; the curvature jumps there, so G2
