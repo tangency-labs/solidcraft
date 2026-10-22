@@ -1,5 +1,5 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's
+//! `smlib_sweep_placed`, `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's
 //! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
 //! the curve lists.
@@ -89,6 +89,20 @@ unsafe extern "C" {
         cap: i32,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_sweep_placed(
+        kinds: *const i64,
+        n_kinds: i64,
+        reals: *const f64,
+        n_reals: i64,
+        path_kinds: *const i64,
+        n_path_kinds: i64,
+        path_reals: *const f64,
+        n_path_reals: i64,
+        frame: i32,
+        cap: i32,
+        out: *mut *mut RawBrep,
+        placed: *mut f64,
+    ) -> i32;
     fn smlib_loft(
         kinds: *const i64,
         n_kinds: i64,
@@ -152,6 +166,16 @@ pub fn sweep(profile: &List, path: &List, frame: i32, cap: bool) -> Result<Handl
     new_brep(|out| unsafe { smlib_sweep(k, nk, r, nr, pk, npk, pr, npr, frame, i32::from(cap), out) })
 }
 
+/// [`sweep`], with the three rigid motions placing the profile (12 numbers each: a matrix by
+/// columns, then a translation) written to `placed`.
+#[cfg(feature = "native")]
+pub fn sweep_placed(profile: &List, path: &List, frame: i32, cap: bool, placed: &mut [f64; 36]) -> Result<Handle, i32> {
+    let (k, nk, r, nr) = raw(profile)?;
+    let (pk, npk, pr, npr) = raw(path)?;
+    let at = placed.as_mut_ptr();
+    new_brep(|out| unsafe { smlib_sweep_placed(k, nk, r, nr, pk, npk, pr, npr, frame, i32::from(cap), out, at) })
+}
+
 #[cfg(feature = "native")]
 pub fn loft(sections: &List, sizes: &[i64], degree: i32, cap: bool) -> Result<Handle, i32> {
     let (k, nk, r, nr) = raw(sections)?;
@@ -194,6 +218,11 @@ pub fn revolve(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: bool) -> Result<
 
 #[cfg(not(feature = "native"))]
 pub fn sweep(_: &List, _: &List, _: i32, _: bool) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn sweep_placed(_: &List, _: &List, _: i32, _: bool, _: &mut [f64; 36]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 

@@ -133,16 +133,6 @@ pub(crate) fn cubic_derivative(p: &[Vec3; 4], x: f64) -> Vec3 {
     (p[1] - p[0]) * (3.0 * y * y) + (p[2] - p[1]) * (6.0 * x * y) + (p[3] - p[2]) * (3.0 * x * x)
 }
 
-/// The cubic split at `x` (de Casteljau): the part before and the part after.
-#[cfg_attr(not(feature = "smlib"), allow(dead_code))]
-pub(crate) fn cubic_split(p: &[Vec3; 4], x: f64) -> ([Vec3; 4], [Vec3; 4]) {
-    let [a, b, c, d] = *p;
-    let (ab, bc, cd) = (a.lerp(b, x), b.lerp(c, x), c.lerp(d, x));
-    let (abc, bcd) = (ab.lerp(bc, x), bc.lerp(cd, x));
-    let m = abc.lerp(bcd, x);
-    ([a, ab, abc, m], [m, bcd, cd, d])
-}
-
 #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
 fn cubic_curve(p: &[Vec3; 4]) -> CurveN<3> {
     CurveN { degree: 3, knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], ctrl: p.iter().map(|q| [q.x, q.y, q.z]).collect() }
