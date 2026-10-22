@@ -107,7 +107,7 @@ fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
 }
 
 /// A point inside face `face` of `body`: the centre of its largest mesh triangle.
-fn face_point(body: &Body, face: usize) -> Result<Vec3> {
+pub(crate) fn face_point(body: &Body, face: usize) -> Result<Vec3> {
     let m = body.mesh(&crate::MeshTolerance::chord((body.size() * 1e-3).max(1e-3)))?;
     let area = |[a, b, c]: &[Vec3; 3]| (*b - *a).cross(*c - *a).len();
     m.triangles
@@ -244,12 +244,13 @@ mod tests {
     }
 
     /// A free-form face goes back to its surface's own parameter box: the saddle z = x y / 10
-    /// over 0…10 × 0…10 (ruled between two straight lines: a bilinear patch), cut at x = 5 and
+    /// over 0…10 × 0…10 (ruled between two straight lines, sketched on planes y = 0 and 10 whose sketch y is −z: a
+    /// bilinear patch), cut at x = 5 and
     /// restored to the whole patch: x and y 0…10, z 0…10.
     #[test]
     fn a_free_form_face_is_restored_to_its_surfaces_bounds() {
         let front = (Plane::XZ, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }]);
-        let back = (Plane { origin: Vec3::new(0.0, 10.0, 0.0), ..Plane::XZ }, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 10.0) }]);
+        let back = (Plane { origin: Vec3::new(0.0, 10.0, 0.0), ..Plane::XZ }, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, -10.0) }]);
         let saddle = crate::loft_sheet(&[front, back]).unwrap();
         let tool = crate::SplitTool::Plane(Plane::from_normal(Vec3::new(5.0, 0.0, 0.0), Vec3::X).unwrap());
         let half = crate::trim(&saddle, &tool, Vec3::new(1.0, 5.0, 0.5)).unwrap();

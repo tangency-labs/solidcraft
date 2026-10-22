@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.extend", "Extend", extend)
         .at("SURFACE", "MODIFY")
         .icon("surface_extend")
-        .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: exact for planes and surfaces of revolution, a B-spline's end spans continued; the default) | tangent (a ruled run-off face along each edge, G1) | curvature (a run-off face keeping the surface's curvature across the edge, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
+        .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
     CommandSpec::new("surface.trim", "Trim", trim)
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")

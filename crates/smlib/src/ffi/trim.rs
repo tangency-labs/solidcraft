@@ -1,5 +1,6 @@
-//! The untrim block of `capi/include/smlib.h` (`smlib_untrim_face`; the fork's
-//! `capi/src/smlib_untrim.cpp`), declared by hand. Part of the FFI boundary, like its parent: called only through [`crate::trim`].
+//! The untrim and extend blocks of `capi/include/smlib.h` (`smlib_untrim_face`,
+//! `smlib_extend_sheet`; the fork's `capi/src/smlib_untrim.cpp` and `smlib_extend.cpp`), declared
+//! by hand. Part of the FFI boundary, like its parent: called only through [`crate::trim`].
 
 #![allow(unsafe_code)]
 
@@ -11,6 +12,10 @@ use super::{RawBrep, new_brep};
 
 /// The answer is not exact in the input's geometry (`SMLIB_ERR_NOT_EXACT`).
 pub const ERR_NOT_EXACT: i32 = -1106;
+
+pub const EXTEND_NATURAL: i32 = 0;
+pub const EXTEND_TANGENT: i32 = 1;
+pub const EXTEND_CURVATURE: i32 = 2;
 
 #[cfg(feature = "native")]
 unsafe extern "C" {
@@ -24,6 +29,17 @@ unsafe extern "C" {
         in_place: i32,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_extend_sheet(sheet: *const RawBrep, point: *const f64, tol: f64, distance: f64, mode: i32, out: *mut *mut RawBrep) -> i32;
+}
+
+#[cfg(feature = "native")]
+pub fn extend_sheet(sheet: &Handle, point: &[f64; 3], tol: f64, distance: f64, mode: i32) -> Result<Handle, i32> {
+    new_brep(|out| unsafe { smlib_extend_sheet(sheet.raw(), point.as_ptr(), tol, distance, mode, out) })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn extend_sheet(_: &Handle, _: &[f64; 3], _: f64, _: f64, _: i32) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
 }
 
 /// `holes`: `None` for every hole.
