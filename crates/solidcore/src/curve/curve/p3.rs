@@ -53,7 +53,11 @@
 //! - **`SmFindPCExtremaEFO::Evaluate`** is implemented for [`Curve`] (it calls the
 //!   virtual `IsDegenerate`). An infinite evaluated tangent returns `SM_ERR`
 //!   instead of looping forever while dividing infinity by ten; finite tangents
-//!   retain upstream's exact scaling operations and order.
+//!   retain upstream's exact scaling operations and order. The separate
+//!   [`MAX_PC_SCALE_STEPS`] cap is retained as a backstop and returns
+//!   [`SolidError::InvalidInput`] after 400 divisions (a finite tangent needs at
+//!   most 310). Upstream loops forever on the infinite rational B-spline tangent
+//!   in fuzz `curve.curve_p9` fuzz01222.
 //! - **`SmBestLineFitENFO`** keeps the solver's intervals as copies; its
 //!   `m_dSolutionSize` / `m_dScaledZero` are fields read through
 //!   [`EvalNFunctions::solution_size`] / [`EvalNFunctions::scaled_zero`]. The status
@@ -713,6 +717,14 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
             while pv[1].length_squared() > 1.0e4 {
                 if pv[1].x.is_infinite() || pv[1].y.is_infinite() || pv[1].z.is_infinite() {
                     return Err(SolidError::sm_err(OP_PC));
+                }
+                // (not upstream) an infinite tangent never scales down: see
+                // MAX_PC_SCALE_STEPS
+                if self.num_scale >= MAX_PC_SCALE_STEPS {
+                    return Err(SolidError::invalid_input(
+                        OP_PC,
+                        "tangent too large to scale (upstream loops forever)",
+                    ));
                 }
                 self.num_scale += 1;
                 sv = div(sv, 10.0);

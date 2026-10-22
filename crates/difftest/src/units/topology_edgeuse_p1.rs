@@ -51,7 +51,7 @@ use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::DropCurveFail;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
@@ -820,11 +820,13 @@ fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError
     let ty = ty as i64;
     if ty == CRV_ON_SURF_TYPE {
         // an SmCrvOnSurf: the UV curve block, then the (B-spline) base surface block
-        let uv_curve = read_curve(rd, true)?
-            .ok_or_else(|| harness("export: CrvOnSurf without UV curve"))?;
-        let surface = read_surface(rd)?
-            .ok_or_else(|| harness("export: CrvOnSurf without surface"))?;
-
+        let uv_curve =
+            read_curve(rd, true)?.ok_or_else(|| harness("export: CrvOnSurf without UV curve"))?;
+        let surface =
+            read_surface(rd)?.ok_or_else(|| harness("export: CrvOnSurf without surface"))?;
+        let SurfaceKind::BSpline(_) = surface.kind() else {
+            return Err(harness("export: CrvOnSurf base is not a B-spline surface"));
+        };
         let k = Kernel::default();
         let cos = CrvOnSurf::new(&k, uv_curve, surface, None, 1)
             .map_err(|e| harness(format!("export CrvOnSurf: {e}")))?;

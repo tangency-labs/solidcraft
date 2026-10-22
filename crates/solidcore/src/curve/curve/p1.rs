@@ -67,6 +67,9 @@
 //!   the 8192 cap. Far-outside breaks can otherwise require trillions of
 //!   spans. The bound limits the pending stack and generated polygon growth, not
 //!   the supplied breaks (including duplicates), which are still visited in order.
+//! - **Output allocation.** The separate [`MAX_APPROX_SPANS`] appended-span bound
+//!   is retained and returns `InvalidInput` before unbounded control-polygon growth
+//!   (upstream fuzz `curve.curve_p1` fuzz01255 aborted on a 6 GiB allocation).
 //! - `SM_ASSERT`, `WARN` and the `SM_DEBUG_CODE` drawing blocks are not ported;
 //!   `TessellateByBisection`'s unused `GetDegree` (its only consumer,
 //!   `sm_FindTestParams`, ignores it) is not called.
@@ -606,6 +609,7 @@ impl Curve {
                     if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
                         return Err(SolidError::sm_err(OP_APPROX));
                     }
+                    let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
                     curr_t = mid_t;
                     curr_pv = mid_pv;
 

@@ -31,12 +31,13 @@
 //! upstream finds again through `SmCacheMgr::GetObjectCache`: built for a face with
 //! loops, its face containment is done, so `PointClassify` classifies through the
 //! leaf node containing the point before the vertex and loop tests (`query.face_p1`
-//! `gen0160`: C++ FACE from an inside leaf, the vertex test alone gives VERTEX). Its
-//! face walk is [`SolidError::Unported`] today (`SmFace handle of a surface's face`,
-//! `topology.face_p2`), so every face-owned surface defers there. The Rust point solvers
-//! take no cache (as in `topology::vertexuse` and `intersect::curve_class::p1`), so
-//! upstream's temporary switch-off of the cache's point test (SmFace.cpp:12801) and the
-//! cache check-out have nothing to act on. `EdgeCurveOnClassify` lifts a 2D curve to a
+//! `gen0160`: C++ FACE from an inside leaf, the vertex test alone gives VERTEX). The
+//! cache is built with the face ([`make_trim_srf_cache_with_face`] over
+//! [`BrepCacheFace`]: `CreateUVTrimCurves` and the face walk change the B-rep as
+//! upstream's do). Upstream switches the cache's point test off around the point
+//! solves (SmFace.cpp:12801); the Rust solves take no cache, so the global solve is
+//! [`Surface::global_point_solve_point_test_off`] (its face check keeps every
+//! solution without fetching a cache); the cache check-out has nothing to act on. `EdgeCurveOnClassify` lifts a 2D curve to a
 //! curve on the face's surface only when an upward edge use of the face is found (upstream lifts it
 //! first and ignores `SetAll`'s status). No recursion.
 

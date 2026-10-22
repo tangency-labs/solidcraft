@@ -590,12 +590,6 @@ impl Clone for Curve {
 }
 
 impl Curve {
-    /// Snapshot shared geometry without normalizing knots or changing its owner.
-    pub(crate) fn clone_for_evaluation(&self) -> Result<Self> {
-        crate::surface::surface::p2::Surface::check_curve_evaluation_copy_depth(self, 0)?;
-        Ok(self.clone_exact_bounded())
-    }
-
     /// Exact recursive copy after the caller validates the complete geometry graph.
     pub(crate) fn clone_exact_bounded(&self) -> Self {
         let kind = match &self.kind {
@@ -4084,7 +4078,7 @@ mod tests {
         let mut on_surface = CrvOnSurf::new(
             &Kernel::default(),
             noncanonical_evaluation_curve(2),
-            patch,
+            Surface::from(patch),
             None,
             3,
         )
@@ -4102,7 +4096,10 @@ mod tests {
             evaluation_bspline(c.uv_curve()).gw_nurb().unwrap().knots()[3],
             0.5 + 1e-14
         );
-        assert_eq!(c.surface().gw_nurb().unwrap().u_knots()[1], 1e-14);
+        let SurfaceKind::BSpline(base) = c.surface().kind() else {
+            panic!("expected B-spline surface");
+        };
+        assert_eq!(base.gw_nurb().unwrap().u_knots()[1], 1e-14);
     }
 
     #[test]

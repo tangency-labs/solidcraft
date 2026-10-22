@@ -209,6 +209,22 @@ impl CrvInVolume {
         }
     }
 
+    /// An exact evaluation copy retaining owners, raw flags and cached breaks.
+    /// Check the entire volume chain against the shared 64-level bound before
+    /// the volume's field-wise recursive `Clone`.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        crate::surface::surface::Surface::check_volume_evaluation_copy_depth(&self.volume, depth)?;
+        Ok(Self {
+            curve: self.curve.clone_for_evaluation_depth(depth)?,
+            in_param_space: self.in_param_space,
+            volume: self.volume.clone(),
+            need_breaks: self.need_breaks,
+            breaks: self.breaks.clone(),
+            conts: self.conts.clone(),
+            owner_flag: self.owner_flag,
+        })
+    }
+
     /// `SmCrvInVolume_TYPE`.
     pub const TYPE: i64 = CRV_IN_VOLUME_TYPE;
 

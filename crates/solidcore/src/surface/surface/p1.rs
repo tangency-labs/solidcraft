@@ -365,8 +365,21 @@ pub struct StepSurface {
 }
 
 impl StepSurface {
+    /// A bounded, exact evaluation copy; the nesting limit is checked by Surface.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        let surface = self
+            .surface
+            .as_deref()
+            .map(|s| s.clone_for_evaluation_depth(depth).map(Box::new))
+            .transpose()?;
+        Ok(Self {
+            surface,
+            owns_surface: self.owns_surface,
+        })
+    }
+
     /// Exact evaluation copy; the caller validates the complete geometry graph first.
-    pub(crate) fn clone_for_evaluation(&self) -> Self {
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
         Self {
             surface: self
                 .surface

@@ -703,13 +703,13 @@ impl OffsetSurface {
         )?))
     }
 
-    /// Exact evaluation copy; the caller validates the complete geometry graph first.
-    pub(crate) fn clone_for_evaluation(&self) -> Self {
+    /// Exact evaluation copy (no knot fix-up) that takes the current extension, pending
+    /// or stored, as main's copy does; the caller validates the complete geometry graph
+    /// first.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
         let surface = Box::new(self.surface.clone_exact_bounded());
-        let extended_surface = self
-            .extended_surface
-            .as_deref()
-            .map(|e| Box::new(e.clone_exact_bounded()));
+        let extended_surface =
+            self.with_current_extension(|e| e.map(|e| Box::new(e.clone_exact_bounded())));
         Self {
             offset_distance: self.offset_distance,
             allow_extension: self.allow_extension,
@@ -721,6 +721,28 @@ impl OffsetSurface {
             is_periodic_on_v: self.is_periodic_on_v,
             singularities: self.singularities,
         }
+    }
+
+    /// A copy for evaluation: the members as they are, the base and extended
+    /// surfaces copied exactly (no knot fix-up), `depth` the wrapper nesting
+    /// already walked.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        let surface = Box::new(self.surface.clone_for_evaluation_depth(depth)?);
+        let extended_surface = self.with_current_extension(|e| {
+            e.map(|e| e.clone_for_evaluation_depth(depth).map(Box::new))
+                .transpose()
+        })?;
+        Ok(Self {
+            offset_distance: self.offset_distance,
+            allow_extension: self.allow_extension,
+            owns_surface: self.owns_surface,
+            surface,
+            extended_surface,
+            pending_extension: PendingExtension::default(),
+            is_periodic_on_u: self.is_periodic_on_u,
+            is_periodic_on_v: self.is_periodic_on_v,
+            singularities: self.singularities,
+        })
     }
 
     /// The offset of this surface by `signed_offset_distance` more
@@ -1701,6 +1723,7 @@ impl OffsetSurface {
         scale: Option<Vec3>,
         depth: usize,
     ) -> Result<()> {
+        self.fold_pending_extension();
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
         if rotate_n_move.is_identity(EFF_ZERO) && scale.is_none_or(|s| s.approx_eq(identity_scale))
         {

@@ -312,7 +312,7 @@ impl CrvOnSurf {
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
         Ok(Self {
             uv_curve: Box::new(self.uv_curve.clone_for_evaluation_depth(depth)?),
-            surface: Box::new(self.surface.clone_exact()),
+            surface: Box::new(self.surface.clone_exact_bounded()),
             uv_domain: self.uv_domain,
             need_breaks: self.need_breaks,
             breaks: self.breaks.clone(),
