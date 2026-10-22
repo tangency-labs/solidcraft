@@ -5,15 +5,18 @@
 //! parameters are plane coordinates, so each edge's pcurve is its exact projection onto the
 //! plane.
 //!
-//! The general fill (`solidcraft_geom::fill_general`), which also meets the faces beside the loop
-//! with G1 or G2 and passes through given points, is not ported yet: its surface's parameters are
-//! developed from the loop, so the loop's edges have no exact pcurve on it, and the frames across
-//! each edge come from `bridge::frames_across`.
+//! The general fill, which also meets the faces beside the loop with G1 or G2, passes through
+//! given points, and fills loops that bound no height field, is a patch whose boundary rows are
+//! the loop's own edges (`solidcraft_geom::fill_iso`): each edge's pcurve is a straight line in
+//! (u, v). It takes loops of three or four line or spline edges; the frames across each edge are
+//! read off the neighbouring face's record surface (exact second derivatives for G2).
 
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::brep::{self as b, Curve2, eval::CurveEval};
 use solidcraft_geom::bspline::{HPoint, SplineError};
-use solidcraft_geom::fill_general::MAX_FILL_POINTS;
+use solidcraft_geom::fill_general::{Across, MAX_FILL_POINTS};
+use solidcraft_geom::fill_iso::{IsoEdge, IsoSpec};
 
 use crate::body::Body;
 use crate::bridge::Continuity;
@@ -110,14 +113,217 @@ pub fn patch_edges_report(body: &Body, at: &[Vec3], spec: &PatchSpec) -> Result<
         return patch_edges_crowned(body, at, spec.crown).map(|b| (b, PatchReport::default()));
     }
     body.require_brep("patch")?;
-    Err(general_fill_unported())
+    let record = crate::native::brep_record(body)?;
+    let chain = picked_loop(&record, at, body.size() * 0.05 + 1e-6)?;
+    let mut orders = vec![spec.continuity; chain.len()];
+    for (p, g) in &spec.edges {
+        let e = nearest_edge(&record, *p, body.size() * 0.05 + 1e-6).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
+        let k = chain.iter().position(|c| c.0 == e).ok_or_else(|| KernelError::Invalid("a continuity pick is not on an edge of the loop".into()))?;
+        if let Some(slot) = orders.get_mut(k) {
+            *slot = *g;
+        }
+    }
+    if spec.crown != 0.0 && orders.iter().all(|g| *g == Continuity::G0) {
+        return Err(KernelError::Invalid("not supported yet: a crown on a patch through points with no g1 or g2 edge".into()));
+    }
+    general_fill(body, &record, &chain, &orders, &spec.points, spec.crown)
 }
 
-/// The general fill's refusal until it is ported (module docs).
-fn general_fill_unported() -> KernelError {
-    KernelError::Invalid(
-        "not supported yet: a patch meeting its neighbours with g1 or g2, through points, or on a loop that bounds no height field".into(),
-    )
+/// The general fill of the loop `chain` of the record's edges, edge `k` meeting the face beside it
+/// with `orders[k]` (module docs).
+fn general_fill(
+    body: &Body,
+    record: &b::Brep,
+    chain: &[(usize, bool)],
+    orders: &[Continuity],
+    points: &[Vec3],
+    crown: f64,
+) -> Result<(Body, PatchReport)> {
+    if !(3..=4).contains(&chain.len()) {
+        return Err(KernelError::Invalid(format!("not supported yet: a general patch on a loop of {} edges (three or four)", chain.len())));
+    }
+    let edges: Vec<IsoEdge> = chain.iter().map(|&(e, forward)| iso_edge(record, e, forward)).collect::<Result<_>>()?;
+    let size = body.size().max(solidcraft_geom::LINEAR_TOL);
+    let mut beside: Vec<Option<Beside>> = Vec::with_capacity(chain.len());
+    for (&(e, forward), order) in chain.iter().zip(orders) {
+        beside.push(if *order == Continuity::G0 { None } else { Some(Beside::new(record, e, forward, *order == Continuity::G2, size)?) });
+    }
+    // Where a G1/G2 edge's neighbour and the one before disagree at their corner.
+    let n = chain.len();
+    let mut clash = vec![false; n];
+    for k in 0..n {
+        let prev = (k + n - 1) % n;
+        let (Some(Some(a)), Some(Some(b))) = (beside.get(prev), beside.get(k)) else { continue };
+        let (Some(ea), Some(eb)) = (edges.get(prev), edges.get(k)) else { continue };
+        let (end, start) = (ea.knots.last().copied().unwrap_or(0.0), eb.knots.first().copied().unwrap_or(0.0));
+        if let (Some(x), Some(y)) = (a.across(record, end)?, b.across(record, start)?) {
+            clash[k] = x.normal.dot(y.normal).abs() < (2.0 * PATCH_ANGLE_TOL_DEG).to_radians().cos();
+        }
+    }
+    let mut across = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Option<Across>>, String> {
+        match beside.get(k) {
+            None => Err("no such edge".into()),
+            Some(None) => Ok(vec![None; ts.len()]),
+            Some(Some(side)) => ts.iter().map(|t| side.across(record, *t).map_err(|e| e.to_string())).collect(),
+        }
+    };
+    let spec = IsoSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, points };
+    let fill = solidcraft_geom::fill_iso::iso_fill(&edges, &mut across, &clash, &spec).map_err(spline_error)?;
+    let surface = surface_record(&fill.surface)?;
+    let made = patch_body(body, record, chain, surface, true, &Pcurves::Sides(&fill.sides), face_tolerance(body))?;
+    let a = fill.achieved;
+    let report = PatchReport {
+        general: true,
+        gap: 0.0,
+        normal_deviation_deg: a.normal_deviation.to_degrees(),
+        normal_deviation_all_deg: a.normal_deviation_all.to_degrees(),
+        curvature_mismatch: a.curvature_mismatch,
+        point_gap: a.point_deviation,
+    };
+    Ok((made, report))
+}
+
+/// A loop edge as the patch takes it: a non-rational B-spline on the edge's interval, running
+/// the loop's way, its ends on the edge's vertices. Conics and traced curves have no such form
+/// in their own parameter (an arc's angle is no rational function of a NURBS parameter), and a
+/// rational edge none the Coons sum can blend: refused by name.
+fn iso_edge(record: &b::Brep, e: usize, forward: bool) -> Result<IsoEdge> {
+    let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
+    let v3 = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let [a, z] = edge.interval;
+    let (degree, knots, points): (usize, Vec<f64>, Vec<Vec3>) = match &edge.curve {
+        b::Curve::Line { start, end } => {
+            let (s, t) = (v3(start), v3(end));
+            (1, vec![a, a, z, z], vec![s + (t - s) * a, s + (t - s) * z])
+        }
+        b::Curve::Polyline { points } => {
+            let mut knots = vec![0.0];
+            knots.extend((0..points.len()).map(|i| i as f64));
+            knots.push(points.len().saturating_sub(1) as f64);
+            (1, knots, points.iter().map(v3).collect())
+        }
+        b::Curve::Spline { knots, points } => (knots.len().saturating_sub(points.len() + 1), knots.clone(), points.iter().map(v3).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } if homogeneous.windows(2).all(|w| w[0][3] == w[1][3]) => (
+            knots.len().saturating_sub(homogeneous.len() + 1),
+            knots.clone(),
+            homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect(),
+        ),
+        _ => {
+            return Err(KernelError::Invalid(format!(
+                "not supported yet: a general patch on edge {e}, a circle, ellipse, rational or traced curve (its pcurve on the patch has no exact form in its own parameter)"
+            )));
+        }
+    };
+    // The piece on the edge's interval, then run the loop's way.
+    let h: Vec<HPoint> = points.iter().map(|p| HPoint::weighted(*p, 1.0)).collect();
+    let (mut knots, h) = solidcraft_geom::bspline::segment(degree, &knots, &h, a, z).map_err(spline_error)?;
+    let mut points: Vec<Vec3> = h.iter().map(|p| p.xyz()).collect();
+    if !forward {
+        knots = knots.iter().rev().map(|k| a + z - k).collect();
+        points.reverse();
+    }
+    // Its ends exactly on the loop's vertices.
+    let vertex = |end: usize| record.vertices.get(edge.vertices[end] as usize).map(|v| v3(&v.point));
+    let (first, last) = if forward { (vertex(0), vertex(1)) } else { (vertex(1), vertex(0)) };
+    if let (Some(p), Some(q), Some(f)) = (first, last, points.first_mut()) {
+        *f = p;
+        if let Some(l) = points.last_mut() {
+            *l = q;
+        }
+    }
+    Ok(IsoEdge { degree, knots, points })
+}
+
+/// The face beside a G1/G2 edge, read at points of the edge: its record surface, which side of
+/// it is outward, whether its boundary runs the edge the loop's way, and whether its curvature
+/// is read (G2).
+struct Beside {
+    surface: SurfaceEval,
+    side: f64,
+    along: bool,
+    edge: usize,
+    forward: bool,
+    curvature: bool,
+    reach: f64,
+}
+
+impl Beside {
+    fn new(record: &b::Brep, e: usize, forward: bool, curvature: bool, size: f64) -> Result<Beside> {
+        let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
+        let [u] = edge.uses.as_slice() else {
+            return Err(KernelError::Invalid("an edge of the loop lies between two faces: g1 and g2 need the one face beside it".into()));
+        };
+        let face = record.faces.get(u.face as usize).ok_or_else(|| KernelError::Failed("patch: face reference".into()))?;
+        let surface =
+            SurfaceEval::new(&face.surface).map_err(|err| KernelError::Invalid(format!("the face beside edge {e} cannot be evaluated: {err}")))?;
+        let outward = record
+            .shells
+            .iter()
+            .find_map(|s| match s {
+                b::Shell::Faces { faces, .. } => faces.iter().find(|f| f.face == u.face).map(|f| f.forward),
+                _ => None,
+            })
+            .unwrap_or(true);
+        let used_forward = match face.loops.get(u.r#loop as usize) {
+            Some(b::Loop::Edges { edges }) => edges.get(u.position as usize).map(|x| x.forward),
+            _ => None,
+        }
+        .ok_or_else(|| KernelError::Failed("patch: edge use".into()))?;
+        // A face's boundary runs counter-clockwise about its outward normal: the record's loops
+        // run so about the natural normal, reversed where the outward side is the other.
+        let runs_forward = used_forward == outward;
+        Ok(Beside {
+            surface,
+            side: if outward { 1.0 } else { -1.0 },
+            along: runs_forward == forward,
+            edge: e,
+            forward,
+            curvature,
+            reach: (size * 1e-4).max(1e-6),
+        })
+    }
+
+    /// The neighbour's conditions at parameter `t` of the loop's edge (its `IsoEdge`, run the
+    /// loop's way, whose parameter is the edge's reversed where the loop runs against it):
+    /// its normal, the direction it leaves the edge in, away from it, and for G2 its curvature
+    /// vector along that direction. `None` where the edge has no tangent there.
+    fn across(&self, record: &b::Brep, t: f64) -> Result<Option<Across>> {
+        let edge = record.edges.get(self.edge).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
+        let [a, z] = edge.interval;
+        let tau = if self.forward { t } else { a + z - t };
+        let curve = CurveEval::new(&edge.curve).map_err(|e| KernelError::Invalid(e.to_string()))?;
+        let Some((p, d)) = curve.derivs(tau) else { return Ok(None) };
+        let Some(tangent) = (d * if self.forward { 1.0 } else { -1.0 }).normalized() else { return Ok(None) };
+        let uv =
+            self.surface.project(p, None, self.reach).ok_or_else(|| KernelError::Invalid("a picked edge is not on the face beside it".into()))?;
+        let (_, su, sv) =
+            self.surface.derivs(uv[0], uv[1]).ok_or_else(|| KernelError::Failed("patch: the face beside an edge has no derivatives".into()))?;
+        let normal =
+            (su.cross(sv) * self.side).normalized().ok_or_else(|| KernelError::Failed("patch: the face beside an edge has no normal".into()))?;
+        // Away from the face: its boundary's direction × its outward normal.
+        let boundary = if self.along { tangent } else { tangent * -1.0 };
+        let leave = boundary.cross(normal).normalized().ok_or_else(|| KernelError::Invalid("the boundary runs along the face's normal".into()))?;
+        let bend = if self.curvature { Some(normal * normal_curvature(&self.surface, uv, normal, leave)?) } else { None };
+        Ok(Some(Across { leave, normal, bend }))
+    }
+}
+
+/// The normal curvature of a surface at `uv` along the unit tangent `w`: `n·r''` of the unit-speed
+/// curve on it leaving that way (the second fundamental form, exact second derivatives).
+fn normal_curvature(s: &SurfaceEval, uv: [f64; 2], n: Vec3, w: Vec3) -> Result<f64> {
+    let fail = || KernelError::Failed("patch: the face beside an edge has no curvature there".into());
+    let (_, ru, rv) = s.derivs(uv[0], uv[1]).ok_or_else(fail)?;
+    let (ruu, ruv, rvv) = s.second(uv[0], uv[1]).ok_or_else(fail)?;
+    // w = ru·α + rv·β, solved in the tangent plane.
+    let (e, f, g) = (ru.dot(ru), ru.dot(rv), rv.dot(rv));
+    let det = e * g - f * f;
+    if !(det > 0.0) {
+        return Err(fail());
+    }
+    let (wu, wv) = (w.dot(ru), w.dot(rv));
+    let (alpha, beta) = ((g * wu - f * wv) / det, (e * wv - f * wu) / det);
+    let k = n.dot(ruu * (alpha * alpha) + ruv * (2.0 * alpha * beta) + rvv * (beta * beta));
+    k.is_finite().then_some(k).ok_or_else(fail)
 }
 
 /// [`crate::patch_edges`] with a crown on the fitted face: positive makes the patch's middle
@@ -156,14 +362,23 @@ pub(crate) fn patch_loop(body: &Body, at: &[Vec3], crown: f64) -> Result<Body> {
             let mut point = |k: usize, t: f64| sides.get_mut(k).and_then(|s| s.point(t));
             let fill = match solidcraft_geom::fill::fill_loop(chain.len(), &mut point, tol, crown) {
                 Ok(fill) => fill,
-                Err(SplineError::Unsupported(_)) if crown == 0.0 => return Err(general_fill_unported()),
+                // Not a height field over its plane: the general fill, when no crown asks for the
+                // height field's bump.
+                Err(SplineError::Unsupported(_)) if crown == 0.0 => {
+                    let orders = vec![Continuity::G0; chain.len()];
+                    return general_fill(body, &record, &chain, &orders, &[], 0.0).map(|(b, _)| b);
+                }
                 Err(e) => return Err(spline_error(e)),
             };
             let projection = Projection { origin: fill.origin, axes: fill.axes };
             (surface_record(&fill.surface)?, fill.counter_clockwise, Some(projection))
         }
     };
-    patch_body(body, &record, &chain, surface, ccw, pcurve.as_ref(), face_tolerance(body))
+    let pcurves = match &pcurve {
+        Some(p) => Pcurves::Projected(p),
+        None => Pcurves::Computed,
+    };
+    patch_body(body, &record, &chain, surface, ccw, &pcurves, face_tolerance(body))
 }
 
 /// The closed loop of `record`'s edges picked by points on them (the edge nearest each, within
@@ -321,6 +536,14 @@ fn conic_on(frame: &b::Frame, radii: [f64; 2], on: &dyn Fn([f64; 3]) -> bool, n:
     on(frame.origin) && radii[0] * axis(frame.x_axis) + radii[1] * axis(frame.y_axis) <= tol
 }
 
+/// Where a patch's pcurves come from: the record's routine (a plane), the exact projection onto
+/// a height field's plane, or the patch's own sides (each edge a straight line in (u, v)).
+enum Pcurves<'a> {
+    Computed,
+    Projected(&'a Projection),
+    Sides(&'a [[[f64; 2]; 2]]),
+}
+
 /// The plane a height field stands on: its parameters are coordinates along `axes` from `origin`.
 struct Projection {
     origin: Vec3,
@@ -389,15 +612,7 @@ fn surface_record(s: &solidcraft_geom::bspline::NurbsSurface) -> Result<b::Surfa
 /// counter-clockwise about the surface's natural normal (`ccw`: the chain already does), each
 /// edge's pcurve the exact projection where the surface is a height field. Its history is over
 /// `[body]`: the face is new, each edge the body's own.
-fn patch_body(
-    body: &Body,
-    record: &b::Brep,
-    chain: &[(usize, bool)],
-    surface: b::Surface,
-    ccw: bool,
-    projection: Option<&Projection>,
-    tol: f64,
-) -> Result<Body> {
+fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b::Surface, ccw: bool, pcurves: &Pcurves, tol: f64) -> Result<Body> {
     let fail = |m: &str| KernelError::Failed(format!("patch: {m}"));
     let mut vertices: Vec<[f64; 3]> = Vec::new();
     let mut vertex_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
@@ -413,13 +628,20 @@ fn patch_body(
                 vertices.push(record.vertices.get(v as usize).ok_or_else(|| fail("vertex reference"))?.point);
             }
         }
-        let given = match projection {
-            Some(p) => Some(p.pcurve(&edge.curve, edge.interval).ok_or_else(|| {
+        let given = match pcurves {
+            Pcurves::Sides(sides) => {
+                let [s, z] = sides.get(k).copied().ok_or_else(|| fail("side"))?;
+                let [a, b] = edge.interval;
+                // The loop's start of the edge is its interval's start when the loop runs along it.
+                let (at_a, at_b) = if forward { (s, z) } else { (z, s) };
+                Some(Curve2::Spline { knots: vec![a, a, b, b], points: vec![at_a, at_b] })
+            }
+            Pcurves::Projected(p) => Some(p.pcurve(&edge.curve, edge.interval).ok_or_else(|| {
                 KernelError::Invalid(
                     "not supported yet: a fitted patch on a circular, elliptic or traced edge (it has no exact pcurve on the fit)".into(),
                 )
             })?),
-            None => None,
+            Pcurves::Computed => None,
         };
         edges.push(PartEdge { curve: edge.curve.clone(), interval: edge.interval, vertices: ends });
         uses.push(PartUse { edge: k as u32, forward, given });

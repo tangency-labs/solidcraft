@@ -71,6 +71,23 @@ impl Brep {
         }
     }
 
+    /// `self` and `other`, sheets of planar faces on one plane ([`Brep::planar_faces`]), combined
+    /// as regions of that plane by `op`: `None` when the result is empty. The result's edges are
+    /// the inputs' own curves, split where they cross.
+    pub fn boolean2d(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
+        init()?;
+        let op = match op {
+            BooleanOp::Union => ffi::ops::BOOLEAN_UNION,
+            BooleanOp::Subtract => ffi::ops::BOOLEAN_SUBTRACT,
+            BooleanOp::Intersect => ffi::ops::BOOLEAN_INTERSECT,
+        };
+        match ffi::ops::boolean2d(&self.0, &other.0, op) {
+            Ok(h) => Ok(Some(Brep(h))),
+            Err(ffi::ERR_EMPTY) => Ok(None),
+            Err(s) => Err(error(s)),
+        }
+    }
+
     /// `self` with each face `tool` meets cut along the intersection, the pieces kept as faces of
     /// one body: `None` when the tool meets no face. Tagged operands give the pieces' history
     /// (each piece is a split of the face it was cut from).

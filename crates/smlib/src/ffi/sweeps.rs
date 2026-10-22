@@ -1,5 +1,5 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_sweep_placed`, `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's
+//! `smlib_sweep_placed`, `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`, `smlib_planar_faces`; the fork's
 //! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
 //! the curve lists.
@@ -54,6 +54,7 @@ impl<'a> List<'a> {
 
 #[cfg(feature = "native")]
 unsafe extern "C" {
+    fn smlib_planar_faces(kinds: *const i64, n_kinds: i64, reals: *const f64, n_reals: i64, out: *mut *mut RawBrep) -> i32;
     fn smlib_extrude(
         kinds: *const i64,
         n_kinds: i64,
@@ -148,6 +149,12 @@ fn raw(l: &List) -> Result<(*const i64, i64, *const f64, i64), i32> {
 }
 
 #[cfg(feature = "native")]
+pub fn planar_faces(loops: &List) -> Result<Handle, i32> {
+    let (k, nk, r, nr) = raw(loops)?;
+    new_brep(|out| unsafe { smlib_planar_faces(k, nk, r, nr, out) })
+}
+
+#[cfg(feature = "native")]
 pub fn extrude(profile: &List, direction: &[f64; 3], distance: f64, draft: f64, cap: bool) -> Result<Handle, i32> {
     let (k, nk, r, nr) = raw(profile)?;
     new_brep(|out| unsafe { smlib_extrude(k, nk, r, nr, direction.as_ptr(), distance, draft, i32::from(cap), out) })
@@ -204,6 +211,11 @@ pub fn sweep_stations(profile: &List, maps: &[f64], ends: i32) -> Result<Handle,
     }
     let n = i64::try_from(maps.len() / 12).map_err(|_| ERR_ARG)?;
     new_brep(|out| unsafe { smlib_sweep_stations(k, nk, r, nr, maps.as_ptr(), n, ends, out) })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn planar_faces(_: &List) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
 }
 
 #[cfg(not(feature = "native"))]
