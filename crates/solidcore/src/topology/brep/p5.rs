@@ -2508,6 +2508,95 @@ mod tests {
     use crate::topology::Vertex;
 
     #[test]
+    fn supplied_uv_reaches_both_sectors_and_insertion() {
+        struct Backend {
+            sectors: std::cell::RefCell<Vec<(f64, f64, OrientType)>>,
+        }
+        impl FaceEdgeBackend for Backend {
+            type Face = ();
+            type Vertex = ();
+            type Curve = ();
+            type UvCurve = String;
+            type Vertexuse = ();
+            type Output = Option<String>;
+            fn validate_face(&self, (): ()) -> Result<()> {
+                Ok(())
+            }
+            fn tolerance(&self) -> Result<f64> {
+                Ok(1e-6)
+            }
+            fn sector(
+                &self,
+                (): (),
+                _vertex: Option<()>,
+                (): &(),
+                uv: Option<&String>,
+                start: f64,
+                end: f64,
+                orientation: OrientType,
+                tolerance: f64,
+                all: bool,
+            ) -> Result<Option<()>> {
+                assert_eq!(uv.map(String::as_str), Some("trace-489"));
+                assert_eq!(tolerance, 1e-6);
+                assert!(!all);
+                self.sectors.borrow_mut().push((start, end, orientation));
+                Ok(Some(()))
+            }
+            fn insert(
+                &mut self,
+                (): (),
+                (): (),
+                (): (),
+                (): (),
+                uv: Option<String>,
+                interval: Extent1d,
+                _orientation: OrientType,
+                max_gap: f64,
+                output: &mut Self::Output,
+            ) -> Result<()> {
+                assert_eq!(interval, Extent1d::from_min_max(-3.0, 7.0));
+                assert_eq!(max_gap, 2e-7);
+                *output = uv;
+                Ok(())
+            }
+        }
+        for orientation in [OrientType::Same, OrientType::Opposite] {
+            let mut backend = Backend {
+                sectors: std::cell::RefCell::new(Vec::new()),
+            };
+            let mut output = None;
+            make_edge_with_backend(
+                &mut backend,
+                true,
+                Some(()),
+                Some(()),
+                Some(()),
+                (),
+                Some(String::from("trace-489")),
+                Extent1d::from_min_max(-3.0, 7.0),
+                orientation,
+                2e-7,
+                &mut output,
+            )
+            .unwrap();
+            assert_eq!(output.as_deref(), Some("trace-489"));
+            let expected = if orientation == OrientType::Same {
+                vec![
+                    (-3.0, 7.0, OrientType::Same),
+                    (7.0, -3.0, OrientType::Opposite),
+                ]
+            } else {
+                vec![
+                    (7.0, -3.0, OrientType::Opposite),
+                    (-3.0, 7.0, OrientType::Same),
+                ]
+            };
+            assert_eq!(*backend.sectors.borrow(), expected);
+        }
+    }
+
+    #[test]
     fn squeeze_cleanup_continues_after_typed_native_failures() {
         let errors = [
             SolidError::sm_err("SmStitch::StitchVertexPairs"),

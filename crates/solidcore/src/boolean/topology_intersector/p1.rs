@@ -56,6 +56,10 @@
 //! | [`Relations::relate_vertices`]                         | `Relate` of two vertices over [`Brep`] ids            |
 //!
 //! Deviations:
+//! - **Intersection trims (issue #489).** `FaceFaceIntersect` supplies a copy of
+//!   each classification's current UV curve to `MakeEdgeInFace`. Upstream passes
+//!   null here and projects the 3D curve again. The copy keeps the intersection's
+//!   parameterisation and remains independent of the classification's cleanup.
 //! - **Object handles.** Every `SmObject*` (vertices, edges, faces, curves, surfaces,
 //!   the two B-reps and the intersector itself) is a caller-chosen handle `O`
 //!   ([`ClassObject`] + [`SolutionObject`] + `Ord`), as in
@@ -161,7 +165,7 @@ use crate::geom::tol::{xsect_tol_3d_from_zones, zone_tol3d};
 use crate::intersect::curve_class::p1::{src_zone_tol_3d_of, CurveClassification};
 use crate::intersect::curve_class::ClassificationInit;
 use crate::intersect::point_class::{
-    ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
@@ -2882,8 +2886,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     }
 
     /// The "Make an edge in the first/second face" block of `FaceFaceIntersect`: a copy
-    /// of the classification's curve becomes a new edge between the interval's vertices
-    /// in the mid face. Returns the new edge and the face split off, if any.
+    /// of the classification's curve and its current UV curve become a new edge
+    /// between the interval's vertices in the mid face. Returns the new edge and
+    /// the face split off, if any.
     fn make_edge_for_interval(
         &self,
         k: &Kernel,
@@ -2894,14 +2899,16 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     ) -> Result<(Option<O>, Option<O>)> {
         let v1 = ci.start.vertex_object();
         let v2 = ci.end.vertex_object();
-        let curve_3d = cc.curve().ok_or(dangling("classification without curve"))?;
-        let copy = brep
-            .curve(curve_3d)
-            .ok_or(dangling("curve handle cannot be resolved"))?
-            .copy(k)?;
+        let (copy, uv_copy) = copy_intersection_edge_curves(k, brep, cc)?;
         let copy_c = brep
             .insert_curve(copy)
             .ok_or(dangling("curve store is full"))?;
+        let uv_copy_c = uv_copy
+            .map(|curve| {
+                brep.insert_curve(curve)
+                    .ok_or(dangling("curve store is full"))
+            })
+            .transpose()?;
         let ivl = ci.interval;
 
         let old_face = ci.mid.face_object();
@@ -2916,7 +2923,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             v1,
             v2,
             copy_c,
-            None,
+            uv_copy_c,
             ivl,
             OrientType::Same,
             self.this_approx_tol_3d,
@@ -3993,6 +4000,31 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
     Ok(out)
 }
 
+/// Copies the paired geometry before insertion consumes it. Keep the original
+/// parameterisation: the edge's interval selects the same piece of both curves.
+/// A missing or stale UV curve leaves projection to `MakeEdgeInFace`.
+fn copy_intersection_edge_curves<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    cc: &CurveClassification<O>,
+) -> Result<(Curve, Option<Curve>)> {
+    let curve_3d = cc.curve().ok_or(dangling("classification without curve"))?;
+    let copy = geometry
+        .curve(curve_3d)
+        .ok_or(dangling("curve handle cannot be resolved"))?
+        .copy(k)?;
+    let uv_copy = cc
+        .uv_curve1()
+        .map(|uv| {
+            geometry
+                .curve(uv)
+                .ok_or(dangling("UV curve handle cannot be resolved"))?
+                .copy(k)
+        })
+        .transpose()?;
+    Ok((copy, uv_copy))
+}
+
 // ---- mate storage of the merge stages (co-ported by boolean.merge_p1, PR #163) -----------
 
 // The same SetSubset operation for generic handles and the concrete merge adapter.
@@ -4315,6 +4347,7 @@ mod tests {
     use super::*;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::solution_array::{Solution, SolutionArray};
+    use crate::math::Vec3;
 
     /// A handle: a kind and an index.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -4348,6 +4381,149 @@ mod tests {
     const E1: H = H(1, 1);
     const F0: H = H(2, 0);
     const F1: H = H(2, 1);
+
+    struct Curves(Vec<Curve>);
+
+    impl ClassGeometry<H> for Curves {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            self.0.get(o.1 as usize)
+        }
+        fn surface(&self, _o: H) -> Option<&crate::surface::surface::Surface> {
+            None
+        }
+        fn volume(&self, _o: H) -> Option<&crate::surface::volume::Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+    }
+
+    #[test]
+    fn intersection_edge_copies_each_faces_uv_with_its_parameterisation() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+        let k = Kernel::default();
+        let domain = Extent1d::from_min_max(-3.0, 7.0);
+        let mut curves = Vec::new();
+        // One curved 3D intersection and two different surface parameterisations.
+        for (dim, y, z) in [(3, 2.0, 4.0), (2, 0.25, NOZ), (2, -2.0, NOZ)] {
+            curves.push(Curve::from(
+                BSplineCurve::from_data(
+                    dim,
+                    2,
+                    5,
+                    2,
+                    &[
+                        CPoint::new(0.0, y, z, NOW),
+                        CPoint::new(0.5, y + 0.5, z, NOW),
+                        CPoint::new(1.0, y, z, NOW),
+                    ],
+                    &[-3.0, -3.0, -3.0, 7.0, 7.0, 7.0],
+                )
+                .unwrap(),
+            ));
+        }
+        let geometry = Curves(curves);
+        // Two subintervals can consume independent copies of the same trace.
+        for (face_uv, interval) in [
+            (H(4, 1), Extent1d::from_min_max(-2.0, 1.0)),
+            (H(4, 2), Extent1d::from_min_max(1.0, 6.0)),
+        ] {
+            let cc = new_curve_classification(&k, H(4, 0), &domain, Some(face_uv), 1e-6).unwrap();
+            let (mut xyz, uv) = copy_intersection_edge_curves(&k, &geometry, &cc).unwrap();
+            let mut uv = uv.unwrap();
+            assert_eq!(xyz.natural_interval(), domain);
+            assert_eq!(uv.natural_interval(), domain);
+            for t in [interval.min(), interval.mid(), interval.max()] {
+                assert_eq!(
+                    xyz.evaluate_point(&k, t).unwrap(),
+                    geometry.0[0].evaluate_point(&k, t).unwrap()
+                );
+                assert_eq!(
+                    uv.evaluate_point(&k, t).unwrap(),
+                    geometry
+                        .curve(face_uv)
+                        .unwrap()
+                        .evaluate_point(&k, t)
+                        .unwrap()
+                );
+            }
+            let mut ivl = interval;
+            xyz.trim(
+                &k,
+                &mut ivl,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )
+            .unwrap();
+            uv.trim(
+                &k,
+                &mut ivl,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )
+            .unwrap();
+            assert_eq!(geometry.0[0].natural_interval(), domain);
+            assert_eq!(geometry.curve(face_uv).unwrap().natural_interval(), domain);
+        }
+    }
+
+    #[test]
+    fn intersection_edge_projects_only_when_current_uv_is_unavailable() {
+        let k = Kernel::default();
+        let curve = Curve::from(crate::curve::line::Line::from_points(
+            Vec3::ZERO,
+            Vec3::new(1.0, 1.0, 0.0),
+            3,
+        ));
+        let domain = curve.natural_interval();
+        let geometry = Curves(vec![curve]);
+        let mut cc = new_curve_classification(&k, H(4, 0), &domain, None, 1e-6).unwrap();
+        assert!(copy_intersection_edge_curves(&k, &geometry, &cc)
+            .unwrap()
+            .1
+            .is_none());
+        cc.set_uv_curve1(Some(H(4, 99)));
+        assert!(matches!(
+            copy_intersection_edge_curves(&k, &geometry, &cc),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        cc.set_uv_curve1(Some(H(4, 0)));
+        cc.set_intersect_data(None, None, None, false, None);
+        assert_eq!(cc.any_uv_curve1(), Some(H(4, 0)));
+        assert_eq!(cc.uv_curve1(), None);
+        assert!(copy_intersection_edge_curves(&k, &geometry, &cc)
+            .unwrap()
+            .1
+            .is_none());
+    }
+
+    #[test]
+    fn intersection_uv_copy_preserves_analytic_kind() {
+        let k = Kernel::default();
+        let xyz = Curve::from(crate::curve::line::Line::from_points(
+            Vec3::ZERO,
+            Vec3::new(1.0, 1.0, 0.0),
+            3,
+        ));
+        let uv = Curve::from(crate::curve::line::Line::from_points(
+            Vec3::new(2.0, 3.0, 0.0),
+            Vec3::new(4.0, 5.0, 0.0),
+            2,
+        ));
+        let domain = xyz.natural_interval();
+        let geometry = Curves(vec![xyz, uv]);
+        let cc = new_curve_classification(&k, H(4, 0), &domain, Some(H(4, 1)), 1e-6).unwrap();
+        let (_, copy) = copy_intersection_edge_curves(&k, &geometry, &cc).unwrap();
+        let copy = copy.unwrap();
+        assert!(matches!(copy.kind(), CurveKind::Line(_)));
+        for t in [domain.min(), domain.mid(), domain.max()] {
+            assert_eq!(
+                copy.evaluate_point(&k, t).unwrap(),
+                geometry.0[1].evaluate_point(&k, t).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn mates_follow_the_maps() {
