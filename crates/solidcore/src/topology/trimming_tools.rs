@@ -1955,6 +1955,7 @@ pub fn is_loop_uv_gap_within_tolerance(
             Err(_) => return Ok(false),
         },
         SurfaceKind::SurfOfRevolution(s) => Cow::Borrowed(s.base()),
+        SurfaceKind::SurfOfExtrusion(s) => Cow::Borrowed(s.base()),
         SurfaceKind::Cone(s) => Cow::Borrowed(s.rev().base()),
         SurfaceKind::Sphere(s) => Cow::Borrowed(s.base().base()),
         SurfaceKind::Torus(s) => Cow::Borrowed(s.base().base()),

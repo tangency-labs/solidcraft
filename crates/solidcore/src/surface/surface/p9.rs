@@ -77,6 +77,7 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
             ))
         }
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
+        SurfaceKind::SurfOfExtrusion(s) => Ok(Cow::Borrowed(s.base())),
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

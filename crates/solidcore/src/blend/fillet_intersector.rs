@@ -675,6 +675,7 @@ fn crv_on_surf(
     let bs = match surface.kind() {
         SurfaceKind::BSpline(s) => s.clone(),
         SurfaceKind::SurfOfRevolution(s) => s.base().clone(),
+        SurfaceKind::SurfOfExtrusion(s) => s.base().clone(),
         _ => {
             // DISPATCH GAP: SmCrvOnSurf over a non-B-spline SmSurface whose Evaluate
             // overrides the B-spline one (curve.crv_on_surf, partial; no UNPORTED

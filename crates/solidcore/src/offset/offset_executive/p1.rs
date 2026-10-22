@@ -1097,6 +1097,9 @@ impl OffsetExecutive {
             SurfaceKind::SurfOfRevolution(surface) if surface.base().gw_nurb().is_none() => {
                 ignore_status(surface.make_nurb(kernel))?;
             }
+            SurfaceKind::SurfOfExtrusion(surface) if surface.base().gw_nurb().is_none() => {
+                ignore_status(surface.make_nurb(kernel))?;
+            }
             _ => {}
         }
         let original_faceuse = faceuse;

@@ -1211,6 +1211,12 @@ fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
             *s.base_mut().out_of_bounds_enabled_mut() = true;
             Cow::Owned(Surface::from(s))
         }
+        SurfaceKind::SurfOfExtrusion(s) => {
+            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
+            let mut s = s.as_ref().clone();
+            *s.base_mut().out_of_bounds_enabled_mut() = true;
+            Cow::Owned(Surface::from(s))
+        }
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

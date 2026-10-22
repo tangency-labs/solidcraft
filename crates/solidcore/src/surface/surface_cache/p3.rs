@@ -956,6 +956,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     Some(std::borrow::Cow::Owned(tmp.base().clone()))
                 }
             }
+            SurfaceKind::SurfOfExtrusion(s) => {
+                if s.base().gw_nurb().is_some() {
+                    Some(std::borrow::Cow::Borrowed(s.base()))
+                } else {
+                    let mut tmp = (**s).clone();
+                    tmp.make_nurb(k)?;
+                    Some(std::borrow::Cow::Owned(tmp.base().clone()))
+                }
+            }
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)

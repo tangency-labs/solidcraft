@@ -2446,6 +2446,12 @@ fn transformed_surface_base(
             }
             Some(torus.base().base().clone())
         }
+        SurfaceKind::SurfOfExtrusion(extrusion) => {
+            if extrusion.base().gw_nurb().is_none() {
+                crate::error::ignore_status(extrusion.make_nurb(k))?;
+            }
+            Some(extrusion.base().clone())
+        }
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

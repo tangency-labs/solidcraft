@@ -398,7 +398,10 @@ fn inexact(b: &Brep, types: &ImportTypes, eus: &[EdgeuseId]) -> Option<Output> {
                 15012 | 15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCone)"),
                 15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere)"),
                 15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus)"),
-                15030 => ("surface.surface_p2", "SurfaceKind::SurfOfExtrusion (SmSurfOfExtrusion)"),
+                15030 => (
+                "harness:analytic-geometry-export",
+                "SmSurfOfExtrusion face surface not exported exactly",
+            ),
                 _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
             };
             return Some(Output::deferred(unit, symbol));

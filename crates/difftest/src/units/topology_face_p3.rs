@@ -476,9 +476,9 @@ fn inexact_geometry(types: &[f64]) -> Result<Option<Output>, HarnessError> {
                     "SurfaceKind::Torus (SmTorus dispatch)",
                 ),
                 15030 => (
-                    "surface.surf_of_extrusion_p2",
-                    "SurfaceKind::SurfOfExtrusion",
-                ),
+                "harness:analytic-geometry-export",
+                "SmSurfOfExtrusion face surface not exported exactly",
+            ),
                 _ => ("topology.brep_p7", "SmBrep::ReadFromFile"),
             };
             return Ok(Some(Output::deferred(unit, symbol)));

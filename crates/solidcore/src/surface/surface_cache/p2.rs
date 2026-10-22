@@ -42,8 +42,8 @@
 //!   [`SolidError::Unported`] once it reaches it. The surface kinds are dispatched as
 //!   in [`crate::surface::surface_cache::p1`] (`SmIsoCurve::IsLinear` over the B-spline
 //!   kind only, which is all upstream reaches: the diagonal test runs for
-//!   `SmBSplineSurface_TYPE` and `SmSurfOfExtrusion_TYPE`, and no surface of extrusion
-//!   kind exists here yet).
+//!   `SmBSplineSurface_TYPE` and `SmSurfOfExtrusion_TYPE`, whose iso curves run the
+//!   inherited B-spline evaluation).
 //! - **Destructor.** `~SmSurfaceCache` deletes the tree, the continuity arrays, the
 //!   iso boundary curves, the alternate caches and the subdivision surfaces: all owned
 //!   by [`SurfaceCache`], dropped with it.
@@ -540,10 +540,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // node's subdomain.
         let cache_surface = self.surface().clone();
         let surface_to_test: Option<&Surface> = match cache_surface.kind() {
-            SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => None,
-            SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_) => {
-                None
-            }
+            SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+            | SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_) => None,
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
@@ -802,7 +805,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // remember need to check diagonal when all natural isoParam Curves are linear
         let mut check_diagonals = false;
-        if let SurfaceKind::BSpline(bss) = surface.kind() {
+        // (SmBSplineSurface_TYPE or SmSurfOfExtrusion_TYPE: the extrusion's iso curves
+        // evaluate its inherited B-spline evaluation)
+        let diagonal_candidate = match surface.kind() {
+            SurfaceKind::BSpline(bss) => Some(bss),
+            SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+            _ => None,
+        };
+        if let Some(bss) = diagonal_candidate {
             let tol = if opts.chord_height_tolerance > 0.0 {
                 opts.chord_height_tolerance / 2.0
             } else {
@@ -930,6 +940,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     SurfaceKind::Sphere(s) => s.base().base().copy_sub_patch(&node_uv),
                     SurfaceKind::Torus(s) => s.base().base().copy_sub_patch(&node_uv),
                     SurfaceKind::SurfOfRevolution(s) => s.base().copy_sub_patch(&node_uv),
+                    SurfaceKind::SurfOfExtrusion(s) => s.base().copy_sub_patch(&node_uv),
                     SurfaceKind::CurveBounded(_)
                     | SurfaceKind::Step(_)
                     | SurfaceKind::OffsetSurface(_)

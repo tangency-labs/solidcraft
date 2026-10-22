@@ -1170,8 +1170,12 @@ impl Surface {
         };
         let base = match self.kind() {
             SurfaceKind::BSpline(base) => base,
-            SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
-                // DISPATCH GAP: SmCrvOnSurf over an SmSurfOfRevolution (or a sphere or torus) (the ported
+            SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => {
+                // DISPATCH GAP: SmCrvOnSurf over an SmSurfOfRevolution (or a cone, sphere, torus or extrusion) (the ported
                 // CrvOnSurf holds an SmBSplineSurface and would drop the revolution's
                 // evaluation overrides), as in surface::surface::p11.
                 // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::SmCrvOnSurf (non-B-spline surface)

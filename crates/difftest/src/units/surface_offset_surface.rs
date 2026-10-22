@@ -1615,7 +1615,8 @@ fn degree_1_directions(k: &Kernel, off: &OffIn) -> Option<[bool; 2]> {
             | SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
-            | SurfaceKind::SurfOfRevolution(_) => {
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_) => {
                 let d = [
                     s.degree(SurfParamType::U) == 1,
                     s.degree(SurfParamType::V) == 1,

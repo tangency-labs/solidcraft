@@ -207,6 +207,10 @@ fn surface_read_from_db(
             "SmSurface virtuals of an SmSurfOfRevolution",
             "curve.crv_on_surf",
         )),
+        SurfaceKind::SurfOfExtrusion(_) => Err(SolidError::unported(
+            "SmSurface virtuals of an SmSurfOfExtrusion",
+            "curve.crv_on_surf",
+        )),
         SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
             "SmSurface virtuals of an SmOffsetSurface",
             "curve.crv_on_surf",

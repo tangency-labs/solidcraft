@@ -125,7 +125,7 @@ fn surface_approx_tol_3d(
 }
 
 /// `GetOutOfBoundsEnabled` of a surface that is an `SmBSplineSurface` (a B-spline
-/// surface, a plane or a surface of revolution); `None` for the other kinds
+/// surface, a plane, an analytic kind or a surface of revolution or extrusion); `None` for the other kinds
 /// (`SM_CAST_NONNULL_PTR(SmBSplineSurface, ..)` is null, so `SmTemporaryChangeValue`
 /// changes a local instead). An `SmSTEPSurface` is an `SmSurface`, not a B-spline surface.
 pub(crate) fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
@@ -136,6 +136,7 @@ pub(crate) fn out_of_bounds_enabled(surface: &Surface) -> Option<bool> {
         SurfaceKind::Sphere(s) => Some(s.base().is_out_of_bounds_enabled()),
         SurfaceKind::Torus(s) => Some(s.base().is_out_of_bounds_enabled()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.is_out_of_bounds_enabled()),
+        SurfaceKind::SurfOfExtrusion(s) => Some(s.is_out_of_bounds_enabled()),
         SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
@@ -155,6 +156,7 @@ pub(crate) fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
         SurfaceKind::Sphere(s) => *s.base.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::Torus(s) => *s.base.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
+        SurfaceKind::SurfOfExtrusion(s) => *s.base_mut().out_of_bounds_enabled_mut() = enabled,
         SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)

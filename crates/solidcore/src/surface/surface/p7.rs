@@ -783,6 +783,7 @@ impl Surface {
             | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::Step(_) => base_evaluate_normal(k, self, uv, u_side, v_side),
             SurfaceKind::CurveBounded(s) => s.evaluate_normal(k, uv, u_side, v_side),
             SurfaceKind::SrfInVolume(s) => s.evaluate_normal(k, uv, u_side, v_side),
@@ -822,6 +823,7 @@ impl Surface {
             | SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => {
@@ -884,6 +886,11 @@ impl Surface {
                 )
             }
             SurfaceKind::SurfOfRevolution(s) => {
+                let face_tol = self.face_zone_tol_3d()?;
+                Ok(planar_of(k, s.base(), &self.natural_uv_domain(), face_tol)?.is_planar(tol_3d))
+            }
+            // (and SmSurfOfExtrusion)
+            SurfaceKind::SurfOfExtrusion(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
                 Ok(planar_of(k, s.base(), &self.natural_uv_domain(), face_tol)?.is_planar(tol_3d))
             }

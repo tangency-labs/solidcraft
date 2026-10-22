@@ -638,6 +638,15 @@ impl TessSrfCache {
                         None => s.base().clone(),
                     }
                 }),
+                SurfaceKind::SurfOfExtrusion(s) => Some(if s.base().gw_nurb().is_some() {
+                    s.base().clone()
+                } else {
+                    let mut c = s.as_ref().clone();
+                    match ignore(c.make_nurb(k))? {
+                        Some(()) => c.base().clone(),
+                        None => s.base().clone(),
+                    }
+                }),
                 SurfaceKind::CurveBounded(_)
                 | SurfaceKind::Step(_)
                 | SurfaceKind::SrfInVolume(_)

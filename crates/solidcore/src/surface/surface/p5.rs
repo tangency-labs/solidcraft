@@ -485,6 +485,21 @@ impl Surface {
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
         match self.kind() {
+            // (SmSurfOfExtrusion inherits the B-spline override)
+            SurfaceKind::SurfOfExtrusion(s) => {
+                let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
+                    domain: domain.copied(),
+                    uv_iso_curve: want_uv_iso_curve,
+                };
+                let r = s
+                    .base()
+                    .create_iso_parametric_curve(k, param, iso_parameter, opts)?;
+                return Ok(IsoParametricCurve {
+                    curve: Curve::from(r.curve),
+                    max_gap_3d: r.max_gap_3d,
+                    uv_iso_curve: r.uv_iso_curve,
+                });
+            }
             SurfaceKind::BSpline(b) => {
                 let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
                     domain: domain.copied(),

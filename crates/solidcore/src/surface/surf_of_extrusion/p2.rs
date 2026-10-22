@@ -18,14 +18,15 @@
 //! | [`SurfOfExtrusion::read_from_db`]                 | `ReadFromDB` (static)                            |
 //!
 //! Deviations:
-//! - **Not a [`SurfaceKind`].** The surface does not join
-//!   [`crate::surface::surface::SurfaceKind`]: the `SmSurface` dispatchers of
-//!   [`Surface`] take no [`Kernel`], which every edit, conversion and solve of a
-//!   surface of extrusion needs. So `GlobalSurfaceIntersect` takes its other surface
-//!   as an [`IntersectTarget`] (a plane, a cone, a surface of extrusion, or a
-//!   [`Surface`] of any ported kind), and [`Surface::read_from_db`] reads the record
-//!   of a surface of extrusion with [`SurfOfExtrusion::read_from_db`] but cannot
-//!   return it (see `plan/findings.md`).
+//! - **Free surfaces.** `GlobalSurfaceIntersect` takes its other surface as an
+//!   [`IntersectTarget`] (a plane, a cone, a surface of extrusion, or a [`Surface`] of
+//!   any kind); `IntersectWithPlane`'s classification runs on an ownerless [`Surface`]
+//!   stand-in of this surface, and its general intersection stays a named dispatch gap
+//!   (`surface.surface_p2`; see plan/findings.md). Through
+//!   [`crate::surface::surface::SurfaceKind::SurfOfExtrusion`] the `SmSurface` dispatch
+//!   passes the real surfaces instead (`global_surface_intersect_on`,
+//!   `intersect_with_plane_on`, with the plane's face tolerance for its boxes and the
+//!   plane/plane intersection).
 //! - **Outputs.** Out-params become return values ([`ExtrusionIntersection`]). Upstream
 //!   lets the caller pass `NULL` for each output array, but `IntersectWithPlane`,
 //!   `IntersectWithCylinder` and `IntersectWithSurfOfExtrusion` dereference the 3D
@@ -59,16 +60,9 @@
 //! - **`IsNurbSurfaceSurfOfExtrusion`** does not copy the attributes of the test
 //!   surface (`Notify(SM_NO_COPY, ..)`): a free [`BSplineSurface`] has none here.
 //!   `TrimWithDomain`'s edit notifications are not modelled either.
-//! - **Unported callees.** `IntersectWithPlane` of a linear or coplanar generator
-//!   intersects the generator's plane with the plane (`SmPlane::IntersectWithPlane`,
-//!   both planes taken as without owner, as [`Plane::intersect_with_plane`]) and, when
-//!   that gives a line, classifies it on this surface (`SmSurface::CurveOnClassify`,
-//!   which stops at `SmCurveClassification::IntersectNaturalBounds`, unit
-//!   `intersect.curve_class_p8`): that returns [`SolidError::Unported`], and the trimming below it is ported with the
-//!   classification. The general intersection `GlobalSurfaceIntersect` falls back to
-//!   needs `SmAdvSurfaceIntersector` on this surface, which is not a [`Surface`] (see
-//!   **Not a `SurfaceKind`** above), so it stays [`SolidError::Unported`] under the
-//!   `SmSurface` dispatch (`surface.surface_p2`), a dispatch gap.
+//! - **General intersection.** When a special case needs more, the general
+//!   intersection replaces its curves (`SmSurfaceIntersector::DoIntersection` resets
+//!   the output arrays upstream).
 //! - **`sm_IntersectGenerators` status.** `IntersectWithCylinder` and
 //!   `IntersectWithSurfOfExtrusion` ignore it as upstream: a failure keeps the curves
 //!   and types already added, with no more intersections needed (upstream clears the
@@ -86,17 +80,24 @@ use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{approx_tol3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::curve_class::CurveClassification;
+use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest as CurveBoxRequest;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest as SurfaceBoxRequest, IsoCurveOptions, SurfParamType,
 };
 use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::cone::Cone;
+use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
-use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType, CONE_TYPE};
+use crate::surface::surface::p2::{
+    base_global_surface_intersect, SurfaceIntersection, TsectCurveType, CONE_TYPE,
+};
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::volume::Volume;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 use super::p1::{
@@ -213,17 +214,64 @@ fn deg2rad(adeg: f64) -> f64 {
     adeg * (PI / 180.0)
 }
 
-/// `SmSurface::GlobalSurfaceIntersect` of a surface of extrusion: the general
-/// intersector.
-fn base_global_surface_intersect() -> Result<ExtrusionIntersection> {
-    // DISPATCH GAP: SmAdvSurfaceIntersector::SmAdvSurfaceIntersector is ported
-    // (intersect.adv_surface_intersector, partial; no UNPORTED marker), but it takes two
-    // `Surface`s and a surface of extrusion is no `SurfaceKind` yet (the SmSurface
-    // dispatch, unit surface.surface_p2; #76)
-    Err(SolidError::unported(
-        "SmAdvSurfaceIntersector (SurfaceKind::SurfOfExtrusion)",
-        "surface.surface_p2",
-    ))
+/// The handles of the classification `IntersectWithPlane` runs on this surface: the
+/// plane/plane line and this surface (upstream's pointers), plus the boundary
+/// temporaries the classification makes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClassifyHandle {
+    Curve,
+    Surface,
+    Temporary(usize, ClassObjectKind),
+}
+
+impl ClassObject for ClassifyHandle {
+    fn class_kind(&self) -> ClassObjectKind {
+        match self {
+            Self::Curve => ClassObjectKind::Curve,
+            Self::Surface => ClassObjectKind::Surface,
+            Self::Temporary(_, kind) => *kind,
+        }
+    }
+
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        Some(Self::Temporary(index, kind))
+    }
+}
+
+/// The geometry behind [`ClassifyHandle`]s.
+struct ClassifyGeometry<'a> {
+    curve: &'a Curve,
+    surface: &'a Surface,
+}
+
+impl ClassGeometry<ClassifyHandle> for ClassifyGeometry<'_> {
+    fn curve(&self, o: ClassifyHandle) -> Option<&Curve> {
+        (o == ClassifyHandle::Curve).then_some(self.curve)
+    }
+
+    fn surface(&self, o: ClassifyHandle) -> Option<&Surface> {
+        (o == ClassifyHandle::Surface).then_some(self.surface)
+    }
+
+    fn volume(&self, _: ClassifyHandle) -> Option<&Volume> {
+        None
+    }
+
+    fn point(&self, _: ClassifyHandle) -> Option<Point3> {
+        None
+    }
+}
+
+impl From<ExtrusionIntersection> for SurfaceIntersection {
+    fn from(x: ExtrusionIntersection) -> Self {
+        Self {
+            curves_3d: x.curves_3d,
+            surface1_uv_curves: x.surface1_uv_curves,
+            surface2_uv_curves: x.surface2_uv_curves,
+            curve_types: x.curve_types,
+            deviations: x.deviations,
+        }
+    }
 }
 
 impl SurfOfExtrusion {
@@ -259,7 +307,6 @@ impl SurfOfExtrusion {
         ang_tol_rad: Option<f64>,
     ) -> Result<ExtrusionIntersection> {
         // (the general intersection takes the edge flags and angle tolerance)
-        let _ = (use_surface_edges, ang_tol_rad);
 
         let plane = match other {
             IntersectTarget::Plane(p) => Some(p),
@@ -285,10 +332,80 @@ impl SurfOfExtrusion {
 
         // when bNeedNurbIntersection == TRUE, intersection was too complicated for
         // analytic intersectors
-        match special {
-            Some(r) if !r.needs_more_intersections => Ok(r),
-            _ => base_global_surface_intersect(),
+        if let Some(r) = special {
+            if !r.needs_more_intersections {
+                return Ok(r);
+            }
         }
+        // DISPATCH GAP (#76): SmSurface::GlobalSurfaceIntersect of a free extrusion. The
+        // general intersector runs on ownerless stand-ins of both surfaces in principle,
+        // but on surface.surf_of_extrusion_p2 gen0413/gen0448/gen0732 it returns no curves
+        // where the C++ finds some (plan/findings.md); the SmSurface dispatch
+        // (`global_surface_intersect_on`) runs it on the real surfaces.
+        let _ = (other, use_surface_edges, ang_tol_rad);
+        Err(SolidError::unported(
+            "SmAdvSurfaceIntersector (free SmSurfOfExtrusion)",
+            "surface.surface_p2",
+        ))
+    }
+
+    /// [`Self::global_surface_intersect`] of the surface `this` holding this extrusion
+    /// with the surface `other` (the `SmSurface` dispatch): the special cases of a
+    /// plane (with its face's tolerance), an `SmCone_TYPE` cone and a surface of
+    /// extrusion, then, where they need more, the general intersection of `this` and
+    /// `other` (which replaces the special case's curves).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::global_surface_intersect`].
+    #[allow(clippy::too_many_arguments)] // upstream's signature
+    pub(crate) fn global_surface_intersect_on(
+        &self,
+        k: &Kernel,
+        this: &Surface,
+        uv_domain: &Extent2d,
+        other: &Surface,
+        other_uv_domain: &Extent2d,
+        use_surface_edges: [bool; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
+    ) -> Result<SurfaceIntersection> {
+        let special = match other.kind() {
+            SurfaceKind::Plane(p) => Some(self.intersect_with_plane_on(
+                k,
+                this,
+                uv_domain,
+                p,
+                PlaneOwner::of(other)?,
+                other_uv_domain,
+                approx_tol_3d,
+            )?),
+            // (an SmCylinder is not SmCone_TYPE: the default branch)
+            SurfaceKind::Cone(c) if c.type_code() == CONE_TYPE => {
+                Some(self.intersect_with_cylinder(k, c, approx_tol_3d)?)
+            }
+            SurfaceKind::SurfOfExtrusion(s) => {
+                Some(self.intersect_with_surf_of_extrusion(k, s, approx_tol_3d)?)
+            }
+            _ => None,
+        };
+        if let Some(r) = special {
+            if !r.needs_more_intersections {
+                return Ok(SurfaceIntersection::from(r));
+            }
+        }
+        // (SmSurfaceIntersector::DoIntersection resets the output arrays: the special
+        // case's curves are dropped)
+        base_global_surface_intersect(
+            k,
+            this,
+            uv_domain,
+            other,
+            other_uv_domain,
+            use_surface_edges,
+            approx_tol_3d,
+            ang_tol_rad,
+        )
     }
 
     // ---- IntersectWithPlane -----------------------------------------------------------
@@ -322,12 +439,43 @@ impl SurfOfExtrusion {
     /// `intersect.curve_class_p8`); the status of
     /// the plane/plane intersection is ignored as upstream (a failure gives no
     /// curves).
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn intersect_with_plane(
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
         plane: &Plane,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+    ) -> Result<ExtrusionIntersection> {
+        // (a free surface: this surface as an ownerless stand-in, the plane faceless)
+        let this = Surface::from(self.clone_exact());
+        self.intersect_with_plane_on(
+            k,
+            &this,
+            uv_domain,
+            plane,
+            PlaneOwner::NoFace,
+            other_uv_domain,
+            approx_tol_3d,
+        )
+    }
+
+    /// [`Self::intersect_with_plane`] of the surface `this` holding this extrusion (the
+    /// classification's surface), with the owner of `plane` (its face's zone tolerance
+    /// expands the plane's boxes, as `GetFace()->GetTolerance()` upstream).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::intersect_with_plane`].
+    #[allow(clippy::too_many_lines)] // one upstream function
+    #[allow(clippy::too_many_arguments)] // upstream's arguments and the owners
+    pub(crate) fn intersect_with_plane_on(
+        &self,
+        k: &Kernel,
+        this: &Surface,
+        uv_domain: &Extent2d,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
     ) -> Result<ExtrusionIntersection> {
@@ -377,12 +525,13 @@ impl SurfOfExtrusion {
             //  comes before its first output, which it resets with the needs-more
             //  flag, so a failure is "no curves, no more intersections")
             let plane_tol = approx_tol_3d.map(|t| approx_tol3d(k, t));
-            let (needs_more, plane_x) = match plane.intersect_with_plane(
+            let (needs_more, plane_x) = match plane.intersect_with_plane_owned(
                 k,
                 other_uv_domain,
                 &this_plane,
                 &this_plane.step_uv_domain(),
                 plane_tol,
+                [plane_owner, PlaneOwner::NoFace],
             ) {
                 Ok(r) => r,
                 Err(e) if e.is_unported() => return Err(e),
@@ -395,19 +544,73 @@ impl SurfOfExtrusion {
                 return Ok(out);
             }
 
-            // arrive here when two planes intersect in one line: classify the
-            // 3dCurves against the natural boundaries of this surface (for trimming)
-            // with an SmCurveClassification over the line's natural interval at
-            // dTol, then add the intervals inside it (the whole line, or a trimmed
-            // copy), crossing
-            // UNPORTED(intersect.curve_class_p8): SmCurveClassification::IntersectNaturalBounds
-            // (SmSurface::CurveOnClassify resets the classification, then classifies
-            // against the natural bounds; a surface of extrusion is not a Surface
-            // the classification can take yet, see the module docs)
-            return Err(SolidError::unported(
-                "SmCurveClassification::IntersectNaturalBounds",
-                "intersect.curve_class_p8",
-            ));
+            // arrive here when two planes intersect in one line
+            let mut lines = plane_x.curves_3d;
+            if lines.is_empty() {
+                return Err(SolidError::sm_err(OP_PLANE));
+            }
+            let line = lines.swap_remove(0);
+            let line_ivl = line.natural_interval();
+
+            // classify the 3dCurves against the natural boundaries of this surface (for
+            // trimming)
+            let mut classification =
+                CurveClassification::with_curve_interval(k, ClassifyHandle::Curve, line_ivl, tol);
+            this.curve_on_classify(
+                k,
+                ClassifyHandle::Surface,
+                &ClassifyGeometry {
+                    curve: &line,
+                    surface: this,
+                },
+                &mut classification,
+            )?;
+
+            // for every classification interval in this surface (the line moves to the
+            // output with the first whole-curve interval; later copies copy it there)
+            let mut line = Some(line);
+            let mut moved_to = 0;
+            for interval in classification.intervals() {
+                // skip intervals outside the surface
+                if interval.mid.point_class() == PointClassType::Unknown {
+                    continue;
+                }
+
+                // add interval to output
+                let mut ivl = *interval.interval();
+
+                // quick case - the whole curve
+                if ivl.are_equal(&line_ivl, EFF_ZERO) {
+                    let whole = match line.take() {
+                        Some(l) => {
+                            moved_to = out.curves_3d.len();
+                            l
+                        }
+                        None => out
+                            .curves_3d
+                            .get(moved_to)
+                            .ok_or(SolidError::sm_err(OP_PLANE))?
+                            .clone(),
+                    };
+                    out.curves_3d.push(whole);
+                    out.curve_types.push(TsectCurveType::Crossing);
+                    continue;
+                }
+
+                // else - add a trimmed curve to the output (Trim may snap the
+                // interval to existing knots; statuses ignored upstream)
+                let source = match line.as_ref() {
+                    Some(l) => l,
+                    None => out
+                        .curves_3d
+                        .get(moved_to)
+                        .ok_or(SolidError::sm_err(OP_PLANE))?,
+                };
+                let mut curve = source.copy(k)?;
+                ignore_status(curve.trim(k, &mut ivl, TrimMode::Notify))?;
+                out.curves_3d.push(curve);
+                out.curve_types.push(TsectCurveType::Crossing);
+            }
         }
         // When GenCurve is planar with an independent sweep direction
         // and crPlane and plane containing GenCurve are parallel
@@ -455,6 +658,8 @@ impl SurfOfExtrusion {
             let plane_req = SurfaceBoxRequest {
                 pseudo: true,
                 expand_by_zone_tol: true,
+                // (the zone tolerance of the plane's face)
+                expand_tolerance: plane_owner.expand_tolerance()?,
                 ..SurfaceBoxRequest::default()
             };
             let plane_nurb = plane.base_with_nurb()?;
@@ -1322,11 +1527,11 @@ mod tests {
     }
 
     #[test]
-    fn linear_generator_line_waits_on_the_classification() {
+    fn linear_generator_line_is_classified_on_the_surface() {
         let k = k();
         let s = line_extrusion(&k);
         let plane = Plane::from_normal(Point3::new(0.5, 0.0, 0.0), Vec3::X);
-        let e = s
+        let r = s
             .intersect_with_plane(
                 &k,
                 &s.base().natural_uv_domain(),
@@ -1334,8 +1539,12 @@ mod tests {
                 &plane.step_uv_domain(),
                 None,
             )
-            .unwrap_err();
-        assert!(e.is_unported());
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        assert!(!r.curves_3d.is_empty());
+        assert_eq!(r.curves_3d.len(), r.curve_types.len());
+        assert!(r.curve_types.iter().all(|t| *t == TsectCurveType::Crossing));
+        assert_eq!(r.surface1_uv_curves.len(), r.curves_3d.len());
     }
 
     #[test]

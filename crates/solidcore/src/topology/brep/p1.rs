@@ -2008,6 +2008,7 @@ fn bspline_surface(surface: &Surface) -> Result<&BSplineSurface> {
         SurfaceKind::BSpline(s) => Ok(s),
         SurfaceKind::Plane(p) => Ok(p.base()),
         SurfaceKind::SurfOfRevolution(s) => Ok(s.base()),
+        SurfaceKind::SurfOfExtrusion(s) => Ok(s.base()),
         // Upstream passes any SmSurface*; the port of SmBSplineSurface::CreateCornerBlend
         // takes B-spline neighbours only (its Deviations): the other kinds are that
         // partial unit's own unported part.

@@ -674,6 +674,7 @@ impl SurfOfRevolution {
             // (an SmCylinder is not SmCone_TYPE, an SmTorus not SmSurfOfRevolution_TYPE:
             // the default branch)
             SurfaceKind::Torus(_)
+            | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::Cone(_)
             | SurfaceKind::CurveBounded(_)
@@ -737,6 +738,8 @@ impl SurfOfRevolution {
         let plane_base;
         let tgt: &BSplineSurface = match test_surface.kind() {
             SurfaceKind::BSpline(s) => s,
+            // (an SmSurfOfExtrusion is an SmBSplineSurface: its NURB is tested)
+            SurfaceKind::SurfOfExtrusion(s) => s.base(),
             SurfaceKind::Plane(p) => {
                 plane_base = p.base_for_query();
                 &plane_base

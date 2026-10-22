@@ -1957,6 +1957,7 @@ impl Surface {
             | SurfaceKind::Torus(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SrfInVolume(_)
             | SurfaceKind::Step(_)

@@ -232,8 +232,8 @@ pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
         let (unit, symbol) = match (surface_type, surface_kind_gap(surface_type)) {
             (_, Some(symbol)) => ("surface.surface_p2", symbol),
             (15030, None) => (
-                "surface.surf_of_extrusion_p2",
-                "SurfaceKind::SurfOfExtrusion",
+                "harness:analytic-geometry-export",
+                "SmSurfOfExtrusion face surface not exported exactly",
             ),
             _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
         };

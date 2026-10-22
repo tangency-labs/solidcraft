@@ -304,6 +304,7 @@ fn bspline_surface(surface: &Surface) -> Result<&BSplineSurface> {
         SurfaceKind::BSpline(s) => Ok(s),
         SurfaceKind::Plane(p) => Ok(p.base()),
         SurfaceKind::SurfOfRevolution(s) => Ok(s.base()),
+        SurfaceKind::SurfOfExtrusion(s) => Ok(s.base()),
         // UNPORTED(nurbs.b_spline_surface_n_lib_p2): SmBSplineSurface::CreateCornerBlend with a non-B-spline neighbour surface
         _ => Err(unported(
             "SmBSplineSurface::CreateCornerBlend (non-B-spline neighbour SmSurface)",
@@ -1435,6 +1436,9 @@ impl FilletCorner {
                     SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
                     SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
                     SurfaceKind::SurfOfRevolution(r) => {
+                        *r.base_mut().out_of_bounds_enabled_mut() = true;
+                    }
+                    SurfaceKind::SurfOfExtrusion(r) => {
                         *r.base_mut().out_of_bounds_enabled_mut() = true;
                     }
                     SurfaceKind::Cone(c) => {

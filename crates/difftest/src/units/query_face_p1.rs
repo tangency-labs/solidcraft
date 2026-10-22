@@ -260,9 +260,9 @@ pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<O
                 15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere)"),
                 15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus)"),
                 15030 => (
-                    "surface.surface_p2",
-                    "SurfaceKind::SurfOfExtrusion (SmSurfOfExtrusion)",
-                ),
+                "harness:analytic-geometry-export",
+                "SmSurfOfExtrusion face surface not exported exactly",
+            ),
                 _ => (
                     HARNESS_ANALYTIC_IMPORT,
                     "analytic face surface in the B-rep export",

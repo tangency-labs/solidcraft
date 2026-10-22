@@ -27,7 +27,8 @@ pub fn flag(b: bool) -> f64 {
 /// The exact head of an analytic face surface in the shared B-rep graph exports
 /// (`harness/cpp/shim/sc_analytic_export.h`), read after its kind code `2`:
 /// `type version surf_oob gen_oob nbytes byte[nbytes]`, the surface's upstream binary
-/// database record (`SmSurfOfRevolution`, `SmSphere` or `SmTorus`) and the out-of-bounds flags the
+/// database record (`SmSurfOfRevolution`, `SmSphere`, `SmTorus` or `SmSurfOfExtrusion`)
+/// and the out-of-bounds flags the
 /// record does not hold. The regular surface block (the B-spline part) follows it; the
 /// caller reads that too and checks it with [`check_exact_base`].
 ///
@@ -44,7 +45,9 @@ pub fn read_exact_surface(
 ) -> Result<Option<solidcore::surface::surface::Surface>, crate::HarnessError> {
     use solidcore::kernel::Kernel;
     use solidcore::surface::surf_of_revolution::SurfOfRevolution;
-    use solidcore::surface::surface::p2::{SPHERE_TYPE, SURF_OF_REVOLUTION_TYPE, TORUS_TYPE};
+    use solidcore::surface::surface::p2::{
+        SPHERE_TYPE, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE, TORUS_TYPE,
+    };
     use solidcore::surface::surface::{Surface, SurfaceKind};
     use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
     use solidcore::SolidError;
@@ -67,7 +70,11 @@ pub fn read_exact_surface(
         }
         bytes.push(b as u8);
     }
-    if ty != SURF_OF_REVOLUTION_TYPE && ty != SPHERE_TYPE && ty != TORUS_TYPE {
+    if ty != SURF_OF_REVOLUTION_TYPE
+        && ty != SPHERE_TYPE
+        && ty != TORUS_TYPE
+        && ty != SURF_OF_EXTRUSION_TYPE
+    {
         return Err(harness(format!("export: exact surface of type {ty}")));
     }
     let k = Kernel::default();
@@ -86,6 +93,11 @@ pub fn read_exact_surface(
     }
     // the flags beside the record: SetOutOfBoundsEnabled sets the surface's and the
     // generator's, then the surface's own is put back
+    if let SurfaceKind::SurfOfExtrusion(e) = s.kind_mut() {
+        e.set_out_of_bounds_enabled(gen_oob);
+        *e.base_mut().out_of_bounds_enabled_mut() = surf_oob;
+        return Ok(Some(s));
+    }
     let rev: &mut SurfOfRevolution = match s.kind_mut() {
         SurfaceKind::SurfOfRevolution(r) => r,
         SurfaceKind::Sphere(r) => r.base_mut(),
@@ -117,6 +129,7 @@ pub fn check_exact_base(
         SurfaceKind::SurfOfRevolution(s) => s.base(),
         SurfaceKind::Sphere(s) => s.base().base(),
         SurfaceKind::Torus(s) => s.base().base(),
+        SurfaceKind::SurfOfExtrusion(s) => s.base(),
         _ => {
             return Err(crate::HarnessError::new(
                 "export: unexpected exact surface kind",

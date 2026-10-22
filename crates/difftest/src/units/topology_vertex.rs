@@ -1547,7 +1547,10 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCylinder dispatch)"),
             15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere dispatch)"),
             15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus dispatch)"),
-            15030 => ("surface.surf_of_extrusion_p2", "SurfaceKind::SurfOfExtrusion"),
+            15030 => (
+                "harness:analytic-geometry-export",
+                "SmSurfOfExtrusion face surface not exported exactly",
+            ),
             _ => ("topology.brep_p10", "SmBrep::MakeTopologyFromData"),
         };
         return Ok(Output::deferred(unit, symbol));

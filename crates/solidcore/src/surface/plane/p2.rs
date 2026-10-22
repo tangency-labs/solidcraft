@@ -138,6 +138,21 @@ impl PlaneOwner {
     }
 }
 
+impl PlaneOwner {
+    /// The `expand_tolerance` of a box request on the plane's B-spline part: its face's
+    /// tolerance, `None` (the ownerless `SM_ZONE_TOL_3D`) without face.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] (`SmFace::GetTolerance`) for a bare face handle.
+    pub(crate) fn expand_tolerance(self) -> Result<Option<f64>> {
+        match self {
+            Self::NoFace => Ok(None),
+            Self::Face(_) => zone_tolerance(self).map(Some),
+        }
+    }
+}
+
 /// The tolerance of a plane's face (`GetFace()->GetTolerance()`, when the plane has a
 /// face), else `SM_ZONE_TOL_3D` (the `bExpandPosBoxesByZoneTol3d` expansion of
 /// `CalculateBoundingBox`).
@@ -1459,8 +1474,23 @@ pub(crate) fn global_surface_intersect(
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, out) = (need, x);
         }
-        // (the extrusion special case needs a surface kind that is not ported yet; an
-        // SmTorus has no special case: the default branch)
+        // SurfOfExtrusion/plane special case intersection: the orders and the UV curves
+        // are swapped
+        SurfaceKind::SurfOfExtrusion(ext) => {
+            let mut x = ext.intersect_with_plane_on(
+                k,
+                other,
+                other_uv_domain,
+                plane,
+                PlaneOwner::of(this)?,
+                uv_domain,
+                approx_tol_3d,
+            )?;
+            core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
+            need_nurb_intersection = x.needs_more_intersections;
+            out = SurfaceIntersection::from(x);
+        }
+        // (an SmTorus has no special case: the default branch)
         SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)

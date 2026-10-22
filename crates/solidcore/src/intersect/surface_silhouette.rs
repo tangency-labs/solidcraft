@@ -143,6 +143,7 @@ fn evaluate_geometric_at(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Ge
         | SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => surface.evaluate_geometric(k, uv, Side::Left, Side::Left),
@@ -168,6 +169,7 @@ fn evaluate_normal_section(
         | SurfaceKind::BSpline(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {

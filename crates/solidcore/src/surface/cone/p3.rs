@@ -916,6 +916,7 @@ impl Cone {
                 SurfaceKind::SurfOfRevolution(r) => IntersectTarget::Revolution(r),
                 SurfaceKind::Cone(c) => IntersectTarget::Cone(c.as_ref()),
                 SurfaceKind::Sphere(s) => IntersectTarget::Sphere(s.as_ref()),
+                SurfaceKind::SurfOfExtrusion(e) => IntersectTarget::Extrusion(e.as_ref()),
                 _ => other,
             },
             _ => other,

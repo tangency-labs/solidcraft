@@ -1171,6 +1171,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                             | SurfaceKind::Sphere(_)
                             | SurfaceKind::Torus(_)
                             | SurfaceKind::SurfOfRevolution(_)
+                            | SurfaceKind::SurfOfExtrusion(_)
                             | SurfaceKind::Step(_)
                             | SurfaceKind::OffsetSurface(_)
                             | SurfaceKind::SrfInVolume(_) => None,

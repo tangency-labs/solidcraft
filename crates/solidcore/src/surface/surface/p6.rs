@@ -1878,6 +1878,19 @@ pub(super) fn create_iso_parametric_curve(
             )?;
             Ok((Curve::from(iso.curve), iso.max_gap_3d))
         }
+        // (SmSurfOfExtrusion inherits the B-spline override)
+        SurfaceKind::SurfOfExtrusion(s) => {
+            let iso = s.base().create_iso_parametric_curve(
+                k,
+                dir,
+                value,
+                IsoCurveOptions {
+                    domain: domain.copied(),
+                    uv_iso_curve: false,
+                },
+            )?;
+            Ok((Curve::from(iso.curve), iso.max_gap_3d))
+        }
         SurfaceKind::Plane(p) => {
             let iso = p.create_iso_parametric_curve(dir, value, domain, false)?;
             Ok((Curve::from(iso.curve), iso.max_gap_3d))
@@ -1927,6 +1940,7 @@ fn is_singularity(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_) => {
             let r = surface.is_singularity(k, uv, tol, false)?;
@@ -1948,6 +1962,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_) => Ok(surface.is_on_seam(k, uv, None)?.on_seam),
     }

@@ -196,6 +196,7 @@ pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::Sphere(s) => Some(s.base().base()),
         SurfaceKind::Torus(s) => Some(s.base().base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
+        SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -284,6 +285,7 @@ pub(super) fn calculate_bounding_box(
         SurfaceKind::Sphere(s) => s.base().base().calculate_bounding_box(k, domain, req),
         SurfaceKind::Torus(s) => s.base().base().calculate_bounding_box(k, domain, req),
         SurfaceKind::SurfOfRevolution(s) => s.base().calculate_bounding_box(k, domain, req),
+        SurfaceKind::SurfOfExtrusion(s) => s.base().calculate_bounding_box(k, domain, req),
         SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(k, p, domain, req),
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
             // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the
@@ -331,6 +333,7 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::BSpline(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
