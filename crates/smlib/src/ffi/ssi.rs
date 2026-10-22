@@ -110,6 +110,13 @@ unsafe impl Sync for SurfaceHandle {}
 unsafe impl Send for ResultHandle {}
 unsafe impl Sync for ResultHandle {}
 
+impl SurfaceHandle {
+    #[cfg_attr(not(feature = "native"), allow(dead_code))]
+    pub(crate) fn raw(&self) -> *const RawSurface {
+        self.0.as_ptr()
+    }
+}
+
 impl Drop for SurfaceHandle {
     fn drop(&mut self) {
         #[cfg(feature = "native")]

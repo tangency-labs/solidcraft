@@ -23,6 +23,7 @@ pub mod history;
 pub mod import;
 mod measure;
 mod ops;
+mod split;
 pub mod ssi;
 pub mod sweeps;
 pub mod trim;

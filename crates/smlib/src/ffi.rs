@@ -191,6 +191,7 @@ pub mod flat;
 pub mod history;
 pub mod measure;
 pub mod ops;
+pub mod split;
 pub mod ssi;
 pub mod sweeps;
 pub mod trim;
