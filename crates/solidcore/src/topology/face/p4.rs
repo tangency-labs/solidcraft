@@ -1712,3 +1712,229 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     out.has_problem = crossed_u || crossed_v || missing_u || missing_v;
     Ok(out)
 }
+
+// ---- B-rep classification handles ------------------------------------------------------
+
+/// Operation name of [`BrepSeamObjects`].
+const OP_SEAM_OBJECTS: &str = "topology::face::p4::BrepSeamObjects";
+
+/// The classification objects of face `f`'s own B-rep for a [`has_seam_problem`] caller
+/// that holds [`LoopObject`] handles only (`SmFaceProps::SetProps_Stage2`, the seam
+/// checks of `SmFace::MoveSeam` / `SmFace::SplitAtSeam`): upstream's `SmObject` pointers
+/// name the B-rep's own entities and geometry. The face, its surface, the B-rep
+/// topology, edge curves and UV trim curves are the handles [`LoopObject::from_face`],
+/// [`LoopObject::from_face_surface`], [`LoopObject::from_topology`],
+/// [`LoopObject::from_edge_curve`] and [`LoopObject::from_trim_curve`] name (and their
+/// inverses resolve); the seam curves are the handle type's temporaries
+/// ([`ClassObject::temporary`]). Tolerances, points and vertex/face gaps are those
+/// stored in `b` (a gap is computed on a snapshot, as `GetVertexFaceGap` fills a lazy
+/// cache).
+#[derive(Debug)]
+pub struct BrepSeamObjects<'b, O> {
+    k: &'b Kernel,
+    b: &'b Brep,
+    f: FaceId,
+    face: O,
+    surface: Option<O>,
+}
+
+impl<'b, O: LoopObject> BrepSeamObjects<'b, O> {
+    /// The objects of face `f` of `b`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling face; [`SolidError::InvalidInput`] when
+    /// `O` cannot name the face, its surface, the B-rep topology, edge curves, trim
+    /// curves or the seam temporaries (a limitation of the handle type, not an upstream
+    /// status).
+    pub fn new(k: &'b Kernel, b: &'b Brep, f: FaceId) -> Result<Self> {
+        let no = || {
+            SolidError::invalid_input(
+                OP_SEAM_OBJECTS,
+                "classification handles cannot name the face's topology, curves or seam curves",
+            )
+        };
+        // a handle type names every entity of a kind or none (LoopObject), so the first
+        // ids answer for all
+        let e0 = EdgeId::from_index(0);
+        let eu0 = EdgeuseId::from_index(0);
+        let names_all = O::from_topology(EntityRef::Vertex(VertexId::from_index(0))).is_some()
+            && O::from_topology(EntityRef::Edge(e0)).is_some()
+            && O::from_topology(EntityRef::Vertexuse(VertexuseId::from_index(0))).is_some()
+            && O::from_topology(EntityRef::Edgeuse(eu0)).is_some()
+            && O::from_edge_curve(e0).is_some()
+            && O::from_trim_curve(eu0).is_some()
+            && [
+                SEAM_U_TEMPS.0,
+                SEAM_U_TEMPS.1,
+                SEAM_V_TEMPS.0,
+                SEAM_V_TEMPS.1,
+            ]
+            .iter()
+            .all(|&i| O::temporary(i, ClassObjectKind::Curve).is_some());
+        if !names_all {
+            return Err(no());
+        }
+        let surface = if b.face(f)?.surface.is_some() {
+            Some(O::from_face_surface(f).ok_or_else(no)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            k,
+            b,
+            f,
+            face: O::from_face(f).ok_or_else(no)?,
+            surface,
+        })
+    }
+
+    /// The B-rep entity `o` names (the face handle included).
+    fn entity(&self, o: O) -> Option<EntityRef> {
+        if o == self.face {
+            return Some(EntityRef::Face(self.f));
+        }
+        o.as_topology()
+    }
+
+    /// The handle of B-rep entity `t` ([`Self::new`] checked that `O` names topology, so
+    /// the face handle fallback is never taken).
+    fn topology(&self, t: EntityRef) -> O {
+        match t {
+            EntityRef::Face(f) if f == self.f => self.face,
+            _ => O::from_topology(t).unwrap_or(self.face),
+        }
+    }
+}
+
+impl<O: LoopObject> ClassGeometry<O> for BrepSeamObjects<'_, O> {
+    fn curve(&self, o: O) -> Option<&Curve> {
+        if let Some(e) = o.as_edge_curve() {
+            return self.b.edge(e).ok()?.curve.as_ref();
+        }
+        if let Some(eu) = o.as_trim_curve() {
+            return eu1::uv_trim_curve(self.b, eu).ok()?.0;
+        }
+        None
+    }
+
+    fn surface(&self, o: O) -> Option<&Surface> {
+        if self.surface == Some(o) {
+            return self.b.face(self.f).ok()?.surface.as_ref();
+        }
+        None
+    }
+
+    fn volume(&self, _o: O) -> Option<&Volume> {
+        None
+    }
+
+    fn point(&self, o: O) -> Option<Point3> {
+        self.classification_vertex_point(o)
+    }
+
+    fn classification_vertex_point(&self, vertex: O) -> Option<Point3> {
+        match self.entity(vertex)? {
+            EntityRef::Vertex(v) => self.b.vertex(v).ok().map(|v| v.point),
+            _ => None,
+        }
+    }
+
+    fn topology_zone_tol_3d(&self, object: O) -> Option<f64> {
+        match self.entity(object)? {
+            EntityRef::Vertex(v) => self.b.vertex(v).ok().map(|v| v.tolerance),
+            EntityRef::Edge(e) => self.b.edge(e).ok().map(|e| e.tolerance),
+            EntityRef::Face(f) => self.b.face(f).ok().map(|f| f.tolerance),
+            _ => None,
+        }
+    }
+
+    fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
+        let EntityRef::Vertex(v) = self.entity(vertex)? else {
+            return None;
+        };
+        let f = match face {
+            Some(h) => match self.entity(h)? {
+                EntityRef::Face(f) => f,
+                _ => return None,
+            },
+            // the face whose surface `surface` is (`SmSurface::GetFace`)
+            None => self
+                .b
+                .faces()
+                .iter()
+                .find(|(_, r)| r.surface.as_ref().is_some_and(|s| std::ptr::eq(s, surface)))
+                .map(|(f, _)| f)?,
+        };
+        let vu = vertex::vertexuse_of_face(self.b, v, Some(f)).ok()??;
+        let mut snapshot = self.b.clone();
+        let gap = vertexuse::vertex_face_gap(self.k, &mut snapshot, vu, false).ok()?;
+        Some(gap.map_or(0.0, |g| g.gap_3d))
+    }
+
+    fn topology_entity(&self, object: O) -> Option<(&Brep, EntityRef)> {
+        Some((self.b, self.entity(object)?))
+    }
+
+    fn topology_handle(&self, entity: EntityRef) -> Option<O> {
+        Some(self.topology(entity))
+    }
+}
+
+impl<O: LoopObject> CurveOnClassifyObjects<O> for BrepSeamObjects<'_, O> {
+    fn face(&self, f: FaceId) -> O {
+        self.topology(EntityRef::Face(f))
+    }
+
+    fn vertex(&self, v: VertexId) -> O {
+        self.topology(EntityRef::Vertex(v))
+    }
+
+    fn edge(&self, e: EdgeId) -> O {
+        self.topology(EntityRef::Edge(e))
+    }
+
+    fn vertexuse(&self, vu: VertexuseId) -> O {
+        self.topology(EntityRef::Vertexuse(vu))
+    }
+
+    fn edgeuse(&self, eu: EdgeuseId) -> O {
+        self.topology(EntityRef::Edgeuse(eu))
+    }
+
+    fn edge_curve(&self, e: EdgeId) -> O {
+        O::from_edge_curve(e).unwrap_or(self.face)
+    }
+
+    fn trim_curve(&self, eu: EdgeuseId) -> O {
+        O::from_trim_curve(eu).unwrap_or(self.face)
+    }
+
+    fn face_surface(&self, f: FaceId) -> Option<O> {
+        if f == self.f {
+            self.surface
+        } else {
+            None
+        }
+    }
+
+    fn loop_id(&self, tgt_loop: O) -> Option<LoopId> {
+        tgt_loop.as_loop()
+    }
+}
+
+/// `pFace->HasSeamProblem(..)` for a caller holding [`LoopObject`] handles only:
+/// [`has_seam_problem`] with the face's own B-rep objects ([`BrepSeamObjects`]).
+///
+/// # Errors
+///
+/// Those of [`BrepSeamObjects::new`] and [`has_seam_problem`].
+pub fn has_seam_problem_in_brep<O: LoopObject>(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    opts: HasSeamProblemOptions<'_, O>,
+) -> Result<SeamCheck<O>> {
+    let objects = BrepSeamObjects::new(k, b, f)?;
+    has_seam_problem(k, b, f, &objects, opts)
+}

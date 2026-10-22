@@ -56,7 +56,7 @@ use solidcore::intersect::point_class::{
 };
 use solidcore::heal::face_props::{FaceProps, LoopObject};
 use solidcore::kernel::Kernel;
-use solidcore::topology::{Brep, EdgeId, FaceId, LoopId};
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId};
 use solidcore::EntityRef;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -569,12 +569,21 @@ fn cpp(s: &Script) -> Result<Output, HarnessError> {
 enum H {
     Obj(usize, ClassObjectKind),
     Topo(EntityRef),
+    /// The surface of a face, an edge's curve, an edge use's UV trim curve and the
+    /// temporary (seam) curves of `SmFace::HasSeamProblem` (reached through
+    /// `SetProps_Stage2`; none of them is a pool object).
+    FaceSurface(FaceId),
+    EdgeCurve(EdgeId),
+    Trim(EdgeuseId),
+    Temp(usize),
 }
 
 impl ClassObject for H {
     fn class_kind(&self) -> ClassObjectKind {
         match self {
             H::Obj(_, k) => *k,
+            H::FaceSurface(_) => ClassObjectKind::Surface,
+            H::EdgeCurve(_) | H::Trim(_) | H::Temp(_) => ClassObjectKind::Curve,
             H::Topo(e) => match e {
                 EntityRef::Face(_) => ClassObjectKind::Face,
                 EntityRef::Loop(_) => ClassObjectKind::Loop,
@@ -589,11 +598,59 @@ impl ClassObject for H {
             },
         }
     }
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        (kind == ClassObjectKind::Curve).then_some(H::Temp(index))
+    }
 }
 
 impl LoopObject for H {
     fn from_loop(l: LoopId) -> Self {
         H::Topo(EntityRef::Loop(l))
+    }
+    fn as_loop(&self) -> Option<LoopId> {
+        match self {
+            H::Topo(EntityRef::Loop(l)) => Some(*l),
+            _ => None,
+        }
+    }
+    fn as_vertex(&self) -> Option<solidcore::topology::VertexId> {
+        match self {
+            H::Topo(EntityRef::Vertex(v)) => Some(*v),
+            _ => None,
+        }
+    }
+    fn from_face(f: FaceId) -> Option<Self> {
+        Some(H::Topo(EntityRef::Face(f)))
+    }
+    fn from_face_surface(f: FaceId) -> Option<Self> {
+        Some(H::FaceSurface(f))
+    }
+    fn from_topology(t: EntityRef) -> Option<Self> {
+        Some(H::Topo(t))
+    }
+    fn as_topology(&self) -> Option<EntityRef> {
+        match self {
+            H::Topo(t) => Some(*t),
+            _ => None,
+        }
+    }
+    fn from_edge_curve(e: EdgeId) -> Option<Self> {
+        Some(H::EdgeCurve(e))
+    }
+    fn as_edge_curve(&self) -> Option<EdgeId> {
+        match self {
+            H::EdgeCurve(e) => Some(*e),
+            _ => None,
+        }
+    }
+    fn from_trim_curve(eu: EdgeuseId) -> Option<Self> {
+        Some(H::Trim(eu))
+    }
+    fn as_trim_curve(&self) -> Option<EdgeuseId> {
+        match self {
+            H::Trim(eu) => Some(*eu),
+            _ => None,
+        }
     }
 }
 
@@ -619,7 +676,7 @@ impl ClassGeometry<H> for Pool {
                 Some(PoolObj::Curve(c)) => Some(c),
                 _ => None,
             },
-            H::Topo(_) => None,
+            _ => None,
         }
     }
     fn surface(&self, o: H) -> Option<&Surface> {
@@ -628,7 +685,7 @@ impl ClassGeometry<H> for Pool {
                 Some(PoolObj::Surface(s)) => Some(s),
                 _ => None,
             },
-            H::Topo(_) => None,
+            _ => None,
         }
     }
     fn volume(&self, _o: H) -> Option<&Volume> {
@@ -640,7 +697,7 @@ impl ClassGeometry<H> for Pool {
                 Some(PoolObj::Point(p)) => Some(*p),
                 _ => None,
             },
-            H::Topo(_) => None,
+            _ => None,
         }
     }
     fn classification_vertex_point(&self, o: H) -> Option<Vec3> {

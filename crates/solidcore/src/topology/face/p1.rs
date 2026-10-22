@@ -76,7 +76,7 @@
 //! - **`bUseJGU`** (`static constexpr FALSE` in `SplitAtSeam`) branches are dead code
 //!   upstream and are not ported. The `SmTemporaryChangeValue`s of `SplitAtSeam`
 //!   (`m_bEditingEnabled`, `GetDoingBooleanRef`) are not set: they guard
-//!   `HasSeamProblem` (unported) and `MergeIntervals`, whose port reads neither flag
+//!   `HasSeamProblem` and `MergeIntervals`, whose ports read neither flag
 //!   (its topology edits defer to `intersect.curve_class_p6`, the imprinting after
 //!   `GetPointObjZoneTol3d`). `SplitAtSeam` takes the caller's [`ClassGeometry`] for
 //!   the zone tolerances `MergeIntervals` reads.
@@ -96,9 +96,12 @@
 //!   new and the old surface, which have no identity in the B-rep model) stays
 //!   [`SolidError::Unported`], justified in `plan/findings.md` (`topology.face_p3`).
 //!   `CreateUVTrimCurves` is `topology::face::p3::create_uv_trim_curves`.
-//! - **Unported callees** return [`SolidError::Unported`]: `SmFace::GetUpwardLoopuses`,
-//!   `GetUpwardVertexuses`, `GetEdges`, `GetBrep` and `HasSeamProblem`
-//!   (`topology.face_p4`).
+//! - **`HasSeamProblem`** (`topology.face_p4`) runs on the face's own B-rep objects
+//!   ([`crate::topology::face::p4::has_seam_problem_in_brep`]), so the classification
+//!   handle type must name them. The seam curves its classifications name are the
+//!   handle type's temporaries (upstream's classifications own them); `SplitAtSeam`'s
+//!   merges read them through the caller's [`ClassGeometry`], and a handle it cannot
+//!   resolve is [`SolidError::InvalidInput`].
 //!   `SmEdgeuse::NormalizedEvaluate` and `GetOrCreateUVTrimCurve` call
 //!   [`crate::topology::edgeuse::p3`] (wired in PR #117).
 //!   `SmBrep::ReplaceSurface` is [`brep_p2::replace_surface`], which reaches
@@ -235,20 +238,32 @@ pub struct SeamProblem {
 
 /// `SmFace::HasSeamProblem(rCrvClassU, rCrvClassV, eCrossed, eMissing, eNearMiss,
 /// bTgtLoopsOnly)`: rebuilds the classifications and the problem.
+///
+/// The classifications name the face's own B-rep objects
+/// ([`crate::topology::face::p4::has_seam_problem_in_brep`]); the other optional
+/// arguments keep their defaults (periodicity tested, local face properties).
 fn has_seam_problem<O: LoopObject>(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _f: FaceId,
-    _crv_class_u: &mut CurveClassification<O>,
-    _crv_class_v: &mut CurveClassification<O>,
-    _problem: &mut SeamProblem,
-    _tgt_loops_only: bool,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    crv_class_u: &mut CurveClassification<O>,
+    crv_class_v: &mut CurveClassification<O>,
+    problem: &mut SeamProblem,
+    tgt_loops_only: bool,
 ) -> Result<bool> {
-    // UNPORTED(topology.face_p4): SmFace::HasSeamProblem
-    Err(SolidError::unported(
-        "SmFace::HasSeamProblem",
-        "topology.face_p4",
-    ))
+    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+        k,
+        b,
+        f,
+        crate::topology::face::p4::HasSeamProblemOptions {
+            outer_loop_only: tgt_loops_only,
+            ..Default::default()
+        },
+    )?;
+    *crv_class_u = check.class_u;
+    *crv_class_v = check.class_v;
+    *problem = check.problem;
+    Ok(check.has_problem)
 }
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation; default arguments: no

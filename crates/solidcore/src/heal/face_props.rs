@@ -61,8 +61,11 @@
 //!   of the reference build). The unreachable `SmCurveClassification::ReSet` branch of
 //!   `SetProps_Stage2` (the classifications are deleted by `ReSet(SM_PROPSTAGE_2)`
 //!   first) is kept and calls [`CurveClassification::reset`].
-//! - **Unported callees** (`UNPORTED` stubs): `SmFace::HasSeamProblem`
-//!   (`topology.face_p4`). The `SmLoop` queries (`topology.loopuse`),
+//! - **Callees.** `SmFace::HasSeamProblem` of [`FaceProps::set_props_stage2`] runs
+//!   [`crate::topology::face::p4::has_seam_problem_in_brep`] on the face's own B-rep
+//!   objects, so the handle type must name them
+//!   ([`crate::topology::face::p4::BrepSeamObjects`]; otherwise
+//!   [`SolidError::InvalidInput`]). The `SmLoop` queries (`topology.loopuse`),
 //!   `SmCurveClassification::ReSet` (`intersect.curve_class_p2`) and
 //!   `SmFace::ClassifyLoops` ([`crate::query::face::p4::classify_loops`], whose status
 //!   `SetProps_Stage3` ignores as upstream) are wired.
@@ -1145,22 +1148,37 @@ pub type SeamProblemFn<'f, O> = dyn FnMut(
 
 /// `m_pFace->HasSeamProblem(*m_pCrvClassU, *m_pCrvClassV, crossed, missing, nearMiss,
 /// FALSE, &m_bClosedU, &m_bClosedV, this)` for the callers of
-/// [`FaceProps::set_props_stage2`], which have no classification objects for
-/// [`crate::topology::face::p4::has_seam_problem`] (callers that have them use
-/// [`FaceProps::set_props_stage2_with`]).
+/// [`FaceProps::set_props_stage2`], which hold no classification objects: the face's own
+/// B-rep objects ([`crate::topology::face::p4::has_seam_problem_in_brep`]; callers that
+/// have their own objects use [`FaceProps::set_props_stage2_with`]). An `UNSURE` closed
+/// flag reads as `TRUE`; the returned flag is dropped, as upstream.
 fn face_has_seam_problem<O: LoopObject>(
-    _b: &Brep,
-    _f: FaceId,
-    _class_u: &mut CurveClassification<O>,
-    _class_v: &mut CurveClassification<O>,
-    _props: &mut FaceProps<O>,
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    class_u: &mut CurveClassification<O>,
+    class_v: &mut CurveClassification<O>,
+    props: &mut FaceProps<O>,
 ) -> Result<SeamProblem> {
-    // UNPORTED(topology.face_p4): SmFace::HasSeamProblem without a classification-object
-    // mapper (face::p4::has_seam_problem takes one; see set_props_stage2_with)
-    Err(SolidError::unported(
-        "SmFace::HasSeamProblem",
-        "topology.face_p4",
-    ))
+    let (closed_u, closed_v) = (props.closed_u != Tri::False, props.closed_v != Tri::False);
+    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+        k,
+        b,
+        f,
+        crate::topology::face::p4::HasSeamProblemOptions {
+            outer_loop_only: false,
+            periodic_u: Some(closed_u),
+            periodic_v: Some(closed_v),
+            face_props: Some(props),
+        },
+    )?;
+    *class_u = check.class_u;
+    *class_v = check.class_v;
+    Ok(SeamProblem {
+        crossed: check.problem.crossed,
+        missing: check.problem.missing,
+        near_miss: check.problem.near_miss,
+    })
 }
 
 /// `SmCurveClassification::ReSet()` of an existing seam classification.
@@ -1680,8 +1698,9 @@ impl<O: LoopObject> FaceProps<O> {
     ///
     /// `SM_ERR` ([`SolidError::Upstream`]) when `exe_heal_op` is before
     /// [`HealerOpType::FixTolsizes`]; [`SolidError::InvalidInput`] for a face without
-    /// surface or face use; [`SolidError::Unported`] for `SmFace::HasSeamProblem`
-    /// (`topology.face_p4`); the errors of the surface queries.
+    /// surface or face use, and for a handle type that cannot name the face's B-rep
+    /// objects (`SmFace::HasSeamProblem`, see the module docs); the errors of the
+    /// surface queries and the seam check.
     pub fn set_props_stage2(
         &mut self,
         k: &Kernel,
@@ -1696,7 +1715,7 @@ impl<O: LoopObject> FaceProps<O> {
             face,
             face_index,
             exe_heal_op,
-            &mut |_, b, f, cu, cv, p| face_has_seam_problem(b, f, cu, cv, p),
+            &mut |k, b, f, cu, cv, p| face_has_seam_problem(k, b, f, cu, cv, p),
         )
     }
 
