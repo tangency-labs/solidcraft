@@ -143,6 +143,9 @@ mod android {
     /// the system reports back.
     fn services(app: AndroidApp, targets: std::rc::Rc<saf::Targets>) -> Services {
         Services {
+            // The phone types on the on-screen keyboard, which covers the model: a value field
+            // waits for a tap instead of taking the keyboard with a pick or an opening command.
+            soft_keyboard: true,
             pick_open: Some(Box::new({
                 let (app, targets) = (app.clone(), targets.clone());
                 move |exts: &[&str]| Box::pin(saf::Picker::open(app.clone(), targets.clone(), exts))

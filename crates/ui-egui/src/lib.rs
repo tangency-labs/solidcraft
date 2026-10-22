@@ -458,6 +458,11 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// The host types on an on-screen keyboard that covers the display (a phone or tablet): a
+    /// value field takes the keyboard only when the user taps it, never by itself, so a pick or
+    /// an opening command does not hide the view behind the keyboard
+    /// ([`SolveApp::auto_keyboard`]).
+    pub soft_keyboard: bool,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -2286,6 +2291,14 @@ impl SolveApp {
             return self.cam.aligned_standard_view(ORTHO_FACE_TOLERANCE).is_none();
         }
         self.ui.perspective
+    }
+
+    /// Whether a value field may take the keyboard by itself (a box a pick made, a dialog
+    /// opening). A host whose keyboard covers the display says no: the keyboard would hide the
+    /// view the user is working in, so the field waits to be tapped
+    /// ([`Services::soft_keyboard`]).
+    pub(crate) fn auto_keyboard(&self) -> bool {
+        !self.services.soft_keyboard
     }
 
     pub fn set_status(&mut self, s: impl Into<String>, error: bool) {

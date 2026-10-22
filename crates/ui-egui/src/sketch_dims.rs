@@ -562,7 +562,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     if r.changed() || changed {
                         b.locked = true;
                     }
-                    if focus && i == 0 {
+                    // The keyboard goes to the first box so a shape can be typed as it is drawn; a
+                    // host whose on-screen keyboard would cover the sketch waits for a tap.
+                    if focus && i == 0 && app.auto_keyboard() {
                         r.request_focus();
                     }
                     any_focused |= r.has_focus() || r.lost_focus();

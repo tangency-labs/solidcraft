@@ -298,6 +298,26 @@ fn dragging_to_update_value_reselects_whole_value_box_text() {
     assert_eq!(selection(&h), (0, 5), "the drag grew the text length; the selection must cover all of it");
 }
 
+/// A phone types on an on-screen keyboard that would cover the model, so a command's value box
+/// waits for a tap: opening the command takes no keyboard, and the tap then types the value.
+#[test]
+fn a_soft_keyboard_waits_for_a_tap_on_the_canvas_value() {
+    let mut h = make(json!({"distance":"4 mm"}));
+    h.app.services.soft_keyboard = true;
+    open(&mut h);
+    let id = egui::Id::new("sc_canvas_value");
+    assert_ne!(h.ctx.memory(|m| m.focused()), Some(id), "the value waits to be tapped: no keyboard covers the model");
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).expect("the value box was drawn");
+    h.step(&json!({"click": [area.center().x, area.center().y]})).unwrap();
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(id), "a tap gives the box the keyboard");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "24"})).unwrap();
+    let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance, .. }, .. }) = &h.app.dialog else { panic!("extrude dialog") };
+    assert_eq!(distance, "24", "typing reaches the value");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "Enter applies the value as before");
+}
+
 #[test]
 fn symmetric_total_distance_preview_handle_drag_apply_and_reopen_agree() {
     for (convention, cap, total_after_drag) in [("total_distance", 50.0, 120.0), ("legacy_per_side", 100.0, 60.0)] {

@@ -785,7 +785,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         let id = egui::Id::new("sc_drive_value");
                         let r = crate::ui_kit::cell_editor(ui, id, v, "", false);
                         crate::params_dialog::complete(ui, &r, v);
-                        if std::mem::take(focus) {
+                        // The value takes the keyboard so the joint can be driven by typing; a
+                        // host whose on-screen keyboard would cover it waits for a tap.
+                        if std::mem::take(focus) && app.auto_keyboard() {
                             r.request_focus();
                             let n = v.chars().count();
                             let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();

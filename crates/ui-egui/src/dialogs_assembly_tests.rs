@@ -674,6 +674,27 @@ fn drive_value_takes_the_keyboard() {
     assert!(app.dialog.is_none());
 }
 
+/// A phone types on an on-screen keyboard that would cover Drive Joints, so the value waits to
+/// be tapped: opening the dialog takes no keyboard.
+#[test]
+fn a_soft_keyboard_drive_waits_for_a_tap() {
+    let mut app = two_boxes();
+    app.services.soft_keyboard = true;
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("joint.create", json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}))
+        .unwrap();
+    app.start("joint.drive");
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx())).textures_delta.clear();
+    };
+    frame(&mut app, vec![]);
+    frame(&mut app, vec![]);
+    assert!(ctx.memory(|m| m.focused()).is_none(), "the value waits to be tapped: no keyboard covers the dialog");
+}
+
 /// A real slider drag updates the requested pose while the pointer is still down.
 /// Previewing and cancelling must leave the saved joint and occurrence positions alone.
 #[test]

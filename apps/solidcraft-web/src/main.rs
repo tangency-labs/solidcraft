@@ -920,6 +920,12 @@ mod web {
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
                         let services = if launch.embed { Services::default() } else { Services {
+                            // A phone or tablet types on the on-screen keyboard, which covers the
+                            // model: a value field waits for a tap. A mouse or trackpad (a fine
+                            // pointer) means a real keyboard, so fields there take it by ourselves.
+                            soft_keyboard: web_sys::window()
+                                .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+                                .is_some_and(|q| q.matches()),
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
