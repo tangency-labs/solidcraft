@@ -1,7 +1,8 @@
 //! Part of a record: the bounded material regions asked for, each with the voids inside it, as a
 //! record of its own in canonical order (docs/native-brep.md, "Canonical order"), and where each
 //! of its faces, edges and vertices was in the whole. A lump of a body is the part of one of its
-//! material regions; material inside one of its voids (an island) is a lump of its own.
+//! material regions; material inside one of its voids (an island) is a lump of its own. Records
+//! of bodies apart from each other join into one by [`Brep::compound`].
 use super::{Brep, EdgeUseRef, Invalid, Loop, OrientedFace, Region, Result, Shell, require};
 
 /// A record cut from a larger one, and the source index of each of its items.
@@ -46,32 +47,52 @@ impl Brep {
 
     /// The part made of the material regions `regions` (indices into `self.regions`, bounded,
     /// not voids): each with its outer shell, its open and wire shells, and a void for each
-    /// closed inner shell. Islands inside those voids are left out (they are parts of their own).
+    /// closed inner shell. An island inside one of those voids is in the part, inside it, when
+    /// its own region is among `regions`, and left out otherwise.
     pub fn part(&self, regions: &[usize]) -> Result<Part> {
-        // Which shell encloses which region: the region that lists a closed shell first.
+        // Which region each closed shell encloses (the region listing it first), and which
+        // region lies around it (the one listing it after its own outer shell; 0 for the open).
         let mut encloses: Vec<Option<usize>> = vec![None; self.shells.len()];
-        for (r, region) in self.regions.iter().enumerate().skip(1) {
-            if let Some(&s) = region.shells.first() {
-                *encloses.get_mut(s as usize).ok_or(Invalid("region shell reference"))? = Some(r);
+        let mut around: Vec<usize> = vec![0; self.shells.len()];
+        for (r, region) in self.regions.iter().enumerate() {
+            for (k, &s) in region.shells.iter().enumerate() {
+                let i = s as usize;
+                if r > 0 && k == 0 {
+                    *encloses.get_mut(i).ok_or(Invalid("region shell reference"))? = Some(r);
+                } else {
+                    *around.get_mut(i).ok_or(Invalid("region shell reference"))? = r;
+                }
             }
         }
-        // The part's regions over source shells: the infinite one around the outer shells, each
-        // material region as it is, and each void inside one by its outer shell alone.
-        let mut outer = Vec::new();
+        // The part's regions over source shells: each material region as it is, each void
+        // inside one by its outer shell, and the infinite region around every outer shell whose
+        // surrounding void is not in the part. A material region inside a void that is in the
+        // part (an island in a hollow both are taken from) stays inside it.
+        let mut voids: Vec<(usize, Vec<u32>)> = Vec::new();
         let mut kept: Vec<(Vec<u32>, bool)> = Vec::new();
         for &r in regions {
             let region = self.regions.get(r).ok_or(Invalid("part region"))?;
             require(r > 0 && !region.void, "a part's region is bounded material")?;
-            outer.push(*region.shells.first().ok_or(Invalid("bounded region without an outer shell"))?);
+            require(!region.shells.is_empty(), "bounded region without an outer shell")?;
             kept.push((region.shells.clone(), false));
             for &s in region.shells.iter().skip(1) {
                 if let Some(v) = encloses.get(s as usize).copied().flatten() {
                     require(self.regions.get(v).is_some_and(|v| v.void), "a closed inner shell of material encloses a void")?;
-                    kept.push((vec![s], true));
+                    voids.push((v, vec![s]));
                 }
             }
         }
-        let source_regions: Vec<(Vec<u32>, bool)> = std::iter::once((outer, false)).chain(kept).collect();
+        let mut outer = Vec::new();
+        for &r in regions {
+            let Some(&s) = self.regions.get(r).and_then(|region| region.shells.first()) else { continue };
+            let container = around.get(s as usize).copied().unwrap_or(0);
+            match voids.iter_mut().find(|(v, _)| *v == container) {
+                Some((_, list)) => list.push(s),
+                None => outer.push(s),
+            }
+        }
+        let source_regions: Vec<(Vec<u32>, bool)> =
+            std::iter::once((outer, false)).chain(kept).chain(voids.into_iter().map(|(_, list)| (list, true))).collect();
 
         // Canonical order: shells and faces walking regions → shells → oriented faces.
         let mut shells = Renumber::new(self.shells.len());
@@ -217,4 +238,54 @@ fn part_uses(uses: &[EdgeUseRef], faces: &Renumber, primary: Option<(u32, u32, u
 
 fn index(i: usize) -> Result<u32> {
     u32::try_from(i).map_err(|_| Invalid("part index"))
+}
+
+/// Bodies' records joined into one record of all their material, side by side, in canonical
+/// order: what bodies apart from each other are together. The part's `faces`, `edges` and
+/// `vertices` number the inputs one after another (input 0's items first).
+pub fn compound(records: &[&Brep]) -> Result<Part> {
+    let mut all = Brep {
+        version: super::VERSION,
+        tolerance: records.iter().map(|r| r.tolerance).fold(0.0, f64::max),
+        regions: vec![Region { shells: Vec::new(), void: false }],
+        shells: Vec::new(),
+        faces: Vec::new(),
+        edges: Vec::new(),
+        vertices: Vec::new(),
+    };
+    for r in records {
+        let offset = |n: usize| u32::try_from(n).map_err(|_| Invalid("compound size"));
+        let (s0, f0, e0, v0) = (offset(all.shells.len())?, offset(all.faces.len())?, offset(all.edges.len())?, offset(all.vertices.len())?);
+        let (infinite, bounded) = r.regions.split_first().ok_or(Invalid("region count"))?;
+        if let Some(open) = all.regions.first_mut() {
+            open.shells.extend(infinite.shells.iter().map(|s| s + s0));
+        }
+        all.regions.extend(bounded.iter().map(|region| Region { shells: region.shells.iter().map(|s| s + s0).collect(), void: region.void }));
+        all.shells.extend(r.shells.iter().map(|shell| match shell {
+            Shell::Faces { faces, wires } => Shell::Faces {
+                faces: faces.iter().map(|f| OrientedFace { face: f.face + f0, forward: f.forward }).collect(),
+                wires: wires.iter().map(|e| e + e0).collect(),
+            },
+            Shell::Wire { edges } => Shell::Wire { edges: edges.iter().map(|e| e + e0).collect() },
+            Shell::Vertex { vertex } => Shell::Vertex { vertex: vertex + v0 },
+        }));
+        all.faces.extend(r.faces.iter().map(|f| {
+            let mut f = f.clone();
+            for l in &mut f.loops {
+                match l {
+                    Loop::Edges { edges } => edges.iter_mut().for_each(|u| u.edge += e0),
+                    Loop::Vertex { vertex } => *vertex += v0,
+                }
+            }
+            f
+        }));
+        all.edges.extend(r.edges.iter().map(|e| {
+            let mut e = e.clone();
+            e.vertices = e.vertices.map(|v| v + v0);
+            e.uses.iter_mut().for_each(|u| u.face += f0);
+            e
+        }));
+        all.vertices.extend(r.vertices.iter().cloned());
+    }
+    all.part(&all.material_regions())
 }
