@@ -323,6 +323,7 @@ fn join_of_a_lobed_disc_pattern_is_not_refused() {
     assert!(rel(got, want) < 1e-3, "{got} vs {want}");
 }
 
+mod barrel_join;
 mod blend_fit;
 mod component_frames;
 mod curved_seam_round;

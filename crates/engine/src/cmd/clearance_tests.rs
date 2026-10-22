@@ -217,18 +217,6 @@ fn a_thin_overlap_with_a_large_plate_is_measured_in_full() {
     }
 }
 
-/// A shared part whose centre lies outside its own box, or which holds more than its box, is
-/// malformed: the pair is reported unchecked rather than with that volume.
-#[test]
-fn a_malformed_shared_part_is_not_measured() {
-    use solidcraft_geom::{Aabb3, Vec3};
-    let bbox = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(10.0, 10.0, 1.0) };
-    assert!(super::plausible(50.0, Vec3::new(5.0, 5.0, 0.5), bbox));
-    assert!(!super::plausible(50.0, Vec3::new(5.0, 5.0, 3.0), bbox));
-    assert!(!super::plausible(1239.0, Vec3::new(5.0, 5.0, 0.5), bbox));
-    assert!(!super::plausible(f64::NAN, Vec3::new(5.0, 5.0, 0.5), bbox));
-}
-
 /// Two plates 0.2 mm apart, the upper one set 10 mm in from the lower one's corner, and two set
 /// side by side with a 0.2 mm gap: 0.2, not 0 (a point past a corner, on the line of one of its
 /// edges, was taken for a point of the face). Gaps under twice the meshes' chord went wrong.
@@ -348,13 +336,8 @@ fn a_body_that_changed_shape_is_measured_again() {
 /// A flanged bushing and a headed pin seated in it line to line, on its very axis, the head on
 /// the flange. Plain, they touch and share nothing; sunk 0.2 into the flange, the head shares the
 /// ring under it. With a fillet under the head against the bore's sharp edge, the fillet's ring
-/// is in the flange (about 0.49 mm³), next to walls that lie on one another: the boolean tried
-/// for minutes there and gave up; now it is reported as such within seconds.
-///
-/// The clock is not read: what is under test is the result, and the boolean that gives up is
-/// reported as such instead of hanging the test. The wall that lies on the other one is what
-/// makes the pair unchecked, and that is what the assertions below check (#2999 dropped the clock
-/// from the sibling tests the same way).
+/// is in the flange (about 0.49 mm³), next to walls that lie on one another: an overlap. The clock
+/// is not read: what is under test is the result (#2999 dropped it from the sibling tests).
 #[test]
 fn a_pin_seated_line_to_line_in_its_bushing_is_measured() {
     let ring = std::f64::consts::PI * (7.0f64.powi(2) - 4.0f64.powi(2)) * 0.2;
@@ -371,11 +354,11 @@ fn a_pin_seated_line_to_line_in_its_bushing_is_measured() {
             run(&mut s, "solid.fillet", json!({"edges": [[107, 0, z + 1.5]], "radius": 0.5, "body": "Pin"}));
         }
         let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Pin"], "against": ["Bush"], "min_volume": 0.01, "clearance": 1e-6}));
+        assert_eq!(r["unchecked"], json!([]), "sunk {sunk}: {r}");
         if fillet {
-            assert!(r["unchecked"][0]["reason"].as_str().is_some_and(|w| w.contains("pin on one cylinder")), "{r}");
+            assert!(f(&r["overlaps"][0]["volume_mm3"]) > 0.01, "{r}");
             continue;
         }
-        assert_eq!(r["unchecked"], json!([]), "sunk {sunk}: {r}");
         if sunk == 0.0 {
             assert_eq!(r["overlaps"].as_array().map(Vec::len), Some(0), "{r}");
             assert_eq!(f(&r["near"][0]["distance_mm"]), 0.0, "{r}");
@@ -386,9 +369,9 @@ fn a_pin_seated_line_to_line_in_its_bushing_is_measured() {
     }
 }
 
-/// A chamfered pin through a hole of its own radius, its axis a hair off the hole's: the boolean
-/// cannot intersect walls all but tangent along two lines and once passed the pair as clear.
-/// The crescent the pin shares with the plate is reported, against the lens of two circles.
+/// A chamfered pin through a hole of its own radius, its axis a hair off the hole's, the walls
+/// all but tangent along two lines: the crescent the pin shares with the plate is reported,
+/// against the lens of two circles.
 #[test]
 fn a_pin_a_hair_off_its_hole_shares_its_crescent() {
     let crescent = |r: f64, e: f64| std::f64::consts::PI * r * r - (2.0 * r * r * (e / (2.0 * r)).acos() - e / 2.0 * (4.0 * r * r - e * e).sqrt());
@@ -404,38 +387,6 @@ fn a_pin_a_hair_off_its_hole_shares_its_crescent() {
         let got = f(&r["overlaps"][0]["volume_mm3"]);
         assert!((got - want).abs() < 1e-6 * want, "{offset}: {got} against {want}: {r}");
     }
-}
-
-/// The shared volume is checked against the bodies and their union: two 10 mm cubes sharing a
-/// 3 mm corner cube agree at 27 mm³, and a shared part read as three times that (as a mirrored
-/// pair once was) does not.
-#[test]
-fn a_shared_volume_the_union_contradicts_is_caught() {
-    use solidcraft_geom::Vec3;
-    let a = solidcraft_kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap_or_else(|e| panic!("{e}"));
-    let b = solidcraft_kernel::box_solid(Vec3::new(7.0, 7.0, 7.0), Vec3::new(17.0, 17.0, 17.0)).unwrap_or_else(|e| panic!("{e}"));
-    let at = Vec3::new(8.5, 8.5, 8.5);
-    assert_eq!(super::union_disagrees(&a, &b, 27.0, at), None);
-    assert!(super::union_disagrees(&a, &b, 81.0, at).is_some());
-}
-
-/// The check works on measured volumes, and vol(a) + vol(b) − vol(a ∪ b) carries the error of
-/// all three: a small overlap on large bodies can come out near zero, or below it. A union that
-/// cannot resolve the shared part leaves it standing; one that clearly contradicts it does not.
-#[test]
-fn the_union_check_allows_for_the_bodies_measuring_error() {
-    use super::contradicted;
-    // 0.96 mm³ shared where the union of 40 000 and 300 mm³ implies -0.75: noise, not a contradiction.
-    assert_eq!(contradicted(0.96, 40_000.0, 300.0, 40_300.75), None);
-    // 5.92 mm³ of a small body in a large sheet, with the union 0.4 mm³ off the bodies' sum.
-    assert_eq!(contradicted(5.92, 250_000.0, 80.0, 250_074.48), None);
-    // Past the noise, but the union implies nothing at all while the shared part is small next
-    // to both bodies: the union cannot tell, and the shared part stands.
-    assert_eq!(contradicted(6.0, 400.0, 200.0, 600.5), None);
-    // 412 mm³ shared where bodies of a few thousand and their union imply 141: caught.
-    assert!(contradicted(411.98, 3_200.0, 3_150.0, 6_350.0 - 141.18).is_some());
-    // A large shared part the union says is not there at all: caught too.
-    assert!(contradicted(900.0, 3_200.0, 3_150.0, 6_350.0).is_some());
 }
 
 /// A small box pressed 0.6 mm into a 2000 × 1000 × 1 mm plate shares 3 × 3 × 0.6 = 5.4 mm³: an

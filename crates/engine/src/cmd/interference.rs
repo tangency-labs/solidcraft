@@ -56,8 +56,6 @@ enum Outcome {
 /// One pair's answer and where its time went.
 struct Done {
     outcome: Outcome,
-    /// Unverified boolean results are listed as unchecked and still reported as a hit.
-    note: Option<String>,
     ms: f64,
     kernel: KernelTimes,
 }
@@ -171,9 +169,6 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             json!({"a": a, "b": b, "ms": round_ms(d.ms), "boolean_ms": round_ms(d.kernel.boolean_ms),
             "tessellate_ms": round_ms(d.kernel.tessellate_ms)}),
         ));
-        if let Some(reason) = d.note {
-            unchecked.push(json!({"a": a, "b": b, "reason": reason}));
-        }
         match d.outcome {
             Outcome::Hit(v) => hits.push(v),
             Outcome::Clear => {}
@@ -263,92 +258,31 @@ fn any_inside(points: &[Vec3], outer: &Mesh) -> bool {
     }
 }
 
-/// The exact check of one pair: a pin a hair off the axis of its hole by the walls' crescent,
-/// otherwise the intersection measured.
+/// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let ((outcome, note), kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
-    Done { outcome, note, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names));
+    Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> (Outcome, Option<String>) {
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
     let threshold = 1e-9 * a.size().max(1.0).powi(3);
-    // A pin a hair off the axis of its hole: the crescent the walls share, which the boolean
-    // can't intersect.
-    if let Some(o) = solidcraft_kernel::coaxial_overlap(a, b) {
-        if o.volume > threshold {
-            let hit = json!({"a": na, "b": nb, "volume_mm3": o.volume, "area_mm2": o.area, "center": o.centroid,
-                "bbox": {"min": o.bbox.min, "max": o.bbox.max}, "near_coaxial": {"offset_mm": o.offset, "length_mm": o.length}});
-            return (Outcome::Hit(hit), None);
-        }
-        return (Outcome::Clear, None);
-    }
     // A pair whose shared part can't be worked out is reported, not passed as clear.
-    let (shared, report) = solidcraft_kernel::capture_boolean_diagnostics(|| solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect));
-    let shared = match shared {
-        Ok(o) => o,
-        Err(e) => return (Outcome::Unchecked(e.to_string()), None),
+    let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
+        Ok(Some(o)) => o,
+        Ok(None) => return Outcome::Clear,
+        Err(e) => return Outcome::Unchecked(e.to_string()),
     };
-    let mut note = report.unverified();
-    let pieces = match shared {
-        Some(o) => vec![o],
-        // A body in several pieces, one of them wholly inside the other body: the whole bodies'
-        // boolean can come out empty, so the pieces are intersected one by one.
-        None if a.shell_count() > 1 || b.shell_count() > 1 => match by_pieces(a, b) {
-            Ok((pieces, unverified)) => {
-                note = note.or(unverified);
-                pieces
-            }
-            Err(e) => return (Outcome::Unchecked(e), note),
-        },
-        None => return (Outcome::Clear, note),
+    let m = match solidcraft_kernel::measure_mass(&shared) {
+        Ok(m) => m,
+        Err(e) => return Outcome::Unchecked(e.to_string()),
     };
-    // The shared parts measured together: volumes and areas add, the centre is the volumes'.
-    let mut measured = Vec::new();
-    for o in &pieces {
-        match solidcraft_kernel::measure_mass(o) {
-            Ok(m) => measured.push(m),
-            Err(e) => return (Outcome::Unchecked(e.to_string()), note),
-        }
+    if m.volume > threshold {
+        let hit = json!({"a": na, "b": nb, "volume_mm3": m.volume, "area_mm2": m.area, "center": m.centroid,
+            "bbox": {"min": m.bbox.min, "max": m.bbox.max}});
+        return Outcome::Hit(hit);
     }
-    let volume: f64 = measured.iter().map(|m| m.volume).sum();
-    if volume > threshold {
-        let area: f64 = measured.iter().map(|m| m.area).sum();
-        let bbox = measured.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.bbox));
-        let center = match measured.as_slice() {
-            [m] => m.centroid,
-            _ => measured.iter().fold(Vec3::ZERO, |c, m| c + m.centroid * m.volume) / volume,
-        };
-        let hit = json!({"a": na, "b": nb, "volume_mm3": volume, "area_mm2": area, "center": center, "bbox": {"min": bbox.min, "max": bbox.max}});
-        return (Outcome::Hit(hit), note);
-    }
-    (Outcome::Clear, note)
-}
-
-/// Most pairs of pieces [`by_pieces`] intersects.
-const MAX_PIECE_PAIRS: usize = 256;
-
-/// The shared parts of two bodies, a piece of each at a time, and why any of them is unverified.
-fn by_pieces(a: &Body, b: &Body) -> std::result::Result<(Vec<Body>, Option<String>), String> {
-    let (la, lb) = (a.lumps().map_err(|e| e.to_string())?, b.lumps().map_err(|e| e.to_string())?);
-    if la.len() < 2 && lb.len() < 2 {
-        return Ok((Vec::new(), None));
-    }
-    if la.len().saturating_mul(lb.len()) > MAX_PIECE_PAIRS {
-        return Err(format!("not checked: {} by {} pieces are more than {MAX_PIECE_PAIRS} pairs of pieces", la.len(), lb.len()));
-    }
-    let (mut out, mut note) = (Vec::new(), None);
-    for x in &la {
-        for y in &lb {
-            let (r, report) =
-                solidcraft_kernel::capture_boolean_diagnostics(|| solidcraft_kernel::boolean(x, y, solidcraft_kernel::BoolOp::Intersect));
-            note = note.or(report.unverified());
-            if let Some(o) = r.map_err(|e| e.to_string())? {
-                out.push(o);
-            }
-        }
-    }
-    Ok((out, note))
+    Outcome::Clear
 }
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within
@@ -391,7 +325,6 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
                 let Some(job) = jobs.get(k) else { break };
                 let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(job))).unwrap_or_else(|_| Done {
                     outcome: Outcome::Unchecked("internal error while checking this pair".into()),
-                    note: None,
                     ms: 0.0,
                     kernel: KernelTimes::default(),
                 });
