@@ -25,6 +25,10 @@ fn int(n: usize) -> Result<i32> {
 }
 
 impl Surface {
+    pub(crate) fn handle(&self) -> &ffi::ssi::SurfaceHandle {
+        &self.0
+    }
+
     /// `origin + u*x + v*y` (x, y the axes made unit), for u in `u`, v in `v`.
     pub fn plane(origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], u: [f64; 2], v: [f64; 2]) -> Result<Surface> {
         init()?;
