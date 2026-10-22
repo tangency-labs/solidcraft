@@ -49,6 +49,9 @@ pub enum Error {
     NoRoom,
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
+    /// SMLib reported success but the operation did nothing: a blend that made no face, a face
+    /// move or draft that moved no face.
+    NoEffect,
     /// A C++ exception (most likely out of memory) was caught at the boundary.
     Exception,
     /// The C API is a different version from the one this crate was written against.
@@ -71,6 +74,7 @@ impl std::fmt::Display for Error {
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "the offset leaves no room inside the body"),
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
             Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),
@@ -90,6 +94,7 @@ fn error(s: i32) -> Error {
         ffi::ops::ERR_NOT_SOLID => Error::NotSolid,
         ffi::ops::ERR_NO_ROOM => Error::NoRoom,
         ffi::ops::ERR_UNSUPPORTED => Error::Unsupported,
+        ffi::ops::ERR_NO_EFFECT => Error::NoEffect,
         ffi::ERR_EXCEPTION => Error::Exception,
         ffi::NOT_BUILT => Error::NotBuilt,
         s => Error::Status(s),

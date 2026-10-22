@@ -199,6 +199,7 @@ mod imp {
             let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
             let r = op(&tagged).map_err(|e| match e {
                 SmError::Unsupported => super::unsupported(&format!("this {what}, which SMLib cannot build exactly")),
+                SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
                 e => failed(what, "operation", e),
             })?;
             let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
