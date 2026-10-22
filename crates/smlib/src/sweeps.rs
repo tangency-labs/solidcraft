@@ -168,8 +168,9 @@ impl Brep {
     /// `draft` (radians) leans the walls: positive inward, negative outward; a drafted profile is
     /// one closed loop, its curves in order, and `direction` is its normal (either way round).
     /// `corner` closes a drafted profile's sharp corners; a corner it cannot close is
-    /// [`Error::Corner`] (or [`Error::NotExact`] where a curve there is neither a line nor an
-    /// arc, under [`DraftCorner::Curvature`]).
+    /// [`Error::Corner`] (with [`CornerRefusal::NotExact`] where, under
+    /// [`DraftCorner::Curvature`], a curve of a profile with a sharp corner is neither a line nor
+    /// an arc).
     pub fn extrude(profile: &[Curve], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Brep> {
         init()?;
         let l = List::of(profile)?;

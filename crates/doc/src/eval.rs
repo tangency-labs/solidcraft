@@ -2440,6 +2440,20 @@ fn refuse_loft_holes(r: &Region2) -> Result<()> {
     Err(DocError::Invalid("not supported yet: lofting a section with holes to a point".into()))
 }
 
+/// What each way of closing a taper's corners ([`kernel::DraftCorner`]) gives at each sharp
+/// corner of the profiles `sel` picks in `ss`, extruded `distance` with a taper of `taper` radians
+/// (positive grows the profile), the profiles merged as an extrude merges them: per corner, how
+/// far each offset curve runs on (or is trimmed), whether the corner cuts in, or why the rule
+/// refuses it. A dialog offers the other rules where the chosen one is a poor fit.
+pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, taper: f64) -> Result<Vec<kernel::CornerReport>> {
+    let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, sel)?);
+    let mut out = Vec::new();
+    for r in &regions {
+        out.extend(kernel::draft_corners(r, distance, taper)?);
+    }
+    Ok(out)
+}
+
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
@@ -4560,7 +4574,7 @@ fn feature_tools_with_constructor(
                     .map(|r| {
                         let roles =
                             crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, kernel::DraftCorner::default())?;
+                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, extent.corner)?;
                         Ok(roles.tool(body, None))
                     })
                     .collect::<Result<_>>()?;
