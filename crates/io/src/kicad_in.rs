@@ -56,8 +56,14 @@ pub const DEFAULT_BOARD_COLOR: [f32; 3] = [0.05, 0.33, 0.18];
 pub enum KicadRepresentation {
     /// Mesh bodies (the only representation implemented).
     Mesh,
-    /// A B-rep board. Not supported yet.
+    /// A solid board: an Import of the substrate as exact solids (default).
     Brep,
+}
+
+impl Default for KicadRepresentation {
+    fn default() -> Self {
+        KicadRepresentation::Brep
+    }
 }
 
 impl KicadRepresentation {
@@ -129,7 +135,7 @@ impl Default for KicadOptions {
             copper: KicadCopper::None,
             silkscreen: true,
             color: None,
-            representation: KicadRepresentation::Mesh,
+            representation: KicadRepresentation::default(),
         }
     }
 }
@@ -271,6 +277,9 @@ pub struct KicadDrill {
 pub struct KicadImport {
     pub feature: crate::MeshFeature,
     pub plan: crate::MeshPlan,
+    /// The board substrate as a solid (STEP), when it could be built: the engine adds it as an
+    /// Import feature in the board's component. `None`: the mesh feature holds the board.
+    pub board_step: Option<String>,
 }
 
 /// A model file a loader found for a footprint's reference (`(model "…")`): the reference can
@@ -859,6 +868,29 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
     })
 }
 
+/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
+/// feature, so its faces and edges can be picked and used like any other body.
+fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
+    let loops = outline_loops(board)?;
+    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
+    let bodies =
+        extrude_regions_bodies(&regions, 0.0, thickness).or_else(|_| extrude_regions_bodies(&regions_from_loops(loops, None), 0.0, thickness))?;
+    if bodies.is_empty() {
+        return Err(IoError::Invalid("the board has no closed outline to build".into()));
+    }
+    let exports: Vec<solidcraft_kernel::ExportBody<'_>> = bodies
+        .iter()
+        .enumerate()
+        .map(|(n, body)| solidcraft_kernel::ExportBody {
+            name: if n == 0 { board.name.clone() } else { format!("{} {}", board.name, n + 1) },
+            body,
+            color: Some(board.color),
+        })
+        .collect();
+    let header = solidcraft_kernel::StepHeader { file_name: "board.step".into(), organization: "SolidCraft".into(), ..Default::default() };
+    solidcraft_kernel::step_export_bodies(&exports, &header).map_err(|e| IoError::Invalid(format!("the board could not be written as a solid: {e}")))
+}
+
 /// The import's steps on one scale of a thousand units: starting, the board parsed, its
 /// substrate, where the copper begins, the silkscreen, the end. The copper reports the middle.
 const IMPORT_STEP_UNITS: [usize; 6] = [0, 100, 250, 400, 900, 1000];
@@ -873,18 +905,32 @@ fn report_import(step: usize) {
 
 /// Read a board and its referenced STEP/VRML models into one mesh feature and placement plan.
 pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadLoader<'_>) -> Result<KicadImport> {
-    if options.representation == KicadRepresentation::Brep {
-        return Err(IoError::Invalid("B-rep KiCad boards are not supported yet; choose mesh".into()));
-    }
     report_import(0);
     let board = parse_kicad_board_with(bytes, file, options.clone())?;
     report_import(1);
     let thickness = options.thickness.unwrap_or(board.thickness);
-    let board_mesh = kicad_board_mesh(&board, thickness)?;
-    report_import(2);
-    let mut meshes = vec![mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color)];
-    let mut plan = crate::MeshPlan { bodies: vec![None], ..Default::default() };
     let mut warnings = board.warnings.clone();
+    let mut meshes = Vec::new();
+    let mut plan = crate::MeshPlan::default();
+    let mut board_step = None;
+    if options.representation == KicadRepresentation::Brep {
+        match board_solid(&board, thickness) {
+            Ok(step) => board_step = Some(step),
+            Err(error) => {
+                // A profile the kernel cannot build (or a drill touching a cutout) must not lose
+                // the board: it comes in as the mesh it used to be.
+                warnings.push(format!("the board is a mesh: {error}"));
+                let board_mesh = kicad_board_mesh(&board, thickness)?;
+                meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
+                plan.bodies.push(None);
+            }
+        }
+    } else {
+        let board_mesh = kicad_board_mesh(&board, thickness)?;
+        meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
+        plan.bodies.push(None);
+    }
+    report_import(2);
     let mut slots = std::collections::HashMap::<(String, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
     if options.components {
@@ -1032,7 +1078,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
         body_names,
         warnings,
     };
-    Ok(KicadImport { feature, plan })
+    Ok(KicadImport { feature, plan, board_step })
 }
 
 fn component_name(footprint: &KicadFootprint, path: &str) -> String {
