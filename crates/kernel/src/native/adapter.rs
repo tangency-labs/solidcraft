@@ -196,7 +196,7 @@ fn face_record(
             .map(|e| {
                 let i = *edge_index.get(&e.id()).ok_or_else(|| invalid("edge index"))?;
                 let (_, curve, interval, tolerance) = edges.get(i).ok_or_else(|| invalid("edge index"))?;
-                Ok(b::pcurve::EdgeUse { edge: index(i)?, curve, interval: *interval, forward: e.orientation(), tolerance: *tolerance })
+                Ok(b::pcurve::EdgeUse { edge: index(i)?, curve, interval: *interval, forward: e.orientation(), tolerance: *tolerance, given: None })
             })
             .collect::<Result<Vec<_>>>()?;
         uses.push(l);

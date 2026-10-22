@@ -169,10 +169,57 @@ fn newton(s: &EvalSurface, dom: &Domain, p: Vec3, start: [f64; 2]) -> Option<([f
     Some((uv, dist))
 }
 
+/// The grid of surface points [`project`] searches from when it has no hint that converges: up to
+/// [`MAX_STARTS`] evaluations of the surface, the same for every point, so a caller projecting
+/// many points onto one surface (a face's pcurves, its boundary) keeps one `Starts` for it and
+/// the grid is evaluated once, on first use ([`project_with`]).
+#[derive(Clone, Debug, Default)]
+pub struct Starts(std::sync::OnceLock<Vec<(Vec3, [f64; 2])>>);
+
+/// A cache of the surface's own points: any two are alike.
+impl PartialEq for Starts {
+    fn eq(&self, _: &Starts) -> bool {
+        true
+    }
+}
+
+impl Starts {
+    /// The grid over `dom` ([`starts_along`] in each direction, thinned to [`MAX_STARTS`]):
+    /// each start's point and parameters. Empty where a direction is unbounded.
+    fn of(&self, s: &EvalSurface, dom: &Domain) -> &[(Vec3, [f64; 2])] {
+        self.0.get_or_init(|| {
+            let (Some(ru), Some(rv)) = (dom.range[0], dom.range[1]) else { return Vec::new() };
+            let (mut us, mut vs) = (starts_along(s, 0, ru), starts_along(s, 1, rv));
+            // Thin the longer list (every other start, its ends kept) until the grid fits.
+            while us.len().saturating_mul(vs.len()) > MAX_STARTS {
+                let longer = if us.len() >= vs.len() { &mut us } else { &mut vs };
+                let last = longer.last().copied();
+                *longer = longer.iter().step_by(2).copied().chain(last).collect();
+                longer.dedup();
+            }
+            let mut grid = Vec::with_capacity(us.len() * vs.len());
+            for &u in &us {
+                for &v in &vs {
+                    if let Some((q, _, _)) = s.derivs(u, v) {
+                        grid.push((q, [u, v]));
+                    }
+                }
+            }
+            grid
+        })
+    }
+}
+
 /// Parameters of `p` (a point on the surface within `accept`), from `hint` when that
 /// converges, else from the best starts of a grid over the surface's domain, as fine as its
 /// knot spans ([`starts_along`]).
 pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
+    project_with(s, dom, &Starts::default(), p, hint, accept)
+}
+
+/// [`project`] with the grid kept in `starts`, which must have been used with this surface and
+/// domain only.
+pub fn project_with(s: &EvalSurface, dom: &Domain, starts: &Starts, p: Vec3, hint: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
     if let EvalSurface::Plane { origin, du, dv } = s {
         let r = p - *origin;
         let (a, b, c) = (du.len2(), du.dot(*dv), dv.len2());
@@ -193,27 +240,21 @@ pub fn project(s: &EvalSurface, dom: &Domain, p: Vec3, hint: Option<[f64; 2]>, a
         }
         best = Some((uv, d));
     }
-    let (mut us, mut vs) = (starts_along(s, 0, dom.range[0]?), starts_along(s, 1, dom.range[1]?));
-    // Thin the longer list (every other start, its ends kept) until the grid fits.
-    while us.len().saturating_mul(vs.len()) > MAX_STARTS {
-        let longer = if us.len() >= vs.len() { &mut us } else { &mut vs };
-        let last = longer.last().copied();
-        *longer = longer.iter().step_by(2).copied().chain(last).collect();
-        longer.dedup();
+    if dom.range.iter().any(Option::is_none) {
+        return None;
     }
-    let mut starts: Vec<(f64, [f64; 2])> = Vec::with_capacity(us.len() * vs.len());
-    for &u in &us {
-        for &v in &vs {
-            if let Some((q, _, _)) = s.derivs(u, v) {
-                starts.push(((q - p).len2(), [u, v]));
-            }
-        }
+    let grid = starts.of(s, dom);
+    // The nearest starts first (in grid order where equally near), until one converges within
+    // `accept`: where turns of a surface pass close to each other (a thread's root band a tenth
+    // of a millimetre from the next turn's), the nearest few can all lie on the wrong turn.
+    let mut near: Vec<(f64, usize)> = grid.iter().enumerate().map(|(i, (q, _))| ((*q - p).len2(), i)).collect();
+    let by_distance = |a: &(f64, usize), b: &(f64, usize)| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1));
+    if near.len() > NEWTON_STARTS {
+        near.select_nth_unstable_by(NEWTON_STARTS, by_distance);
+        near.truncate(NEWTON_STARTS);
     }
-    starts.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // The nearest starts first, until one converges within `accept`: where turns of a surface
-    // pass close to each other (a thread's root band a tenth of a millimetre from the next
-    // turn's), the nearest few can all lie on the wrong turn.
-    for (_, start) in starts.iter().take(NEWTON_STARTS) {
+    near.sort_by(by_distance);
+    for start in near.iter().filter_map(|(_, i)| grid.get(*i).map(|(_, uv)| uv)) {
         if let Some((uv, d)) = newton(s, dom, p, *start)
             && best.is_none_or(|(_, bd)| d < bd)
         {

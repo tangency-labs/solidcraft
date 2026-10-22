@@ -38,8 +38,12 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 /// One oriented edge of a loop, as [`pcurves`] reads it: the edge's index (a seam edge, used
-/// twice, is fitted once), its curve record and interval, whether the loop runs along it, and the
-/// edge record's own tolerance (its pcurve is fitted to that, never closer than the face's).
+/// twice, is fitted once), its curve record and interval, whether the loop runs along it, the
+/// edge record's own tolerance (its pcurve is fitted to that, never closer than the face's), and
+/// the use's exact pcurve where the producer holds one (`given`, on the use's interval in its
+/// curve's direction: a kernel's own UV trim mapped exactly into the record's parameters). A
+/// given pcurve is taken as it is, only moved by whole periods with its loop; it is never
+/// checked against the edge or replaced here (`Brep::check_geometry` checks it).
 #[derive(Clone, Copy, Debug)]
 pub struct EdgeUse<'a> {
     pub edge: u32,
@@ -47,6 +51,7 @@ pub struct EdgeUse<'a> {
     pub interval: [f64; 2],
     pub forward: bool,
     pub tolerance: f64,
+    pub given: Option<&'a Curve2>,
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
@@ -97,6 +102,10 @@ pub fn pcurves_within(
     for (w, l) in loops.iter().enumerate() {
         let mut fitted = Vec::with_capacity(l.len());
         for (i, u) in l.iter().enumerate() {
+            if let Some(given) = u.given {
+                fitted.push((own_pcurve(given, u.interval, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?, u.forward));
+                continue;
+            }
             let pc = match done.iter().find(|(e, _)| *e == u.edge) {
                 Some((_, pc)) => pc.clone(),
                 None => {
@@ -127,9 +136,23 @@ pub fn pcurves_within(
     Ok(out)
 }
 
-/// A face's surface: its evaluator and parameter box.
+/// A producer's own pcurve, checked as a record: a valid 2D B-spline on the use's interval
+/// (within 10⁻⁹ of its magnitude, the schema's slack for a linear remap's rounding).
+fn own_pcurve(c: &Curve2, [t0, t1]: [f64; 2], budget: &mut Budget) -> Result<Curve2> {
+    super::curve2::curve2(c, budget).map_err(|e| Error::Invalid(format!("given pcurve: {e}")))?;
+    let [a, b] = c.interval().ok_or_else(|| Error::Invalid("given pcurve: no interval".into()))?;
+    let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+    if (a - t0).abs() > slack || (b - t1).abs() > slack {
+        return Err(Error::Invalid(format!("given pcurve on [{a}, {b}], its edge on [{t0}, {t1}]")));
+    }
+    Ok(c.clone())
+}
+
+/// A face's surface: its evaluator and parameter box, and the grid a point's parameters on it
+/// are searched from, made once for all the face's points.
 struct On {
     surface: SurfaceEval,
+    starts: uv::Starts,
     dom: Domain,
     /// The face's own parameter box, where its kernel gives one.
     face: Option<[[f64; 2]; 2]>,
@@ -151,7 +174,7 @@ impl On {
     fn new(s: &Surface) -> Result<Self> {
         let surface = SurfaceEval::new(s)?;
         let dom = surface.domain();
-        Ok(On { surface, dom, face: None })
+        Ok(On { surface, starts: uv::Starts::default(), dom, face: None })
     }
 
     fn within(self, face: Option<[[f64; 2]; 2]>) -> Self {
@@ -272,7 +295,7 @@ impl On {
 
     /// The parameters of `p` within `accept`, from `near` (and unwrapped to it) when given.
     fn project(&self, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
-        let mut q = self.surface.project(p, near, accept)?;
+        let mut q = self.surface.project_with(&self.starts, p, near, accept)?;
         if let Some(n) = near {
             for (d, x) in q.iter_mut().enumerate() {
                 *x = uv::unwrap(*x, n[d], self.dom.period.get(d).copied().flatten());
