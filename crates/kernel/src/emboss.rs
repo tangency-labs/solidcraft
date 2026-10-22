@@ -20,15 +20,13 @@ fn angle(p: Vec3, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> f64 {
     let w = w - axis * w.dot(axis);
     w.dot(tangent).atan2(w.dot(radial))
 }
-fn unwrap(a: f64, around: f64) -> f64 {
-    around + (a - around + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
-}
 fn arr(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
 /// The angles a wall face spans about the axis, seen from `radial`: from one of its arcs about
-/// the axis (a face of one loop of four edges).
+/// the axis (a face of one loop of four edge uses: two arcs and two lines, or a whole turn's two
+/// circles and its seam used twice).
 fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> Option<(f64, f64)> {
     let f = b.faces.get(face)?;
     let [Loop::Edges { edges }] = f.loops.as_slice() else { return None };
@@ -42,12 +40,13 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         if z.dot(axis).abs() < 1.0 - 1e-9 {
             continue;
         }
+        // The circle's parameter is its angle: the wall spans the edge's interval about the
+        // angle of its middle (a whole turn, from the seam, for a wall in one piece).
         let c = CurveEval::new(&e.curve).ok()?;
         let [t0, t1] = e.interval;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
-        let aa = unwrap(angle(c.point(t0)?, o, axis, radial, tangent), am);
-        let ab = unwrap(angle(c.point(t1)?, o, axis, radial, tangent), am);
-        return Some((aa.min(ab), aa.max(ab)));
+        let half = 0.5 * (t1 - t0);
+        return Some((am - half, am + half));
     }
     None
 }
