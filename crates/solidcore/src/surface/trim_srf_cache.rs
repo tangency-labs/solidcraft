@@ -14,7 +14,9 @@
 //! | [`is_kind_of`], [`TrimSrfCache::is_kind_of`] | `SmTrimSrfCache::IsKindOf`              |
 //! | [`TrimSrfCache::point_test`]              | `SmTrimSrfCache::PointTest`                |
 //! | [`TrimSrfCache::point_classify`]          | `SmTrimSrfCache::PointClassify`            |
-//! | [`TrimSrfCache::build_tree`]              | `SmTrimSrfCache::BuildTree`                |
+//! | [`TrimSrfCache::build_tree`], [`TrimSrfCache::build_tree_with_face`] | `SmTrimSrfCache::BuildTree` |
+//! | [`TrimSrfCache::point_test_in`], [`TrimSrfCache::point_classify_in`] | `PointTest`, `PointClassify` over the given face |
+//! | [`CacheFace`]                             | `GetFace()` and what the cache reads from the face and its B-rep |
 //! | [`TrimSrfCache::implant_edgeuse`]         | `SmTrimSrfCache::ImplantEdgeuse`           |
 //! | [`TrimSrfCache::implant_poly_edge`], [`PolyEdgeInput`] | `SmTrimSrfCache::ImplantPolyEdge` |
 //! | [`TrimSrfCache::implant_vertexuse`], [`VertexuseInput`] | `SmTrimSrfCache::ImplantVertexuse` |
@@ -31,11 +33,16 @@
 //!   tolerance (`SmVertexuse::ComputeUVPoint`, `SmVertex::GetTolerance`), the poly
 //!   edge's end points and tolerance and the surface of its original face
 //!   (`SmPolyEdge::GetStartPoint`, `GetEndPoint`, `GetTolerance`,
-//!   `GetPolyFace()->GetOriginalFace()->GetSurface()`). [`TrimSrfCache::build_tree`],
-//!   the caller that walks the face, reaches those reads through
-//!   [`SolidError::Unported`] stubs. `BuildTree` reads the natural domain of
-//!   `GetFace()->GetSurface()`, which is the cache's own surface (the face is found
-//!   through the surface's owner).
+//!   `GetPolyFace()->GetOriginalFace()->GetSurface()`). `GetFace()` is a
+//!   [`CacheFace`] the caller gives ([`TrimSrfCache::build_tree_with_face`],
+//!   [`TrimSrfCache::point_test_in`], [`TrimSrfCache::point_classify_in`]): the
+//!   surface's owner is an object reference the cache cannot follow to the B-rep.
+//!   Without it ([`TrimSrfCache::build_tree`], [`TrimSrfCache::point_test`],
+//!   [`TrimSrfCache::point_classify`]) a face-owned surface stops at
+//!   [`SurfaceCache::face`] ([`SolidError::Unported`]). `BuildTree` reads the natural
+//!   domain of `GetFace()->GetSurface()`, which is the cache's own surface.
+//!   `SubdivideNode` re-implants a moved edge use with the curve it was implanted with
+//!   (its `GetUVTrimCurve`, unchanged during the build).
 //! - **Node lists.** `SmTList::Prepend` onto a node's edge use, vertex and poly edge
 //!   lists inserts at the front of the [`BezierAux2d`] `Vec`s (list order, head first).
 //!   The list memory managers (`m_sVLMgr`, `m_sEdgeuseListMgr`) have no counterpart.
@@ -44,21 +51,14 @@
 //!   `m_bPointTestEnabled` set at the end of the face branch is overwritten by the
 //!   restore when the branch ends.
 //! - **Virtual dispatch.** `MarkFaceContainment` (reached after the face's trim
-//!   curves are implanted) runs [`SurfaceCache::mark_face_containment`], whose
-//!   `PointClassify` is the base class body; upstream dispatches to
-//!   [`TrimSrfCache::point_classify`]. Both end in [`SolidError::Unported`] today
-//!   (`GetFace`, the face classification), see `plan/findings.md`.
-//! - **Unported callees** (all return [`SolidError::Unported`]): those reached through
-//!   `SmSurfaceCache::BuildTree`, `FindUVNodes` and `SubdivideNode`
-//!   ([`crate::surface::surface_cache::p3`]); `SmSurface::GetFace` (through
-//!   [`SurfaceCache::face`]) and `Evaluate1stDerivatives`, `SmTol::MapTo2d` over a
-//!   surface (`surface.surface_p1`); `SmPointClassification` (`intersect.point_class`) and
-//!   `SmFace::PointClassify` (`query.face_p2`); `SmTol::GetZoneTol3d` of a face
-//!   (`topology.brep_p1`, as in [`SurfaceCache::mark_face_containment`]); and the face
-//!   walk of `BuildTree` (`SmFace::GetBrep`, `CreateUVTrimCurves`,
-//!   `GetUpwardLoopuses`, `SmLoopuse::GetEdgeuses` / `GetVertexuses`,
-//!   `SmEdgeuse::GetUVTrimCurve`, `SmVertexuse::ComputeUVPoint`,
-//!   `SmVertex::GetTolerance`).
+//!   curves are implanted) runs [`SurfaceCache::mark_face_containment_with`] with the
+//!   face as classifier, so its `PointClassify` is this cache's
+//!   ([`TrimSrfCache::point_classify_in`]).
+//! - **Unported callees** (all return [`SolidError::Unported`]): `SmSurface::GetFace`
+//!   without a [`CacheFace`] (through [`SurfaceCache::face`]); `SmTol::GetZoneTol3d`
+//!   and `SmFace::PointClassify` of [`TrimSrfCache::point_test`] /
+//!   [`TrimSrfCache::point_classify`] without a [`CacheFace`]; `SmFace::GetSurface` of
+//!   a moved poly edge's original face.
 //! - **Undefined behaviour.** Upstream dereferences a null face in `PointTest` /
 //!   `PointClassify` of a cache whose surface has no face; the port returns
 //!   `SM_ERR_NULL_POINTER`. A node without surface data in this cache gives
@@ -154,12 +154,149 @@ pub struct PolyEdgeInput<'a, O> {
     pub surface: &'a Surface,
 }
 
+/// The owning face of a trimmed surface cache's surface (`GetFace()`) and what
+/// `BuildTree` and `PointClassify` read from it and its B-rep. The face, its loop uses,
+/// edge uses and vertex uses are handles in the cache's object space (`O`); the B-rep
+/// layer implements this over its records (`query::face::p2`), so the cache reaches
+/// the face the surface's owner names without holding the B-rep.
+pub trait CacheFace<O> {
+    /// The face (`GetFace()`).
+    fn face(&self) -> O;
+
+    /// `GetFace()->GetBrep()->m_bEditingEnabled`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's (a face without B-rep).
+    fn brep_editing_enabled(&self) -> Result<bool>;
+
+    /// Sets `GetFace()->GetBrep()->m_bEditingEnabled`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's (a face without B-rep).
+    fn set_brep_editing_enabled(&mut self, enabled: bool) -> Result<()>;
+
+    /// `GetFace()->CreateUVTrimCurves(TRUE, NULL, NULL, ..)` (its gap statistics are
+    /// not read).
+    ///
+    /// # Errors
+    ///
+    /// Those of `CreateUVTrimCurves`.
+    fn create_uv_trim_curves(&mut self, k: &Kernel) -> Result<()>;
+
+    /// `GetFace()->GetUpwardLoopuses(sLoopuses)`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn upward_loopuses(&self) -> Result<Vec<O>>;
+
+    /// `pLU->GetEdgeuses(sEUses)`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn loopuse_edgeuses(&self, loopuse: O) -> Result<Vec<O>>;
+
+    /// `pLU->GetVertexuses(sVUses)`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's (a null vertex use, which upstream dereferences).
+    fn loopuse_vertexuses(&self, loopuse: O) -> Result<Vec<O>>;
+
+    /// `SM_CAST_PTR(SmBSplineCurve, pEdgeuse->GetUVTrimCurve())` (`None` when there is
+    /// none or it is no B-spline curve).
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn edgeuse_uv_trim_curve(&self, edgeuse: O) -> Result<Option<BSplineCurve>>;
+
+    /// `pVertexuse->ComputeUVPoint(sUV)` (`bOKToMakeUVTrimCurve` default `TRUE`).
+    ///
+    /// # Errors
+    ///
+    /// Those of `ComputeUVPoint`.
+    fn vertexuse_uv_point(&mut self, k: &Kernel, vertexuse: O) -> Result<Point2>;
+
+    /// `pVertexuse->GetVertex()->GetTolerance()`.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's (a vertex use without vertex).
+    fn vertexuse_vertex_tolerance(&self, vertexuse: O) -> Result<f64>;
+
+    /// `SmTol::GetZoneTol3d(pObject)` of the face or of an object a node records.
+    ///
+    /// # Errors
+    ///
+    /// The implementor's.
+    fn zone_tol_3d(&self, k: &Kernel, object: O) -> Result<f64>;
+
+    /// `GetFace()->PointClassify(uv, tol, FALSE, TRUE, sPC)` into a fresh
+    /// `SmPointClassification(tol)`: its class (`SmPointClassificationType`) and
+    /// object.
+    ///
+    /// # Errors
+    ///
+    /// Those of `SmFace::PointClassify`.
+    fn point_classify(
+        &mut self,
+        k: &Kernel,
+        uv_point: Point2,
+        src_zone_tol_3d: f64,
+    ) -> Result<(i32, Option<O>)>;
+}
+
+/// [`CacheFace`] as `MarkFaceContainment`'s classifier: `PointClassify` dispatches to
+/// [`TrimSrfCache::point_classify_in`].
+struct FaceClassifier<'f, O>(&'f mut dyn CacheFace<O>);
+
+impl<O> sc::FaceContainmentClassifier<O> for FaceClassifier<'_, O> {
+    fn zone_tol_3d(&mut self, k: &Kernel, face: O) -> Result<f64> {
+        self.0.zone_tol_3d(k, face)
+    }
+
+    fn point_classify(
+        &mut self,
+        k: &Kernel,
+        uv_point: Point2,
+        src_zone_tol_3d: f64,
+    ) -> Result<(i32, Option<O>)> {
+        classify_in_face(k, self.0, uv_point, src_zone_tol_3d)
+    }
+}
+
+/// The body of `SmTrimSrfCache::PointClassify` over the cache's face.
+fn classify_in_face<O>(
+    k: &Kernel,
+    face: &mut dyn CacheFace<O>,
+    uv_point: Point2,
+    src_zone_tol_3d: f64,
+) -> Result<(i32, Option<O>)> {
+    // Classify the Point against the surface->Face
+    let (class, object) = face.point_classify(k, uv_point, src_zone_tol_3d)?;
+
+    // set output
+    let object = if class == POINT_CLASS_UNKNOWN {
+        None
+    } else {
+        object
+    };
+    Ok((class, object))
+}
+
 /// The trimmed surface cache (`SmTrimSrfCache`): a [`SurfaceCache`] whose tree
 /// knows the face boundary.
 #[derive(Debug, Clone)]
 pub struct TrimSrfCache<O> {
     /// The `SmSurfaceCache` base.
     base: SurfaceCache<O>,
+    /// The UV trim curve of every edge use implanted (`GetUVTrimCurve`, read again
+    /// when a subdivision moves the edge use into the new children).
+    edgeuse_curves: Vec<(O, BSplineCurve)>,
 }
 
 impl<O: Copy + PartialEq> TrimSrfCache<O> {
@@ -179,13 +316,19 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         base.point_test_enabled = true; // solvers only accept point solutions within trim boundaries
         base.have_t_surface_cache = false; // Set to true after adding UVTrimCurves to cache
         base.face_containment_done = FaceContainment::NotDone;
-        Self { base }
+        Self {
+            base,
+            edgeuse_curves: Vec::new(),
+        }
     }
 
     /// Wraps an existing cache as is (no state change).
     #[must_use]
     pub const fn from_base(base: SurfaceCache<O>) -> Self {
-        Self { base }
+        Self {
+            base,
+            edgeuse_curves: Vec::new(),
+        }
     }
 
     /// The `SmSurfaceCache` base.
@@ -301,6 +444,52 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         Ok((class, object))
     }
 
+    /// [`TrimSrfCache::point_test`] with the surface's face given (`GetFace()`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the face classification.
+    pub fn point_test_in(
+        &self,
+        k: &Kernel,
+        face: &mut dyn CacheFace<O>,
+        uv_point: Point2,
+        opt_zone_tol_3d: Option<f64>,
+    ) -> Result<(bool, Option<O>)> {
+        // when testing is off or cache is not current
+        if !self.base.point_test_enabled || self.base.face_was_modified {
+            // return TRUE so this point won't be culled
+            return Ok((true, None));
+        }
+
+        // classify point (with optional tolerance) against face
+        let src_zone_tol_3d = match opt_zone_tol_3d {
+            Some(t) => t,
+            None => face.zone_tol_3d(k, face.face())?,
+        };
+        let (class, object) = face.point_classify(k, uv_point, src_zone_tol_3d)?;
+
+        // Point is ok when it classified to a topology object
+        let ok =
+            class == POINT_CLASS_FACE || class == POINT_CLASS_EDGE || class == POINT_CLASS_VERTEX;
+        Ok((ok, object))
+    }
+
+    /// [`TrimSrfCache::point_classify`] with the surface's face given (`GetFace()`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the face classification.
+    pub fn point_classify_in(
+        &self,
+        k: &Kernel,
+        face: &mut dyn CacheFace<O>,
+        uv_point: Point2,
+        src_zone_tol_3d: f64,
+    ) -> Result<(i32, Option<O>)> {
+        classify_in_face(k, face, uv_point, src_zone_tol_3d)
+    }
+
     // ---- construction ------------------------------------------------------------------
 
     /// Builds the decomposition tree (when there is none) and, for a face's surface
@@ -315,10 +504,27 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// [`SolidError::Unported`] for the unported callees (`GetFace` and those of the tree
     /// construction).
     pub fn build_tree(&mut self, k: &Kernel) -> Result<()> {
+        self.build_tree_in(k, None)
+    }
+
+    /// [`TrimSrfCache::build_tree`] with the surface's face given (`GetFace()`): `face`
+    /// must be the face owning the cache's surface. Its UV trim curves are created
+    /// (`CreateUVTrimCurves`, which changes the B-rep) and its edge uses and vertex uses
+    /// implanted unless its B-rep is being edited.
+    ///
+    /// # Errors
+    ///
+    /// Those of the tree construction, of the face reads, the implanting and the
+    /// classification.
+    pub fn build_tree_with_face(&mut self, k: &Kernel, face: &mut dyn CacheFace<O>) -> Result<()> {
+        self.build_tree_in(k, Some(face))
+    }
+
+    fn build_tree_in(&mut self, k: &Kernel, face: Option<&mut dyn CacheFace<O>>) -> Result<()> {
         // prevent bad recursion back into BuildTree
         let saved = self.base.face_containment_done;
         self.base.face_containment_done = FaceContainment::UnderConstruction;
-        let r = self.build_tree_body(k);
+        let r = self.build_tree_body(k, face);
         // SmTemporaryChangeValue: restore unless cleared
         if !matches!(r, Ok(true)) {
             self.base.face_containment_done = saved;
@@ -328,7 +534,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
     /// `BuildTree` inside the face containment guard; `true` when the guard was
     /// cleared (containment done).
-    fn build_tree_body(&mut self, k: &Kernel) -> Result<bool> {
+    fn build_tree_body(&mut self, k: &Kernel, face: Option<&mut dyn CacheFace<O>>) -> Result<bool> {
         // Build m_ptree surface subdivision tree when it does not exist
         let clean_up_build_data = if self.base.tree().is_none() {
             surface_cache_build_tree(&mut self.base, k)?;
@@ -341,12 +547,19 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         // skip inserting UVTrimCurves and classifying node containment
         //   when Surface is not owned by a face (no UVTrimCurves to process)
         //     or Brep Editing is enabled (face data structure may be in an intermediate state)
-        let face = self.base.face()?;
+        // (`GetFace()`: the caller's face, else the surface's owner, which has no
+        // handle here when it is a face)
+        let face = if let Some(f) = face {
+            Some(f)
+        } else {
+            self.base.face()?;
+            None
+        };
         let mut cleared = false;
         let editing_face = match face {
             None => None,
             Some(f) => {
-                if face_brep_editing_enabled(f)? {
+                if f.brep_editing_enabled()? {
                     None
                 } else {
                     Some(f)
@@ -383,21 +596,21 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// The face branch of `BuildTree` (editing disabled in the brep): implant every
     /// edge use and vertex use, reduce the cache domain to the face domain and
     /// classify the nodes. `true` when the face containment is done.
-    fn implant_face(&mut self, k: &Kernel, face: O) -> Result<bool> {
-        let saved_editing = face_brep_editing_enabled(face)?;
-        set_face_brep_editing_enabled(face, true)?;
+    fn implant_face(&mut self, k: &Kernel, face: &mut dyn CacheFace<O>) -> Result<bool> {
+        let saved_editing = face.brep_editing_enabled()?;
+        face.set_brep_editing_enabled(true)?;
         let result = self.implant_face_body(k, face);
         // SmTemporaryChangeValue restores the brep editing flag on errors too.
-        set_face_brep_editing_enabled(face, saved_editing)?;
+        face.set_brep_editing_enabled(saved_editing)?;
         result
     }
 
-    fn implant_face_body(&mut self, k: &Kernel, face: O) -> Result<bool> {
+    fn implant_face_body(&mut self, k: &Kernel, face: &mut dyn CacheFace<O>) -> Result<bool> {
         // create UVTrimCurve for every face->edge
-        face_create_uv_trim_curves(face)?;
+        face.create_uv_trim_curves(k)?;
 
         // Now implant edgeuses and vertexuses into the cache tree
-        let loopuses = face_upward_loopuses(face)?;
+        let loopuses = face.upward_loopuses()?;
         let mut face_domain = Extent2d::new();
 
         // do subdivision on nonPlanar faces.
@@ -405,8 +618,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
         // for every loopuse - implant edgeuses into TrimSurfaceCache
         for &lu in &loopuses {
-            for eu in loopuse_edgeuses(lu)? {
-                let curve = edgeuse_uv_trim_curve(eu)?;
+            for eu in face.loopuse_edgeuses(lu)? {
+                let curve = face.edgeuse_uv_trim_curve(eu)?;
                 self.implant_edgeuse(
                     k,
                     eu,
@@ -420,11 +633,11 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
         // for every Loopuse - implant every vertexuse into the TrimSurfCache
         for &lu in &loopuses {
-            for vu in loopuse_vertexuses(lu)? {
+            for vu in face.loopuse_vertexuses(lu)? {
                 let input = VertexuseInput {
                     vertexuse: vu,
-                    uv_point: vertexuse_uv_point(vu)?,
-                    vertex_tolerance: vertexuse_vertex_tolerance(vu)?,
+                    uv_point: face.vertexuse_uv_point(k, vu)?,
+                    vertex_tolerance: face.vertexuse_vertex_tolerance(vu)?,
                 };
                 self.implant_vertexuse(k, input, &mut face_domain)?;
             }
@@ -450,18 +663,10 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
             // Classify every TrimSurfCache Node not on a boundary as INSIDE or OUTSIDE
             //
-            // DISPATCH GAP: SmTrimSrfCache::PointClassify via MarkFaceContainment must
-            // dispatch to the trimmed override. Upstream (SmTrimSrfCache.cpp:343) calls
-            // the virtual `MarkFaceContainment`, whose `PointClassify` resolves to
-            // `SmTrimSrfCache::PointClassify` (SmTrimSrfCache.cpp:1048, ported here as
-            // `TrimSrfCache::point_classify`). `SurfaceCache::mark_face_containment`
-            // calls the base `SurfaceCache::point_classify` instead (surface_cache/p1.rs,
-            // always `SM_ERR`). No UNPORTED marker: the override is owned by this unit
-            // (surface.trim_srf_cache, per harness/callgraph/units.json) and is already
-            // ported; what is missing is the dispatch (e.g. a classifier argument to
-            // `mark_face_containment`). Unreachable today: the face path errors with
-            // `Unported` before this point. See plan/findings.md.
-            self.base.mark_face_containment(k)?;
+            // (the virtual `MarkFaceContainment`, whose `PointClassify` is this cache's
+            // `SmTrimSrfCache::PointClassify` over the face)
+            self.base
+                .mark_face_containment_with(k, &mut FaceClassifier(face))?;
             // set a permament value into m_bFaceContainment
             self.base.face_containment_done = FaceContainment::Done;
             Ok(true)
@@ -546,6 +751,9 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ) -> Result<()> {
         // locals
         let eu_curve = uv_trim_curve.ok_or(SolidError::null_pointer(OP_EU))?;
+        if !self.edgeuse_curves.iter().any(|(eu, _)| *eu == edgeuse) {
+            self.edgeuse_curves.push((edgeuse, eu_curve.clone()));
+        }
 
         // set up for poles
         let (poles, u_ivl, v_ivl, u_tol, v_tol) = {
@@ -795,8 +1003,8 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// # Errors
     ///
     /// Those of [`SurfaceCache::subdivide_node_split`]; [`SolidError::Unported`]:
-    /// `SmEdgeuse::GetUVTrimCurve` (`topology.edgeuse_p1`) for an edge use to move,
-    /// `SmFace::GetSurface` (`topology.face_p2`) for a poly edge to move.
+    /// `SmFace::GetSurface` (`topology.face_p2`) for a poly edge to move. An edge use's
+    /// `GetUVTrimCurve` is the curve it was implanted with.
     fn subdivide_node(
         &mut self,
         k: &Kernel,
@@ -810,7 +1018,11 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                 while let Some(eu) = self.base.aux(node)?.edgeuse_list.last().copied() {
                     // implant the edge use in both children without subsequent
                     // subdivision (the status is ignored)
-                    let curve = edgeuse_uv_trim_curve(eu)?;
+                    let curve = self
+                        .edgeuse_curves
+                        .iter()
+                        .find(|(e, _)| *e == eu)
+                        .map(|(_, c)| c.clone());
                     for child in [node1, node2] {
                         let mut temp_ext = Extent2d::new();
                         let r = self.implant_edgeuse(
@@ -1121,87 +1333,6 @@ fn face_point_classify<O>(
     Err(SolidError::unported(
         "SmFace::PointClassify",
         "query.face_p2",
-    ))
-}
-
-/// `GetFace()->GetBrep()->m_bEditingEnabled`.
-fn face_brep_editing_enabled<O>(_face: O) -> Result<bool> {
-    // UNPORTED(topology.face_p4): SmFace::GetBrep
-    Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
-}
-
-/// The temporary `GetFace()->GetBrep()->m_bEditingEnabled` assignment.
-fn set_face_brep_editing_enabled<O>(_face: O, _editing: bool) -> Result<()> {
-    // UNPORTED(topology.face_p4): SmFace::GetBrep (SmBrep::m_bEditingEnabled is
-    // Brep::set_editing_enabled once the face's B-rep is reachable)
-    Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
-}
-
-/// `SmFace::CreateUVTrimCurves(TRUE, NULL, NULL, ..)`.
-///
-/// When wiring, keep upstream's arguments exactly: `(TRUE, NULL, NULL, ..)`
-/// (`SmTrimSrfCache.cpp:209`).
-fn face_create_uv_trim_curves<O>(_face: O) -> Result<()> {
-    // UNPORTED(topology.face_p3): SmFace::CreateUVTrimCurves -- justified: findings.md topology.face_p3 "Stubs left for this unit"
-    // (`(TRUE, NULL, NULL, ..)`; the face is an opaque handle with no B-rep)
-    Err(SolidError::unported(
-        "SmFace::CreateUVTrimCurves",
-        "topology.face_p3",
-    ))
-}
-
-/// `SmFace::GetUpwardLoopuses`.
-fn face_upward_loopuses<O>(_face: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.face_p4): SmFace::GetUpwardLoopuses
-    Err(SolidError::unported(
-        "SmFace::GetUpwardLoopuses",
-        "topology.face_p4",
-    ))
-}
-
-/// `SmLoopuse::GetEdgeuses`.
-fn loopuse_edgeuses<O>(_loopuse: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.loopuse): SmLoopuse::GetEdgeuses
-    Err(SolidError::unported(
-        "SmLoopuse::GetEdgeuses",
-        "topology.loopuse",
-    ))
-}
-
-/// `SmLoopuse::GetVertexuses`.
-fn loopuse_vertexuses<O>(_loopuse: O) -> Result<Vec<O>> {
-    // UNPORTED(topology.loopuse): SmLoopuse::GetVertexuses
-    Err(SolidError::unported(
-        "SmLoopuse::GetVertexuses",
-        "topology.loopuse",
-    ))
-}
-
-/// `SmEdgeuse::GetUVTrimCurve` (`None` when there is none).
-fn edgeuse_uv_trim_curve<O>(_edgeuse: O) -> Result<Option<BSplineCurve>> {
-    // UNPORTED(topology.edgeuse_p1): SmEdgeuse::GetUVTrimCurve
-    Err(SolidError::unported(
-        "SmEdgeuse::GetUVTrimCurve",
-        "topology.edgeuse_p1",
-    ))
-}
-
-/// `SmVertexuse::ComputeUVPoint`.
-fn vertexuse_uv_point<O>(_vertexuse: O) -> Result<Point2> {
-    // UNPORTED(topology.vertexuse): SmVertexuse::ComputeUVPoint
-    Err(SolidError::unported(
-        "SmVertexuse::ComputeUVPoint",
-        "topology.vertexuse",
-    ))
-}
-
-/// `pVertexuse->GetVertex()->GetTolerance()`.
-fn vertexuse_vertex_tolerance<O>(_vertexuse: O) -> Result<f64> {
-    // UNPORTED(topology.vertexuse): SmVertexuse::GetVertex
-    // UNPORTED(topology.vertex): SmVertex::GetTolerance
-    Err(SolidError::unported(
-        "SmVertexuse::GetVertex",
-        "topology.vertexuse",
     ))
 }
 

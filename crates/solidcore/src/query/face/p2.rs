@@ -17,6 +17,7 @@
 //! | [`ProtoTopologyManager::capture_distance`] | `SmProtoTopologyManager::GetCaptureDistance` (already in `topology::proto_topology`) |
 //! | [`face_vertices`]                     | `SmFace::GetVertices(SmTArray&, ..)` (CO-PORTED, `topology.face_p4`) |
 //! | `ClassObject for EntityRef`           | the `SmObject*` of a classification of B-rep topology |
+//! | [`BrepCacheFace`], [`face_surface_cache`] | `GetFace()` of a face surface's trimmed cache (`SmTrimSrfCache::BuildTree`, `PointClassify`), `smsurf_GetSurfaceCache(GetSurface())` |
 //!
 //! Deviations:
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the
@@ -81,7 +82,7 @@
 //!   callee). A vertex without a face use is unresolved (upstream dereferences null).
 //! - No recursion.
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::point_set::PointContainment;
@@ -97,10 +98,12 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::r#loop::{contains_uv_point, UvContainment};
+use crate::surface::surface::p1::get_surface_cache_with_face;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCacheOptions};
-use crate::surface::trim_srf_cache::TrimSrfCache;
+use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as fp2;
 use crate::topology::loopuse;
@@ -129,6 +132,173 @@ impl ClassObject for EntityRef {
 
 fn null(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(operation, reason)
+}
+
+// ---- the face of a face surface's trimmed cache ------------------------------------------
+
+const OP_CACHE_FACE: &str = "query::face::p2::BrepCacheFace";
+
+/// A face of a B-rep as the owning face of its surface's trimmed surface cache
+/// ([`CacheFace`]: what `SmTrimSrfCache` reads through `GetFace()`). Handles are
+/// [`EntityRef`]s; the B-rep is borrowed mutably because `CreateUVTrimCurves` and
+/// `ComputeUVPoint` attach UV trim curves and the classification may too.
+#[derive(Debug)]
+pub struct BrepCacheFace<'a> {
+    /// The B-rep holding the face.
+    pub b: &'a mut Brep,
+    /// The face.
+    pub f: FaceId,
+}
+
+fn cache_face_entity(reason: &'static str) -> SolidError {
+    SolidError::invalid_input(OP_CACHE_FACE, reason)
+}
+
+impl CacheFace<EntityRef> for BrepCacheFace<'_> {
+    fn face(&self) -> EntityRef {
+        EntityRef::Face(self.f)
+    }
+
+    fn brep_editing_enabled(&self) -> Result<bool> {
+        Ok(self.b.editing_enabled())
+    }
+
+    fn set_brep_editing_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.b.set_editing_enabled(enabled);
+        Ok(())
+    }
+
+    fn create_uv_trim_curves(&mut self, k: &Kernel) -> Result<()> {
+        // (TRUE, NULL, NULL, ..): adjust tolerances, no given curves
+        crate::topology::face::p3::create_uv_trim_curves(k, self.b, self.f, true, None).map(|_| ())
+    }
+
+    fn upward_loopuses(&self) -> Result<Vec<EntityRef>> {
+        Ok(
+            crate::topology::face::p4::upward_loopuses(self.b, self.f, false, None)?
+                .into_iter()
+                .map(EntityRef::Loopuse)
+                .collect(),
+        )
+    }
+
+    fn loopuse_edgeuses(&self, loopuse: EntityRef) -> Result<Vec<EntityRef>> {
+        let EntityRef::Loopuse(lu) = loopuse else {
+            return Err(cache_face_entity("not a loop use"));
+        };
+        Ok(loopuse::edgeuses(self.b, lu, None, None)?
+            .into_iter()
+            .map(EntityRef::Edgeuse)
+            .collect())
+    }
+
+    fn loopuse_vertexuses(&self, loopuse: EntityRef) -> Result<Vec<EntityRef>> {
+        let EntityRef::Loopuse(lu) = loopuse else {
+            return Err(cache_face_entity("not a loop use"));
+        };
+        let mut out = Vec::new();
+        for vu in loopuse::vertexuses(self.b, lu, None)? {
+            // a null vertex use is dereferenced by ImplantVertexuse upstream
+            let vu = vu.ok_or_else(|| cache_face_entity("null vertex use"))?;
+            out.push(EntityRef::Vertexuse(vu));
+        }
+        Ok(out)
+    }
+
+    fn edgeuse_uv_trim_curve(&self, edgeuse: EntityRef) -> Result<Option<BSplineCurve>> {
+        let EntityRef::Edgeuse(eu) = edgeuse else {
+            return Err(cache_face_entity("not an edge use"));
+        };
+        // SM_CAST_PTR(SmBSplineCurve, ..): the analytic curves derive from it upstream
+        Ok(match eu1::uv_trim_curve(self.b, eu)?.0.map(Curve::kind) {
+            Some(CurveKind::BSpline(c)) => Some(c.clone()),
+            Some(CurveKind::Line(c)) => Some(c.base.clone()),
+            Some(CurveKind::Ellipse(c)) => Some(c.base().clone()),
+            Some(CurveKind::Hyperbola(c)) => Some(c.base().clone()),
+            Some(CurveKind::Parabola(c)) => Some(c.base().clone()),
+            _ => None,
+        })
+    }
+
+    fn vertexuse_uv_point(&mut self, k: &Kernel, vertexuse: EntityRef) -> Result<Point2> {
+        let EntityRef::Vertexuse(vu) = vertexuse else {
+            return Err(cache_face_entity("not a vertex use"));
+        };
+        crate::topology::vertexuse::compute_uv_point(k, self.b, vu, true)
+    }
+
+    fn vertexuse_vertex_tolerance(&self, vertexuse: EntityRef) -> Result<f64> {
+        let EntityRef::Vertexuse(vu) = vertexuse else {
+            return Err(cache_face_entity("not a vertex use"));
+        };
+        let v = crate::topology::vertexuse::vertex(self.b, vu)?
+            .ok_or_else(|| cache_face_entity("vertex use without vertex"))?;
+        crate::topology::vertex::tolerance(self.b, v)
+    }
+
+    fn zone_tol_3d(&self, _k: &Kernel, object: EntityRef) -> Result<f64> {
+        // SmTol::GetZoneTol3d(const SmObject*): the topology's GetTolerance
+        match object {
+            EntityRef::Face(f) => fp2::tolerance(self.b, f),
+            EntityRef::Edge(e) => crate::topology::edge::tolerance(self.b, e),
+            EntityRef::Vertex(v) => crate::topology::vertex::tolerance(self.b, v),
+            EntityRef::Edgeuse(eu) => eu1::tolerance(self.b, eu),
+            // no GetTolerance override: SmTopology::GetTolerance
+            _ => Ok(crate::geom::tol::ZONE_TOL_3D),
+        }
+    }
+
+    fn point_classify(
+        &mut self,
+        k: &Kernel,
+        uv_point: Point2,
+        src_zone_tol_3d: f64,
+    ) -> Result<(i32, Option<EntityRef>)> {
+        // SmPointClassification sPC(sSrcZoneTol3d, ..); sPC.SetSrcZoneTol3d(..)
+        let mut pc = PointClassification::new(src_zone_tol_3d);
+        pc.set_src_zone_tol_3d(src_zone_tol_3d);
+        // PointClassify(uv, tol, FALSE, TRUE, sPC); the trimmed cache it would find is
+        // the one asking (under construction, or the caller's)
+        point_classify(
+            k,
+            self.b,
+            self.f,
+            uv_point,
+            &mut pc,
+            PointClassifyOptions {
+                src_zone_tol_3d,
+                do_boundary_intersections: false,
+                use_uv_classification: true,
+                ..PointClassifyOptions::default()
+            },
+        )?;
+        Ok((pc.point_class() as i32, pc.object()))
+    }
+}
+
+/// `smsurf_GetSurfaceCache(pFace->GetSurface())`: the trimmed surface cache of face
+/// `f`'s surface built with the face ([`get_surface_cache_with_face`]; this creates
+/// the face's UV trim curves), else its plain surface cache wrapped as one. `handle`
+/// is the surface's handle in the cache's object space.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a face without surface; those of
+/// [`get_surface_cache_with_face`].
+pub fn face_surface_cache(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    handle: Option<EntityRef>,
+) -> Result<TrimSrfCache<EntityRef>> {
+    // the cache copies the surface; the face's B-rep is changed while it is built
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or(SolidError::null_pointer(OP_CACHE_FACE))?
+        .clone_for_evaluation()?;
+    get_surface_cache_with_face(k, &surface, handle, &mut BrepCacheFace { b, f })
 }
 
 // ---- co-ported topology access ----------------------------------------------------------
@@ -190,8 +360,10 @@ fn with_out_of_bounds_enabled(surface: &Surface) -> Option<Surface> {
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => {}
     }
-    // the copy constructor resets the owner; the temporary change keeps it
+    // the copy constructor resets the owner; the temporary change keeps it (and the
+    // face tolerance its B-rep cached on it, which `GetFace()->GetTolerance()` reads)
     copy.set_owner(surface.owner());
+    copy.set_owner_zone_tol_3d(surface.owner_zone_tol_3d());
     Some(copy)
 }
 

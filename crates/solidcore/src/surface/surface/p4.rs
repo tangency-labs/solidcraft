@@ -15,7 +15,7 @@
 //! | [`pass_sp_convergence_test`]                      | `sm_PassSPConvergenceTest` (static)              |
 //! | [`Surface::create_seam_curve`]                    | `SmSurface::CreateSeamCurve`                     |
 //! | [`Surface::is_on_seam`], [`SeamInfo`]             | `SmSurface::IsOnSeam`                            |
-//! | [`Surface::global_point_solve`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
+//! | [`Surface::global_point_solve`], [`Surface::global_point_solve_point_test_off`], [`global_point_solve_starts`], [`NoObject`] | `SmSurface::GlobalPointSolve` |
 //! | [`classify_curve_surface_xsect_point`], [`XsectClassification`] | `sm_ClassifyCurveSurfaceXSectPoint` (static) |
 //! | [`CsIntersectEnfo`] (`EvalNFunctions`)           | `SmCSIntersectENFO::Evaluate` (struct: `surface.surface_p1`) |
 //! | [`CsNormalizeEnfo`] (`EvalNFunctions`)            | `SmCSNormalizeENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -1327,6 +1327,42 @@ impl Surface {
         Ok(solutions)
     }
 
+    /// [`Surface::global_point_solve`] by a caller that holds the surface's cache with
+    /// its point testing switched off (`SmTemporaryChangeValue` on
+    /// `m_bPointTestEnabled` around the solve, as `SmFace::Point3DClassify` does): the
+    /// trim boundary check of a face's surface keeps every solution, so the cache is
+    /// not fetched for it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve`].
+    pub fn global_point_solve_point_test_off<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+    ) -> Result<SolutionArray<O>> {
+        let mut solutions = SolutionArray::new();
+        self.global_point_solve_in(
+            k,
+            surface,
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            &mut solutions,
+            true,
+        )?;
+        Ok(solutions)
+    }
+
     /// [`Surface::global_point_solve`] with upstream's out-parameter: `solutions` keeps
     /// what was found when the call fails (for callers that ignore the status), except
     /// what the fast drop produced before it failed itself.
@@ -1345,6 +1381,36 @@ impl Surface {
         opt_target_distance: Option<f64>,
         requested: SolutionRequested,
         solutions: &mut SolutionArray<O>,
+    ) -> Result<()> {
+        self.global_point_solve_in(
+            k,
+            surface,
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            solutions,
+            false,
+        )
+    }
+
+    /// The body of [`Surface::global_point_solve_into`]; `point_test_off`: the
+    /// caller's cache of the surface has its point testing off.
+    #[allow(clippy::too_many_arguments)]
+    fn global_point_solve_in<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+        solutions: &mut SolutionArray<O>,
+        point_test_off: bool,
     ) -> Result<()> {
         // init output
         *solutions = SolutionArray::new();
@@ -1388,7 +1454,8 @@ impl Surface {
                 // If this surface belongs to a face, then check whether the returned UV
                 // values are within the trim boundaries of the face, unless flags in its
                 // surface cache indicate otherwise.
-                if self.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
+                // (with the caller's cache's point testing off every point is kept)
+                if !point_test_off && self.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
                     get_surface_cache(k, self, None::<NoObject>)?;
                     // UNPORTED(query.face_p2): SmFace::PointClassify
                     // NOTE for the face_p2 porter: upstream callers disable the surface
