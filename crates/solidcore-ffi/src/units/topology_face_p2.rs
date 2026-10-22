@@ -59,8 +59,11 @@ use crate::{call_with_buffer, FfiError};
 pub const MAX_INDEX: usize = 32;
 /// Largest degree.
 pub const MAX_DEGREE: usize = 5;
-/// Largest coordinate magnitude.
-pub const MAX_COORD: f64 = 1.0e300;
+/// Largest magnitude of any value (coordinates included). HANG-29: with a B-rep or
+/// curve coordinate whose square overflows (from about `1.34e154`), the face build's
+/// `SmCurve::GlobalCoincidenceChecker` (through `DropPoint`) splits forever; the bound
+/// keeps Euclidean points (weights `1e-3..=1e3`) under that regime.
+pub const MAX_COORD: f64 = 1.0e150;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

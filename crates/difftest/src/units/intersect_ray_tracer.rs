@@ -330,6 +330,13 @@ fn rust_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
             &ext2(*domain),
         ))),
         SurfIn::Bezier { p, q, net } => {
+            // A degree at or above the net size cannot make a surface (NurbSurface::new
+            // rejects it); check first so a fuzzed degree cannot size the knot vectors.
+            let rows = net.len();
+            let cols = net.first().map_or(0, Vec::len);
+            if *p >= rows || *q >= cols {
+                return Err(harness("surface: degree not below the control net size"));
+            }
             let net = net
                 .iter()
                 .map(|r| r.iter().map(cpoint).collect())
@@ -581,6 +588,11 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 ny,
                 rate,
             } => {
+                // the FFI's renderer size bound ("renderer size"); mirrored so a fuzzed
+                // pixel count cannot keep the Rust side rendering for billions of pixels
+                if !(1..=8).contains(nx) || !(1..=8).contains(ny) || !(1..=3).contains(rate) {
+                    return Err(bad_index("renderer size"));
+                }
                 let t = tracer_slot.take().ok_or_else(|| bad_index("renderer"))?;
                 let place = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
                 let mut r = RayRenderer::new(t, &place, &ext3(*view), *nx as u64, *ny as u64);

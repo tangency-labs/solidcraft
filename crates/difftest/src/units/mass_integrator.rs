@@ -440,7 +440,13 @@ fn geometry_rust(g: &Geometry) -> Output {
                 let raw = ffi::face(1, *kind, p).map_err(|_| SolidError::sm_err("trim export"))?;
                 let mut it = raw.into_iter();
                 if it.next() != Some(0.0) {
-                    return Err(SolidError::sm_err("trim construction"));
+                    // the C++ could not construct the face, so there are no trims to
+                    // import: the Rust side has nothing to integrate (a harness
+                    // limitation, as for the aggregate queries)
+                    return Err(SolidError::Unported {
+                        upstream: "mass.integrator runner: the C++ face construction failed",
+                        unit: "harness:mass.integrator-face-construction",
+                    });
                 }
                 let estimated_area = it.next().ok_or_else(|| SolidError::sm_err("bbox export"))?;
                 let u0 = it

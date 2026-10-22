@@ -19,8 +19,8 @@
 //! `NULL` entry). Curves are written as `type dim knot_type form has [n p m cpts(x y z
 //! w) knots] ivl[2]`.
 //!
-//! [`run`] accepts only finite inputs of magnitude at most [`MAX_COORD`], well-formed
-//! clamped B-splines and trees of the shape of the `intersect.adv_surface_intersector`
+//! [`run`] accepts only finite inputs of magnitude at most [`MAX_COORD`], planes whose
+//! domain has positive extent (UB-68), well-formed clamped B-splines and trees of the shape of the `intersect.adv_surface_intersector`
 //! wrapper (at most [`MAX_NODES`] nodes, [`MAX_POLAR`] polar box vectors per node, the
 //! top node first, children after their parent, leaves are patches with a pseudo box of
 //! independent basis vectors, patches and heads have a polar box of non-zero vectors).
@@ -231,6 +231,12 @@ impl Enc {
                 scale,
                 domain,
             } => {
+                // UB-68: a plane with a degenerate or inverted domain has no NURB, and
+                // its surface cache hands the NULL NURB to `sm_CreateBezierPatchBlock`
+                // (`SmSurfaceCache.cpp:4800`, SIGSEGV)
+                if !(domain[2] > domain[0] && domain[3] > domain[1]) {
+                    return Err(bad("plane domain must have positive extent"));
+                }
                 self.int(0);
                 self.nums(o)?;
                 self.nums(x)?;

@@ -307,8 +307,8 @@ fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
                 m as f64,
                 b.p as f64,
                 b.q as f64,
-                (b.u.len() - 1) as f64,
-                (b.v.len() - 1) as f64,
+                b.u.len().checked_sub(1).ok_or_else(|| harness("empty u knots"))? as f64,
+                b.v.len().checked_sub(1).ok_or_else(|| harness("empty v knots"))? as f64,
             ]);
             for row in &b.net {
                 for p in row {
@@ -1939,6 +1939,11 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             flags,
             n,
         } => {
+            // The FFI bounds the derivative array (`MAX_DYDX`); mirror it so a
+            // fuzzed count cannot make the runner allocate without bound.
+            if *n > ffi::MAX_DYDX {
+                return Err(harness(format!("bad index/count {n} (max {})", ffi::MAX_DYDX)).into());
+            }
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
             let k = Kernel::default();

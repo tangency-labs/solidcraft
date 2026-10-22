@@ -20,7 +20,9 @@
 //!
 //! Guards (inputs that are undefined upstream): NURB sizes must be consistent (degree
 //! `1..=MAX_DEGREE`, `n >= p`, `m = n + p + 1`, non-decreasing knots with a non-empty
-//! domain, positive weights or `NL_NOW`), every value finite; an edge is used at most twice (a third
+//! domain (an edge curve's last `p + 1` knots equal: `sm_CreateBezSegments` reads past
+//! the control polygon of an unclamped end), edge circle axes whose squared length does
+//! not overflow (`SmCircle` builds no NURB, later dereferenced), positive weights or `NL_NOW`), every value finite; an edge is used at most twice (a third
 //! use takes the non-manifold radial-sector path of the constructor); every edge use's
 //! interval lies in its UV trim curve's domain (evaluations outside it fail and
 //! `ContainsUVPoint` then reads uninitialised outputs); the first edge use's interval is
@@ -272,6 +274,18 @@ fn push_nurb(o: &mut Vec<f64>, c: &Nurb, dim: usize) {
     o.extend_from_slice(&c.knots);
 }
 
+/// A circle axis whose squared length overflows: `SmCircle` then builds no NURB
+/// and `SmBSplineCurve::EvaluatePoint` dereferences the missing one
+/// (`SmBSplineCurve.cpp:3300`, reached from `SmBrepConstructor::EndLoop`; SIGSEGV).
+fn circle_axes_ok(x: &[f64; 3], y: &[f64; 3], what: &str) -> Result<(), FfiError> {
+    for a in [x, y] {
+        if !(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).is_finite() {
+            return Err(bad(format!("{what}: axis length overflows")));
+        }
+    }
+    Ok(())
+}
+
 fn push_circle(o: &mut Vec<f64>, c: &[f64; 3], x: &[f64; 3], y: &[f64; 3], d: &[f64; 2], r: f64) {
     o.extend_from_slice(c);
     o.extend_from_slice(x);
@@ -372,11 +386,19 @@ fn push_curve(o: &mut Vec<f64>, c: &Curve3) -> Result<(), FfiError> {
             for v in [&c[..], x, y, d, &[*r]] {
                 finite(v, "circle")?;
             }
+            circle_axes_ok(x, y, "circle")?;
             o.push(1.0);
             push_circle(o, c, x, y, d, *r);
         }
         Curve3::BSpline(n) => {
             nurb_ok(n, "edge curve")?;
+            // `sm_CreateBezSegments` (the curve cache that `DropPoint` builds) walks the
+            // knots after the last span up to `m` and copies `Pw[ie - p + i]` past the
+            // control polygon when the end is not clamped (SIGSEGV).
+            let tail = n.knots.len().saturating_sub(n.p + 1);
+            if n.knots.get(tail..).is_some_and(|t| t.windows(2).any(|w| w.first() != w.get(1))) {
+                return Err(bad("edge curve: end knots not clamped"));
+            }
             o.push(2.0);
             push_nurb(o, n, 3);
         }

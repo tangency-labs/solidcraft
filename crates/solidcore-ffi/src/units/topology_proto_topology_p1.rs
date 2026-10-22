@@ -43,10 +43,14 @@
 //! live object pointing at a deleted one) writes `op -2` ([`SKIPPED`]) and ends the output.
 //!
 //! [`run`] accepts only well-formed scripts with bounded finite data (counts, codes, curve
-//! and surface blocks); the run-time state checks are the shim's.
+//! and surface blocks; conic axes whose squared length does not overflow, else the conic
+//! has no NURB to evaluate, and conic domains within [`MAX_CONIC_ANGLE`], HANG-4); the run-time state checks are the shim's.
 
 use crate::validate::{bad, NOW};
 use crate::{call_with_buffer, FfiError};
+
+/// Largest conic domain end (radians) accepted (HANG-4).
+pub const MAX_CONIC_ANGLE: f64 = 1e6;
 
 mod sys {
     extern "C" {
@@ -524,10 +528,17 @@ impl Reader<'_> {
                     return Err(bad("conic dim"));
                 }
                 self.vec3()?;
-                self.nonzero3()?;
-                self.nonzero3()?;
-                self.finite()?;
-                self.finite()?;
+                self.axis3()?;
+                self.axis3()?;
+                // HANG-4: `N_CreateEllipticalArcAngTypeTol` moves the end angle by one
+                // turn per iteration (forever once `ae + 360 == ae`); bound the domain so
+                // the C++ loop stays short (at most ~3e5 turns, under the Rust port's
+                // 2^20-turn bound, so both sides agree)
+                for _ in 0..2 {
+                    if self.finite()?.abs() > MAX_CONIC_ANGLE {
+                        return Err(bad("conic domain too large"));
+                    }
+                }
                 let rx = self.finite()?;
                 if rx <= 0.0 {
                     return Err(bad("radius"));
@@ -538,6 +549,22 @@ impl Reader<'_> {
                 self.flag()
             }
         }
+    }
+    /// A conic axis: non-zero, and its squared length does not overflow (otherwise
+    /// the conic builds no NURB and `SmBSplineCurve::EvaluatePoint` dereferences the
+    /// missing one, `SmBSplineCurve.cpp:3300`, from `SmEdgeDefinition::GetEndPosition`
+    /// or `SmVertexDefinition::Resolve`: SIGSEGV).
+    fn axis3(&mut self) -> Result<(), FfiError> {
+        let x = self.finite()?;
+        let y = self.finite()?;
+        let z = self.finite()?;
+        if x == 0.0 && y == 0.0 && z == 0.0 {
+            return Err(bad("zero vector"));
+        }
+        if !(x * x + y * y + z * z).is_finite() {
+            return Err(bad("conic axis length overflows"));
+        }
+        Ok(())
     }
     fn nonzero3(&mut self) -> Result<(), FfiError> {
         let x = self.finite()?;

@@ -84,6 +84,10 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
         || (op == 3 && (n == 0 || other_n == 0))
         || (op == 4 && n != other_n)
         || (op == 6 && flag1 != 0.0 && flag2 != 0.0)
+        // UB-109: `IntersectVertices` -> `InsertPointClass` -> `FindInterval` reads the
+        // first interval of an empty classification (SIGSEGV); the shim only passes
+        // a vertex when flag1 is set
+        || (op == 6 && n == 0 && flag1 != 0.0)
     {
         return Err(invalid());
     }

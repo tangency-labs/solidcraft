@@ -621,7 +621,9 @@ fn rust_transfer_records(
         let extra = ShellId::from_index(u32::try_from(extra_index).map_err(failure)?);
         let members = match &mut brep.shell_mut(original).map_err(failure)?.members {
             ShellMembers::Faceuses(members) if members.len() >= 2 => members,
-            _ => return Err(failure("split fixture needs a face-use cycle")),
+            // the shim refuses this fixture (`SC_ERR_ARG`), which the C++ side reports
+            // as `rejected_input`
+            _ => return Ok(Output::err("rejected_input")),
         };
         let moved = members.remove(0);
         let target = brep.shell_mut(extra).map_err(failure)?;

@@ -75,6 +75,14 @@ pub fn eval(op: i32, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     {
         return Err(bad());
     }
+    // Building the B-rep of a rational sphere (kind 9) of radius about 1e-5 .. 1e-4
+    // does not return in upstream (the face's `SmSurface::LocalCurveIntersect` ->
+    // `SmLocalSolveNd::SolveIt` inside `SmGlobalSolver::SolveBranch`, shape-dependent:
+    // 1e-6 and 1e-3 return), so B-rep ops (all but 3) need a radius of at least 1e-3
+    // (the fixtures use 1).
+    if kind == 9 && op != 3 && a[6] < 1e-3 {
+        return Err(bad());
+    }
     if (op == 1 || op == 2) && !is_curve
         || op == 3 && !matches!(kind, 4 | 5 | 8 | 9 | 13)
         || kind == 13 && op != 3

@@ -381,6 +381,11 @@ impl Enc {
                 if scale.iter().any(|s| s.abs() < 1e-9) {
                     return Err(bad("plane scale"));
                 }
+                // UB-68: a plane with a degenerate or inverted domain has no NURB
+                // (`CreateCanonical` fails), which upstream paths then dereference
+                if !(domain[2] > domain[0] && domain[3] > domain[1]) {
+                    return Err(bad("plane domain must have positive extent"));
+                }
                 self.int(0);
                 self.nums(o)?;
                 self.nums(x)?;

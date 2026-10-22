@@ -67,9 +67,35 @@ fn harness(msg: impl Into<String>) -> HarnessError {
     HarnessError::new(msg)
 }
 
+/// Largest magnitude of a script value the C++ side is given (the `±f64::MAX` markers
+/// aside). HANG-29: a B-rep coordinate whose square overflows (from about `1.34e154`)
+/// makes the healer's face work (`SmCurve::GlobalCoincidenceChecker` through
+/// `DropPoint`) split forever; weights stay within `1e-3..=1e3`, so this bound keeps
+/// every Euclidean point under that regime.
+const MAX_MAGNITUDE: f64 = 1.0e150;
+
+/// Whether `v` holds a number above [`MAX_MAGNITUDE`] (other than `±f64::MAX`).
+fn has_huge(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => n.as_f64().is_some_and(|x| {
+            let a = x.abs();
+            a > MAX_MAGNITUDE && a < f64::MAX
+        }),
+        Value::Array(a) => a.iter().any(has_huge),
+        Value::Object(o) => o.values().any(has_huge),
+        _ => false,
+    }
+}
+
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     match i {
-        Inputs::Script(s) => p2_cpp(s),
+        Inputs::Script(s) => {
+            let v = serde_json::to_value(s).map_err(|e| harness(e.to_string()))?;
+            if has_huge(&v) {
+                return Err(harness("script value above 1e150 (HANG-29)"));
+            }
+            p2_cpp(s)
+        }
         Inputs::Api { api } => {
             let r = match api.box_size {
                 None => ffi::api_heal_null(),

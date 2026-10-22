@@ -257,10 +257,15 @@ fn chain(n: usize, flush: bool) -> Inputs {
 }
 
 /// A chain case as its spans; other cases unchanged.
-fn expand(i: Inputs) -> Inputs {
+fn expand(i: Inputs) -> Result<Inputs, HarnessError> {
     match i {
-        Inputs::Chain { n, flush } => chain(n, flush),
-        other => other,
+        // `n + 1` points: the FFI accepts at most `MAX_ITEMS`, so refuse larger chains
+        // before building them (a fuzzed `n` would otherwise allocate without bound).
+        Inputs::Chain { n, .. } if n >= ffi::MAX_ITEMS => {
+            Err(harness(format!("chain of {n} spans exceeds {}", ffi::MAX_ITEMS)))
+        }
+        Inputs::Chain { n, flush } => Ok(chain(n, flush)),
+        other => Ok(other),
     }
 }
 
@@ -1422,8 +1427,9 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
             }),
         };
         if let Some(i) = got {
-            let i2 = expand(i.clone());
-            if ffi_op(&i2).is_ok_and(|op| ffi::encode(&op).is_ok()) {
+            let ok = expand(i.clone())
+                .is_ok_and(|i2| ffi_op(&i2).is_ok_and(|op| ffi::encode(&op).is_ok()));
+            if ok {
                 return i;
             }
         }
@@ -1444,11 +1450,11 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
-        cpp(&expand(case.parse()?))
+        cpp(&expand(case.parse()?)?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&expand(case.parse()?))
+        rust(&expand(case.parse()?)?)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

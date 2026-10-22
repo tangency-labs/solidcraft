@@ -28,6 +28,9 @@
 //! | `UvTrim`      | `face adjust own_curves` (`own_curves`: pass copies of the face's UV trim curves, cleared first) | `status gaps*6`, tolerances, use states |
 //! | `Intersect`   | `face other approx_tol ang_tol_deg coincidence want_points` (`coincidence` `-1` none, `0`, `1`) | `status n samples* n_pts xyz*` |
 //!
+//! Blocks with a value above [`super::topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`] are
+//! refused first (HANG-29).
+//!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: valid B-rep
 //! blocks (checked by [`super::topology_vertexuse`]), indices inside the B-rep's export,
 //! the flags and selectors above, finite `SetTol` / `Degenerate` tolerances (any sign:
@@ -204,6 +207,7 @@ fn check_args(op: Op, a: &[f64], c: [usize; 10]) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed block or argument; [`FfiError::Status`]
 /// for a shim failure.
 pub fn eval(op: Op, path: &str, block: &[f64], args: &[f64]) -> Result<Vec<f64>, FfiError> {
+    super::topology_edgeuse_p2::check_block_magnitudes(block)?;
     // validates the complete block and counts the B-rep's entities
     let export = fixture::eval(FixtureOp::Export, path, block)?;
     let Some(c) = fixture::counts(&export) else {

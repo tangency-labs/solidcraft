@@ -431,6 +431,11 @@ fn run_rust_op(
             ..
         } => eu2::is_tangent_sector(&k, b, eu, *tol_deg, *coincidence, *ok_make)
             .map(|r| vec![flag(r)]),
+        // the FFI bounds the sample count (`MAX_SAMPLES`); mirror it so a fuzzed count
+        // cannot keep the Rust side sampling for billions of iterations
+        OpIn::Convex { n, .. } if *n > ffi::MAX_SAMPLES as u64 => {
+            return Err(harness(format!("sample count {n} above {}", ffi::MAX_SAMPLES)));
+        }
         OpIn::Convex {
             n,
             step_off,

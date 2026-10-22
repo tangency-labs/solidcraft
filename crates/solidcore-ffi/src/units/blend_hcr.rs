@@ -24,7 +24,8 @@
 //! run). Rejected: a view vector whose squared length is below `SM_EFF_ZERO_SQ` or not
 //! finite (UB-169: upstream builds the view transform from uninitialised vectors), entity
 //! indices out of range, seeded silhouette edges without curve, non-finite numbers,
-//! more than 64 seeds.
+//! values above [`MAX_SCENE_MAGNITUDE`] (the ray tracer's grid walk does not end), more
+//! than 64 seeds.
 use super::topology_vertexuse::{self as fixture, Op};
 use crate::{call_with_buffer, FfiError};
 use std::ffi::CString;
@@ -172,6 +173,10 @@ pub fn validate(op: u8, scene: &[f64], ops: &[f64]) -> Result<(), FfiError> {
     if op > 7 {
         return Err(bad("op"));
     }
+    if op == 7 {
+        // the point `IsPointVisible` fires its ray from (hints may be any `int64_t`)
+        check_magnitudes(ops)?;
+    }
     let s = split(scene).ok_or_else(|| bad("bad scene output"))?;
     let c = fixture::counts(s.export).ok_or_else(|| bad("scene export"))?;
     let (n_e, n_v) = (c[7], c[9]);
@@ -249,9 +254,28 @@ fn call(op: u8, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     })
 }
 
+/// Largest magnitude of a scene value (B-rep block, extra wire, view, op 7's point; the
+/// `±f64::MAX` markers aside). With a coordinate near `1e20` in a scene of size `2e4`
+/// (between `1e18`, which returns, and `1e20`), `SmHCR::IsPointVisible` ->
+/// `SmRayTracer::FireRay` -> `SmGrid::Step3DDDA` never leaves its voxel walk: the
+/// grid's voxels are so large that the ray's steps no longer move it.
+pub const MAX_SCENE_MAGNITUDE: f64 = 1.0e15;
+
+fn check_magnitudes(v: &[f64]) -> Result<(), FfiError> {
+    if v.iter().any(|x| {
+        let a = x.abs();
+        a > MAX_SCENE_MAGNITUDE && a < f64::MAX
+    }) {
+        return Err(bad("scene value above 1e15 (grid walk does not end)"));
+    }
+    Ok(())
+}
+
 /// Op 8: builds the B-rep block `brep` (file `path` for a file block), adds the extra
 /// wire and constructs the HCR from the view part `hcr`; returns the scene output.
 pub fn scene(path: &str, brep: &[f64], hcr: &[f64]) -> Result<Vec<f64>, FfiError> {
+    check_magnitudes(brep)?;
+    check_magnitudes(hcr)?;
     let ex = fixture::eval(Op::Export, path, brep)?;
     fixture::counts(&ex).ok_or_else(|| bad("fixture rejected"))?;
     validate_hcr(hcr)?;

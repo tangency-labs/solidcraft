@@ -403,6 +403,11 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
     }
     let mut shells: Vec<PolyShellId> = Vec::new();
     for (r, &n) in regions.iter().zip(&b.regions) {
+        // The FFI rejects larger counts; mirror it so a fuzzed count cannot make the
+        // runner build billions of shells.
+        if n > ffi::MAX_SHELLS_PER_REGION {
+            return Err(Fail::Harness(harness("too many shells in a region")));
+        }
         for _ in 0..n {
             shells.push(rs(p.add_shell(*r))?);
         }
@@ -428,6 +433,10 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
             let lp = rs(p.start_poly_edge_loop(face))?;
             n_loops += 1;
             let kk = l.verts.len();
+            // the FFI's loop check ("loop vertex count / mode")
+            if kk == 0 || (l.mode == 2 && kk < 2) || l.mode > 2 {
+                return Err(Fail::Harness(harness("loop vertex count / mode")));
+            }
             let ne = if l.mode == 2 { kk - 1 } else { kk };
             for j in 0..ne {
                 let v0 = pick(*l.verts.get(j).ok_or(Fail::Harness(harness("loop")))?)?;
