@@ -487,6 +487,8 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
+    s.cloud.binding = None;
+    s.cloud.captures.clear();
     s.mark_saved();
     Ok(json!({"path": path, "bytes": bytes.len(), "name": s.doc.name}))
 }
@@ -543,6 +545,8 @@ impl Session {
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
+        self.cloud.binding.clone_from(&done.cloud.binding);
+        self.cloud.captures.clear();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -617,6 +621,9 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.cloud_binding().is_some() && str_(p, "path").is_none() {
+        return super::cloud::save(s, &json!({}));
+    }
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
