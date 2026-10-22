@@ -90,7 +90,7 @@ use crate::surface::surface_cache::p1::{BezierPatch, SurfaceCache};
 
 use super::p1::{
     get_surface_cache, is_node_valid, surface_to_evaluate, CsGlobalSolver, SsiNormalizeEnfo,
-    SspIntersectEnfo,
+    SspIntersectEnfo, SurfaceSolveContext,
 };
 use super::p2::{cs_are_perpen_disjoint_in, intersect_and_split, original_surface, set_up_breaks};
 use super::p5::{cs_identical_solutions, DropPointOptions};
@@ -1893,6 +1893,61 @@ impl Surface {
         approx_tol_3d: f64,
         skip_continuity_checks: bool,
     ) -> Result<LiftedCurve> {
+        self.lift_curve_in::<crate::surface::surface::p4::NoObject>(
+            k,
+            uv_domain,
+            uv_curve,
+            interval,
+            approx_tol_3d,
+            skip_continuity_checks,
+            None,
+            None,
+        )
+    }
+
+    /// [`Surface::lift_curve`] through the caller's face-aware cache context:
+    /// `handle` names this surface in the cache, so a surface owned by a face can
+    /// reach that face when the continuity checks build its cache.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::lift_curve`] and of the context's cache preparation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lift_curve_with_context<O: Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        uv_curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        skip_continuity_checks: bool,
+        context: &mut dyn SurfaceSolveContext<O>,
+        handle: Option<O>,
+    ) -> Result<LiftedCurve> {
+        self.lift_curve_in(
+            k,
+            uv_domain,
+            uv_curve,
+            interval,
+            approx_tol_3d,
+            skip_continuity_checks,
+            Some(context),
+            handle,
+        )
+    }
+
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    fn lift_curve_in<O: Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        uv_curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        skip_continuity_checks: bool,
+        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        handle: Option<O>,
+    ) -> Result<LiftedCurve> {
         let mut max_approx_dev = 0.0;
 
         // Test to see if the UV curve corresponds to an ISO curve
@@ -1918,7 +1973,11 @@ impl Surface {
             // Right now step surfaces will not be created that have discontinuities.
             if !matches!(self.kind(), SurfaceKind::Step(_)) {
                 // NER: no surface cache
-                let cache = match get_surface_cache::<()>(k, self, None) {
+                let cache = match context.as_mut() {
+                    Some(context) => context.build_surface_cache(k, self, handle),
+                    None => get_surface_cache::<O>(k, self, None),
+                };
+                let cache = match cache {
                     Ok(c) => c,
                     Err(e) if e.is_unported() => return Err(e),
                     Err(_) => return Err(SolidError::null_pointer(OP_LIFT)),
@@ -2041,7 +2100,17 @@ impl Surface {
             let vec = Vec2::new(p1.x, p1.y);
 
             // get surface domain enclosing pnt that is at least SM_CT_C1 continuous
-            let seg_domain = self.domain_with_continuity(k, ContinuityType::C1, pnt, vec)?;
+            let seg_domain = match context.as_mut() {
+                Some(ctx) => self.domain_with_continuity_with_context(
+                    k,
+                    ContinuityType::C1,
+                    pnt,
+                    vec,
+                    &mut **ctx,
+                    handle,
+                )?,
+                None => self.domain_with_continuity(k, ContinuityType::C1, pnt, vec)?,
+            };
 
             // If we don't get some sort of a domain then error out.
             if seg_domain.size().length_squared() < EFF_ZERO_SQ {

@@ -2489,14 +2489,17 @@ impl OffsetGeometryCreation {
 
         // Set pLiftedCurve = pUVCurveExtended projected through pExtSurf
         let edge_tol = brep.edge_tolerance(edge)?;
-        let lifted = surface_of(brep, ext_surf_h)?
-            .lift_curve(
+        let ext_surface = surface_of(brep, ext_surf_h)?.clone_for_evaluation()?;
+        let lifted = ext_surface
+            .lift_curve_with_context(
                 k,
                 &ext_domain,
                 &Curve::from(uv_curve_extended.clone()),
                 &ext_ivl,
                 edge_tol / 3.0,
                 false,
+                &mut OffsetSurfaceSolveContext(brep),
+                Some(ext_surf_h),
             )?
             .curve;
         let lifted_curve = lifted;
@@ -2722,11 +2725,23 @@ impl OffsetGeometryCreation {
         let deg20_rad = 20.0_f64.to_radians();
         let use_surface_edges = [true, true];
 
-        // Intersect extended surfaces
-        let ssi = surface_of(brep, ext_surface1)?.global_surface_intersect(
+        // Intersect extended surfaces. The evaluation copies cannot be passed for
+        // both when the two faces share one surface (`SmSurfaceIntersector` records
+        // `doing_self_intersection` from pointer identity, and the C++ call passes
+        // the same surface pointer twice).
+        let s1 = surface_of(brep, ext_surface1)?.clone_for_evaluation()?;
+        let s2 = surface_of(brep, ext_surface2)?.clone_for_evaluation()?;
+        let other = if ext_surface1 == ext_surface2 {
+            &s1
+        } else {
+            &s2
+        };
+        let ssi = s1.global_surface_intersect_with_context(
             k,
+            [Some(ext_surface1), Some(ext_surface2)],
+            &mut OffsetSurfaceSolveContext(brep),
             &domain1,
-            surface_of(brep, ext_surface2)?,
+            other,
             &domain2,
             use_surface_edges,
             Some(ssi_tol),

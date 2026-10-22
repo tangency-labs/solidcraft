@@ -1059,6 +1059,18 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
 }
 
+/// The caller's face-aware cache preparation for a surface/surface intersection.
+///
+/// `handles` name the two intersected surfaces in their caches (the first is the
+/// dispatching surface, the second its argument); each is passed to
+/// [`SurfaceSolveContext::build_surface_cache`] when a cache is first requested.
+pub struct SurfaceIntersectContext<'a, O: Copy + PartialEq> {
+    /// The operation-scoped cache and face service.
+    pub solver: &'a mut dyn SurfaceSolveContext<O>,
+    /// The handles naming the two surfaces in their caches.
+    pub handles: [Option<O>; 2],
+}
+
 // ---- bounding boxes -------------------------------------------------------------------
 
 /// The boxes [`Surface::calculate_bounding_box`] computes (those asked for).
@@ -1538,10 +1550,54 @@ impl Surface {
         uv: Point2,
         uv_vector: Vec2,
     ) -> Result<Extent2d> {
+        self.domain_with_continuity_in::<crate::surface::surface::p4::NoObject>(
+            k,
+            min_continuity,
+            uv,
+            uv_vector,
+            None,
+            None,
+        )
+    }
+
+    /// [`Surface::domain_with_continuity`] through the caller's face-aware cache
+    /// context: `handle` names this surface in the cache, so a surface owned by a
+    /// face can reach that face when the continuity domain builds its cache.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::domain_with_continuity`] and of the context's cache
+    /// preparation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn domain_with_continuity_with_context<O: Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        min_continuity: ContinuityType,
+        uv: Point2,
+        uv_vector: Vec2,
+        context: &mut dyn SurfaceSolveContext<O>,
+        handle: Option<O>,
+    ) -> Result<Extent2d> {
+        self.domain_with_continuity_in(k, min_continuity, uv, uv_vector, Some(context), handle)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn domain_with_continuity_in<O: Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        min_continuity: ContinuityType,
+        uv: Point2,
+        uv_vector: Vec2,
+        mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        handle: Option<O>,
+    ) -> Result<Extent2d> {
         if let SurfaceKind::Step(s) = self.kind() {
             return s.domain_with_continuity();
         }
-        let cache = get_surface_cache::<()>(k, self, None)?;
+        let cache = match context.as_mut() {
+            Some(context) => context.build_surface_cache(k, self, handle),
+            None => get_surface_cache::<O>(k, self, None),
+        }?;
 
         // Start out with natural domain and then shrink it if needed
         let ret_domain = self.natural_uv_domain();

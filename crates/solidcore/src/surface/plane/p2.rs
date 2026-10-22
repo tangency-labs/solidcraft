@@ -81,9 +81,9 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
-use crate::surface::surface::p1::evaluate_1st_derivatives;
+use crate::surface::surface::p1::{evaluate_1st_derivatives, SurfaceIntersectContext};
 use crate::surface::surface::p2::{
-    base_global_surface_intersect, SurfaceIntersection, TsectCurveType,
+    base_global_surface_intersect_in, SurfaceIntersection, TsectCurveType,
 };
 use crate::surface::surface::p7::base_evaluate_normal;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -1398,7 +1398,8 @@ impl Plane {
 ///
 /// Those of [`Plane::intersect_with_plane`]; [`SolidError::Unported`] from the general
 /// intersector.
-pub(crate) fn global_surface_intersect(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn global_surface_intersect_in<O: SolutionObject + Copy + PartialEq>(
     k: &Kernel,
     this: &Surface,
     plane: &Plane,
@@ -1408,6 +1409,7 @@ pub(crate) fn global_surface_intersect(
     use_surface_edges: [bool; 2],
     approx_tol_3d: Option<f64>,
     ang_tol_rad: Option<f64>,
+    context: Option<SurfaceIntersectContext<'_, O>>,
 ) -> Result<SurfaceIntersection> {
     // assume special case intersections will be complete
     let mut need_nurb_intersection = true;
@@ -1501,7 +1503,7 @@ pub(crate) fn global_surface_intersect(
 
     // If we're here, then analytic intersection were not found - do general intersection
     if need_nurb_intersection {
-        out = base_global_surface_intersect(
+        out = base_global_surface_intersect_in(
             k,
             this,
             uv_domain,
@@ -1510,6 +1512,7 @@ pub(crate) fn global_surface_intersect(
             use_surface_edges,
             approx_tol_3d,
             ang_tol_rad,
+            context,
         )?;
     }
 

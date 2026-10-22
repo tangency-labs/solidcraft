@@ -69,6 +69,7 @@ use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::knots::Side;
+use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SurfaceCache};
@@ -111,6 +112,31 @@ pub fn intersection_surface_caches<O: Copy + PartialEq>(
     si: &SurfaceIntersector<'_>,
     handles: [O; 2],
 ) -> Result<Vec<SurfaceCache<O>>> {
+    intersection_surface_caches_in(k, si, handles.map(Some), None)
+}
+
+/// [`intersection_surface_caches`] through the caller's face-aware cache context:
+/// the context builds each cache with the surface handle that names it, so a surface
+/// owned by a face reaches that face (upstream's `GetFace()`).
+///
+/// # Errors
+///
+/// Those of [`intersection_surface_caches`] and of the context's cache preparation.
+pub fn intersection_surface_caches_with_context<O: Copy + PartialEq>(
+    k: &Kernel,
+    si: &SurfaceIntersector<'_>,
+    handles: [Option<O>; 2],
+    context: &mut dyn SurfaceSolveContext<O>,
+) -> Result<Vec<SurfaceCache<O>>> {
+    intersection_surface_caches_in(k, si, handles, Some(context))
+}
+
+fn intersection_surface_caches_in<O: Copy + PartialEq>(
+    k: &Kernel,
+    si: &SurfaceIntersector<'_>,
+    handles: [Option<O>; 2],
+    mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+) -> Result<Vec<SurfaceCache<O>>> {
     let ner = |e: SolidError| {
         if e.is_unported() {
             e
@@ -119,8 +145,12 @@ pub fn intersection_surface_caches<O: Copy + PartialEq>(
         }
     };
     let [h1, h2] = handles;
-    let get = |s, h| -> Result<SurfaceCache<O>> {
-        let mut c = surface_cache::<O>(k, s, Some(h)).map_err(ner)?;
+    let mut get = |s, h| -> Result<SurfaceCache<O>> {
+        let built = match context.as_mut() {
+            Some(ctx) => ctx.build_surface_cache(k, s, h),
+            None => surface_cache::<O>(k, s, h),
+        };
+        let mut c = built.map_err(ner)?;
         c.get_tree(k).map_err(ner)?;
         Ok(c)
     };
@@ -323,6 +353,34 @@ pub fn do_intersection(
         &ssi.base,
         [IntersectionSurface::First, IntersectionSurface::Second],
     )?;
+    ssi.do_intersection_with_caches(k, &mut caches, opt_approx_tol_3d, opt_ang_tol_rad)
+}
+
+/// [`do_intersection`] through the caller's face-aware cache context. `handles` name
+/// the two surfaces in their caches; the context builds each cache (and so reaches
+/// the face that owns the surface) instead of the handle-less default.
+///
+/// # Errors
+///
+/// Those of [`do_intersection`] and of the context's cache preparation.
+pub fn do_intersection_with_context<O: SolutionObject + Copy + PartialEq>(
+    k: &Kernel,
+    surface1: &Surface,
+    uv_domain1: &Extent2d,
+    surface2: &Surface,
+    uv_domain2: &Extent2d,
+    use_surface_edges: [bool; 2],
+    opt_approx_tol_3d: Option<f64>,
+    opt_ang_tol_rad: Option<f64>,
+    context: &mut dyn SurfaceSolveContext<O>,
+    handles: [Option<O>; 2],
+) -> Result<SurfaceIntersection> {
+    let mut caches: Vec<SurfaceCache<O>>;
+    let mut ssi: AdvSurfaceIntersector<'_, '_, O> =
+        AdvSurfaceIntersector::new(k, surface1, uv_domain1, surface2, uv_domain2, false)?;
+    ssi.base
+        .set_use_surface_edges(use_surface_edges[0], use_surface_edges[1]);
+    caches = intersection_surface_caches_with_context(k, &ssi.base, handles, context)?;
     ssi.do_intersection_with_caches(k, &mut caches, opt_approx_tol_3d, opt_ang_tol_rad)
 }
 

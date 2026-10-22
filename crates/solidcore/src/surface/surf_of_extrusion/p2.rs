@@ -93,8 +93,9 @@ use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::surface::cone::Cone;
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
+use crate::surface::surface::p1::SurfaceIntersectContext;
 use crate::surface::surface::p2::{
-    base_global_surface_intersect, SurfaceIntersection, TsectCurveType, CONE_TYPE,
+    base_global_surface_intersect_in, SurfaceIntersection, TsectCurveType, CONE_TYPE,
 };
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::Volume;
@@ -359,7 +360,7 @@ impl SurfOfExtrusion {
     ///
     /// Those of [`Self::global_surface_intersect`].
     #[allow(clippy::too_many_arguments)] // upstream's signature
-    pub(crate) fn global_surface_intersect_on(
+    pub(crate) fn global_surface_intersect_on_in<O: SolutionObject + Copy + PartialEq>(
         &self,
         k: &Kernel,
         this: &Surface,
@@ -369,6 +370,7 @@ impl SurfOfExtrusion {
         use_surface_edges: [bool; 2],
         approx_tol_3d: Option<f64>,
         ang_tol_rad: Option<f64>,
+        context: Option<SurfaceIntersectContext<'_, O>>,
     ) -> Result<SurfaceIntersection> {
         let special = match other.kind() {
             SurfaceKind::Plane(p) => Some(self.intersect_with_plane_on(
@@ -396,7 +398,7 @@ impl SurfOfExtrusion {
         }
         // (SmSurfaceIntersector::DoIntersection resets the output arrays: the special
         // case's curves are dropped)
-        base_global_surface_intersect(
+        base_global_surface_intersect_in(
             k,
             this,
             uv_domain,
@@ -405,6 +407,7 @@ impl SurfOfExtrusion {
             use_surface_edges,
             approx_tol_3d,
             ang_tol_rad,
+            context,
         )
     }
 
