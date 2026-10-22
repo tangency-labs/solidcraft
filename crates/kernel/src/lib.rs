@@ -47,6 +47,7 @@ mod helix;
 pub mod history;
 mod iges_in;
 mod iges_out;
+mod intersection;
 #[cfg(test)]
 mod intersection_curve_tests;
 #[cfg(test)]
@@ -178,6 +179,7 @@ pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned,
 pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
+pub use intersection::{MeetingEdge, meeting_edges};
 pub use lip::{raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
