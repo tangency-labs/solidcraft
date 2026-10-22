@@ -14,7 +14,9 @@
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
-use solidcraft_geom::brep::{Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex};
+use solidcraft_geom::brep::{
+    Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex,
+};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, EdgeProv, FaceProv, History};
@@ -33,6 +35,8 @@ pub(crate) struct AEdge {
     pub tolerance: f64,
     /// The source record's edge this edge is, kept as it was.
     pub source: Option<usize>,
+    /// The source record's edges this new edge is (a piece of, or the moved) edge of.
+    pub of: Vec<usize>,
 }
 
 /// One use of an edge in a face's loop: the loop runs along it from its start (`forward`) or
@@ -116,7 +120,14 @@ impl Assembly {
             .edges
             .iter()
             .enumerate()
-            .map(|(i, e)| AEdge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance: e.tolerance, source: Some(i) })
+            .map(|(i, e)| AEdge {
+                curve: e.curve.clone(),
+                interval: e.interval,
+                vertices: e.vertices,
+                tolerance: e.tolerance,
+                source: Some(i),
+                of: Vec::new(),
+            })
             .collect();
         Ok(Assembly { tolerance: b.tolerance, vertices: b.vertices.clone(), edges, faces, regions: b.regions.clone(), shells: b.shells.len() })
     }
@@ -137,7 +148,7 @@ impl Assembly {
 
     /// A new edge on `curve` over `interval`, from `a` to `b`.
     pub(crate) fn edge(&mut self, curve: Curve, interval: [f64; 2], a: u32, b: u32) -> Result<u32> {
-        self.edges.push(AEdge { curve, interval, vertices: [a, b], tolerance: self.tolerance, source: None });
+        self.edges.push(AEdge { curve, interval, vertices: [a, b], tolerance: self.tolerance, source: None, of: Vec::new() });
         index(self.edges.len() - 1)
     }
 
@@ -148,6 +159,22 @@ impl Assembly {
             return Err(invalid("a line of no length"));
         }
         self.edge(Curve::Line { start: [p.x, p.y, p.z], end: [q.x, q.y, q.z] }, [0.0, 1.0], a, b)
+    }
+
+    /// Record that edge `e` is (a piece of, or the moved) edge `of` of the assembly: the source
+    /// edges under `of` are under `e`.
+    pub(crate) fn piece(&mut self, e: u32, of: u32) {
+        let roots: Vec<usize> = match self.edges.get(of as usize) {
+            Some(x) => x.source.map(|s| vec![s]).unwrap_or_else(|| x.of.clone()),
+            None => Vec::new(),
+        };
+        if let Some(x) = self.edges.get_mut(e as usize) {
+            for r in roots {
+                if !x.of.contains(&r) {
+                    x.of.push(r);
+                }
+            }
+        }
     }
 
     /// A new face.
@@ -233,7 +260,14 @@ impl Assembly {
                     l.iter()
                         .map(|u| {
                             let e = self.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
-                            Ok(EdgeUse { edge: u.edge, curve: &e.curve, interval: e.interval, forward: u.forward, tolerance: e.tolerance, given: u.given.as_ref() })
+                            Ok(EdgeUse {
+                                edge: u.edge,
+                                curve: &e.curve,
+                                interval: e.interval,
+                                forward: u.forward,
+                                tolerance: e.tolerance,
+                                given: u.given.as_ref(),
+                            })
                         })
                         .collect::<Result<Vec<_>>>()
                 })
@@ -417,7 +451,8 @@ pub(crate) fn body_with_history(finished: &Finished, assembly: &Assembly, from: 
         let p = given.next().ok_or_else(|| invalid("history: fewer faces than the body"))?;
         *provs.get_mut(*k).ok_or_else(|| invalid("history: face"))? = Some(p);
     }
-    let faces: Vec<FaceProv> = provs.into_iter().collect::<Option<_>>().ok_or_else(|| invalid("history: a face without provenance"))?;
+    let mut faces: Vec<FaceProv> = provs.into_iter().collect::<Option<_>>().ok_or_else(|| invalid("history: a face without provenance"))?;
+    crate::record::mark_shared_split(&mut faces);
     let edges = finished
         .record
         .edges
@@ -427,9 +462,14 @@ pub(crate) fn body_with_history(finished: &Finished, assembly: &Assembly, from: 
             let mut between: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
             between.sort_unstable();
             between.dedup();
-            let origins = match assembly.edges.get(*a).and_then(|x| x.source) {
-                Some(edge) => vec![EdgeOrigin::Edge { operand: 0, edge }],
-                None => crate::record::meeting(&between, &faces),
+            let origins = match assembly.edges.get(*a) {
+                Some(AEdge { source: Some(edge), .. }) => vec![EdgeOrigin::Edge { operand: 0, edge: *edge }],
+                Some(AEdge { of, .. }) if !of.is_empty() => {
+                    let mut of = of.clone();
+                    of.sort_unstable();
+                    of.into_iter().map(|edge| EdgeOrigin::Edge { operand: 0, edge }).collect()
+                }
+                _ => crate::record::meeting(&between, &faces),
             };
             EdgeProv { faces: between, origins }
         })

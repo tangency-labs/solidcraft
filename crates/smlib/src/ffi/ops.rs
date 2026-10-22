@@ -1,6 +1,6 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_fillet`,
 //! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
-//! `smlib_thicken`, `smlib_draft`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
+//! `smlib_thicken`, `smlib_draft`, `smlib_merge_faces`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
 
@@ -121,6 +121,14 @@ unsafe extern "C" {
         out_failed_point: *mut i64,
     ) -> i32;
     fn smlib_thicken(brep: *const RawBrep, thickness: f64, symmetric: i32, out: *mut *mut RawBrep) -> i32;
+    fn smlib_merge_faces(
+        brep: *const RawBrep,
+        keep: *const f64,
+        n_keep: i64,
+        tolerance: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+    ) -> i32;
     fn smlib_draft(
         brep: *const RawBrep,
         points: *const f64,
@@ -206,6 +214,24 @@ pub fn draft(
 
 #[cfg(not(feature = "native"))]
 pub fn draft(_: &Handle, _: &[[f64; 3]], _: f64, _: &[f64; 3], _: &[f64; 3], _: &[f64; 3], _: f64) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
+}
+
+/// `smlib_merge_faces`: the body's topological edges and vertices removed, the edges under
+/// `keep` kept.
+#[cfg(feature = "native")]
+pub fn merge_faces(b: &Handle, keep: &[[f64; 3]], tolerance: f64) -> Result<Handle, PickError> {
+    let n = i64::try_from(keep.len()).map_err(|_| (ERR_ARG, None))?;
+    let flat = keep.as_ptr().cast::<f64>();
+    let mut failed = -1i64;
+    new_brep(|out| unsafe { smlib_merge_faces(b.raw(), flat, n, tolerance, out, &mut failed) }).map_err(|s| {
+        let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+        (s, at)
+    })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn merge_faces(_: &Handle, _: &[[f64; 3]], _: f64) -> Result<Handle, PickError> {
     Err((NOT_BUILT, None))
 }
 
