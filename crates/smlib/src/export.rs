@@ -832,7 +832,9 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let params = nurbs.as_ref().unwrap_or(&surface);
         let natural = params.natural();
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
-        let spline = matches!(params, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. });
+        // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
+        // planes (mapped onto the plane's own (u, v) by the export).
+        let spline = matches!(params, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. } | b::Surface::Plane { .. });
         let mut out = Vec::with_capacity(loops.len());
         let mut records = Vec::with_capacity(loops.len());
         let mut given = Vec::with_capacity(loops.len());
