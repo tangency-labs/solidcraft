@@ -1,7 +1,7 @@
 //! A schema 4 record ([`solidcraft_geom::brep`]) as ISO 10303-42 topology, the inverse of
 //! [`crate::topology`]. Each bounded material region becomes a MANIFOLD_SOLID_BREP, or a
-//! BREP_WITH_VOIDS when voids lie inside it (each void an ORIENTED_CLOSED_SHELL, orientation
-//! .F.); the open shells become one SHELL_BASED_SURFACE_MODEL. Faces are ADVANCED_FACEs on their
+//! BREP_WITH_VOIDS when voids lie inside it (each void's CLOSED_SHELL through an
+//! ORIENTED_CLOSED_SHELL); the open shells become one SHELL_BASED_SURFACE_MODEL. Faces are ADVANCED_FACEs on their
 //! exact surface, bounded by a FACE_OUTER_BOUND (the loop that runs counter-clockwise in (u, v))
 //! and FACE_BOUNDs of EDGE_LOOPs of ORIENTED_EDGEs, or of VERTEX_LOOPs. Each EDGE_CURVE runs on
 //! its exact curve from the record edge's start vertex (interval min) to its end (max), its
@@ -17,10 +17,10 @@
 //! angle first; pcurves go through the same map. Where the map reverses orientation, the
 //! record's natural normal is STEP's reversed, and the faces' same_sense says so.
 //!
-//! Sides: a face is written with the side its first use needs (its same_sense, and its loops
-//! run counter-clockwise about that side's normal); a later use of the other side refers to it
-//! through an ORIENTED_FACE. A void's closed shell is written as the solid it would bound, and
-//! turned inside out by its ORIENTED_CLOSED_SHELL, as ISO 10303-42 states voids.
+//! Sides: every face's normal points out of the material, as the record's shells have them (a
+//! void's faces into the void, its ORIENTED_CLOSED_SHELL orientation .T.). A face is written with
+//! the side its first use needs (its same_sense, and its loops run counter-clockwise about that
+//! side's normal); a later use of the other side refers to it through an ORIENTED_FACE.
 
 use std::sync::Arc;
 
@@ -36,7 +36,8 @@ use crate::read::R;
 
 /// Points of each use's pcurve the loops' (u, v) areas are taken over.
 const AREA_SAMPLES: usize = 16;
-/// How far a revolution's placement may be from a rotation times a scale (per entry of LᵀL / λ² − I).
+/// How far (relative to its scales) a revolution's placement may be from one that keeps it a
+/// revolution, or from a similarity.
 const SIMILAR: f64 = 1e-9;
 
 fn unsupported(what: impl std::fmt::Display) -> String {
@@ -182,17 +183,24 @@ fn moved((l, t): &Affine, p: P3) -> P3 {
     [q[0] + t[0], q[1] + t[1], q[2] + t[2]]
 }
 
-/// A record curve mapped by a similarity (`l` a rotation, possibly with a reflection, times
-/// `scale`): the same kind of curve on the same parameter.
-fn similar(c: &BCurve, a: &Affine, scale_by: f64) -> R<BCurve> {
+/// A record curve mapped by an affine map: the same kind of curve on the same parameter. A
+/// circle or ellipse stays one only under a similarity (`similarity`: its scale).
+fn placed_curve(c: &BCurve, a: &Affine, similarity: Option<f64>) -> R<BCurve> {
     let (l, _) = a;
-    let frame = |f: &Frame| -> R<Frame> {
-        Ok(Frame { origin: moved(a, f.origin), x_axis: unit(linear(l, f.x_axis), "frame")?, y_axis: unit(linear(l, f.y_axis), "frame")? })
+    let conic = |f: &Frame| -> R<(Frame, f64)> {
+        let k = similarity.ok_or_else(|| unsupported("a revolution of a conic under a non-uniform placement"))?;
+        Ok((Frame { origin: moved(a, f.origin), x_axis: unit(linear(l, f.x_axis), "frame")?, y_axis: unit(linear(l, f.y_axis), "frame")? }, k))
     };
     Ok(match c {
         BCurve::Line { start, end } => BCurve::Line { start: moved(a, *start), end: moved(a, *end) },
-        BCurve::Circle { frame: f, radius } => BCurve::Circle { frame: frame(f)?, radius: radius * scale_by },
-        BCurve::Ellipse { frame: f, radii } => BCurve::Ellipse { frame: frame(f)?, radii: radii.map(|r| r * scale_by) },
+        BCurve::Circle { frame, radius } => {
+            let (frame, k) = conic(frame)?;
+            BCurve::Circle { frame, radius: radius * k }
+        }
+        BCurve::Ellipse { frame, radii } => {
+            let (frame, k) = conic(frame)?;
+            BCurve::Ellipse { frame, radii: radii.map(|r| r * k) }
+        }
         BCurve::Polyline { points } => BCurve::Polyline { points: points.iter().map(|p| moved(a, *p)).collect() },
         BCurve::Spline { knots, points } => BCurve::Spline { knots: knots.clone(), points: points.iter().map(|p| moved(a, *p)).collect() },
         BCurve::RationalSpline { knots, homogeneous } => BCurve::RationalSpline {
@@ -211,22 +219,31 @@ fn similar(c: &BCurve, a: &Affine, scale_by: f64) -> R<BCurve> {
 }
 
 /// `profile` revolved about `origin` and `axis`, then placed by `matrix`, as a
-/// SURFACE_OF_REVOLUTION: exact when the placement is a similarity (it maps a revolution onto a
-/// revolution, turning the angle back when it reflects). STEP's u is the angle, v the profile's
-/// parameter.
+/// SURFACE_OF_REVOLUTION. Exact when the placement maps revolutions about the axis onto
+/// revolutions: a rotation (or reflection, which turns the angle back) after one scale across
+/// the axis and another along it. STEP's u is the angle, v the profile's parameter.
 fn revolution(profile: &BCurve, origin: P3, axis: P3, matrix: &[[f64; 4]; 4], forward: bool) -> R<(Surface, Map)> {
     let a = affine(matrix);
     let l = &a.0;
-    let gram = |i: usize, j: usize| dot(l[i], l[j]);
-    let lambda2 = gram(0, 0);
-    let similar_to = (0..3).all(|i| (0..3).all(|j| (gram(i, j) / lambda2 - if i == j { 1.0 } else { 0.0 }).abs() <= SIMILAR));
-    if !(lambda2.is_finite() && lambda2 > 0.0 && similar_to) {
-        return Err(unsupported("a revolution under a non-uniform placement"));
+    let k = unit(axis, "revolution axis")?;
+    // An orthonormal frame (e1, e2, k): the placement scales e1 and e2 alike, keeps them
+    // orthogonal to each other and to the image of k.
+    let e1 = unit(if k[0].abs() < 0.9 { cross(k, [1.0, 0.0, 0.0]) } else { cross(k, [0.0, 1.0, 0.0]) }, "revolution axis")?;
+    let e2 = cross(k, e1);
+    let (le1, le2, lk) = (linear(l, e1), linear(l, e2), linear(l, k));
+    let (across, along) = (norm(le1), norm(lk));
+    let near = |x: f64, y: f64| (x - y).abs() <= SIMILAR * across.max(along);
+    let keeps_revolutions = across > 0.0
+        && along > 0.0
+        && near(norm(le2), across)
+        && [dot(le1, le2), dot(le1, lk), dot(le2, lk)].iter().all(|d| near(*d / across.max(along), 0.0));
+    if !keeps_revolutions {
+        return Err(unsupported("a revolution under a placement that does not keep it one"));
     }
-    let det = dot(cross(l[0], l[1]), l[2]);
-    let turn = if det > 0.0 { 1.0 } else { -1.0 };
-    let profile = curve(&similar(profile, &a, lambda2.sqrt())?)?;
-    let axis = Axis1 { origin: moved(&a, origin), direction: unit(linear(l, axis), "revolution axis")? };
+    let turn = if dot(cross(l[0], l[1]), l[2]) > 0.0 { 1.0 } else { -1.0 };
+    let similarity = near(across, along).then_some(across);
+    let profile = curve(&placed_curve(profile, &a, similarity)?)?;
+    let axis = Axis1 { origin: moved(&a, origin), direction: scale(lk, 1.0 / along) };
     // Record (u, v) is (profile, angle) when `forward`, else (angle, profile).
     let m = if forward { [[0.0, turn], [1.0, 0.0]] } else { [[turn, 0.0], [0.0, 1.0]] };
     Ok((Surface::Revolution { profile: Arc::new(profile), axis }, Map { m }))
@@ -323,13 +340,13 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
     let mut out = Written::default();
     for region in b.regions.iter().skip(1).filter(|r| !r.void) {
         let (Some(&outer), inner) = (region.shells.first(), region.shells.get(1..).unwrap_or(&[])) else { continue };
-        let shell = w.shell(outer, true, false)?;
+        let shell = w.shell(outer, true)?;
         let mut voids = Vec::new();
         for &inner_shell in inner {
             match outer_of.get(inner_shell as usize).copied().flatten() {
                 Some(v) if b.regions.get(v).is_some_and(|r| r.void) => {
-                    let inside_out = w.shell(inner_shell, true, true)?;
-                    voids.push(r(w.g.w.add_distinct("ORIENTED_CLOSED_SHELL", &[s(), Param::Derived, r(inside_out), boolean(false)])));
+                    let void = w.shell(inner_shell, true)?;
+                    voids.push(r(w.g.w.add_distinct("ORIENTED_CLOSED_SHELL", &[s(), Param::Derived, r(void), boolean(true)])));
                 }
                 Some(_) => return Err(unsupported("material regions that meet across a shell")),
                 // An open shell inside the material: written with the sheets.
@@ -345,7 +362,7 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
     let mut sheets = Vec::new();
     for (si, shell) in b.shells.iter().enumerate() {
         match shell {
-            Shell::Faces { .. } if outer_of.get(si).copied().flatten().is_none() => sheets.push(r(w.shell(index(si)?, false, false)?)),
+            Shell::Faces { .. } if outer_of.get(si).copied().flatten().is_none() => sheets.push(r(w.shell(index(si)?, false)?)),
             Shell::Faces { .. } => {}
             Shell::Wire { .. } | Shell::Vertex { .. } => return Err(unsupported("wire and vertex shells")),
         }
@@ -504,9 +521,8 @@ impl BrepWriter<'_, '_, '_> {
         if ccw.next().is_some() { None } else { first }
     }
 
-    /// A face shell: CLOSED_SHELL when it bounds a region, else OPEN_SHELL. `inside_out` writes
-    /// every face from its other side (a void's shell, turned back by its ORIENTED_CLOSED_SHELL).
-    fn shell(&mut self, si: u32, closed: bool, inside_out: bool) -> R<u64> {
+    /// A face shell: CLOSED_SHELL when it bounds a region, else OPEN_SHELL.
+    fn shell(&mut self, si: u32, closed: bool) -> R<u64> {
         let b = self.b;
         let Some(Shell::Faces { faces, wires }) = b.shells.get(si as usize) else {
             return Err(format!("shell {si}: not a face shell"));
@@ -516,7 +532,7 @@ impl BrepWriter<'_, '_, '_> {
         }
         let mut entries = Vec::with_capacity(faces.len());
         for of in faces {
-            entries.push(r(self.face(of.face, of.forward != inside_out)?));
+            entries.push(r(self.face(of.face, of.forward)?));
         }
         let kind = if closed { "CLOSED_SHELL" } else { "OPEN_SHELL" };
         Ok(self.g.w.add_distinct(kind, &[s(), list(entries)]))

@@ -333,6 +333,14 @@ impl<'a> Reader<'a> {
         self.placement_scaled(id, [l, l, l], 3)
     }
 
+    /// A placement in 3D space (an assembly's or a mapped item's): AXIS2_PLACEMENT_3D, or an
+    /// AXIS2_PLACEMENT_2D as the placement in the XY plane it describes.
+    pub fn frame(&self, id: u64) -> R<Placement> {
+        let l = self.units.len;
+        let dim = if entity(self.ex, id)?.name() == "AXIS2_PLACEMENT_2D" { 2 } else { 3 };
+        self.placement_scaled(id, [l, l, l], dim)
+    }
+
     pub fn axis1(&self, id: u64) -> R<Axis1> {
         let e = entity(self.ex, id)?;
         if e.name() != "AXIS1_PLACEMENT" {
