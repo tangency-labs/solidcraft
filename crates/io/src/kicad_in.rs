@@ -52,18 +52,13 @@ const SILK_THICKNESS: f64 = 0.01;
 pub const DEFAULT_BOARD_COLOR: [f32; 3] = [0.05, 0.33, 0.18];
 
 /// How a KiCad board comes in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KicadRepresentation {
-    /// Mesh bodies (the only representation implemented).
+    /// Mesh bodies.
     Mesh,
     /// A solid board: an Import of the substrate as exact solids (default).
+    #[default]
     Brep,
-}
-
-impl Default for KicadRepresentation {
-    fn default() -> Self {
-        KicadRepresentation::Brep
-    }
 }
 
 impl KicadRepresentation {
@@ -888,7 +883,15 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
         })
         .collect();
     let header = solidcraft_kernel::StepHeader { file_name: "board.step".into(), organization: "SolidCraft".into(), ..Default::default() };
-    solidcraft_kernel::step_export_bodies(&exports, &header).map_err(|e| IoError::Invalid(format!("the board could not be written as a solid: {e}")))
+    let step = solidcraft_kernel::step_export_bodies(&exports, &header)
+        .map_err(|e| IoError::Invalid(format!("the board could not be written as a solid: {e}")))?;
+    if step.len() > crate::MAX_STEP_BYTES {
+        return Err(IoError::Invalid(format!(
+            "the board's solid exceeds the STEP size limit ({} MB); open it with the mesh representation",
+            crate::MAX_STEP_BYTES >> 20
+        )));
+    }
+    Ok(step)
 }
 
 /// The import's steps on one scale of a thousand units: starting, the board parsed, its

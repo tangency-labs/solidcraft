@@ -479,6 +479,7 @@ mod flush_join_loft;
 mod gltf_import;
 mod import_component;
 mod kernel_pool;
+mod kicad_import;
 mod large_step_import;
 mod loft_ring;
 mod loft_spacing;

@@ -1237,6 +1237,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             import_reused: r.import_reused,
             history: r.history,
             board_path: r.board_path,
+            board_solid: r.board_solid,
             param_warnings: Vec::new(),
         }));
     }
@@ -1381,6 +1382,8 @@ struct ImportedFile {
     history: Option<String>,
     #[serde(default)]
     board_path: Option<String>,
+    #[serde(default)]
+    board_solid: Option<u64>,
 }
 
 /// The name a design never given one by its user is shown under.

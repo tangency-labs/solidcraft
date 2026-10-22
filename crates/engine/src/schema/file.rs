@@ -769,6 +769,9 @@ pub struct OpenedFile {
     /// A KiCad PCB opened from a project file: the board file that was read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board_path: Option<String>,
+    /// A KiCad PCB whose substrate came in as a solid: that body's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_solid: Option<u64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
