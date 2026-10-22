@@ -112,8 +112,7 @@
 //!   same value.
 //! - **Unported callees.** `GlobalSurfaceIntersect` runs
 //!   `SmSurfaceIntersector::DoIntersection` (unit `intersect.surface_intersector_p5`);
-//!   `PointBasedSurfaceIntersect` builds the `SmAdvSurfaceIntersector` and then needs
-//!   `DoPointIntersection` (`intersect.surface_intersector_p4`); `CreatePlaneWith3DCurves`
+//!   `CreatePlaneWith3DCurves`
 //!   needs `SmTrimmingTools` (`topology.trimming_tools`); `smsurf_GetSurfaceCache`
 //!   needs the cache store to make surface caches (`SmSurface::CacheMakeOrValidate`,
 //!   `surface.surface_p1`); the polar box test of `sm_CsArePerpenDisjoint` needs the
@@ -185,7 +184,8 @@ use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::intersect::adv_surface_intersector::{AdvSurfaceIntersector, NoSurfaceHandle};
 use crate::intersect::curve_class::{CurveClassification, ResetOptions};
 use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType};
-use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
+use crate::intersect::surface_intersector::p1::{SrfIndex, TsectId, TsectPnt};
+use crate::intersect::surface_intersector::p4::PointIntersectionOptions;
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -558,19 +558,21 @@ pub struct SurfaceIntersection {
 }
 
 /// The curve of a point-based surface/surface intersection
-/// (`PointBasedSurfaceIntersect`'s outputs).
-#[derive(Debug, Clone)]
+/// (`PointBasedSurfaceIntersect`'s outputs). Each member is `None` where upstream
+/// leaves the out-param `NULL` or unset (it is set only when exactly one curve was
+/// found).
+#[derive(Debug, Clone, Default)]
 pub struct PointIntersection {
     /// `rp3DCurve`: the 3D curve (`None` when no curve passes through all points).
-    pub curve_3d: Option<BSplineCurve>,
+    pub curve_3d: Option<Curve>,
     /// `rpSurface1UVCurve`: its UV curve on this surface.
-    pub surface1_uv_curve: Option<BSplineCurve>,
+    pub surface1_uv_curve: Option<Curve>,
     /// `rpSurface2UVCurve`: its UV curve on the other surface.
-    pub surface2_uv_curve: Option<BSplineCurve>,
+    pub surface2_uv_curve: Option<Curve>,
     /// `reCurveType`: the kind of intersection.
-    pub curve_type: TsectCurveType,
+    pub curve_type: Option<TsectCurveType>,
     /// `rdDeviation`: the maximum distance between the curve and the surfaces.
-    pub deviation: f64,
+    pub deviation: Option<f64>,
 }
 
 /// The kind of an intersection curve (`SmTsectCurveType`).
@@ -2251,15 +2253,16 @@ impl Surface {
     }
 
     /// The intersection curve of this surface with `other` through the given pairs
-    /// of UV points (`PointBasedSurfaceIntersect`, UV point version, through
-    /// `SmAdvSurfaceIntersector::DoPointIntersection`).
+    /// of UV points (`PointBasedSurfaceIntersect`, UV point version): the points are
+    /// handed to `SmAdvSurfaceIntersector::DoPointIntersection` (the base driver,
+    /// [`crate::intersect::surface_intersector::SurfaceIntersector::do_point_intersection`],
+    /// which reaches the advanced intersector's `ComputeSingularityPoint` override).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for point lists of different lengths or of 20
     /// points or more (upstream writes past its arrays); those of the intersector's
-    /// construction; [`SolidError::Unported`]: `SmSurfaceIntersector::DoPointIntersection`
-    /// (`intersect.surface_intersector_p4`).
+    /// construction and of `DoPointIntersection`.
     pub fn point_based_surface_intersect(
         &self,
         k: &Kernel,
@@ -2268,10 +2271,10 @@ impl Surface {
         other_uv_domain: &Extent2d,
         surface1_points: &[Point2],
         surface2_points: &[Point2],
-        _extend: [bool; 2],
-        _directions: [Option<Vec3>; 2],
-        _approx_tol_3d: Option<f64>,
-        _ang_tol_rad: Option<f64>,
+        extend: [bool; 2],
+        directions: [Option<Vec3>; 2],
+        approx_tol_3d: Option<f64>,
+        ang_tol_rad: Option<f64>,
     ) -> Result<PointIntersection> {
         if surface1_points.len() >= 20 || surface1_points.len() != surface2_points.len() {
             return Err(SolidError::invalid_input(
@@ -2280,31 +2283,46 @@ impl Surface {
             ));
         }
 
-        // store every given surface point in a SmTsectPnt object
-        let _tsect_points: Vec<TsectPnt> = surface1_points
+        // allocate the surf/surf intersector
+        let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+            AdvSurfaceIntersector::new(k, self, uv_domain, other, other_uv_domain, false)?;
+
+        // store every given surface point in a SmTsectPnt object (upstream's are on
+        // its stack, here in the intersector's arena)
+        let tsect_points: Vec<TsectId> = surface1_points
             .iter()
             .zip(surface2_points)
             .map(|(&uv1, &uv2)| {
                 let mut tsp = TsectPnt::new();
                 *tsp.uv_pos_mut(SrfIndex::First) = uv1;
                 *tsp.uv_pos_mut(SrfIndex::Second) = uv2;
-                tsp
+                ssi.base.alloc_point(tsp)
             })
             .collect();
 
-        // allocate the surf/surf intersector
-        let _ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
-            AdvSurfaceIntersector::new(k, self, uv_domain, other, other_uv_domain, false)?;
-
-        // (SurfaceIntersector::do_point_intersection, part 4, is the basic intersector's:
-        // through TraceCurve and ComputePointValues it calls the basic
-        // ComputeSingularityPoint, not SmAdvSurfaceIntersector's override, so it cannot
-        // stand in here until the intersector parts dispatch their virtual calls)
-        // UNPORTED(intersect.surface_intersector_p4): SmSurfaceIntersector::DoPointIntersection
-        Err(SolidError::unported(
-            "SmSurfaceIntersector::DoPointIntersection",
-            "intersect.surface_intersector_p4",
-        ))
+        // pass the call along
+        let [extend_before_start, extend_after_end] = extend;
+        let [start_direction, end_direction] = directions;
+        let curve = ssi.base.do_point_intersection(
+            k,
+            &tsect_points,
+            &PointIntersectionOptions {
+                extend_before_start,
+                extend_after_end,
+                start_direction,
+                end_direction,
+                approx_tol_3d,
+                ang_tol_rad,
+            },
+        )?;
+        let [surface1_uv_curve, surface2_uv_curve] = curve.uv_curves;
+        Ok(PointIntersection {
+            curve_3d: curve.curve_3d,
+            surface1_uv_curve,
+            surface2_uv_curve,
+            curve_type: curve.curve_type,
+            deviation: curve.deviation,
+        })
     }
 
     /// A plane containing a set of coplanar 3D curves, with the curves ordered into

@@ -1205,6 +1205,18 @@ pub(crate) fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
+/// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
+pub(crate) const fn b_spline_part(c: &Curve) -> Option<&BSplineCurve> {
+    match c.kind() {
+        CurveKind::BSpline(b) => Some(b),
+        CurveKind::Line(l) => Some(l.base()),
+        CurveKind::Ellipse(e) => Some(e.base()),
+        CurveKind::Hyperbola(h) => Some(h.base()),
+        CurveKind::Parabola(p) => Some(p.base()),
+        _ => None,
+    }
+}
+
 pub(crate) fn dump_bcurve(o: &mut Vec<f64>, c: Option<&BSplineCurve>) {
     let Some(cur) = c.and_then(BSplineCurve::gw_nurb) else {
         o.push(0.0);
@@ -2028,9 +2040,10 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             match try_status!(r) {
                 Ok(x) => {
                     o.push(0.0);
-                    dump_bcurve(&mut o, x.curve_3d.as_ref());
-                    dump_bcurve(&mut o, x.surface1_uv_curve.as_ref());
-                    dump_bcurve(&mut o, x.surface2_uv_curve.as_ref());
+                    // (the C++ dumps the SmBSplineCurve outputs' NURBs)
+                    dump_bcurve(&mut o, x.curve_3d.as_ref().and_then(b_spline_part));
+                    dump_bcurve(&mut o, x.surface1_uv_curve.as_ref().and_then(b_spline_part));
+                    dump_bcurve(&mut o, x.surface2_uv_curve.as_ref().and_then(b_spline_part));
                 }
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }

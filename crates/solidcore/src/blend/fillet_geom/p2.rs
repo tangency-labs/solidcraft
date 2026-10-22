@@ -720,10 +720,9 @@ pub fn srf_srf_intersection(
                 ssi_tol,
             ))?;
             if let Some(pi) = r {
-                if let Some(c3) = pi.curve_3d {
-                    let curve_3d = Curve::from(c3);
-                    let uv1 = pi.surface1_uv_curve.map(Curve::from);
-                    let uv2 = pi.surface2_uv_curve.map(Curve::from);
+                if let Some(curve_3d) = pi.curve_3d {
+                    let uv1 = pi.surface1_uv_curve;
+                    let uv2 = pi.surface2_uv_curve;
 
                     // skip cases where pEndV was not given
                     let Some(end_pnt) = end else {

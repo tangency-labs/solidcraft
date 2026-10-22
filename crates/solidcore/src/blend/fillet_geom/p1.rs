@@ -168,8 +168,7 @@
 //!   examine path (`DropCurve`). `sm_TwoPntsIntersection` hands its tolerance to
 //!   `PointBasedSurfaceIntersect` through `SM_CAST_APPROXTOL3D_PTR` (a pointer cast, no
 //!   conversion), so it stays raw there.
-//! - **Unported callees.** `SmSurface::PointBasedSurfaceIntersect` defers in
-//!   `intersect.surface_intersector_p4`; `SmSurface::GlobalCurveIntersect` (in
+//! - **Unported callees.** `SmSurface::GlobalCurveIntersect` (in
 //!   [`FilletBrep::calc_cliff_rail_int_edge`]) stops at the unwired
 //!   `SmSurfaceDropCurve::DoTrace` call of `intersect.surface_drop_lib_p1` (its stub
 //!   carries the label `intersect.surface_drop_curve`);
@@ -2412,8 +2411,7 @@ fn is_closed(
 /// # Errors
 ///
 /// Those of the point drops ([`surface_drop_point`]) and of
-/// [`Surface::point_based_surface_intersect`] (deferred:
-/// `intersect.surface_intersector_p4`); [`SolidError::InvalidInput`] for a zero
+/// [`Surface::point_based_surface_intersect`]; [`SolidError::InvalidInput`] for a zero
 /// direction. `direction` is unitised in place before the intersection (upstream
 /// `pDirection->Unitize()`).
 pub fn two_pnts_intersection(

@@ -38,11 +38,10 @@ use serde_json::Value;
 use solidcore::blend::fillet_geom::p1::FilletSolverId;
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
-use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::curve::curve::Curve;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point3, Vec3};
-use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, EdgeId, FaceId};
@@ -50,7 +49,7 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_geom_p2::{self as ffi, Op};
 
 use super::blend_fillet_geom_p1::{
-    analytic_surface, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
+    analytic_surface, b_spline_part, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
     surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
 };
 use super::blend_fillet_geom_p4::{
@@ -378,18 +377,6 @@ fn st<T>(r: &solidcore::Result<T>) -> Result<f64, SolidError> {
         Ok(_) => Ok(0.0),
         Err(e) if e.is_unported() => Err(e.clone()),
         Err(e) => Ok(status(e)),
-    }
-}
-
-/// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
-const fn b_spline_part(c: &Curve) -> Option<&BSplineCurve> {
-    match c.kind() {
-        CurveKind::BSpline(b) => Some(b),
-        CurveKind::Line(l) => Some(l.base()),
-        CurveKind::Ellipse(e) => Some(e.base()),
-        CurveKind::Hyperbola(h) => Some(h.base()),
-        CurveKind::Parabola(p) => Some(p.base()),
-        _ => None,
     }
 }
 
