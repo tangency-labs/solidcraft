@@ -3,9 +3,9 @@
 // (sc_edgeuse_graph.h, sc_topology_fixture.h): the face surface kinds the Rust import can
 // rebuild as their own `SurfaceKind` travel as their upstream database record (binary,
 // SM_CURRENT_DATABASE_VERSION), which the importer reads with the ported `ReadFromDB`.
-// `SmSurfOfRevolution`, `SmSphere`, `SmTorus` and `SmSurfOfExtrusion` qualify (the kinds
-// with a `SurfaceKind` the port's `Surface::read_from_db` returns); the other subclasses
-// (`SmCone`, `SmCylinder`) keep their B-spline part.
+// `SmSurfOfRevolution`, `SmCone`, `SmCylinder`, `SmSphere`, `SmTorus` and
+// `SmSurfOfExtrusion` qualify (the kinds with a `SurfaceKind` the port's
+// `Surface::read_from_db` returns).
 //
 // Face surface block (layout in crates/solidcore-ffi/src/units/topology_edgeuse_p1.rs):
 //   `2 type version surf_oob gen_oob nbytes byte[nbytes]` then the header's regular
@@ -24,6 +24,7 @@
 #include <SmBSplineSurface.h>
 #include <SmConfig.h>
 #include <SmContext.h>
+#include <SmCone.h>
 #include <SmDatabaseIO.h>
 #include <SmEllipse.h>
 #include <SmSphere.h>
@@ -56,12 +57,13 @@ inline bool record_of(const SmSurface* s, std::string& bytes)
 
 inline bool oob_of(const SmBSplineCurve* c) { return c != nullptr && c->IsOutOfBoundsEnabled() != FALSE; }
 
-// The surface types exported exactly (`SmSurfOfRevolution` or a subclass of it, and
+// The surface types exported exactly (`SmSurfOfRevolution` or a subclass of it:
+// `SmCone`/`SmCylinder`, `SmSphere`, `SmTorus`; and
 // `SmSurfOfExtrusion`).
 inline bool exact_type(SM_TYPE t)
 {
-    return t == SmSurfOfRevolution_TYPE || t == SmSphere_TYPE || t == SmTorus_TYPE ||
-           t == SmSurfOfExtrusion_TYPE;
+    return t == SmSurfOfRevolution_TYPE || t == SmCone_TYPE || t == SmCylinder_TYPE ||
+           t == SmSphere_TYPE || t == SmTorus_TYPE || t == SmSurfOfExtrusion_TYPE;
 }
 
 // `put_exact_head` of a surface of extrusion: no polar curve; the surface and its

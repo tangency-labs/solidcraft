@@ -11,6 +11,7 @@
 // can import the graph with that runner's importer; ops whose upstream path would
 // dereference null output -2 instead of calling it.
 #include "sc_shim.h"
+#include "sc_analytic_export.h"
 #include "support/topology_fixture.h"
 
 
@@ -1042,8 +1043,9 @@ SmBSplineCurve* plain_curve(SmCurve* c)
     return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
 }
 
-// The Rust side imports the export's NURBs as plain B-splines (and lines), and SmPlanes
-// as planes: give every other face and edge of the C++ B-rep the same geometry (the
+// The Rust side imports the export's NURBs as plain B-splines (and lines), SmPlanes as
+// planes and the analytic surfaces the export sends exactly (sc_analytic_export.h) as
+// their own kind: give every other face and edge of the C++ B-rep the same geometry (the
 // analytic originals are left unowned and leaked).
 void normalise(Graph& g)
 {
@@ -1052,6 +1054,10 @@ void normalise(Graph& g)
         SmSurface* s = f->*FacePeek::surface();
         if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
             s->GetType() == SmPlane_TYPE)
+            continue;
+        // exported exactly: the Rust side runs the same analytic surface
+        std::vector<double> head;
+        if (sc_analytic_export::put_exact_head(head, s, the_context()))
             continue;
         SmBSplineSurface* b = (SmBSplineSurface*)s;
         gw_SURFACE* nurb = b->GetGwNurbPointer();

@@ -27,7 +27,8 @@ pub fn flag(b: bool) -> f64 {
 /// The exact head of an analytic face surface in the shared B-rep graph exports
 /// (`harness/cpp/shim/sc_analytic_export.h`), read after its kind code `2`:
 /// `type version surf_oob gen_oob nbytes byte[nbytes]`, the surface's upstream binary
-/// database record (`SmSurfOfRevolution`, `SmSphere`, `SmTorus` or `SmSurfOfExtrusion`)
+/// database record (`SmSurfOfRevolution`, `SmCone`, `SmCylinder`, `SmSphere`, `SmTorus` or
+/// `SmSurfOfExtrusion`)
 /// and the out-of-bounds flags the
 /// record does not hold. The regular surface block (the B-spline part) follows it; the
 /// caller reads that too and checks it with [`check_exact_base`].
@@ -46,7 +47,8 @@ pub fn read_exact_surface(
     use solidcore::kernel::Kernel;
     use solidcore::surface::surf_of_revolution::SurfOfRevolution;
     use solidcore::surface::surface::p2::{
-        SPHERE_TYPE, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE, TORUS_TYPE,
+        CONE_TYPE, CYLINDER_TYPE, SPHERE_TYPE, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE,
+        TORUS_TYPE,
     };
     use solidcore::surface::surface::{Surface, SurfaceKind};
     use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
@@ -71,6 +73,8 @@ pub fn read_exact_surface(
         bytes.push(b as u8);
     }
     if ty != SURF_OF_REVOLUTION_TYPE
+        && ty != CONE_TYPE
+        && ty != CYLINDER_TYPE
         && ty != SPHERE_TYPE
         && ty != TORUS_TYPE
         && ty != SURF_OF_EXTRUSION_TYPE
@@ -96,6 +100,11 @@ pub fn read_exact_surface(
     if let SurfaceKind::SurfOfExtrusion(e) = s.kind_mut() {
         e.set_out_of_bounds_enabled(gen_oob);
         *e.base_mut().out_of_bounds_enabled_mut() = surf_oob;
+        return Ok(Some(s));
+    }
+    if let SurfaceKind::Cone(c) = s.kind_mut() {
+        c.set_out_of_bounds_enabled(gen_oob);
+        *c.base_mut().out_of_bounds_enabled_mut() = surf_oob;
         return Ok(Some(s));
     }
     let rev: &mut SurfOfRevolution = match s.kind_mut() {
@@ -130,6 +139,7 @@ pub fn check_exact_base(
         SurfaceKind::Sphere(s) => s.base().base(),
         SurfaceKind::Torus(s) => s.base().base(),
         SurfaceKind::SurfOfExtrusion(s) => s.base(),
+        SurfaceKind::Cone(s) => s.rev().base(),
         _ => {
             return Err(crate::HarnessError::new(
                 "export: unexpected exact surface kind",
