@@ -1876,14 +1876,14 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
     if crate::backend()? == crate::Backend::Smlib {
-        if !rails.is_empty() {
-            return Err(crate::smlib_sweeps::refuse("loft along guide rails"));
-        }
         let reversed = loft_reversed(sections)?;
         let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
         let loops = loft_numbered_loops(&numbered, reversed)?;
         let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
         let pieces: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> = loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
+        if !rails.is_empty() {
+            return crate::smlib_sweeps::loft_rails(&pieces, first, rails, fit);
+        }
         return crate::smlib_sweeps::loft(&pieces, first);
     }
     let (wires, edge_sources, reversed) = loft_wires(sections)?;
@@ -2349,31 +2349,27 @@ pub(crate) fn rotate_about(p: Vec3, center: Vec3, k: Vec3, angle: f64) -> Vec3 {
     center + v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
 }
 
-/// [`sweep_with`] through SMLib's curve sweep: the profile turning with the path or only moving
-/// along it (orientation parallel), along a path without corners (SMLib's sweep follows smooth
-/// paths). Twists, end scales, guide rails and orientation directions have no SMLib sweep.
+/// [`sweep_with`] through SMLib, along a path without corners (SMLib's sweeps follow smooth
+/// paths): its curve sweep for the profile turning with the path or only moving along it
+/// (orientation parallel); a twist, an end scale, guide rails or an orientation direction place
+/// the profile at stations along the path ([`crate::smlib_sweeps::sweep_controlled`]).
 fn smlib_sweep(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
     ctl.check()?;
     region_ok(region)?;
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
     }
-    let translate = match ctl.orientation {
-        crate::SweepOrientation::Perpendicular => false,
-        crate::SweepOrientation::Parallel => true,
-        crate::SweepOrientation::Direction(_) => return Err(crate::smlib_sweeps::refuse("sweep with an orientation direction")),
-    };
-    if ctl.twist != 0.0 || ctl.scale != 1.0 {
-        return Err(crate::smlib_sweeps::refuse("sweep with a twist or an end scale"));
-    }
-    if !ctl.rails.is_empty() {
-        return Err(crate::smlib_sweeps::refuse("sweep along guide rails"));
-    }
     let ends: Vec<(Vec3, Vec3)> =
         path.iter().map(PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
     if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
         return Err(crate::smlib_sweeps::refuse("sweep along a path with corners (SMLib's sweep follows smooth paths)"));
     }
+    let translate = match ctl.orientation {
+        _ if ctl.varies() => return crate::smlib_sweeps::sweep_controlled(plane, &oriented(region)?, path, ctl),
+        crate::SweepOrientation::Perpendicular => false,
+        crate::SweepOrientation::Parallel => true,
+        crate::SweepOrientation::Direction(_) => return crate::smlib_sweeps::sweep_controlled(plane, &oriented(region)?, path, ctl),
+    };
     crate::smlib_sweeps::sweep(plane, &crate::smlib_sweeps::pieces(oriented(region)?.loops()), path, translate)
 }
 

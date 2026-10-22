@@ -104,7 +104,7 @@ impl SweepControl {
     }
 
     /// Whether the profile changes along the path (it twists, scales or follows rails).
-    fn varies(&self) -> bool {
+    pub(crate) fn varies(&self) -> bool {
         self.twist != 0.0 || self.scale != 1.0 || !self.rails.is_empty()
     }
 
@@ -141,13 +141,13 @@ impl SweepControl {
 
 /// A linear map of world vectors (columns) plus the station it is centred at.
 #[derive(Clone, Copy)]
-struct Station {
-    at: Vec3,
-    m: [Vec3; 3],
+pub(crate) struct Station {
+    pub at: Vec3,
+    pub m: [Vec3; 3],
 }
 
 impl Station {
-    fn apply(&self, v: Vec3) -> Vec3 {
+    pub(crate) fn apply(&self, v: Vec3) -> Vec3 {
         self.m[0] * v.x + self.m[1] * v.y + self.m[2] * v.z
     }
 }
@@ -177,7 +177,7 @@ pub(crate) fn closed_path(pts: &[Vec3]) -> bool {
 
 /// The cyclic correspondence of a loop's last section to its first. Matching whole curves
 /// (rather than vertices alone) prevents sewing an incompatible twist or scale shut.
-fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Result<usize> {
+pub(crate) fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Result<usize> {
     let fail =
         || KernelError::Invalid("a sweep along a closed path must return to its starting profile; adjust the twist, end scale or rails".into());
     let (Some(first), Some(last)) = (st.first(), st.last()) else { return Err(fail()) };
@@ -301,7 +301,13 @@ fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
 /// at its own (twisted and scaled about the profile's normal through the first station, then
 /// turned by the orientation's frames), optionally stretched across a corner (mitre). Twist and
 /// scale grow with the length run along `pts`.
-fn controlled_stations(plane: &Plane, pts: &[Vec3], tangents: &[Vec3], mitre: &[Option<(Vec3, f64)>], ctl: &SweepControl) -> Result<Vec<Station>> {
+pub(crate) fn controlled_stations(
+    plane: &Plane,
+    pts: &[Vec3],
+    tangents: &[Vec3],
+    mitre: &[Option<(Vec3, f64)>],
+    ctl: &SweepControl,
+) -> Result<Vec<Station>> {
     if !ctl.rails.is_empty() {
         return railed_stations(pts, tangents, mitre, ctl);
     }
@@ -524,7 +530,7 @@ pub fn sweep_path(plane: &Plane, region: &Region2, path: &[Vec3]) -> Result<Body
 pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
     ctl.check()?;
     if crate::backend()? == crate::Backend::Smlib {
-        return Err(crate::smlib_sweeps::refuse("sweep along a path of points (a 3D sketch curve)"));
+        return smlib_sweep_points(plane, region, path, ctl);
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
@@ -558,6 +564,24 @@ pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &Swe
         }
     }
     ruled(plane, &profile, &pts, ctl)
+}
+
+/// [`sweep_path_with`] through SMLib: a path of points is the polyline through them, its
+/// straight runs the lines between them. A line, or a polyline with corners, is swept as those
+/// lines ([`crate::sweep_with`], which takes a path with corners only where SMLib has a sweep for
+/// it); a smooth polyline of more points stands for a curve (a drawn 3D spline) that SMLib has no
+/// path for yet.
+fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
+    let pts = clean(path)?;
+    let smooth = pts.len() > 2 && !pts.windows(3).any(|w| turn(w[1] - w[0], w[2] - w[1]) > CORNER);
+    if smooth {
+        return Err(crate::smlib_sweeps::refuse("sweep along a smooth path of points (a 3D sketch spline)"));
+    }
+    let segs: Vec<crate::PathSeg> = pts.windows(2).map(|w| crate::PathSeg::Line { a: w[0], b: w[1] }).collect();
+    if segs.len() > 1000 {
+        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
+    }
+    crate::sweep_with(plane, region, &segs, ctl)
 }
 
 fn central_tangents(p: &[Vec3]) -> Result<Vec<Vec3>> {
