@@ -1214,7 +1214,7 @@ impl Body {
                 let sources = self.face_sources.as_ref().map(|all| {
                     std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>())
                 });
-                let history = crate::history::History::of_part(&part);
+                let history = crate::history::of_part(&part, &counts);
                 let piece = Body::from_record(part.brep)?.with_face_sources(sources).inherit_regularization_protection(self);
                 Ok(piece.with_checked_history(Some(history), &counts))
             })
