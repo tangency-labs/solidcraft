@@ -6,10 +6,7 @@
 //! SMLib's NURB parameters). This module reads them as hostile input and maps them to schema 4:
 //! - **Geometry:** each analytic surface to its schema kind (SMLib's cone of semi-angle 0 is its
 //!   cylinder), NURBS as splines. Edge curves come as their own kinds, or as NURBS where SMLib
-//!   holds the edge as one (its primitives' circles do). As a fallback a NURBS line (order 2,
-//!   two points) and a rational quadratic circle or arc are recognised exactly and written as
-//!   `line` / `circle` with their interval mapped; other NURBS edges stay splines. The report
-//!   counts both.
+//!   holds the edge as one; nothing is recognised. The report counts the NURBS edges.
 //! - **Sides:** SMLib keeps a face's loops relative to its own natural normal, which may be
 //!   opposite the STEP form's (a surface with SMLib's `insideOut` or `swapUV`). Schema 4 keeps
 //!   them relative to the record's normal, outer loop counter-clockwise: a face whose outer loop
@@ -113,8 +110,6 @@ impl Brep {
 /// What the mapping could not put in its own kind, or turned.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
-    /// NURBS edge curves recognised as lines or circular arcs and written as those.
-    pub recognised_edges: usize,
     /// NURBS edge curves kept as splines (neither a line nor a circular arc).
     pub nurbs_edges: usize,
     /// Faces whose loops were reversed (SMLib's natural normal against the record's).
@@ -297,9 +292,6 @@ fn blocks(counts: &[i64], total: usize, what: &str) -> Res<Vec<std::ops::Range<u
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
-fn arr(p: Vec3) -> [f64; 3] {
-    [p.x, p.y, p.z]
-}
 /// A frame from an origin, z axis and x axis (y = z × x).
 fn frame(origin: [f64; 3], axis: [f64; 3], x: [f64; 3]) -> b::Frame {
     b::Frame { origin, x_axis: x, y_axis: cross(axis, x) }
@@ -450,80 +442,14 @@ impl Nurbs {
     }
 }
 
-/// A NURBS line (order 2, two points, equal weights) as a line, its parameter mapped onto the
-/// line's: t ↦ (t − k₁)/(k₂ − k₁).
-fn as_line(n: &Nurbs, range: [f64; 2]) -> Option<(b::Curve, [f64; 2])> {
-    let ([p0, p1], [k0, k1, k2, k3]) = (<[[f64; 3]; 2]>::try_from(n.points.as_slice()).ok()?, <[f64; 4]>::try_from(n.knots.as_slice()).ok()?);
-    if !(k0 == k1 && k2 == k3 && k1 < k2) || n.weights.first() != n.weights.get(1) || p0 == p1 {
-        return None;
-    }
-    let s = |t: f64| (t - k1) / (k2 - k1);
-    Some((b::Curve::Line { start: p0, end: p1 }, [s(range[0]), s(range[1])]))
-}
-
-/// A rational quadratic circle or circular arc as a circle: its frame's x axis at the curve's
-/// start and its normal the curve's turning direction, so the angle grows along the curve; the
-/// interval the angles of the range's ends. Checked: 65 samples lie on the circle within 10⁻⁹
-/// of its radius (at least 1 mm).
-fn as_circle(n: &Nurbs, range: [f64; 2]) -> Option<(b::Curve, [f64; 2])> {
-    if n.knots.len() != n.points.len() + 3 || n.points.len() < 3 {
-        return None;
-    }
-    let eval = b::eval::CurveEval::new(&n.record()).ok()?;
-    let (a, z) = (*n.knots.get(2)?, *n.knots.get(n.points.len())?);
-    let at = |t: f64| eval.point(t);
-    let (p, q, r) = (at(a)?, at(a + (z - a) / 3.0)?, at(a + 2.0 * (z - a) / 3.0)?);
-    // The circle through three points: centre p + (|w|² (u × w) × u + |u|² w × (u × w)) / (2 |u × w|²).
-    let (u, w) = (q - p, r - p);
-    let normal = u.cross(w);
-    let nn = normal.dot(normal);
-    if !(nn > 0.0) {
-        return None;
-    }
-    let center = p + (normal.cross(u) * w.dot(w) + w.cross(normal) * u.dot(u)) * (0.5 / nn);
-    let radius = (p - center).len();
-    let k = normal.normalized()?;
-    let slack = 1e-9 * radius.max(1.0);
-    for i in 0..=64 {
-        let s = at(a + (z - a) * f64::from(i) / 64.0)?;
-        if ((s - center).len() - radius).abs() > slack || (s - center).dot(k).abs() > slack {
-            return None;
-        }
-    }
-    let x = (p - center).normalized()?;
-    let y = k.cross(x);
-    let angle = |t: f64| at(t).map(|s| (s - center).dot(y).atan2((s - center).dot(x)));
-    // The angle at the range's start in [0, 2π), then unwrapped along the range.
-    let mut a0 = angle(range[0])?;
-    if a0 < 0.0 {
-        a0 += TAU;
-    }
-    let (mut prev, mut total) = (a0, a0);
-    for i in 1..=64 {
-        let mut t = angle(range[0] + (range[1] - range[0]) * f64::from(i) / 64.0)?;
-        while t - prev > std::f64::consts::PI {
-            t -= TAU;
-        }
-        while t - prev < -std::f64::consts::PI {
-            t += TAU;
-        }
-        total += t - prev;
-        prev = t;
-    }
-    if !(total > a0) {
-        return None;
-    }
-    Some((b::Curve::Circle { frame: b::Frame { origin: arr(center), x_axis: arr(x), y_axis: arr(y) }, radius }, [a0, total]))
-}
-
 /// How a UV trim's parameter (SMLib's edge parameter, as the arrays carry it) becomes the edge
 /// record's: t ↦ scale · t + offset, scale > 0. None where the record's parameter is not an
 /// affine image of SMLib's (a circle or ellipse, whose angle is not its NURBS parameter).
 type TrimMap = Option<[f64; 2]>;
 
 /// Each edge's record and interval (in SMLib's direction along it) and its [`TrimMap`], and how
-/// many NURBS edges were recognised as lines or circles and how many stayed splines.
-fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [f64; 2], TrimMap)>, usize, usize)> {
+/// many edges are NURBS.
+fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [f64; 2], TrimMap)>, usize)> {
     let kinds = flat.i(EDGE_CURVE_TYPE);
     let range = flat.f(EDGE_RANGE);
     if kinds.len() != n_edges || range.len() != 2 * n_edges {
@@ -550,7 +476,7 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
         kn += n + o;
         Ok(Nurbs { knots, points: cvs.as_chunks::<3>().0.to_vec(), weights })
     };
-    let (mut recognised, mut kept) = (0usize, 0usize);
+    let mut kept = 0usize;
     let mut out = Vec::with_capacity(n_edges);
     for (e, &kind) in kinds.iter().enumerate() {
         let r = [at(range, 2 * e, "edge range")?, at(range, 2 * e + 1, "edge range")?];
@@ -590,24 +516,15 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
             }
             CURVE_NURBS => {
                 let c = next_nurbs()?;
-                // A fallback: SMLib exports lines, circles and ellipses as their own kinds.
-                if let Some((line, s)) = as_line(&c, r) {
-                    recognised += 1;
-                    // as_line's t ↦ (t − k₁)/(k₂ − k₁).
-                    let (k1, k2) = (c.knots.get(1).copied().unwrap_or(0.0), c.knots.get(2).copied().unwrap_or(1.0));
-                    (line, None, s, Some([1.0 / (k2 - k1), -k1 / (k2 - k1)]))
-                } else if let Some((circle, s)) = as_circle(&c, r) {
-                    recognised += 1;
-                    (circle, None, s, None)
-                } else {
-                    kept += 1;
-                    (c.record(), None, r, Some([1.0, 0.0]))
-                }
+                // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
+                // gives lines, circles and ellipses as their own kinds, and nothing is recognised here.
+                kept += 1;
+                (c.record(), None, r, Some([1.0, 0.0]))
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });
     }
-    Ok((out, recognised, kept))
+    Ok((out, kept))
 }
 
 /// Each edgeuse record's UV trim as SMLib holds it (`EDGEUSE_NURBS_*`), along its edgeuse (the
@@ -767,34 +684,28 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         return Err(invalid("array too long"));
     }
 
-    // Tolerances: SMLib's, or the size-relative floor where larger.
-    let size = match flat.f(EXTENT) {
-        [a, b, c, d, e, f] => ((d - a).powi(2) + (e - b).powi(2) + (f - c).powi(2)).sqrt(),
-        _ => return Err(invalid("extent")),
-    };
-    if !size.is_finite() {
-        return Err(invalid("extent"));
-    }
-    let floor = (1e-6 * size).max(1e-5);
+    // Tolerances exactly as SMLib gives them: each edge's and vertex's own, the body's the smallest
+    // of them (only what needs more carries more). Without per-item tolerances, every tolerance is
+    // the largest SMLib reports for the body. Nothing of ours is added: the record's tolerances go
+    // back into SMLib, which makes its approximations to them.
     let largest = match flat.f(TOLERANCE) {
-        [t] if t.is_finite() && *t > floor => *t,
-        [_] => floor,
+        [t] if t.is_finite() && *t > 0.0 => *t,
         _ => return Err(invalid("tolerance")),
     };
-    // Each edge's and vertex's own tolerance where SMLib gives them (never below the floor); the
-    // body's is then the floor, and only what needs more carries more. Without them, every
-    // tolerance is the largest SMLib reports for the body.
     let own = |id: i32, n: usize| -> Res<Option<Vec<f64>>> {
         match flat.f(id) {
             [] => Ok(None),
-            t if t.len() == n && t.iter().all(|x| x.is_finite() && *x > 0.0) => Ok(Some(t.iter().map(|x| x.max(floor)).collect())),
+            t if t.len() == n && t.iter().all(|x| x.is_finite() && *x > 0.0) => Ok(Some(t.to_vec())),
             _ => Err(invalid("edge or vertex tolerances")),
         }
     };
     let n_vertex_points = flat.f(VERTEX_POSITION).len() / 3;
     let edge_tolerances = own(EDGE_TOLERANCE, flat.i(EDGE_CURVE_TYPE).len())?;
     let vertex_tolerances = own(VERTEX_TOLERANCE, n_vertex_points)?;
-    let tolerance = if edge_tolerances.is_some() && vertex_tolerances.is_some() { floor } else { largest };
+    let tolerance = match (&edge_tolerances, &vertex_tolerances) {
+        (Some(e), Some(v)) => e.iter().chain(v).copied().fold(largest, f64::min),
+        _ => largest,
+    };
     let tolerances = Tolerances { body: tolerance, edges: edge_tolerances, vertices: vertex_tolerances };
 
     // Topology blocks.
@@ -829,8 +740,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     let loop_edgeuses = blocks(flat.i(LOOP_EDGEUSE_COUNT), n_edgeuses, "loop edgeuses")?;
 
     // Edges along their records' parameters.
-    let (records, recognised, kept) = curves(flat, n_edges)?;
-    report.recognised_edges = recognised;
+    let (records, kept) = curves(flat, n_edges)?;
     report.nurbs_edges = kept;
     let mut edges = Vec::with_capacity(n_edges);
     for (e, (curve, nurbs, [a, z], trim_map)) in records.into_iter().enumerate() {
