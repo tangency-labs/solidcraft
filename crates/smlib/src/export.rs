@@ -183,6 +183,7 @@ const I64_IDS: &[i32] = &[
     FACE_NURBS_U_ORDER,
     FACE_NURBS_V_ORDER,
     FACE_NURBS_FORM,
+    EDGE_NURBS_FORM,
 ];
 
 /// The double arrays this mapping reads.
@@ -509,14 +510,33 @@ type TrimMap = Option<[f64; 2]>;
 
 /// Each edge's record and interval (in SMLib's direction along it) and its [`TrimMap`], and how
 /// many NURBS edges were recognised as lines or circles and how many stayed splines.
-fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2], TrimMap)>, usize, usize)> {
+fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [f64; 2], TrimMap)>, usize, usize)> {
     let kinds = flat.i(EDGE_CURVE_TYPE);
     let range = flat.f(EDGE_RANGE);
     if kinds.len() != n_edges || range.len() != 2 * n_edges {
         return Err(invalid("edge kinds or ranges"));
     }
+    let forms = flat.i(EDGE_NURBS_FORM);
+    if !forms.is_empty() && forms.len() != n_edges {
+        return Err(invalid("edge NURBS forms"));
+    }
     let (mut nurbs, mut lines, mut circles, mut ellipses) = (0usize, 0usize, 0usize, 0usize);
     let (mut cv, mut kn) = (0usize, 0usize);
+    // The next NURBS block, in edge order: a NURBS edge's curve or a circle's NURBS form.
+    let mut next_nurbs = || -> Res<Nurbs> {
+        let n = count(at(flat.i(EDGE_NURBS_VERTEX_COUNT), nurbs, "NURBS edge")?, "NURBS edge")?;
+        let o = count(at(flat.i(EDGE_NURBS_ORDER), nurbs, "NURBS edge")?, "NURBS edge")?;
+        let cvs = flat.f(EDGE_NURBS_CVS).get(3 * cv..3 * (cv + n)).ok_or_else(|| invalid("NURBS edge points"))?;
+        let knots = flat.f(EDGE_NURBS_KNOTS).get(kn..kn + n + o).ok_or_else(|| invalid("NURBS edge knots"))?.to_vec();
+        let weights = match flat.f(EDGE_NURBS_WEIGHTS) {
+            [] => vec![1.0; n],
+            w => w.get(cv..cv + n).ok_or_else(|| invalid("NURBS edge weights"))?.to_vec(),
+        };
+        nurbs += 1;
+        cv += n;
+        kn += n + o;
+        Ok(Nurbs { knots, points: cvs.as_chunks::<3>().0.to_vec(), weights })
+    };
     let (mut recognised, mut kept) = (0usize, 0usize);
     let mut out = Vec::with_capacity(n_edges);
     for (e, &kind) in kinds.iter().enumerate() {
@@ -526,7 +546,7 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2], TrimMap)>
                 let (o, d) = (v3(flat.f(EDGE_LINE_ORIGIN), lines, "line")?, v3(flat.f(EDGE_LINE_DIRECTION), lines, "line")?);
                 lines += 1;
                 // The C side maps a line's trims onto the line's STEP parameter, the record's.
-                (b::Curve::Line { start: o, end: [o[0] + d[0], o[1] + d[1], o[2] + d[2]] }, r, Some([1.0, 0.0]))
+                (b::Curve::Line { start: o, end: [o[0] + d[0], o[1] + d[1], o[2] + d[2]] }, None, r, Some([1.0, 0.0]))
             }
             CURVE_CIRCLE => {
                 let f = frame(
@@ -536,7 +556,13 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2], TrimMap)>
                 );
                 let radius = at(flat.f(EDGE_CIRCLE_RADIUS), circles, "circle")?;
                 circles += 1;
-                (b::Curve::Circle { frame: f, radius }, r, None)
+                // A circle with its NURBS form is parameterised on it: its range and the trims
+                // on it are that NURBS's, so the trims carry over as they are.
+                if forms.get(e) == Some(&1) {
+                    (b::Curve::Circle { frame: f, radius }, Some(next_nurbs()?.record()), r, Some([1.0, 0.0]))
+                } else {
+                    (b::Curve::Circle { frame: f, radius }, None, r, None)
+                }
             }
             CURVE_ELLIPSE => {
                 let f = frame(
@@ -546,33 +572,22 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2], TrimMap)>
                 );
                 let radii = [at(flat.f(EDGE_ELLIPSE_X_RADIUS), ellipses, "ellipse")?, at(flat.f(EDGE_ELLIPSE_Y_RADIUS), ellipses, "ellipse")?];
                 ellipses += 1;
-                (b::Curve::Ellipse { frame: f, radii }, r, None)
+                (b::Curve::Ellipse { frame: f, radii }, None, r, None)
             }
             CURVE_NURBS => {
-                let n = count(at(flat.i(EDGE_NURBS_VERTEX_COUNT), nurbs, "NURBS edge")?, "NURBS edge")?;
-                let o = count(at(flat.i(EDGE_NURBS_ORDER), nurbs, "NURBS edge")?, "NURBS edge")?;
-                let cvs = flat.f(EDGE_NURBS_CVS).get(3 * cv..3 * (cv + n)).ok_or_else(|| invalid("NURBS edge points"))?;
-                let knots = flat.f(EDGE_NURBS_KNOTS).get(kn..kn + n + o).ok_or_else(|| invalid("NURBS edge knots"))?.to_vec();
-                let weights = match flat.f(EDGE_NURBS_WEIGHTS) {
-                    [] => vec![1.0; n],
-                    w => w.get(cv..cv + n).ok_or_else(|| invalid("NURBS edge weights"))?.to_vec(),
-                };
-                nurbs += 1;
-                cv += n;
-                kn += n + o;
-                let c = Nurbs { knots, points: cvs.as_chunks::<3>().0.to_vec(), weights };
+                let c = next_nurbs()?;
                 // A fallback: SMLib exports lines, circles and ellipses as their own kinds.
                 if let Some((line, s)) = as_line(&c, r) {
                     recognised += 1;
                     // as_line's t ↦ (t − k₁)/(k₂ − k₁).
                     let (k1, k2) = (c.knots.get(1).copied().unwrap_or(0.0), c.knots.get(2).copied().unwrap_or(1.0));
-                    (line, s, Some([1.0 / (k2 - k1), -k1 / (k2 - k1)]))
+                    (line, None, s, Some([1.0 / (k2 - k1), -k1 / (k2 - k1)]))
                 } else if let Some((circle, s)) = as_circle(&c, r) {
                     recognised += 1;
-                    (circle, s, None)
+                    (circle, None, s, None)
                 } else {
                     kept += 1;
-                    (c.record(), r, Some([1.0, 0.0]))
+                    (c.record(), None, r, Some([1.0, 0.0]))
                 }
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
@@ -715,6 +730,8 @@ enum Loop {
 #[derive(Clone)]
 struct Edge {
     curve: b::Curve,
+    /// The NURBS form the edge's parameter is on (`EDGE_NURBS_FORM`), when it differs from `curve`.
+    nurbs: Option<b::Curve>,
     interval: [f64; 2],
     vertices: [u32; 2],
     /// The record's parameter runs against SMLib's edge direction.
@@ -802,7 +819,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     report.recognised_edges = recognised;
     report.nurbs_edges = kept;
     let mut edges = Vec::with_capacity(n_edges);
-    for (e, (curve, [a, z], trim_map)) in records.into_iter().enumerate() {
+    for (e, (curve, nurbs, [a, z], trim_map)) in records.into_iter().enumerate() {
         if !(a.is_finite() && z.is_finite()) || a == z {
             return Err(invalid("edge interval"));
         }
@@ -811,6 +828,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let reversed = a > z;
         edges.push(Edge {
             curve,
+            nurbs,
             interval: if reversed { [z, a] } else { [a, z] },
             vertices: if reversed { [end, start] } else { [start, end] },
             reversed,
@@ -1162,7 +1180,14 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
     for ((&e, vertices), uses) in edge_order.iter().zip(edge_vertices).zip(edge_uses) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
         let source = edge_source.get(e as usize).copied().ok_or_else(|| invalid("edge"))?;
-        edge_records.push(b::Edge { nurbs: None, curve: edge.curve.clone(), interval: edge.interval, vertices, tolerance: tolerances.edge(source), uses });
+        edge_records.push(b::Edge {
+            nurbs: edge.nurbs.clone(),
+            curve: edge.curve.clone(),
+            interval: edge.interval,
+            vertices,
+            tolerance: tolerances.edge(source),
+            uses,
+        });
     }
     let mut face_records = Vec::with_capacity(face_order.len());
     for (fi, &f) in face_order.iter().enumerate() {
@@ -1462,7 +1487,7 @@ fn pcurves(
             let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
             loop_uses.push(b::pcurve::EdgeUse {
                 edge: e,
-                curve: &edge.curve,
+                curve: edge.nurbs.as_ref().unwrap_or(&edge.curve),
                 interval: edge.interval,
                 forward,
                 tolerance: edge.tolerance,
@@ -1480,8 +1505,10 @@ fn pcurves(
 /// (positive: counter-clockwise, the record's convention); 0 where it has no edge loop.
 fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
-    let records: Vec<b::Edge> =
-        edges.iter().map(|e| b::Edge { nurbs: None, curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() }).collect();
+    let records: Vec<b::Edge> = edges
+        .iter()
+        .map(|e| b::Edge { nurbs: e.nurbs.clone(), curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() })
+        .collect();
     let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
     let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();

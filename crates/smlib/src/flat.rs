@@ -38,6 +38,7 @@ pub const FACE_NURBS_U_ORDER: i32 = 30;
 pub const FACE_NURBS_V_ORDER: i32 = 31;
 pub const SOURCE: i32 = 32;
 pub const FACE_NURBS_FORM: i32 = 33;
+pub const EDGE_NURBS_FORM: i32 = 34;
 pub const TOLERANCE: i32 = 101;
 pub const EXTENT: i32 = 102;
 pub const FACE_RANGE: i32 = 103;

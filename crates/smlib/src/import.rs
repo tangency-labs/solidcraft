@@ -166,7 +166,9 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     }
 
     // Each edge's interval as SMLib takes it, and how far it moved (see `turned`).
-    let intervals: Vec<([f64; 2], f64)> = brep.edges.iter().map(|e| turned(&e.curve, e.interval)).collect();
+    // An edge on its NURBS form keeps that NURBS's interval.
+    let intervals: Vec<([f64; 2], f64)> =
+        brep.edges.iter().map(|e| if e.nurbs.is_some() { (e.interval, 0.0) } else { turned(&e.curve, e.interval) }).collect();
 
     // Faces, loops and edgeuses, with the surfaces and, on B-spline faces, the trims.
     let any_spline_face =
@@ -217,8 +219,29 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     a.i(flat::EDGEUSE_NEXT_RADIAL).extend(next);
     a.i(flat::EDGEUSE_RADIAL_ENTRY).extend(entry);
 
+    let any_edge_form = brep.edges.iter().any(|e| e.nurbs.is_some());
     for (e, (interval, _)) in brep.edges.iter().zip(&intervals) {
-        curve(&mut a, &e.curve)?;
+        // A circle on its NURBS form: what it is (its circle entry), then the NURBS it is
+        // parameterised on (EDGE_NURBS_FORM). Another curve on a NURBS form is written as that
+        // NURBS, whose parameter the edge's interval and trims are in.
+        let form = match (&e.curve, &e.nurbs) {
+            (b::Curve::Circle { .. }, Some(n)) => {
+                curve(&mut a, &e.curve)?;
+                edge_nurbs_block(&mut a, n)?;
+                true
+            }
+            (_, Some(n)) => {
+                curve(&mut a, n)?;
+                false
+            }
+            (_, None) => {
+                curve(&mut a, &e.curve)?;
+                false
+            }
+        };
+        if any_edge_form {
+            a.i(flat::EDGE_NURBS_FORM).push(i64::from(form));
+        }
         a.i(flat::EDGE_VERTICES).extend([i64::from(e.vertices[0]), i64::from(e.vertices[1])]);
         a.r(flat::EDGE_RANGE).extend(*interval);
         // Each edge's own tolerance, never below the body's.
@@ -528,9 +551,14 @@ fn trim(a: &mut Arrays, c: &b::Curve2, forward: bool, shift: f64) -> R<()> {
 }
 
 fn nurbs_curve(a: &mut Arrays, knots: &[f64], pts: impl ExactSizeIterator<Item = ([f64; 3], f64)>) -> R<()> {
+    a.i(flat::EDGE_CURVE_TYPE).push(i64::from(flat::CURVE_NURBS));
+    nurbs_curve_block(a, knots, pts)
+}
+
+/// An edge NURBS block (counts, points, weights, knots) with no curve kind of its own.
+fn nurbs_curve_block(a: &mut Arrays, knots: &[f64], pts: impl ExactSizeIterator<Item = ([f64; 3], f64)>) -> R<()> {
     let n = pts.len();
     let order = knots.len().checked_sub(n).filter(|o| *o >= 2).ok_or(Unsupported::Invalid("spline order"))?;
-    a.i(flat::EDGE_CURVE_TYPE).push(i64::from(flat::CURVE_NURBS));
     a.i(flat::EDGE_NURBS_VERTEX_COUNT).push(int(n)?);
     a.i(flat::EDGE_NURBS_ORDER).push(int(order)?);
     for (p, w) in pts {
@@ -539,6 +567,17 @@ fn nurbs_curve(a: &mut Arrays, knots: &[f64], pts: impl ExactSizeIterator<Item =
     }
     a.r(flat::EDGE_NURBS_KNOTS).extend_from_slice(knots);
     Ok(())
+}
+
+/// The NURBS block of an edge's NURBS form.
+fn edge_nurbs_block(a: &mut Arrays, c: &b::Curve) -> R<()> {
+    match c {
+        b::Curve::Spline { knots, points } => nurbs_curve_block(a, knots, points.iter().map(|p| (*p, 1.0))),
+        b::Curve::RationalSpline { knots, homogeneous } => {
+            nurbs_curve_block(a, knots, homogeneous.iter().map(|h| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3])))
+        }
+        _ => Err(Unsupported::Invalid("NURBS form is not a NURBS")),
+    }
 }
 
 fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
