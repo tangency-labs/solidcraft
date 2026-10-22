@@ -109,7 +109,9 @@ People trust SolidCraft with their designs; a crash loses their work. **This out
   run service workers as JavaScript) and the small inline scripts in `apps/solidcraft-web/index.html`.
   Keep them minimal; `cargo xtask web-offline-test` covers the service worker.
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests,
-  assets, layers). Commit after every feature arc that builds.
+  assets, layers). Commit after every feature arc that builds. The gate reads the working tree,
+  so do not switch branches while it runs: it compiles the other branch's code and fails on a
+  change that is not in the PR. Run it in the background and wait for its log.
 - **Publishing**: the repository is github.com/tangency-labs/solidcraft. Changes land through
   **pull requests** and the **merge queue**: push a branch and open a PR. The heavy CI jobs start
   when a maintainer adds `approved-for-ci` after reviewing the code. Approved PRs go into the queue
