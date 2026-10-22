@@ -28,8 +28,8 @@
 //! result key. No offset geometry is fabricated. Copied faces pass the actual region
 //! and caller-owned notification stores to brep p7; mapped edges use p1's common
 //! notification-aware builder exactly once, with the already-claimed traversal mark.
-//! Generic geometry creators are available, but the executive's FaceuseOffset/SSI
-//! and cross-arena geometry backends are not yet integrated.
+//! Face geometry and SSI are obtained through the owned cross-arena face adapter;
+//! later topology construction and merge stages retain their explicit boundaries.
 //! Continuations after missing calls are documented there, including ignored-status
 //! calls. The executive's temporary Boolean scope and mark locks are restored on
 //! every `Result` exit. The shell difference delegates native context/error state
@@ -62,7 +62,7 @@ use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
 use crate::topology::topology::Topology;
-use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, RegionId};
+use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId};
 
 const OP_OFFSET: &str = "offset::offset_executive::p2::offset_brep";
 const OP_SHELL: &str = "offset::offset_executive::p2::shell_brep";
@@ -275,7 +275,7 @@ impl OffsetExecutive {
                 if self.shell_faces().contains(&id) {
                     self.copy_shell_face_prefix(kernel, original, id, false, notifications)?;
                 } else {
-                    self.offset_face_prefix(original, id, false)?;
+                    self.offset_face_prefix(kernel, original, id, false, notifications)?;
                 }
             }
 
@@ -319,7 +319,7 @@ impl OffsetExecutive {
             if self.shell_faces().contains(&id) {
                 self.copy_shell_face_prefix(kernel, original, id, true, notifications)?;
             } else {
-                self.offset_face_prefix(original, id, true)?;
+                self.offset_face_prefix(kernel, original, id, true, notifications)?;
             }
         }
 
@@ -578,38 +578,61 @@ impl OffsetExecutive {
         )
     }
 
-    fn offset_face_prefix(&self, original: &Brep, id: FaceId, extended: bool) -> Result<()> {
+    fn offset_face_prefix(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &mut Brep,
+        id: FaceId,
+        extended: bool,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
         let operation = if extended { OP_EXTENDED } else { OP_SOLID };
-        let mut faceuse = required(face::upward_faceuse(original, id)?, operation)?;
-        let shell = required(eu::faceuse_shell(original, faceuse)?, operation)?;
-        let region = eu::shell_region(original, shell)?;
-        // Do not unify these predicates: extended offset tests void, rounded
-        // offset compares region identity (including native null equality).
-        let use_mate = if extended {
-            !region_is_void(original, required(region, operation)?)?
-        } else {
-            region != original.infinite_region()
+        let faceuse = select_offset_faceuse(original, id, extended, self.inset(), operation)?;
+        let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
+            self.offset_distance(),
+            self.approximation_tol_3d(),
+        );
+        let (mut surface, ssi) = super::face::build(kernel, &creator, original, faceuse, true)?;
+        if self.skip_offset_face_geometry(extended, surface.is_some(), ssi.curves_3d.len())? {
+            return Ok(());
+        }
+        let mut stores = NotificationStores {
+            records: &mut *notifications.records,
+            attributes: &mut *notifications.attributes,
+            key_of: notifications.original_key_of,
         };
-        if use_mate {
-            faceuse = required(eu::faceuse_mate(original, faceuse)?, operation)?;
-        }
-        if self.inset() {
-            // Validate the final mate now; geometry creation below is deferred.
-            required(eu::faceuse_mate(original, faceuse)?, operation)?;
-        }
+        self.build_offset_of_faceuse_with_kernel_context(
+            kernel,
+            original,
+            faceuse,
+            &mut surface,
+            &ssi,
+            &mut stores,
+            notifications.result_key_of,
+        )
+    }
 
-        // FaceuseOffset(context, selected faceuse, TRUE, surface, SSI data), using
-        // this executive's immutable distance/approximation/tangency snapshot.
-        // Continuation cpp:559–567: rounded offset skips a null surface; extended
-        // cpp:1296–1312 instead returns SM_ERR for null or for SSI count >0 with
-        // merge_results, or >5 with extend_convex_edges. Then call p1
-        // BuildOffsetOfFaceuse, preserving both surface and SSI data. The generic
-        // creator is landed; this executive's arena/SSI backend is not yet wired.
-        // UNPORTED(offset.offset_executive_p2): SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)
-        Err(SolidError::unported(
-            "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-            "offset.offset_executive_p2",
-        ))
+    /// Applies native null-surface and SSI policy using this executive's flags.
+    fn skip_offset_face_geometry(
+        &self,
+        extended: bool,
+        has_surface: bool,
+        ssi_count: usize,
+    ) -> Result<bool> {
+        if !has_surface {
+            return if extended {
+                Err(SolidError::sm_err(OP_EXTENDED))
+            } else {
+                Ok(true)
+            };
+        }
+        if extended
+            && ((self.merge_results() && ssi_count > 0)
+                || (self.extend_convex_edges() && ssi_count > 5))
+        {
+            return Err(SolidError::sm_err(OP_EXTENDED));
+        }
+        Ok(false)
     }
 
     fn mapped_edge_prefix(
@@ -736,6 +759,31 @@ impl OffsetExecutive {
         self.set_offset_brep(temporary);
         status
     }
+}
+
+fn select_offset_faceuse(
+    original: &Brep,
+    face: FaceId,
+    extended: bool,
+    inset: bool,
+    operation: &'static str,
+) -> Result<FaceuseId> {
+    let mut faceuse = required(face::upward_faceuse(original, face)?, operation)?;
+    let shell = required(eu::faceuse_shell(original, faceuse)?, operation)?;
+    let region = eu::shell_region(original, shell)?;
+    // Native predicates differ: rounded compares identity, extended tests void.
+    let use_mate = if extended {
+        !region_is_void(original, required(region, operation)?)?
+    } else {
+        region != original.infinite_region()
+    };
+    if use_mate {
+        faceuse = required(eu::faceuse_mate(original, faceuse)?, operation)?;
+    }
+    if inset {
+        faceuse = required(eu::faceuse_mate(original, faceuse)?, operation)?;
+    }
+    Ok(faceuse)
 }
 
 /// Pure full-shell API over a caller-identified original arena.
@@ -1184,6 +1232,24 @@ mod tests {
         OffsetExecutive::new(OffsetOperation::SolidOffset, 0.125, 1.0e-6)
     }
 
+    fn run_face_prefix(
+        exec: &mut OffsetExecutive,
+        brep: &mut Brep,
+        face: FaceId,
+        extended: bool,
+    ) -> Result<()> {
+        let mut kernel = Kernel::default();
+        let mut notifications = NotificationFixture::new(brep);
+        exec.allocate_offset_brep(&mut notifications.context())?;
+        exec.offset_face_prefix(
+            &mut kernel,
+            brep,
+            face,
+            extended,
+            &mut notifications.context(),
+        )
+    }
+
     fn assert_status<T: core::fmt::Debug>(result: Result<T>, code: i32) {
         assert!(
             matches!(result.unwrap_err(), SolidError::Upstream { code: actual, .. } if actual == code)
@@ -1337,13 +1403,13 @@ mod tests {
     }
 
     #[test]
-    fn both_offset_paths_initialize_only_empty_constructor_metadata() {
+    fn both_offset_paths_stop_at_real_missing_surface_and_restore_boolean_context() {
         for extended in [false, true] {
             let (mut original, _) = one_face(false);
             let mut kernel = Kernel::default();
             let mut exec = executive();
             exec.set_extend_convex_edges(extended);
-            assert_dependency(
+            assert!(matches!(
                 {
                     let mut notifications = NotificationFixture::new(&original);
                     exec.do_solid_offset(
@@ -1353,9 +1419,9 @@ mod tests {
                         &mut notifications.context(),
                     )
                 },
-                "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                "offset.offset_executive_p2",
-            );
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert!(!kernel.context.doing_boolean());
             let temporary = exec.offset_brep().unwrap();
             assert_eq!(
                 temporary.key(),
@@ -1446,7 +1512,7 @@ mod tests {
     }
 
     #[test]
-    fn extended_void_selection_and_inset_distinguish_each_missing_mate() {
+    fn faceuse_selection_returns_exact_extended_orientation_and_inset_use() {
         for flag in [0, 1, 2, -1] {
             for inset in [false, true] {
                 // Break each direction separately: an inset after selecting the
@@ -1459,21 +1525,19 @@ mod tests {
                     let second = brep.faceuse(first).unwrap().mate.unwrap();
                     let broken = if missing_first { first } else { second };
                     brep.faceuse_mut(broken).unwrap().mate = None;
-                    let mut exec = executive();
-                    exec.set_inset(inset);
-                    let result = exec.offset_face_prefix(&brep, face, true);
+                    let selected = select_offset_faceuse(&brep, face, true, inset, OP_EXTENDED);
+                    let should_flip = flag == 0;
                     let needs_broken_mate = if missing_first {
-                        flag == 0 || inset
+                        should_flip || inset
                     } else {
-                        flag == 0 && inset
+                        should_flip && inset
                     };
                     if needs_broken_mate {
-                        assert_status(result, SM_ERR_NULL_POINTER);
+                        assert_status(selected, SM_ERR_NULL_POINTER);
                     } else {
-                        assert_dependency(
-                            result,
-                            "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                            "offset.offset_executive_p2",
+                        assert_eq!(
+                            selected,
+                            Ok(if should_flip ^ inset { second } else { first })
                         );
                     }
                 }
@@ -1482,7 +1546,7 @@ mod tests {
     }
 
     #[test]
-    fn rounded_selection_uses_identity_not_void_and_then_applies_inset() {
+    fn faceuse_selection_returns_exact_rounded_identity_and_inset_use() {
         for flag in [0, 1, 2, -1] {
             for infinite_matches in [false, true] {
                 for inset in [false, true] {
@@ -1498,21 +1562,19 @@ mod tests {
                         let second = brep.faceuse(first).unwrap().mate.unwrap();
                         let broken = if missing_first { first } else { second };
                         brep.faceuse_mut(broken).unwrap().mate = None;
-                        let mut exec = executive();
-                        exec.set_inset(inset);
-                        let result = exec.offset_face_prefix(&brep, face, false);
+                        let selected = select_offset_faceuse(&brep, face, false, inset, OP_SOLID);
+                        let should_flip = !infinite_matches;
                         let needs_broken_mate = if missing_first {
-                            !infinite_matches || inset
+                            should_flip || inset
                         } else {
-                            !infinite_matches && inset
+                            should_flip && inset
                         };
                         if needs_broken_mate {
-                            assert_status(result, SM_ERR_NULL_POINTER);
+                            assert_status(selected, SM_ERR_NULL_POINTER);
                         } else {
-                            assert_dependency(
-                                result,
-                                "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                                "offset.offset_executive_p2",
+                            assert_eq!(
+                                selected,
+                                Ok(if should_flip ^ inset { second } else { first })
                             );
                         }
                     }
@@ -1530,19 +1592,52 @@ mod tests {
         brep.set_infinite_region(None);
         // A non-null shell region differs from a null infinite region.
         assert_status(
-            executive().offset_face_prefix(&brep, face, false),
+            run_face_prefix(&mut executive(), &mut brep, face, false),
             SM_ERR_NULL_POINTER,
         );
         brep.shell_mut(shell).unwrap().region = None;
-        assert_dependency(
-            executive().offset_face_prefix(&brep, face, false),
-            "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-            "offset.offset_executive_p2",
-        );
+        assert!(matches!(
+            run_face_prefix(&mut executive(), &mut brep, face, false),
+            Err(SolidError::InvalidInput { .. })
+        ));
         assert_status(
-            executive().offset_face_prefix(&brep, face, true),
+            run_face_prefix(&mut executive(), &mut brep, face, true),
             SM_ERR_NULL_POINTER,
         );
+    }
+
+    #[test]
+    fn offset_face_post_geometry_policy_matches_null_and_ssi_boundaries() {
+        // Synthetic policy evidence; normal executive calls skip SSI generation.
+        for merge in [false, true] {
+            for extend in [false, true] {
+                let mut executive = executive();
+                executive.set_merge_results(merge);
+                executive.set_extend_convex_edges(extend);
+                for count in [0, 1, 5, 6] {
+                    let rejected =
+                        matches!((merge, extend, count), (true, _, 1 | 5 | 6) | (_, true, 6));
+                    let result = executive.skip_offset_face_geometry(true, true, count);
+                    if rejected {
+                        assert_status(result, SM_ERR);
+                    } else {
+                        assert_eq!(result, Ok(false));
+                    }
+                    assert_eq!(
+                        executive.skip_offset_face_geometry(false, true, count),
+                        Ok(false)
+                    );
+                    assert_eq!(
+                        executive.skip_offset_face_geometry(false, false, count),
+                        Ok(true)
+                    );
+                    assert_status(
+                        executive.skip_offset_face_geometry(true, false, count),
+                        SM_ERR,
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1724,6 +1819,121 @@ mod tests {
 
         fn as_any(&self) -> Option<&dyn core::any::Any> {
             Some(self)
+        }
+    }
+
+    #[test]
+    fn face_geometry_error_precedes_builder_mutation_and_notifications() {
+        let (mut original, face) = one_face(false);
+        let mut fixture = NotificationFixture::new(&original);
+        let mut executive = executive();
+        executive
+            .allocate_offset_brep(&mut fixture.context())
+            .unwrap();
+        let original_before = format!("{original:?}");
+        let result_before = format!("{:?}", executive.offset_brep());
+        let records_before = fixture.records.clone();
+        let attributes_before = format!("{:?}", fixture.attributes);
+        let mut kernel = Kernel::default();
+        kernel
+            .context
+            .set_user_notify_callback(Some(Box::<NotificationLog>::default()));
+        kernel
+            .context
+            .set_sys_notify_callback(Some(Box::<NotificationLog>::default()));
+        assert!(matches!(
+            executive.offset_face_prefix(
+                &mut kernel,
+                &mut original,
+                face,
+                false,
+                &mut fixture.context()
+            ),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(format!("{original:?}"), original_before);
+        assert_eq!(format!("{:?}", executive.offset_brep()), result_before);
+        assert_eq!(fixture.records, records_before);
+        assert_eq!(format!("{:?}", fixture.attributes), attributes_before);
+        for callback in [
+            kernel.context.user_notify_callback(),
+            kernel.context.sys_notify_callback(),
+        ] {
+            let log = callback
+                .unwrap()
+                .as_any()
+                .unwrap()
+                .downcast_ref::<NotificationLog>()
+                .unwrap();
+            assert!(log.0.is_empty());
+        }
+    }
+
+    #[test]
+    fn face_builder_kernel_scope_restores_callbacks_on_noop_and_early_error() {
+        for has_surface in [false, true] {
+            let (mut original, face) = one_face(true);
+            let faceuse = original.face(face).unwrap().faceuse.unwrap();
+            let mut fixture = NotificationFixture::new(&original);
+            let source_key = original_key(EntityRef::Face(face));
+            let offset_key = result_key(EntityRef::Face(face));
+            assert_ne!(source_key.key, offset_key.key);
+            fixture
+                .records
+                .get_mut(&source_key.key)
+                .unwrap()
+                .set_user_index1(17);
+            fixture
+                .records
+                .entry(offset_key.key)
+                .or_default()
+                .set_user_index1(93);
+            let records_before = fixture.records.clone();
+            let mut kernel = Kernel::default();
+            let event = (NotifyOperation::Copy, source_key, Some(offset_key));
+            kernel
+                .context
+                .set_user_notify_callback(Some(Box::new(NotificationLog(vec![event]))));
+            kernel
+                .context
+                .set_sys_notify_callback(Some(Box::new(NotificationLog(vec![event]))));
+            let mut executive = executive();
+            let mut surface =
+                has_surface.then(|| Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)));
+            // No temporary exists: a non-null surface reaches the builder's actual
+            // NER before construction; null preserves its legacy successful no-op.
+            let status = executive.build_offset_of_faceuse_with_kernel_context(
+                &mut kernel,
+                &mut original,
+                faceuse,
+                &mut surface,
+                &crate::offset::offset_geometry_creation::SsiData::default(),
+                &mut NotificationStores {
+                    records: &mut fixture.records,
+                    attributes: &mut fixture.attributes,
+                    key_of: &original_key,
+                },
+                &result_key,
+            );
+            if has_surface {
+                assert_status(status, SM_ERR_NULL_POINTER);
+                assert!(surface.is_some());
+            } else {
+                assert_eq!(status, Ok(()));
+            }
+            assert_eq!(fixture.records, records_before);
+            for callback in [
+                kernel.context.user_notify_callback(),
+                kernel.context.sys_notify_callback(),
+            ] {
+                let log = callback
+                    .unwrap()
+                    .as_any()
+                    .unwrap()
+                    .downcast_ref::<NotificationLog>()
+                    .unwrap();
+                assert_eq!(log.0, [event]);
+            }
         }
     }
 
@@ -2136,7 +2346,7 @@ mod tests {
                 kernel.context.set_doing_boolean(previous);
                 let mut exec = executive();
                 exec.set_extend_convex_edges(true);
-                assert_dependency(
+                assert!(matches!(
                     {
                         let mut notifications = NotificationFixture::new(&original);
                         exec.do_solid_offset(
@@ -2146,9 +2356,8 @@ mod tests {
                             &mut notifications.context(),
                         )
                     },
-                    "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                    "offset.offset_executive_p2",
-                );
+                    Err(SolidError::InvalidInput { .. })
+                ));
                 assert_eq!(kernel.context.doing_boolean(), previous);
                 assert_eq!(exec.offset_brep().unwrap().tolerance(), 1.0e-6);
             }
@@ -2189,7 +2398,7 @@ mod tests {
         for inset in [false, true] {
             let mut exec = executive();
             exec.set_inset(inset);
-            assert_dependency(
+            assert!(matches!(
                 {
                     let mut notifications = NotificationFixture::new(&original);
                     exec.do_solid_offset(
@@ -2199,9 +2408,8 @@ mod tests {
                         &mut notifications.context(),
                     )
                 },
-                "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                "offset.offset_executive_p2",
-            );
+                Err(SolidError::InvalidInput { .. })
+            ));
             assert!(!kernel.context.doing_boolean());
             assert!(exec.offset_brep().unwrap().faces().is_empty());
         }
@@ -2217,7 +2425,7 @@ mod tests {
             let mut exec = executive();
             exec.set_extend_convex_edges(extended);
             exec.set_shell_faces(&[second]);
-            assert_dependency(
+            assert!(matches!(
                 {
                     let mut notifications = NotificationFixture::new(&original);
                     exec.do_solid_offset(
@@ -2227,9 +2435,8 @@ mod tests {
                         &mut notifications.context(),
                     )
                 },
-                "SmOffsetExecutive::FaceuseOffset (geometry/SSI adapter)",
-                "offset.offset_executive_p2",
-            );
+                Err(SolidError::InvalidInput { .. })
+            ));
             let mut exec = executive();
             exec.set_extend_convex_edges(extended);
             exec.set_shell_faces(&[first]);

@@ -10254,6 +10254,74 @@ successful offset/shell geometry.
   an unported p2 entrypoint. The narrow vertex bridge is a separate PR #288; the
   face/edge construction continuations and fail-closed output adapter still need work.
 
+### Owned face-geometry bridge (PR #452, 2026-10-21)
+
+- Both executive member paths now call the existing `FaceuseOffset` algorithm,
+  then the existing p1 face builder. A narrow private backend is shared with the
+  public full-backend creator; it does not duplicate offset numerics or provide
+  dummy implementations of unrelated `OffsetBrep` operations. Source face/surface
+  handles remain distinct from newly owned surfaces and SSI curves. Output slots
+  transfer once, preserving concrete kinds, optional UV slots, curve types and
+  deviation values. The source arena is borrowed without cloning topology.
+- Rounded selection still compares region identity; extended selection still
+  tests native void truthiness. Inset now assigns the selected mate. Rounded null
+  output skips the face, whereas extended null output and its exact SSI-count
+  limits return `SM_ERR`. Both paths retain upstream's `skip_self_intersection =
+  TRUE`; the nonempty-SSI transport/count tests are synthetic policy evidence,
+  not a claim of native executive self-intersection coverage.
+- A thin p1 wrapper reuses the caller's kernel notification callbacks and the
+  existing face-construction algorithm. Source and result keys, records and
+  attributes remain caller supplied; legacy external/null contexts are unchanged.
+  Tests establish callback restoration on no-op/early-error exits and that a
+  geometry error precedes builder mutation or notification. Successful
+  face-construction notification routing through this new bridge remains blocked
+  by the dependencies below; existing p1 mapping tests are supporting evidence,
+  not end-to-end constructive certification.
+- An unfiltered native comparison against a frozen `5c3adfbe` baseline retains all
+  2244 case identities and every prior pass/rejection, with zero failures. The
+  creator remains **874 / 585 passed / 289 deferred** and p1 remains **1048 / 732
+  passed / 315 deferred / 1 rejected**. P2 remains **322 / 141 passed / 164 deferred /
+  17 rejected**: its 100 self-deferrals now reach `SmBrep::MakeWireEdgeVertex`
+  (**50**, `topology.brep_p3`) or the non-B-spline `SmCrvOnSurf` constructor
+  (**50**, `curve.crv_on_surf`, addressed by the separate #307 work). The complete
+  p2 deferred totals are `topology.brep_p3` **97** (32 copies, 65 wire-edge
+  constructors), `curve.crv_on_surf` **50**, `topology.brep_p4` **10**, and
+  `query.brep` **7**. No tolerance, absolute floor, seed, fixture, native guard or
+  rejection policy was changed.
+- This is pipeline progress, not a new whole-operation parity pass or a green
+  promotion. Full returned-offset topology, subsequent edge/merge continuations,
+  and newly exposed dependencies still require their own native evidence. Local
+  native runs use pinned Rust 1.98 and GNU C++ 12.2 on Linux ARM64; canonical
+  Linux x86-64 CI remains the merge authority, including the documented General
+  UB-35/UB-194 platform limitations.
+
+### Face bridge integrated with main `1b7f638e6` (PR #452, 2026-10-22)
+
+- Preserved upstream's per-unit metadata migration and ignored report artifacts.
+  The thin p1 wrapper propagates the new notification-lease acquisition `Result`
+  before returning the existing builder's inner status; callbacks and their
+  identity domain remain supplied by the caller. Independent source review found
+  no production-code blocker within the bridge's bounded scope.
+- Canonical x86-64 CI run **39738195736**, head `52a2660bf`, passed the complete
+  differential gate: **252 units, 134 passed, 118 partial, zero failed**. It also
+  passed strict Clippy both with and without C++, wasm, formatting, licensing and
+  packaging. The final integrated plain workspace tests pass locally, including
+  **1842 kernel tests**. These supersede the old platform-limited gate above.
+- Current native summaries are creator **874 / 609 passed / 265 deferred**, p1
+  **1048 / 733 passed / 314 deferred / 1 rejected**, and p2 **322 / 141 passed /
+  164 deferred / 17 rejected**, all with zero failures. The p2 self-deferral is
+  absent: its 100 cases reach `SmSurface::DropCurve` (**50**) or the non-B-spline
+  `SmCrvOnSurf` constructor (**50**). Upstream's real wire-edge constructor now
+  runs before the former `MakeWireEdgeVertex` boundary's next missing call.
+  Complete p2 deferral totals are `intersect.surface_drop_lib_p3` **65**,
+  `curve.crv_on_surf` **50**, `topology.brep_p3` **32** (copies),
+  `topology.brep_p4` **11**, and `harness:offset-result-adapter` **6**.
+- That CI run exposed two stale exact-callee runner-test expectations, not native
+  disagreements. Their expected owner/symbol now follow the observed
+  `intersect.surface_drop_lib_p3` / `SmSurface::DropCurve` path; no obsolete stub,
+  tolerance relaxation, case removal or rejection-policy change is introduced.
+  P2 remains partial, with no new whole-operation parity pass claimed.
+
 ## topology.brep_p1 (`SmBrep` members, collections, `sm_*` helpers of `SmBrep.cpp`, PR #145, 2026-10-16; partial, no disagreements)
 
 Difftest (`fixtures/topology.brep_p1/`: 2335 cases on the 15 upstream `.smb` files read by
