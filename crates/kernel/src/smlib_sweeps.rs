@@ -284,7 +284,7 @@ mod imp {
         let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
         let body = body_of(&brep, "sphere")?;
         let faces = body.face_count();
-        record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), Default::default())
+        Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
     }
 
     /// A point a wall is known by: on its edge in the start plane, or inside it; and the piece
@@ -407,7 +407,7 @@ mod imp {
     }
 
     fn with_history(body: Body, roles: &[Role], pieces: &[Piece]) -> Result<Body> {
-        record::attach(body, &[], Some(history(roles, pieces)), Default::default())
+        Ok(record::attach(body, &[], Some(history(roles, pieces)), &[]))
     }
 
     /// The profile `pieces` on `plane`, moved `from` along its normal, extruded `distance`
