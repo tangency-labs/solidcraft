@@ -920,7 +920,8 @@ fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
 
 /// A sheet of SMLib's pieces (each a record with its faces' history), joined into one record and,
 /// with `stitch`, sewn where pieces share edges (at ten times the pieces' tolerance).
-fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
+pub(crate) fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool, operands: &[&Body]) -> Result<Body> {
+    let counts = record::counts(operands);
     let records: Vec<&Brep> = pieces.iter().map(|(r, _)| r).collect();
     let (parts, offsets) = Parts::joined(&records)?;
     let c = parts.canonical()?;
@@ -928,7 +929,7 @@ fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
     let faces: Option<Vec<FaceProv>> = c.faces.iter().map(|p| prov(*p)).collect();
     if !stitch {
         let (body, same) = record_body(&c.brep)?;
-        return Ok(record::attach(body, &[], faces.filter(|_| same), &[]));
+        return Ok(record::attach(body, &counts, faces.filter(|_| same), &[]));
     }
     let (body, h) = imp::stitched(&c.brep, c.brep.tolerance * 10.0)?;
     // A stitched face keeps the tag of the joined record's face it was.
@@ -941,7 +942,7 @@ fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
             })
             .collect::<Option<Vec<_>>>()
     });
-    Ok(record::attach(body, &[], sewn, &[]))
+    Ok(record::attach(body, &counts, sewn, &[]))
 }
 
 /// A surface extruded from chains of sketch segments on `plane`: each chain (open, or closed such
@@ -970,7 +971,15 @@ pub fn extrude_sheet(plane: &Plane, chains: &[Vec<Seg2>], start: f64, end: f64) 
             Ok((r, h))
         })
         .collect::<Result<Vec<_>>>()?;
-    sheet_of(pieces, false)
+    sheet_of(pieces, false, &[])
+}
+
+/// The sheet SMLib revolves from the sketch segments `segs` on `plane` about the axis through
+/// `origin` along the unit `axis` (in the plane) by `angle` radians (right-handed, up to a turn),
+/// with no caps, as its record: a surface builder's sector.
+pub(crate) fn revolved_record(plane: &Plane, segs: &[Seg2], origin: Vec3, axis: Vec3, angle: f64) -> Result<Brep> {
+    let chain: Vec<Numbered> = segs.iter().copied().zip(0..).collect();
+    imp::revolved(plane, &chain, origin, axis, angle)
 }
 
 /// A surface revolved from chains of sketch segments on `plane` about the sketch line through
@@ -1018,7 +1027,7 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
         let h = swept_from(&r, &turned, &chain);
         pieces.push((r, h));
     }
-    sheet_of(pieces, false)
+    sheet_of(pieces, false, &[])
 }
 
 /// A surface swept from chains of sketch segments on `plane` along a path that starts near them,
@@ -1057,7 +1066,7 @@ pub fn sweep_sheet_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::Path
         let h = swept_from(&r, plane, &chain);
         pieces.push((r, h));
     }
-    sheet_of(pieces, runs.len() > 1)
+    sheet_of(pieces, runs.len() > 1, &[])
 }
 
 /// The path's segments in runs along which its direction carries on (within a thousandth of a
@@ -1138,7 +1147,7 @@ pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>
             Ok((r, h))
         })
         .collect::<Result<Vec<_>>>()?;
-    sheet_of(pieces, true)
+    sheet_of(pieces, true, &[])
 }
 
 /// Closed sections matched as the solid loft matches them ([`crate::build::loft_numbered_loops`]),
