@@ -1,20 +1,13 @@
-//! Recording the exact history of a boolean's result, whichever path made it (see
-//! [`crate::ops::boolean`]): for each result face, the operand faces it is a region of; for each
-//! result edge, the operand edges it lies along or the operand faces whose meeting it is. The
-//! operands are `[a, b]`: the target, then the tool. Paths compose the histories of the steps
-//! they take ([`History::over`], [`History::substitute`]); a path that cannot leaves the result
-//! without history.
-
-use std::collections::HashMap;
-
-use solidcraft_geom::Vec3;
-use truck_modeling as mt;
+//! Composing the exact history of a multi-step operation (a boolean through several steps, a
+//! local modifier on a healed body): each step's history over its own operands is placed among
+//! the operation's operands ([`placed`], [`kept`]) and substituted into the next
+//! ([`through`], [`of_pair`], [`crate::record::after`]). The operands of a boolean are `[a, b]`:
+//! the target, then the tool. A step that cannot report its history leaves the result without
+//! one.
 
 use crate::Result;
-use crate::body::{Body, Solid, edge_order};
-use crate::history::BodyHistory;
-use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv, History};
-use crate::record;
+use crate::body::Body;
+use crate::history::{BodyHistory, History};
 
 /// A composition step's history, or none (logged) where the lineage can't be expressed.
 pub(crate) fn composed<E: std::fmt::Display>(h: std::result::Result<History, E>) -> Option<History> {
@@ -44,19 +37,6 @@ pub(crate) fn operand(body: &Body, operand: usize, counts: &[(usize, usize)]) ->
     body.clone().with_checked_history(kept(body, operand, counts.len()), counts)
 }
 
-/// The histories of `parts`, each made of shells of `whole` (its lumps), over `[whole]`: their
-/// faces and edges are the whole's own (by identity).
-pub(crate) fn parts_of(parts: &[Body], whole: &Body) -> Vec<Option<History>> {
-    let (faces, edges) = (record::face_index(&whole.solid), record::edge_origins(&whole.solid, 0));
-    parts
-        .iter()
-        .map(|part| {
-            let faces = part.solid.face_iter().map(|f| Some(record::from_face(0, *faces.get(&f.id())?, Change::Kept))).collect::<Option<Vec<_>>>()?;
-            Some(History { operands: 1, faces, edges: record::edge_provs(part, &edges)? })
-        })
-        .collect()
-}
-
 /// A body with its history over the operation's operands (`None`: not known).
 pub(crate) type Traced = (Body, Option<History>);
 
@@ -66,169 +46,14 @@ pub(crate) fn of_pair(result: &Body, x: &Option<History>, y: &Option<History>) -
     composed(result.history()?.clone().over(&[x.as_ref()?, y.as_ref()?]))
 }
 
-/// Bodies apart from each other, each with its history over the operation's operands (with
-/// `counts` faces and edges), as one body of several pieces whose history is theirs side by side.
-pub(crate) fn join(pieces: Vec<Traced>, counts: &[(usize, usize)]) -> Result<Option<Body>> {
-    if pieces.len() < 2 {
-        return Ok(pieces.into_iter().next().map(|(b, h)| b.with_checked_history(h, counts)));
-    }
-    // The pieces' shells in order: their faces in order, their edges themselves.
-    let mut faces = Some(Vec::new());
-    let mut edges = HashMap::new();
-    for (p, h) in &pieces {
-        let (Some(h), Some(all)) = (h, faces.as_mut()) else {
-            faces = None;
-            break;
-        };
-        all.extend(h.faces.iter().cloned());
-        edges.extend(record::edges_by_identity(p, h));
-    }
-    if let Some(faces) = faces.as_mut() {
-        record::mark_shared_split(faces);
-    }
-    let joined = crate::ops::join_pieces(pieces.into_iter().map(|(p, _)| p).collect())?;
-    Ok(joined.map(|body| record::traced(body, counts, faces, Some(&edges))))
-}
-
-/// A truck boolean's history in our terms, in the order of the solid it made: each face a
-/// region of one operand face (Kept when that very face), each edge's origins.
-pub(crate) type Shapeops = (Vec<FaceProv>, Vec<Vec<EdgeOrigin>>);
-
-/// A truck boolean's history in our terms ([`Shapeops`]). `tool` is the
-/// tool as passed (after a cut turned it inside out, which keeps its faces' order but walks each
-/// face's edges the other way, so its edge order changes) and `tool_edges` its edges by identity
-/// in its own order (before turning).
-pub(crate) fn shapeops(h: &truck_shapeops::History, tool: &Solid, tool_edges: Option<&HashMap<mt::EdgeID, Vec<EdgeOrigin>>>) -> Option<Shapeops> {
-    let face = |f: truck_shapeops::FaceIndex| FaceOrigin::Face { operand: f.operand, face: f.face };
-    let faces =
-        h.faces.iter().map(|o| record::from_face(o.source.operand, o.source.face, if o.kept { Change::Kept } else { Change::Modified })).collect();
-    let passed: Vec<mt::EdgeID> = edge_order(tool.face_iter()).0.iter().map(|e| e.id()).collect();
-    let edges = h
-        .edges
-        .iter()
-        .map(|o| match *o {
-            truck_shapeops::EdgeOrigin::Edge { operand: 1, edge } if tool_edges.is_some() => {
-                tool_edges.and_then(|t| t.get(passed.get(edge)?)).cloned()
-            }
-            truck_shapeops::EdgeOrigin::Edge { operand, edge } => Some(vec![EdgeOrigin::Edge { operand, edge }]),
-            truck_shapeops::EdgeOrigin::Meet { a, b } => Some(vec![EdgeOrigin::meet(face(a), face(b))]),
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some((faces, edges))
-}
-
-/// Samples along each edge when checking that its curve evaluates.
-const EVALUATION_SAMPLES: usize = 32;
-
-/// Whether every edge of `solid` evaluates along its whole range. An intersection curve projects
-/// its leader's point onto both surfaces, which fails to converge where a boolean made the edge
-/// from an approximation that strayed (#1252). Such a result is no solid to keep: the mesher,
-/// healing and measuring all sample the edge and stumble over the gap.
-pub(crate) fn edges_evaluate(solid: &Solid) -> bool {
-    use truck_meshalgo::prelude::TrySubs;
-    use truck_modeling::BoundedCurve;
-    solid.boundaries().iter().flat_map(|shell| shell.edge_iter()).all(|edge| {
-        let curve = edge.curve();
-        let (t0, t1) = curve.range_tuple();
-        (0..=EVALUATION_SAMPLES).all(|k| {
-            let t = t0 + (t1 - t0) * k as f64 / EVALUATION_SAMPLES as f64;
-            curve.try_subs(t).is_some_and(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
-        })
-    })
-}
-
-/// The body made of `solid` healed (keeping faces apart along `keep`), with the history whose
-/// faces and edges (in `solid`'s orders) are given before healing, carried through it.
-/// Operands with `counts` faces and edges. A result with an edge that does not evaluate is
-/// refused (see [`edges_evaluate`]).
-pub(crate) fn heal_build(
-    solid: Solid,
-    size: f64,
-    keep: &[Vec<Vec3>],
-    faces: Option<Vec<FaceProv>>,
-    edges: Option<Vec<Vec<EdgeOrigin>>>,
-    counts: &[(usize, usize)],
-) -> Result<Body> {
-    let (healed, map) = crate::heal::heal_traced(solid, size, keep);
-    if !edges_evaluate(&healed) {
-        return Err(crate::KernelError::Failed("an edge of the result does not evaluate".into()));
-    }
-    let carried = faces.zip(edges).zip(map).and_then(|((f, e), m)| m.carry(&f, &e));
-    let (faces, edges) = carried.unzip();
-    record::build(healed, counts, faces, edges.as_ref())
-}
-
-/// The body truck's result `s` makes, healed (see [`heal_build`]), with its history `h`.
-pub(crate) fn truck_result(s: Solid, h: Option<Shapeops>, size: f64, keep: &[Vec<Vec3>], counts: &[(usize, usize)]) -> Result<Body> {
-    let (faces, edges) = h.unzip();
-    heal_build(s, size, keep, faces, edges, counts)
-}
-
-/// `body` healed (see [`heal_build`]), its history carried through: `solid` is `body`'s solid
-/// or a copy of it (`Body::deep_copy`, which keeps its order).
-pub(crate) fn heal_body(body: &Body, solid: Solid, size: f64, keep: &[Vec<Vec3>], counts: &[(usize, usize)]) -> Result<Body> {
-    let (faces, edges) = body.history().map(|h| (h.faces.clone(), h.edges.iter().map(|e| e.origins.clone()).collect())).unzip();
-    heal_build(solid, size, keep, faces, edges, counts)
-}
-
-/// A prism boolean's result `body` with the coplanar pieces its slabs leave merged (nothing
-/// else healed: its edges are exact as they are), its history carried through, and what else it carries kept: each face's
-/// construction source where every piece merged into it had that same one, its Split Face
-/// lines and its regularization protection.
-pub(crate) fn heal_prism_result(body: &Body, size: f64, keep: &[Vec<Vec3>], counts: &[(usize, usize)]) -> Result<Body> {
-    let (faces, edges): (Option<Vec<FaceProv>>, Option<Vec<Vec<EdgeOrigin>>>) =
-        body.history().map(|h| (h.faces.clone(), h.edges.iter().map(|e| e.origins.clone()).collect())).unzip();
-    let (healed, map) = crate::heal::merge_faces_traced((*body.solid).clone(), size, keep);
-    let sources = match (body.face_sources(), &map) {
-        (Some(sources), Some(m)) => Some(
-            m.faces
-                .iter()
-                .map(|under| {
-                    let mut each = under.iter().map(|i| sources.get(*i).cloned().flatten());
-                    let first = each.next().flatten()?;
-                    each.all(|s| s.as_ref() == Some(&first)).then_some(first)
-                })
-                .collect::<Vec<_>>(),
-        ),
-        _ => None,
-    };
-    let carried = faces.zip(edges).zip(map).and_then(|((f, e), m)| m.carry(&f, &e));
-    let (faces, edges) = carried.unzip();
-    let mut out = record::build(healed, counts, faces, edges.as_ref())?;
-    out = out.with_face_sources(sources.map(std::sync::Arc::new)).inherit_regularization_protection(body);
-    out.splits = body.splits.clone();
-    Ok(out)
-}
-
-/// `body` healed as the local modifiers take it (coplanar neighbours as one face, as after a
-/// join; faces split on purpose kept apart), with its history over `[body]`.
+/// `body` healed as the local modifiers take it (faces on one surface as one face, as after a
+/// join; faces split on purpose kept apart), with its history over `[body]`
+/// ([`crate::heal::heal`]), each face keeping the construction source its faces shared and the
+/// body its regularization protection.
 pub(crate) fn healed(body: &Body) -> Result<Body> {
-    let counts = record::counts(&[body]);
-    heal_body(&operand(body, 0, &counts), body.deep_copy(), body.size(), body.split_keep(), &counts)
-}
-
-/// `body` copied as it is, unhealed (`Body::deep_copy`, which keeps its face and edge order),
-/// with its history over `[body]`: every face and edge kept.
-pub(crate) fn copied(body: &Body) -> Result<Body> {
-    let copy = Body::new(body.deep_copy())?;
-    Ok(operand(&copy, 0, &record::counts(&[body])))
-}
-
-/// The faces and edges of `a`, then of the tool `b` turned inside out as a void (`inner`, a
-/// copy of `b`, with `inner_edges` its edges by identity before turning): the history of
-/// `a` with `b`'s inside taken out where `b` lies wholly within it.
-pub(crate) fn void(
-    a: &Body,
-    inner_edges: HashMap<mt::EdgeID, Vec<EdgeOrigin>>,
-    b_faces: usize,
-) -> (Vec<FaceProv>, HashMap<mt::EdgeID, Vec<EdgeOrigin>>) {
-    let faces = (0..a.face_count())
-        .map(|i| record::from_face(0, i, Change::Kept))
-        .chain((0..b_faces).map(|i| record::from_face(1, i, Change::Kept)))
-        .collect();
-    let mut edges = record::edge_origins(&a.solid, 0);
-    edges.extend(inner_edges);
-    (faces, edges)
+    let healed = crate::heal::heal(body, body.split_keep())?;
+    let sources = healed.history().map(|h| std::sync::Arc::new(h.face_sources(&[body])));
+    Ok(healed.with_face_sources(sources).inherit_regularization_protection(body))
 }
 
 #[cfg(test)]
