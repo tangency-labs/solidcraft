@@ -194,88 +194,18 @@ impl Parts {
             return Err(invalid("no faces"));
         }
         let shells = self.shells()?;
-        let order: Vec<usize> = shells.iter().flatten().copied().collect();
-        let face = |fi: usize| self.faces.get(fi).ok_or_else(|| invalid("a face reference"));
-        let mut edge_new: Vec<Option<u32>> = vec![None; self.edges.len()];
-        let mut edges_old: Vec<usize> = Vec::new();
-        let mut uses: Vec<Vec<b::EdgeUseRef>> = Vec::new();
-        for (nf, &fi) in order.iter().enumerate() {
-            let (f, forward) = face(fi)?;
-            for (li, l) in f.loops.iter().enumerate() {
-                let b::Loop::Edges { edges } = l else { continue };
-                let k = edges.len();
-                for step in 0..k {
-                    let p = if *forward { step } else { k - 1 - step };
-                    let Some(u) = edges.get(p) else { continue };
-                    let slot = edge_new.get_mut(u.edge as usize).ok_or_else(|| invalid("an edge reference"))?;
-                    let ne = match *slot {
-                        Some(ne) => ne,
-                        None => {
-                            let ne = index(edges_old.len())?;
-                            *slot = Some(ne);
-                            edges_old.push(u.edge as usize);
-                            uses.push(Vec::new());
-                            ne
-                        }
-                    };
-                    let at = b::EdgeUseRef { face: index(nf)?, r#loop: index(li)?, position: index(p)?, upper: !u.forward };
-                    if let Some(list) = uses.get_mut(ne as usize) {
-                        list.push(at);
-                    }
-                }
-            }
-        }
-        let mut vertex_new: Vec<Option<u32>> = vec![None; self.vertices.len()];
-        let mut vertices: Vec<b::Vertex> = Vec::new();
-        let mut visit = |v: u32, vertices: &mut Vec<b::Vertex>| -> Result<u32> {
-            let slot = vertex_new.get_mut(v as usize).ok_or_else(|| invalid("a vertex reference"))?;
-            if let Some(nv) = *slot {
-                return Ok(nv);
-            }
-            let nv = index(vertices.len())?;
-            *slot = Some(nv);
-            vertices.push(self.vertices.get(v as usize).cloned().ok_or_else(|| invalid("a vertex reference"))?);
-            Ok(nv)
-        };
-        let mut edges = Vec::with_capacity(edges_old.len());
-        for (old, uses) in edges_old.iter().zip(uses) {
-            let e = self.edges.get(*old).ok_or_else(|| invalid("an edge reference"))?;
-            let ends = [visit(e.vertices[0], &mut vertices)?, visit(e.vertices[1], &mut vertices)?];
-            edges.push(b::Edge { vertices: ends, uses, ..e.clone() });
-        }
-        let mut faces = Vec::with_capacity(order.len());
-        for &fi in &order {
-            let (f, _) = face(fi)?;
-            let mut loops = Vec::with_capacity(f.loops.len());
-            for l in &f.loops {
-                loops.push(match l {
-                    b::Loop::Edges { edges } => b::Loop::Edges {
-                        edges: edges
-                            .iter()
-                            .map(|u| {
-                                let edge = edge_new.get(u.edge as usize).copied().flatten().ok_or_else(|| invalid("an edge reference"))?;
-                                Ok(b::OrientedEdge { edge, ..u.clone() })
-                            })
-                            .collect::<Result<_>>()?,
-                    },
-                    b::Loop::Vertex { vertex } => b::Loop::Vertex { vertex: visit(*vertex, &mut vertices)? },
-                });
-            }
-            faces.push(b::Face { loops, ..f.clone() });
-        }
-        let mut numbered = 0usize;
-        let mut shell_records = Vec::with_capacity(shells.len());
+        // The record as the parts stand (shell k as `shells` groups it), then in canonical order.
         let mut regions = vec![b::Region { shells: Vec::new(), void: false }];
+        let mut shell_records = Vec::with_capacity(shells.len());
         for (s, members) in shells.iter().enumerate() {
             let mut count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
             let mut list = Vec::with_capacity(members.len());
             for &fi in members {
-                let (f, forward) = face(fi)?;
+                let (f, forward) = self.faces.get(fi).ok_or_else(|| invalid("a face reference"))?;
                 for e in Parts::uses_of(f) {
                     *count.entry(e).or_default() += 1;
                 }
-                list.push(b::OrientedFace { face: index(numbered)?, forward: *forward });
-                numbered += 1;
+                list.push(b::OrientedFace { face: index(fi)?, forward: *forward });
             }
             shell_records.push(b::Shell::Faces { faces: list, wires: Vec::new() });
             let s = index(s)?;
@@ -286,9 +216,21 @@ impl Parts {
                 regions.push(b::Region { shells: vec![s], void: false });
             }
         }
-        let brep = Brep { version: b::VERSION, tolerance: self.tolerance, regions, shells: shell_records, faces, edges, vertices };
-        brep.validate().map_err(|e| failed(format!("faces into a record: {e}")))?;
-        Ok(Canonical { brep, faces: order, edges: edges_old })
+        let loose = Brep {
+            version: b::VERSION,
+            tolerance: self.tolerance,
+            regions,
+            shells: shell_records,
+            faces: self.faces.iter().map(|(f, _)| f.clone()).collect(),
+            edges: self.edges.iter().map(|e| b::Edge { uses: Vec::new(), ..e.clone() }).collect(),
+            vertices: self.vertices.clone(),
+        };
+        let part = loose.canonical().map_err(|e| failed(format!("faces into a record: {e}")))?;
+        Ok(Canonical {
+            brep: part.brep,
+            faces: part.faces.iter().map(|f| *f as usize).collect(),
+            edges: part.edges.iter().map(|e| *e as usize).collect(),
+        })
     }
 }
 

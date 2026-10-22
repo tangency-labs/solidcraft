@@ -383,7 +383,7 @@ pub(crate) fn patch_loop(body: &Body, at: &[Vec3], crown: f64) -> Result<Body> {
                 Err(e) => return Err(spline_error(e)),
             };
             let projection = Projection { origin: fill.origin, axes: fill.axes };
-            (surface_record(&fill.surface)?, fill.counter_clockwise, Some(projection))
+            (crate::surfaces::spline_surface(&fill.surface), fill.counter_clockwise, Some(projection))
         }
     };
     let pcurves = match &pcurve {
@@ -604,21 +604,6 @@ impl Projection {
     }
 }
 
-/// A geom NURBS surface as a record: a plain spline where every weight is one.
-fn surface_record(s: &solidcraft_geom::bspline::NurbsSurface) -> Result<b::Surface> {
-    let [ku, kv] = s.knots().clone();
-    let rows = s.net().into_u_rows();
-    if rows.iter().flatten().all(|h| h.w == 1.0) {
-        Ok(b::Surface::Spline { u_knots: ku, v_knots: kv, points: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z]).collect()).collect() })
-    } else {
-        Ok(b::Surface::RationalSpline {
-            u_knots: ku,
-            v_knots: kv,
-            homogeneous: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()).collect(),
-        })
-    }
-}
-
 /// The one-face sheet on `surface` bounded by the loop `chain` of `record`'s own edges, run
 /// counter-clockwise about the surface's natural normal (`ccw`: the chain already does), each
 /// edge's pcurve the exact projection where the surface is a height field. Its history is over
@@ -770,7 +755,7 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
                 }
             }
         }
-        faces.push(PartFace { surface: surface_record(&patch.surface)?, forward: true, loops: vec![uses] });
+        faces.push(PartFace { surface: crate::surfaces::spline_surface(&patch.surface), forward: true, loops: vec![uses] });
     }
     let made = assemble(Parts { vertices, edges, faces, tolerance: tol }, false)?;
     let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
