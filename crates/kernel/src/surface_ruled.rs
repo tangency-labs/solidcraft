@@ -8,8 +8,9 @@
 //! their angle to its axis (a plane ring, or the ruled NURBS of a cylinder or a cone, exactly).
 //! Rulings that turn any other way along the edge (a normal turning along a free-form face, a
 //! tangent continuing a face round a free-form curve) end on an offset curve, which has no exact
-//! NURBS form in general (SMLib keeps one only implicitly, `SmOffsetCurve`, or approximates it,
-//! `N_CrvOffsetApprox`), so such a strip is refused, never fitted. Strips share their side edges
+//! NURBS form in general; such a strip's far edge is a curve of its own instead ([`far_curves`]:
+//! fair, near the rulings' ends, its handles movable), and the strip is exactly the ruled surface
+//! between the edge and it. Strips share their side edges
 //! where their rulings agree; at a sharp corner of the chain they are mitred (each extended along
 //! its far edge until the two meet, or cut back where they overlap) or rounded (a planar or
 //! conical sector SMLib revolves from one ruling to the other; an inside corner is always cut
@@ -1531,10 +1532,10 @@ mod tests {
     }
 
     /// Off a doubly curved face (a saddle patch over a cup's rim) its normal turns along a
-    /// straight edge: the rulings' ends trace an offset curve with no exact NURBS form, so the
-    /// strip is refused, by name.
+    /// straight edge: the strip is ruled to a far curve of its own, from corner to corner, which
+    /// its handles move.
     #[test]
-    fn a_strip_off_a_curved_face_is_refused() {
+    fn a_strip_off_a_curved_face_is_ruled_to_its_far_curve() {
         let b = box_solid(Vec3::new(-14.0, -14.0, 0.0), Vec3::new(14.0, 14.0, 20.0)).unwrap();
         let tool = cylinder(Vec3::new(0.0, -60.0, 50.0), Vec3::Y, 40.0, 120.0).unwrap();
         let cup = crate::boolean(&b, &tool, crate::BoolOp::Cut).unwrap().unwrap();
@@ -1542,8 +1543,14 @@ mod tests {
         let rim = [Vec3::new(14.0, 0.0, z(14.0)), Vec3::new(0.0, 14.0, z(0.0)), Vec3::new(-14.0, 0.0, z(-14.0)), Vec3::new(0.0, -14.0, z(0.0))];
         let cover = crate::patch_edges(&cup, &rim).unwrap();
         let edge = [Vec3::new(14.0, 0.0, z(14.0))];
-        let e = ruled_surface(&cover, &edge, &ruled(RuledMode::Normal, 3.0, Vec3::new(0.0, 0.0, 12.0))).unwrap_err().to_string();
-        assert!(e.contains("offset curve"), "{e}");
+        let r = ruled(RuledMode::Normal, 3.0, Vec3::new(0.0, 0.0, 12.0));
+        let s = ruled_surface(&cover, &edge, &r).unwrap();
+        assert!(s.is_surface() && s.face_count() == 1);
+        let handles = ruled_far_handles(&cover, &edge, &r).unwrap();
+        let [Some(h)] = handles.as_slice() else { panic!("one free strip: {handles:?}") };
+        let lifted: Vec<Vec3> = h.iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect();
+        let moved = ruled_surface_with(&cover, &edge, &r, &[Some(lifted)]).unwrap();
+        assert!(measure(&moved).unwrap().bbox.max.z > measure(&s).unwrap().bbox.max.z, "the handles move the far curve");
     }
 
     /// Each strip is made in place of the edge it stands on; a corner face in place of the two
