@@ -483,11 +483,11 @@ mod imp {
                 Curve::Arc { center: p(center), axis: p(k), reference: p(reference), radius, start: 0.0, end: turn }
             }
             crate::PathSeg::Curve { plane, seg } => curve(&plane, &seg)?,
-            crate::PathSeg::Cubic { p: ctrl } => Curve::Nurbs {
-                degree: 3,
-                points: ctrl.iter().map(|q| [q.x, q.y, q.z, 1.0]).collect(),
-                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            },
+            crate::PathSeg::Bezier(b) => {
+                let degree = b.degree();
+                let points = b.weighted_points().ok_or_else(|| KernelError::Invalid("a path span does not evaluate".into()))?;
+                Curve::Nurbs { degree, points, knots: std::iter::repeat_n(0.0, degree + 1).chain(std::iter::repeat_n(1.0, degree + 1)).collect() }
+            }
         })
     }
 
@@ -564,7 +564,7 @@ mod imp {
                 (a, crate::build::rotate_about(a, center, k, angle))
             }
             crate::PathSeg::Curve { plane, seg } => (plane.to_world(seg.start()), plane.to_world(seg.end())),
-            crate::PathSeg::Cubic { p: ctrl } => (ctrl[0], ctrl[3]),
+            crate::PathSeg::Bezier(b) => (b.start(), b.end()),
         })
     }
 
@@ -608,7 +608,7 @@ mod imp {
             length += a.dist(b).max(match *s {
                 crate::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
                 crate::PathSeg::Curve { seg, .. } => seg.length(),
-                crate::PathSeg::Cubic { .. } => seg_len(s),
+                crate::PathSeg::Bezier(_) => seg_len(s),
                 crate::PathSeg::Line { .. } => 0.0,
             });
         }
@@ -712,7 +712,7 @@ mod imp {
             crate::PathSeg::Line { a, b } => a.dist(b),
             crate::PathSeg::Arc { a, center, angle, .. } => angle.abs() * a.dist(center),
             crate::PathSeg::Curve { seg, .. } => seg.length(),
-            crate::PathSeg::Cubic { p: ctrl } => crate::point_path::cubic_length(&ctrl).unwrap_or(f64::NAN),
+            crate::PathSeg::Bezier(b) => b.length().unwrap_or(f64::NAN),
         }
     }
 
@@ -740,7 +740,7 @@ mod imp {
                 let t = 0.5 * (lo + hi);
                 Some((plane.to_world(seg.point_at(t)), plane.dir_to_world(seg.derivative(t)).normalized()?))
             }
-            crate::PathSeg::Cubic { p: ctrl } => crate::point_path::cubic_along(&ctrl, f),
+            crate::PathSeg::Bezier(b) => b.along(f),
         }
     }
 
@@ -782,8 +782,8 @@ mod imp {
                     .map(|(u, v)| u.cross(v).atan2(u.dot(v)).abs())
                     .sum()
             }
-            crate::PathSeg::Cubic { p: ctrl } => {
-                let pts: Vec<Vec3> = std::iter::once(ctrl[0]).chain(crate::point_path::cubic_polyline(&ctrl, 1e-3)).collect();
+            crate::PathSeg::Bezier(b) => {
+                let pts: Vec<Vec3> = std::iter::once(b.start()).chain(b.polyline(1e-3)).collect();
                 pts.windows(3)
                     .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
                     .map(|(u, v)| u.cross(v).len().atan2(u.dot(v)))
