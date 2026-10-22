@@ -15,13 +15,7 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
     let ordinary = cup(&stock);
     assert!(!ordinary.regularization_protected);
     let painted = stock.clone().with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
-    let side = stock
-        .solid
-        .face_iter()
-        .enumerate()
-        .find(|(i, _)| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.))
-        .unwrap()
-        .0;
+    let side = (0..stock.face_count()).find(|i| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.)).unwrap();
     let split = crate::split_faces(&stock, &[side], &crate::SplitTool::Plane(Plane { origin: Vec3::new(0., 0., 8.), ..Plane::XY })).unwrap();
     assert!(split.split_lines().is_some());
     for protected in [painted, split] {

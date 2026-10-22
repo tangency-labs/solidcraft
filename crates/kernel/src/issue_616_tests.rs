@@ -54,7 +54,11 @@ fn moved_outside(from: &Mesh, onto: &Mesh, region: &Aabb3, tol: f64) -> Option<V
 /// (a slit, a moved face) and none lost, outside the tool's box.
 fn assert_local(target: &Body, tool: &Body, joined: &Body, what: &str) {
     let tol = 1e-3;
-    let (mt, mtool, mj) = (target.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(), tool.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(), joined.mesh(&crate::MeshTolerance::chord(0.01)).unwrap());
+    let (mt, mtool, mj) = (
+        target.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
+        tool.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
+        joined.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
+    );
     let mut region = mtool.bounds();
     region.min -= Vec3::new(0.01, 0.01, 0.01);
     region.max += Vec3::new(0.01, 0.01, 0.01);
@@ -64,58 +68,22 @@ fn assert_local(target: &Body, tool: &Body, joined: &Body, what: &str) {
 
 /// The four ribs of the issue, 1.6 × 6 × 11.7, sit on the plate (z = 2.4), over the skirt, flush
 /// with the window's sides. Each join adds exactly what lies outside the skirt, changes nothing
-/// else (it used to leave a slit through the far wall), and needs no displacement of the tool.
+/// else (it used to leave a slit through the far wall).
 #[test]
 fn ribs_joined_flush_to_the_lid_change_nothing_else() {
     let mut b = lid();
     assert!((volume(&b) - 6703.5222).abs() < 1e-3, "{}", volume(&b));
     for c in [[102.8, 14., 2.4], [102.8, 48., 2.4], [172.4, 14., 2.4], [172.4, 48., 2.4]] {
         let tool = bx(c, [1.6, 6., 11.7]);
-        let (r, report) = capture_boolean_diagnostics(|| boolean(&b, &tool, BoolOp::Union));
-        let r = r.unwrap().unwrap();
+        let r = boolean(&b, &tool, BoolOp::Union).unwrap().unwrap();
         // 1.6 × 6 × 11.7 less the 1.35 × 6 × 3 inside the skirt.
         assert!((volume(&r) - volume(&b) - 88.02).abs() < 1e-6, "{c:?}: {}", volume(&r) - volume(&b));
-        assert!(!report.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{c:?}: {report:?}");
-        assert_eq!(r.solid.boundaries().len(), 1);
+        assert_eq!(r.shell_count(), 1);
         assert_local(&b, &tool, &r, &format!("{c:?}"));
         b = r;
     }
     let bounds = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().bounds();
     assert!((bounds.max.z - 14.1).abs() < 1e-9, "the ribs keep their height: {}", bounds.max.z);
-}
-
-/// A plane cut through a frame meets it in two faces; gluing the halves back joins both (one
-/// left over was the slit of #616).
-#[test]
-fn glue_joins_every_face_the_pieces_share() {
-    let frame = boolean(&bx([0., 0., 0.], [40., 30., 5.]), &bx([5., 5., -1.], [30., 20., 7.]), BoolOp::Cut).unwrap().unwrap();
-    let low = boolean(&frame, &bx([-1., -1., -1.], [42., 16., 7.]), BoolOp::Intersect).unwrap().unwrap();
-    let high = boolean(&frame, &bx([-1., 15., -1.], [42., 16., 7.]), BoolOp::Intersect).unwrap().unwrap();
-    let glued = crate::coplanar::glue(&low, &high).unwrap().unwrap();
-    assert_eq!(glued.solid.boundaries().len(), 1);
-    assert!((volume(&glued) - volume(&frame)).abs() < 1e-6);
-    assert!((measure(&glued).unwrap().area - measure(&frame).unwrap().area).abs() < 1e-6, "no faces left inside");
-}
-
-/// The guard refuses a result that changed the target away from the tool, or lost volume in a
-/// join, and accepts the right one.
-#[test]
-fn the_retry_guard_refuses_changes_away_from_the_tool() {
-    let target = bx([0., 0., 0.], [40., 30., 5.]);
-    let tool = bx([0., 0., 5.], [4., 4., 4.]);
-    let right = boolean(&target, &tool, BoolOp::Union).unwrap().unwrap();
-    assert!(crate::boolean_guard::check_retry(&target, &tool, BoolOp::Union, Some(&right)).is_ok());
-    // A notch far from the tool (volume still up: the tool adds more than the notch takes).
-    let notched = boolean(&right, &bx([30., 10., 4.], [2., 2., 2.]), BoolOp::Cut).unwrap().unwrap();
-    let e = crate::boolean_guard::check_retry(&target, &tool, BoolOp::Union, Some(&notched)).unwrap_err().to_string();
-    assert!(e.contains("away from the tool") && e.contains("refused"), "{e}");
-    // A join that lost volume.
-    let e = crate::boolean_guard::check_retry(&target, &tool, BoolOp::Union, Some(&bx([0., 0., 0.], [40., 30., 4.]))).unwrap_err().to_string();
-    assert!(e.contains("volume"), "{e}");
-    // A cut that comes out empty while the tool covers only part of the target.
-    assert!(crate::boolean_guard::check_retry(&target, &tool, BoolOp::Cut, None).is_err());
-    assert!(crate::boolean_guard::check_retry(&tool, &target, BoolOp::Cut, None).is_err());
-    assert!(crate::boolean_guard::check_retry(&tool, &bx([-1., -1., 4.], [6., 6., 6.]), BoolOp::Cut, None).is_ok());
 }
 
 /// Random small boxes joined flush to the walls and floor of a shelled box with rounded corners

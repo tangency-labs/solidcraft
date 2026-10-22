@@ -151,35 +151,27 @@ fn random_cuts_and_joins_never_split_other_faces() {
 
 /// The edges of `b` lying along the line through `a` and `z`.
 fn edges_along(b: &Body, a: Vec3, z: Vec3) -> usize {
+    let r = b.record();
     let on = |p: Vec3| p.dist_to_segment(a, z) < 1e-6;
-    let edges: std::collections::HashSet<_> = b
-        .solid
-        .edge_iter()
-        .filter(|e| on(crate::body::from_p3(e.front().point())) && on(crate::body::from_p3(e.back().point())))
-        .map(|e| e.id())
-        .collect();
-    edges.len()
+    let point = |v: u32| Vec3::from(r.vertices[v as usize].point);
+    r.edges.iter().filter(|e| on(point(e.vertices[0])) && on(point(e.vertices[1]))).count()
 }
 
 /// Vertices of `b` where just two straight edges meet in line (a straight edge split in two).
 fn stations(b: &Body) -> usize {
-    use std::collections::HashMap;
-    let mut at: HashMap<truck_modeling::VertexID, Vec<truck_modeling::Edge>> = HashMap::new();
-    let mut seen = std::collections::HashSet::new();
-    for e in b.solid.edge_iter() {
-        if seen.insert(e.id()) {
-            for v in [e.front(), e.back()] {
-                at.entry(v.id()).or_default().push(e.clone());
-            }
+    let r = b.record();
+    let mut at: Vec<Vec<usize>> = vec![Vec::new(); r.vertices.len()];
+    for (i, e) in r.edges.iter().enumerate() {
+        for v in e.vertices {
+            at[v as usize].push(i);
         }
     }
-    at.values()
+    let point = |v: u32| Vec3::from(r.vertices[v as usize].point);
+    let dir = |e: usize| (point(r.edges[e].vertices[1]) - point(r.edges[e].vertices[0])).normalized();
+    let line = |e: usize| matches!(r.edges[e].curve, solidcraft_geom::brep::Curve::Line { .. });
+    at.iter()
         .filter(|es| match es.as_slice() {
-            [a, b] => {
-                let dir = |e: &truck_modeling::Edge| (crate::body::from_p3(e.back().point()) - crate::body::from_p3(e.front().point())).normalized();
-                matches!((a.curve(), b.curve()), (truck_modeling::Curve::Line(_), truck_modeling::Curve::Line(_)))
-                    && dir(a).zip(dir(b)).is_some_and(|(u, w)| u.dot(w).abs() > 1. - 1e-9)
-            }
+            [a, b] => line(*a) && line(*b) && dir(*a).zip(dir(*b)).is_some_and(|(u, w)| u.dot(w).abs() > 1. - 1e-9),
             _ => false,
         })
         .count()

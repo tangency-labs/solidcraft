@@ -33,7 +33,7 @@ fn a_transform_keeps_every_face_and_edge_in_place() {
         assert!(rot(before).dist(after) < 1e-6, "{before:?} → {after:?}");
     }
     // Each edge separates the same faces it did.
-    let (ea, em) = (super::edge_faces(&a.solid), super::edge_faces(&moved.solid));
+    let (ea, em) = (super::edge_faces(a.record()), super::edge_faces(moved.record()));
     assert_eq!(ea, em);
     assert!(h.edges.iter().all(|e| e.faces.len() == 2 && e.origins.len() == 1));
     // The history's edges are the tessellation's edges, bounding the same faces.

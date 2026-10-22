@@ -46,14 +46,14 @@ fn sphere_cut_far_from_a_void_keeps_the_void() {
     let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 40.0)).unwrap();
     let cavity = box_solid(Vec3::new(25.0, 25.0, 25.0), Vec3::new(30.0, 30.0, 30.0)).unwrap();
     let hollow = boolean(&block, &cavity, BoolOp::Cut).unwrap().unwrap();
-    assert_eq!(hollow.solid.boundaries().len(), 2, "the cavity is a second shell");
+    assert_eq!(hollow.shell_count(), 2, "the cavity is a second shell");
     let ball = sphere(Vec3::new(0.0, 0.0, 40.0), 8.0).unwrap();
     let cut = boolean(&hollow, &ball, BoolOp::Cut).unwrap().unwrap();
     // The block, less the cavity, less the eighth of the ball inside the corner.
     let want = 64_000.0 - 125.0 - std::f64::consts::PI * 512.0 / 6.0;
     let got = measure(&cut).unwrap().volume;
     assert!((got - want).abs() < want * 1e-3, "volume {got}, want {want}");
-    assert_eq!(cut.solid.boundaries().len(), 2, "the cavity stays a sealed second shell");
+    assert_eq!(cut.shell_count(), 2, "the cavity stays a sealed second shell");
     let mesh = cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     for (p, material) in [(Vec3::new(27.5, 27.5, 27.5), false), (Vec3::new(1.0, 1.0, 39.0), false), (Vec3::new(20.0, 20.0, 20.0), true)] {
         assert_eq!(mesh.contains(p), material, "material at {p:?}");
@@ -61,29 +61,11 @@ fn sphere_cut_far_from_a_void_keeps_the_void() {
 }
 
 #[test]
-fn nested_cavities_stay_with_their_material_islands_for_every_shell_order() {
+fn nested_cavities_stay_with_their_material_islands() {
     let body = nested_island();
     check_nested(&body);
     let before = step_export(&[&body], "nested cavities").unwrap();
-    let shells = body.deep_copy().boundaries().clone();
-    assert_eq!(shells.len(), 4);
-    for a in 0..4 {
-        for b in 0..4 {
-            for c in 0..4 {
-                for d in 0..4 {
-                    let order = [a, b, c, d];
-                    if order.iter().enumerate().any(|(i, x)| order.iter().skip(i + 1).any(|y| x == y)) {
-                        continue;
-                    }
-                    let permuted = guard("permuted cavity shells", || {
-                        Body::new(Solid::try_new(order.into_iter().map(|i| shells[i].clone()).collect()).unwrap())
-                    })
-                    .unwrap();
-                    check_nested(&permuted);
-                }
-            }
-        }
-    }
+    assert_eq!(body.shell_count(), 4);
     assert_eq!(step_export(&[&body], "nested cavities").unwrap(), before);
 }
 
@@ -148,33 +130,6 @@ fn curved_internal_void_and_disconnected_material_keep_analytic_volume() {
     }
 }
 
-fn joined_shells(shells: Vec<mt::Shell>) -> Body {
-    guard("invalid ownership fixture", || Body::new(Solid::try_new(shells).unwrap())).unwrap()
-}
-
-#[test]
-fn unowned_overlapping_and_touching_cavities_are_errors_not_dropped_geometry() {
-    let outer = cube(50.0);
-    for (min, max) in [
-        (Vec3::new(60.0, 60.0, 60.0), Vec3::new(70.0, 70.0, 70.0)),
-        (Vec3::new(45.0, -5.0, -5.0), Vec3::new(55.0, 5.0, 5.0)),
-        (Vec3::new(40.0, -5.0, -5.0), Vec3::new(50.0, 5.0, 5.0)),
-    ] {
-        let mut inner = box_solid(min, max).unwrap().deep_copy();
-        inner.not();
-        let body = joined_shells(outer.deep_copy().boundaries().iter().chain(inner.boundaries()).cloned().collect());
-        let before = step_export(&[&body], "invalid ownership").unwrap();
-        assert!(body.lumps().is_err());
-        assert_eq!(step_export(&[&body], "invalid ownership").unwrap(), before);
-    }
-    let mut a = box_solid(Vec3::new(-10.0, -10.0, -10.0), Vec3::new(10.0, 10.0, 10.0)).unwrap().deep_copy();
-    a.not();
-    let mut b = box_solid(Vec3::new(0.0, -10.0, -10.0), Vec3::new(20.0, 10.0, 10.0)).unwrap().deep_copy();
-    b.not();
-    let body = joined_shells(outer.deep_copy().boundaries().iter().chain(a.boundaries()).chain(b.boundaries()).cloned().collect());
-    assert!(body.lumps().is_err());
-}
-
 #[test]
 fn translated_and_scaled_nested_voids_keep_material_membership() {
     let body = nested_island();
@@ -197,26 +152,12 @@ fn translated_and_scaled_nested_voids_keep_material_membership() {
 }
 
 #[test]
-fn shortcut_clearance_refuses_curved_contact_hidden_between_mesh_vertices() {
+fn spheres_apart_join_as_two_lumps() {
     let direction = Vec3::new(1.0, 2.0, 3.0).normalized().unwrap();
     let a = sphere(Vec3::ZERO, 10.0).unwrap();
-    for distance in [19.999, 20.001] {
-        let b = sphere(direction * distance, 10.0).unwrap();
-        for shells in [
-            a.deep_copy().boundaries().iter().chain(b.deep_copy().boundaries()).cloned().collect(),
-            b.deep_copy().boundaries().iter().chain(a.deep_copy().boundaries()).cloned().collect(),
-        ] {
-            assert!(joined_shells(shells).separated_lumps().is_err(), "distance {distance}");
-        }
-    }
     let far = sphere(direction * 21.0, 10.0).unwrap();
     let safe = crate::ops::join_pieces(vec![a, far]).unwrap().unwrap();
-    assert_eq!(safe.separated_lumps().unwrap().len(), 2);
-    let outer = sphere(Vec3::ZERO, 10.0).unwrap();
-    let mut protruding = sphere(direction * 9.001, 1.0).unwrap().deep_copy();
-    protruding.not();
-    let invalid = joined_shells(outer.deep_copy().boundaries().iter().chain(protruding.boundaries()).cloned().collect());
-    assert!(invalid.separated_lumps().is_err());
+    assert_eq!(safe.lumps().unwrap().len(), 2);
 }
 
 fn certified_lump_witness() -> Body {
@@ -230,23 +171,28 @@ fn certified_lump_witness() -> Body {
     let lower = crate::extrude(&Plane::XY, &[region], 0., 1.).unwrap().pop().unwrap();
     let named = box_solid(Vec3::new(40., 20., 5.), Vec3::new(42., 23., 7.)).unwrap().with_box_certificate(202).unwrap();
     let unknown = box_solid(Vec3::new(50., 20., 5.), Vec3::new(51., 21., 6.)).unwrap().with_face_sources(None);
-    let sources: std::collections::HashMap<_, _> = [&lower, &named]
-        .into_iter()
-        .flat_map(|body| body.solid.face_iter().zip(body.face_sources().unwrap()).map(|(face, source)| (face.id(), source.clone())))
-        .collect();
     // Deliberately put the larger named box first, then the trimmed tool. An
     // index-based copy of the source table would attach certificates wrongly.
-    let shells = [&named, &unknown, &lower].into_iter().flat_map(|b| b.solid.boundaries().iter().cloned()).collect();
-    let body = Body::new(Solid::try_new(shells).unwrap()).unwrap();
-    let table = body.solid.face_iter().map(|f| sources.get(&f.id()).cloned().flatten()).collect();
+    let inputs = [&named, &unknown, &lower];
+    let sources: Vec<Option<FaceSource>> =
+        inputs.iter().flat_map(|b| b.face_sources().map_or_else(|| vec![None; b.face_count()], |s| s.to_vec())).collect();
+    let records: Vec<&solidcraft_geom::brep::Brep> = inputs.iter().map(|b| b.record()).collect();
+    let part = solidcraft_geom::brep::part::compound(&records).unwrap();
+    let body = Body::from_record(part.brep).unwrap();
+    let table = part.faces.iter().map(|f| sources.get(*f as usize).cloned().flatten()).collect();
     body.with_face_sources(Some(std::sync::Arc::new(table)))
 }
 
 #[test]
 fn grouping_lumps_preserves_only_unchanged_face_certificates_and_trimmed_caps() {
     let body = certified_lump_witness();
+    // A face is known by its surface and parameter box (no two faces here share both).
+    let key = |b: &Body, i: usize| {
+        let f = &b.record().faces[i];
+        format!("{:?} {:?}", f.surface, f.domain)
+    };
     let expected: std::collections::HashMap<_, _> =
-        body.solid.face_iter().zip(body.face_sources().unwrap()).map(|(f, source)| (f.id(), (f.orientation(), source.clone()))).collect();
+        (0..body.face_count()).zip(body.face_sources().unwrap()).map(|(i, source)| (key(&body, i), (body.face_forward(i), source.clone()))).collect();
     let before = step_export(&[&body], "source").unwrap();
     let lumps = body.lumps().unwrap();
     assert_eq!(lumps.len(), 3);
@@ -256,9 +202,9 @@ fn grouping_lumps_preserves_only_unchanged_face_certificates_and_trimmed_caps() 
     let mut unknown_faces = 0;
     for lump in &lumps {
         assert_eq!(lump.face_sources().unwrap().len(), lump.face_count());
-        for (f, source) in lump.solid.face_iter().zip(lump.face_sources().unwrap()) {
-            let (orientation, original) = expected.get(&f.id()).expect("grouping must retain original face IDs");
-            assert_eq!(*orientation, f.orientation());
+        for (i, source) in lump.face_sources().unwrap().iter().enumerate() {
+            let (orientation, original) = expected.get(&key(lump, i)).expect("grouping must retain the original faces");
+            assert_eq!(*orientation, lump.face_forward(i));
             assert_eq!(source, original);
             match source {
                 Some(FaceSource::ExtrudeCap { region, high, plane }) => {

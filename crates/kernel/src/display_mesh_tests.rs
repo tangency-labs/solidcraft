@@ -294,7 +294,7 @@ fn a_face_crowded_with_holes_gets_a_coarser_angle_and_bounded_work() {
     let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
     let round = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
     let boundary = |m: &Mesh, z: f64| m.edges.iter().filter(|e| e.iter().all(|p| (p.z - z).abs() < 1e-6)).map(|e| e.len() - 1).sum::<usize>();
-    let budget = truck_meshalgo::tessellation::Deflection::MAX_ANGLE_BOUNDARY;
+    let budget = crate::tess::size::MAX_ANGLE_BOUNDARY;
     for z in [0.0, 2.0] {
         // At the chord tolerance alone each rim is divided only as far as a face can be bounded
         // by it (two segments, a line, are divided again).
