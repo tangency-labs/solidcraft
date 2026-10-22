@@ -1,5 +1,5 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_sweep_placed`, `smlib_project_curves` (with `smlib_curves_*`), `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`,
+//! `smlib_sweep_placed`, `smlib_project_curves`, `smlib_face_section` (with `smlib_curves_*`), `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`,
 //! `smlib_sweep_stations`, `smlib_planar_faces`; the fork's
 //! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
@@ -114,6 +114,15 @@ unsafe extern "C" {
         reals: *const f64,
         n_reals: i64,
         direction: *const f64,
+        tolerance: f64,
+        out: *mut *mut RawCurves,
+    ) -> i32;
+    fn smlib_face_section(
+        brep: *const RawBrep,
+        face_point: *const f64,
+        pick_tolerance: f64,
+        plane_point: *const f64,
+        plane_normal: *const f64,
         tolerance: f64,
         out: *mut *mut RawCurves,
     ) -> i32;
@@ -234,8 +243,31 @@ pub fn project_curves(
     tolerance: f64,
 ) -> Result<OutCurves, i32> {
     let (k, nk, r, nr) = raw(curves)?;
+    take_curves(|out| unsafe {
+        smlib_project_curves(brep.raw(), face_point.as_ptr(), pick_tolerance, k, nk, r, nr, direction.as_ptr(), tolerance, out)
+    })
+}
+
+/// `smlib_face_section`: the face of `brep` at `face_point` cut by a plane.
+#[cfg(feature = "native")]
+pub fn face_section(
+    brep: &Handle,
+    face_point: &[f64; 3],
+    pick_tolerance: f64,
+    plane_point: &[f64; 3],
+    plane_normal: &[f64; 3],
+    tolerance: f64,
+) -> Result<OutCurves, i32> {
+    take_curves(|out| unsafe {
+        smlib_face_section(brep.raw(), face_point.as_ptr(), pick_tolerance, plane_point.as_ptr(), plane_normal.as_ptr(), tolerance, out)
+    })
+}
+
+/// Runs a call that makes an `smlib_curves`, reads it out and frees it.
+#[cfg(feature = "native")]
+fn take_curves(call: impl FnOnce(*mut *mut RawCurves) -> i32) -> Result<OutCurves, i32> {
     let mut out: *mut RawCurves = std::ptr::null_mut();
-    let s = unsafe { smlib_project_curves(brep.raw(), face_point.as_ptr(), pick_tolerance, k, nk, r, nr, direction.as_ptr(), tolerance, &mut out) };
+    let s = call(&mut out);
     if s != super::OK {
         return Err(s);
     }
@@ -319,6 +351,11 @@ pub fn sweep_placed(_: &List, _: &List, _: i32, _: bool, _: &mut [f64; 36]) -> R
 
 #[cfg(not(feature = "native"))]
 pub fn project_curves(_: &Handle, _: &[f64; 3], _: f64, _: &List, _: &[f64; 3], _: f64) -> Result<OutCurves, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn face_section(_: &Handle, _: &[f64; 3], _: f64, _: &[f64; 3], _: &[f64; 3], _: f64) -> Result<OutCurves, i32> {
     Err(NOT_BUILT)
 }
 
