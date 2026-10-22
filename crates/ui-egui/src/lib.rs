@@ -1175,8 +1175,9 @@ impl SolveApp {
             return;
         }
         workspace::select_command_tab(self, id);
-        // Move a selected assembly placement the same way as its Browser menu, retaining
-        // the exact instance path and the grounding/rigid-group restrictions.
+        // One selected placement moves as a component, the same way as its Browser menu,
+        // retaining the exact instance path and the grounding/rigid-group restrictions.
+        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {

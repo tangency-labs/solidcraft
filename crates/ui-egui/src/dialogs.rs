@@ -743,6 +743,37 @@ impl Dialog {
         Dialog::new(Kind::ChatContext, inputs)
     }
 
+    /// A component picked in the browser is not a body selection. A command that takes bodies,
+    /// Move/Copy included, still starts with that component's bodies.
+    fn take_component_bodies(app: &SolveApp, d: &mut Dialog) {
+        if app.tree.picked_components.is_empty() {
+            return;
+        }
+        let mut names = Vec::new();
+        for id in &app.tree.picked_components {
+            for name in crate::browser::bodies_of_component(app, *id) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty())) else {
+            return;
+        };
+        for name in names {
+            let body = Sel::Body { name };
+            if !inp.multi {
+                if inp.items.is_empty() {
+                    inp.items.push(body);
+                }
+                break;
+            }
+            if !inp.items.contains(&body) {
+                inp.items.push(body);
+            }
+        }
+    }
+
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
         let s = &app.session;
         let has_bodies = !s.world_state().bodies.is_empty();
@@ -996,6 +1027,27 @@ impl Dialog {
                 }
                 continue;
             }
+            // A selected component is its bodies when the command takes bodies. One selected
+            // placement still starts component Move before this dialog is built.
+            if let Sel::Occurrence { path } = sel
+                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+            {
+                if let Ok(names) = s.occurrence_bodies(path, true) {
+                    for name in names {
+                        let body = Sel::Body { name };
+                        if !inp.multi {
+                            if inp.items.is_empty() {
+                                inp.items.push(body);
+                            }
+                            break;
+                        }
+                        if !inp.items.contains(&body) {
+                            inp.items.push(body);
+                        }
+                    }
+                }
+                continue;
+            }
             // Planar-only inputs take planar faces only.
             let planar_ok = match sel {
                 Sel::Face { body, index, .. } => planar_face(s, body, *index).is_some(),
@@ -1029,6 +1081,7 @@ impl Dialog {
                 }
             }
         }
+        Self::take_component_bodies(app, &mut d);
         // A primitive goes where a face or vertex is picked, standing on a planar face.
         if let Kind::Primitive { at, .. } = &mut d.kind {
             *at = s.selection.iter().find_map(|sel| match sel {

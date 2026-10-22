@@ -217,6 +217,68 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
     app.session.doc.browser_groups.iter().find(|g| g.id == id)
 }
 
+/// World bodies of a component picked in the tree. The root is the whole design; a nested
+/// component is its own placement, including bodies inside it.
+pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
+    let present: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let mut names = if id == 0 {
+        present.clone()
+    } else {
+        let mut names = Vec::new();
+        let path = app.session.doc.first_path(id);
+        if !path.is_empty()
+            && let Ok(more) = app.session.occurrence_bodies(&path, true)
+        {
+            names.extend(more);
+        }
+        names.extend(crate::context_menu::component_bodies(app, id));
+        names
+    };
+    names.retain(|n| present.contains(n) && !app.session.body_removed_later(n));
+    let mut kept = Vec::new();
+    for name in names {
+        if !kept.contains(&name) {
+            kept.push(name);
+        }
+    }
+    kept
+}
+
+/// How a browser click changes a dialog input that takes bodies.
+enum Take {
+    /// A second click on the same set removes it.
+    Toggle,
+    /// A Shift range only adds.
+    Add,
+}
+
+/// Put these bodies into the open dialog's active input, the same way as clicking each one
+/// ([`pick_from_browser`]). Returns false when that input does not take bodies, so the click
+/// keeps its ordinary meaning. A Shift range only adds; a group or component toggles.
+fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
+    if !dialog_takes_body(app) {
+        return false;
+    }
+    let world = app.session.world_state();
+    let picked: Vec<Sel> =
+        names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
+    if picked.is_empty() {
+        return false;
+    }
+    let Some(mut d) = app.dialog.take() else { return false };
+    for body in picked {
+        if !d.active_input().is_some_and(|i| i.accept & crate::selection::BODIES != 0) {
+            break;
+        }
+        if matches!(take, Take::Add) && d.active_input().is_some_and(|i| i.items.contains(&body)) {
+            continue;
+        }
+        d.pick(&app.session, body);
+    }
+    app.dialog = Some(d);
+    true
+}
+
 /// The bodies in a group (none for sketch and plane groups).
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     let st = app.session.world_state();
@@ -561,6 +623,18 @@ fn click_select(app: &mut SolveApp, ui: &egui::Ui, key: String, sel: Option<Sel>
         let order = app.tree.order.get(..app.tree.order_len).unwrap_or(&[]);
         let items = shift_range(&app.tree.order_prev, a, &key).or_else(|| shift_range(order, a, &key));
         if let Some(items) = items {
+            // Move/Copy (and any open command whose active input takes bodies) gets every body
+            // in the range. Otherwise the range is an ordinary selection.
+            let names: Vec<String> = items
+                .iter()
+                .filter_map(|s| match s {
+                    Sel::Body { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            if offer_bodies(app, &names, Take::Add) {
+                return;
+            }
             let _ = app.run("select.set", json!({ "items": items, "add": mods.command || mods.ctrl }));
             return;
         }
@@ -710,7 +784,10 @@ impl Lit {
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
-        for s in &app.session.selection {
+        // Bodies chosen in an open dialog light up even when the click was in the 3D view,
+        // which does not rewrite the browser selection.
+        let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
+        for s in app.session.selection.iter().chain(&dialog_picks) {
             selected.insert(match s {
                 Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } | Sel::Vertex { body: name, .. } => {
                     Thing::Body(name.clone())
@@ -1206,16 +1283,19 @@ fn component_rows_inner(
             app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
         }
     }
-    if r.clicked {
-        let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
-        if !ctrl {
-            app.tree.picked_components.clear();
-            let _ = app.run("select.clear", json!({}));
-        }
-        if app.tree.picked_components.contains(&id) {
-            app.tree.picked_components.retain(|c| *c != id);
-        } else {
-            app.tree.picked_components.push(id);
+    if r.clicked && !r.double {
+        let names = bodies_of_component(app, id);
+        if !offer_bodies(app, &names, Take::Toggle) {
+            let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+            if !ctrl {
+                app.tree.picked_components.clear();
+                let _ = app.run("select.clear", json!({}));
+            }
+            if app.tree.picked_components.contains(&id) {
+                app.tree.picked_components.retain(|c| *c != id);
+            } else {
+                app.tree.picked_components.push(id);
+            }
         }
     }
     if r.double {
@@ -1352,8 +1432,11 @@ fn occurrence_rows_inner(
     if r.double && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
-    if r.clicked {
-        click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
+    if r.clicked && !r.double {
+        let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
+        if !offer_bodies(app, &names, Take::Toggle) {
+            click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
+        }
     }
     if r.hovered {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
@@ -1800,9 +1883,10 @@ impl CanvasPanel {
     }
 }
 
-/// Does the open dialog's active input take bodies (Combine's target and tools, #4452)? Then a
-/// body clicked in the Browser goes there, as a click on it in the view does, rather than
-/// replacing the selection: overlapping bodies are often only told apart in the Browser.
+/// Does the open dialog's active input take bodies (Combine's target and tools, #4452;
+/// Move/Copy's bodies, #4771)? Then a body clicked in the Browser goes there, as a click
+/// on it in the view does, rather than replacing the selection: overlapping bodies are
+/// often only told apart in the Browser.
 fn dialog_takes_body(app: &SolveApp) -> bool {
     app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::BODIES != 0)
 }
@@ -2094,8 +2178,15 @@ fn folder_rows_at(
             ..Default::default()
         },
     );
-    if r.fold || r.clicked {
+    if r.fold {
         toggle(app, key, true);
+    } else if r.clicked {
+        // The Bodies label is the whole set while a command is asking for bodies. The arrow
+        // still folds it. With no such command, the label folds, as it always has.
+        let names: Vec<String> = data.entries().flat_map(|e| e.bodies.clone()).collect();
+        if !offer_bodies(app, &names, Take::Toggle) {
+            toggle(app, key, true);
+        }
     }
     if r.eye {
         toggle_folder(app, key);
@@ -2142,8 +2233,13 @@ fn folder_rows_at(
                 ..Default::default()
             },
         );
-        if r.fold || r.clicked {
+        if r.fold {
             toggle(app, gkey, true);
+        } else if r.clicked {
+            let names: Vec<String> = items.iter().flat_map(|e| e.bodies.clone()).collect();
+            if !offer_bodies(app, &names, Take::Toggle) {
+                toggle(app, gkey, true);
+            }
         }
         if r.eye {
             toggle_folder(app, gkey);
@@ -2278,8 +2374,14 @@ fn entry_row(
             app.edit_sketch(id);
         }
     } else if r.clicked {
-        if folder == "construction" || (folder == "bodies" && app.dialog.is_some()) {
+        let shift = ui.input(|i| i.modifiers.shift);
+        // A body row with a dialog open is a pick, as Combine does (#4452), unless Shift is
+        // asking for the rows between this one and the anchor.
+        if folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some()) {
             if let Some(s) = e.sel.clone() {
+                if matches!(s, Sel::Body { .. }) {
+                    app.tree.anchor = Some(e.row_key.clone());
+                }
                 pick_from_browser(app, s);
             }
         } else {
