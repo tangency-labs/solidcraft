@@ -1,12 +1,11 @@
-//! Edge fillets and chamfers. SMLib blends the picked edges, each with its tangent chain, in one
-//! call ([`crate::blend_smlib`]): the blend faces, the corners where blends meet (a sphere, a
-//! patch, a bevel or a mitre, as its fillet corners choose) and the end faces rebuilt round
-//! them. Before SMLib runs, a blend that would run past the faces beside its edge into other
-//! geometry or into another blend is refused as too large, with the largest size that fits
-//! ([`crate::blend_fit`]); after, a result that changed more than the blends can is refused too.
+//! Edge fillets and chamfers. SMLib blends exactly the picked edges in one call
+//! ([`crate::blend_smlib`]): the blend faces, the corners where blends meet (a sphere, a patch, a
+//! bevel or a mitre, as its fillet corners choose) and the end faces rebuilt round them. A blend
+//! whose contact lines would leave the faces it rolls on is SMLib's refusal, reported as
+//! [`KernelError::TooLarge`]. A tangent chain is the caller's to select.
 //!
-//! The helpers here read a body's schema 4 record for those checks: planar faces' outward
-//! normals, the direction into a face across an edge, an edge's tangent at its ends.
+//! The helpers here read a body's schema 4 record: planar faces' outward normals, the direction
+//! into a face across an edge, an edge's tangent at its ends.
 
 use std::collections::BTreeSet;
 
@@ -89,16 +88,12 @@ impl Faces {
     }
 
     /// The outward unit normal of face `f` at `p` (a point within `accept` of its surface).
+    #[cfg(test)]
     pub(crate) fn normal_at(&self, f: usize, p: Vec3, accept: f64) -> Option<Vec3> {
         let s = SurfaceEval::new(&self.rec.faces.get(f)?.surface).ok()?;
         let uv = s.project(p, None, accept)?;
         let (_, su, sv) = s.derivs(uv[0], uv[1])?;
         Some(su.cross(sv).normalized()? * self.side(f)?)
-    }
-
-    /// The unit natural normal of face `f`'s surface at `p` (a point within `accept` of it).
-    pub(crate) fn natural_normal_at(&self, f: usize, p: Vec3, accept: f64) -> Option<Vec3> {
-        Some(self.normal_at(f, p, accept)? * self.side(f)?)
     }
 
     /// Every edge use in the face's loops.
@@ -215,9 +210,7 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     body.require_brep("fillet")?;
-    crate::blend_fit::fit(body, edges, crate::blend_fit::Size::Round(radius), || {
-        crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
-    })
+    crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
 }
 
 /// [`fillet`] whose corners where three blended edges meet are G2 patches. SMLib's fillet
@@ -306,7 +299,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
 }
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), all in one SMLib
-/// blend. Each round must fit beside its own edge (#1080).
+/// blend.
 pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
@@ -315,9 +308,6 @@ pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
         return fillet(body, edges, *r);
     }
     body.require_brep("fillet")?;
-    for (p, r) in edges.iter().zip(radii) {
-        crate::blend_fit::check(body, std::slice::from_ref(p), crate::blend_fit::Size::Round(*r))?;
-    }
     crate::blend_smlib::fillet_each(body, edges, radii).and_then(|b| closed(body, b))
 }
 
@@ -369,7 +359,7 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
-    crate::blend_fit::fit(body, edges, crate::blend_fit::Size::Chamfer(distance), || crate::blend_smlib::chamfer(body, edges, distance))
+    crate::blend_smlib::chamfer(body, edges, distance)
 }
 
 /// The second side of an unequal chamfer: a distance along the other face, or the angle the
@@ -396,9 +386,7 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
     if edges.is_empty() || edges.len() > 1000 {
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
-    crate::blend_fit::fit(body, edges, crate::blend_fit::Size::Sides(d1, side, flip), || {
-        crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip)
-    })
+    crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip)
 }
 
 #[cfg(test)]

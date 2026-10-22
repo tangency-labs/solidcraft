@@ -121,21 +121,21 @@ impl Brep {
         ffi::ops::solid_count(&self.0).map(|n| usize::try_from(n).unwrap_or(0)).map_err(error)
     }
 
-    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, rounded
+    /// The edges nearest to `edges` (each within `tolerance`), exactly those, rounded
     /// at `radius`.
     pub fn fillet(&self, edges: &[[f64; 3]], tolerance: f64, radius: f64) -> Result<Brep> {
         self.pick_op(ffi::ops::Pick::Fillet, edges, tolerance, radius, false)
     }
 
-    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, cut by
+    /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
     /// an equal-distance chamfer `distance` back along each face (measured at each edge's
     /// midpoint), with bevelled corners.
     pub fn chamfer(&self, edges: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
         self.pick_op(ffi::ops::Pick::Chamfer, edges, tolerance, distance, false)
     }
 
-    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, blended
-    /// as `kind`, edge i (and its chain) at `sizes[i]`.
+    /// The edges nearest to `edges` (each within `tolerance`), exactly those, blended
+    /// as `kind`, edge i at `sizes[i]`.
     pub fn blend(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<Brep> {
         init()?;
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
@@ -150,7 +150,7 @@ impl Brep {
         ffi::ops::blend(kind, &self.0, edges, sizes, tolerance).map(Brep).map_err(pick_error)
     }
 
-    /// The one edge nearest to `edge` (within `tolerance`, no tangent chain) rounded with a radius
+    /// The one edge nearest to `edge` (within `tolerance`) rounded with a radius
     /// that varies along it: a clamped B-spline of `degree` (1 to 3) with `knots` and control
     /// `radii` over the position along the edge, 0 at its end nearest `start` and 1 at the other
     /// (the edge curve's parameter scaled to 0..1).
@@ -164,7 +164,7 @@ impl Brep {
         })
     }
 
-    /// The edges nearest to `edges` (each within `tolerance`), with their tangent chains, cut by
+    /// The edges nearest to `edges` (each within `tolerance`), exactly those, cut by
     /// a chamfer `distance` back along the face whose outward normal leans most along `first`,
     /// and by `second` on the other, with bevelled corners (setbacks measured at each edge's
     /// midpoint).

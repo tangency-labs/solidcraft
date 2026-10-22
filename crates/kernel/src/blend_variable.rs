@@ -198,23 +198,13 @@ pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &
 }
 
 /// Fillet one edge with the radius `spline` along it, its positions from the end nearest
-/// `start`. One end's radius may be zero. On a straight edge between planar faces a law whose
-/// band runs past the faces anywhere along the edge is refused as too large.
+/// `start`. One end's radius may be zero. A law whose round would leave the faces beside the
+/// edge is SMLib's refusal ([`KernelError::TooLarge`]).
 pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
     body.require_brep("fillet")?;
     spline.check()?;
     if !(edge_at.is_finite() && start.is_finite()) {
         return Err(KernelError::Invalid("the edge pick and the start point must be finite".into()));
-    }
-    if let Ok(s) = EdgeSetup::new(body, edge_at) {
-        // Positions from the end nearest `start` (the edge keeps its own direction).
-        let law = if s.p1.dist(start) < s.p0.dist(start) { spline.reversed() } else { spline.clone() };
-        const STATIONS: usize = 256;
-        let fits =
-            guard("variable fillet", || Ok((1..STATIONS).all(|k| s.band_fits(k as f64 / STATIONS as f64, law.eval(k as f64 / STATIONS as f64)))))?;
-        if !fits {
-            return Err(too_large("the blend is larger than the neighbouring faces"));
-        }
     }
     crate::blend_smlib::fillet_variable(body, edge_at, start, spline)
 }

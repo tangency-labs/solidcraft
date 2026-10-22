@@ -12,4 +12,3 @@ pub(crate) fn loop_area(points: &[Vec3]) -> Vec3 {
     }
     n * 0.5
 }
-

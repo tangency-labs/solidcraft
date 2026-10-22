@@ -163,7 +163,7 @@ fn shell_a_box_open_at_the_top() {
 }
 
 #[test]
-fn fillet_follows_a_tangent_chain() {
+fn fillet_takes_exactly_the_picked_edges() {
     // Round the vertical edge x = y = 20 first (r = 5): the top rim is then line, arc, line,
     // meeting tangentially.
     let c = cube(20.0);
@@ -171,15 +171,16 @@ fn fillet_follows_a_tangent_chain() {
     shot(&round, "fillet_one_edge");
     let pi = std::f64::consts::PI;
     assert_close(volume(&round), 8000.0 - (1.0 - pi / 4.0) * 25.0 * 20.0, 1e-6, "one rounded edge");
-    // One point on the straight part of the rim rounds the whole chain.
-    let chain = round.fillet(&[[7.5, 20.0, 20.0]], 0.1, 1.0).unwrap();
-    shot(&chain, "fillet_tangent_chain");
+    // One point on the straight part of the rim rounds that edge only; the chain is rounded when
+    // all of its edges are picked.
+    let one = round.fillet(&[[7.5, 20.0, 20.0]], 0.1, 1.0).unwrap();
+    shot(&one, "fillet_one_of_a_chain");
     let arc = [15.0 + 5.0 * (pi / 4.0).cos(), 15.0 + 5.0 * (pi / 4.0).sin(), 20.0];
     let all = round.fillet(&[[7.5, 20.0, 20.0], arc, [20.0, 7.5, 20.0]], 0.1, 1.0).unwrap();
     shot(&all, "fillet_chain_picked");
-    assert_eq!(chain.counts().unwrap(), all.counts().unwrap(), "one pick = the whole chain");
-    assert_close(volume(&chain), volume(&all), 1e-9, "one pick = the whole chain");
-    assert_eq!(chain.counts().unwrap()[0], round.counts().unwrap()[0] + 3, "three rounds on the chain");
+    assert_eq!(one.counts().unwrap()[0], round.counts().unwrap()[0] + 1, "one round on the picked edge");
+    assert_eq!(all.counts().unwrap()[0], round.counts().unwrap()[0] + 3, "three rounds on the chain");
+    assert!(volume(&all) < volume(&one), "the chain takes more than its one edge");
 }
 
 #[test]
