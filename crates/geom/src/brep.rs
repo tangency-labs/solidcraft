@@ -17,6 +17,7 @@ pub mod history;
 pub mod part;
 pub mod pcurve;
 pub mod placement;
+mod split;
 mod topology;
 pub use curve2::Curve2;
 

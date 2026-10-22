@@ -93,13 +93,28 @@ impl Brep {
         }
         let source_regions: Vec<(Vec<u32>, bool)> =
             std::iter::once((outer, false)).chain(kept).chain(voids.into_iter().map(|(_, list)| (list, true))).collect();
+        self.renumbered(&source_regions)
+    }
 
+    /// The record in canonical order (docs/native-brep.md, "Canonical order"), every region and
+    /// shell kept, open, wire and vertex shells included, and where each item was in it. For a
+    /// record whose parts a builder put together in its own order: each edge's uses are worked
+    /// out from the walk (a list that already names exactly those uses keeps its radial order).
+    /// A face no shell uses is left out.
+    pub fn canonical(&self) -> Result<Part> {
+        let regions: Vec<(Vec<u32>, bool)> = self.regions.iter().map(|r| (r.shells.clone(), r.void)).collect();
+        self.renumbered(&regions)
+    }
+
+    /// The record of `source_regions` (each the source shells it lists and whether it is a void,
+    /// the infinite region first), renumbered in canonical order.
+    fn renumbered(&self, source_regions: &[(Vec<u32>, bool)]) -> Result<Part> {
         // Canonical order: shells and faces walking regions → shells → oriented faces.
         let mut shells = Renumber::new(self.shells.len());
         let mut faces = Renumber::new(self.faces.len());
         let mut direction = vec![true; self.faces.len()];
         let mut new_regions = Vec::with_capacity(source_regions.len());
-        for (list, void) in &source_regions {
+        for (list, void) in source_regions {
             let mut mapped = Vec::with_capacity(list.len());
             for &s in list {
                 mapped.push(shells.visit(s)?);
@@ -120,7 +135,7 @@ impl Brep {
         // reversed), then wire edges walking shells.
         // Each edge's first use in that walk is its primary use: (new face, loop, position).
         let mut edges = Renumber::new(self.edges.len());
-        let mut primary: Vec<Option<(u32, u32, u32)>> = vec![None; self.edges.len()];
+        let mut walked: Vec<Vec<EdgeUseRef>> = vec![Vec::new(); self.edges.len()];
         for (k, &f) in faces.old.iter().enumerate() {
             let face = self.faces.get(f as usize).ok_or(Invalid("face reference"))?;
             let forward = direction.get(f as usize).copied().unwrap_or(true);
@@ -132,8 +147,8 @@ impl Brep {
                     let p = if forward { step } else { n - 1 - step };
                     let u = uses.get(p).ok_or(Invalid("edge reference"))?;
                     edges.visit(u.edge)?;
-                    let first = primary.get_mut(u.edge as usize).ok_or(Invalid("edge reference"))?;
-                    first.get_or_insert((k, index(li)?, index(p)?));
+                    let at = EdgeUseRef { face: k, r#loop: index(li)?, position: index(p)?, upper: !u.forward };
+                    walked.get_mut(u.edge as usize).ok_or(Invalid("edge reference"))?.push(at);
                 }
             }
         }
@@ -206,7 +221,7 @@ impl Brep {
             .map(|&e| {
                 let mut edge = self.edges.get(e as usize).ok_or(Invalid("edge reference"))?.clone();
                 edge.vertices = [map(&vertices, edge.vertices[0])?, map(&vertices, edge.vertices[1])?];
-                edge.uses = part_uses(&edge.uses, &faces, primary.get(e as usize).copied().flatten());
+                edge.uses = part_uses(&edge.uses, &faces, walked.get(e as usize).map_or(&[][..], Vec::as_slice));
                 Ok(edge)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -225,12 +240,16 @@ impl Brep {
     }
 }
 
-/// An edge's uses on the part's faces: the source's radial cycle with the other faces' uses left
-/// out (a sub-cycle keeps its order), turned to start at the part's primary use, the first in
-/// the part's canonical walk (`primary`: face, loop, position).
-fn part_uses(uses: &[EdgeUseRef], faces: &Renumber, primary: Option<(u32, u32, u32)>) -> Vec<EdgeUseRef> {
+/// An edge's uses on the part's faces (`walked`: in the canonical walk's order, the first its
+/// primary use): the source's radial cycle with the other faces' uses left out (a sub-cycle keeps
+/// its order), turned to start at the primary use, where the source names exactly the walked
+/// uses; the walk's own order otherwise (a record whose builder left them to be worked out).
+fn part_uses(uses: &[EdgeUseRef], faces: &Renumber, walked: &[EdgeUseRef]) -> Vec<EdgeUseRef> {
     let mut kept: Vec<EdgeUseRef> = uses.iter().filter_map(|u| faces.get(u.face).map(|face| EdgeUseRef { face, ..*u })).collect();
-    if let Some(first) = primary.and_then(|p| kept.iter().position(|u| (u.face, u.r#loop, u.position) == p)) {
+    if kept.len() != walked.len() || !walked.iter().all(|w| kept.contains(w)) {
+        return walked.to_vec();
+    }
+    if let Some(first) = walked.first().and_then(|p| kept.iter().position(|u| u == p)) {
         kept.rotate_left(first);
     }
     kept

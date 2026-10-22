@@ -194,88 +194,18 @@ impl Parts {
             return Err(invalid("no faces"));
         }
         let shells = self.shells()?;
-        let order: Vec<usize> = shells.iter().flatten().copied().collect();
-        let face = |fi: usize| self.faces.get(fi).ok_or_else(|| invalid("a face reference"));
-        let mut edge_new: Vec<Option<u32>> = vec![None; self.edges.len()];
-        let mut edges_old: Vec<usize> = Vec::new();
-        let mut uses: Vec<Vec<b::EdgeUseRef>> = Vec::new();
-        for (nf, &fi) in order.iter().enumerate() {
-            let (f, forward) = face(fi)?;
-            for (li, l) in f.loops.iter().enumerate() {
-                let b::Loop::Edges { edges } = l else { continue };
-                let k = edges.len();
-                for step in 0..k {
-                    let p = if *forward { step } else { k - 1 - step };
-                    let Some(u) = edges.get(p) else { continue };
-                    let slot = edge_new.get_mut(u.edge as usize).ok_or_else(|| invalid("an edge reference"))?;
-                    let ne = match *slot {
-                        Some(ne) => ne,
-                        None => {
-                            let ne = index(edges_old.len())?;
-                            *slot = Some(ne);
-                            edges_old.push(u.edge as usize);
-                            uses.push(Vec::new());
-                            ne
-                        }
-                    };
-                    let at = b::EdgeUseRef { face: index(nf)?, r#loop: index(li)?, position: index(p)?, upper: !u.forward };
-                    if let Some(list) = uses.get_mut(ne as usize) {
-                        list.push(at);
-                    }
-                }
-            }
-        }
-        let mut vertex_new: Vec<Option<u32>> = vec![None; self.vertices.len()];
-        let mut vertices: Vec<b::Vertex> = Vec::new();
-        let mut visit = |v: u32, vertices: &mut Vec<b::Vertex>| -> Result<u32> {
-            let slot = vertex_new.get_mut(v as usize).ok_or_else(|| invalid("a vertex reference"))?;
-            if let Some(nv) = *slot {
-                return Ok(nv);
-            }
-            let nv = index(vertices.len())?;
-            *slot = Some(nv);
-            vertices.push(self.vertices.get(v as usize).cloned().ok_or_else(|| invalid("a vertex reference"))?);
-            Ok(nv)
-        };
-        let mut edges = Vec::with_capacity(edges_old.len());
-        for (old, uses) in edges_old.iter().zip(uses) {
-            let e = self.edges.get(*old).ok_or_else(|| invalid("an edge reference"))?;
-            let ends = [visit(e.vertices[0], &mut vertices)?, visit(e.vertices[1], &mut vertices)?];
-            edges.push(b::Edge { vertices: ends, uses, ..e.clone() });
-        }
-        let mut faces = Vec::with_capacity(order.len());
-        for &fi in &order {
-            let (f, _) = face(fi)?;
-            let mut loops = Vec::with_capacity(f.loops.len());
-            for l in &f.loops {
-                loops.push(match l {
-                    b::Loop::Edges { edges } => b::Loop::Edges {
-                        edges: edges
-                            .iter()
-                            .map(|u| {
-                                let edge = edge_new.get(u.edge as usize).copied().flatten().ok_or_else(|| invalid("an edge reference"))?;
-                                Ok(b::OrientedEdge { edge, ..u.clone() })
-                            })
-                            .collect::<Result<_>>()?,
-                    },
-                    b::Loop::Vertex { vertex } => b::Loop::Vertex { vertex: visit(*vertex, &mut vertices)? },
-                });
-            }
-            faces.push(b::Face { loops, ..f.clone() });
-        }
-        let mut numbered = 0usize;
-        let mut shell_records = Vec::with_capacity(shells.len());
+        // The record as the parts stand (shell k as `shells` groups it), then in canonical order.
         let mut regions = vec![b::Region { shells: Vec::new(), void: false }];
+        let mut shell_records = Vec::with_capacity(shells.len());
         for (s, members) in shells.iter().enumerate() {
             let mut count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
             let mut list = Vec::with_capacity(members.len());
             for &fi in members {
-                let (f, forward) = face(fi)?;
+                let (f, forward) = self.faces.get(fi).ok_or_else(|| invalid("a face reference"))?;
                 for e in Parts::uses_of(f) {
                     *count.entry(e).or_default() += 1;
                 }
-                list.push(b::OrientedFace { face: index(numbered)?, forward: *forward });
-                numbered += 1;
+                list.push(b::OrientedFace { face: index(fi)?, forward: *forward });
             }
             shell_records.push(b::Shell::Faces { faces: list, wires: Vec::new() });
             let s = index(s)?;
@@ -286,9 +216,21 @@ impl Parts {
                 regions.push(b::Region { shells: vec![s], void: false });
             }
         }
-        let brep = Brep { version: b::VERSION, tolerance: self.tolerance, regions, shells: shell_records, faces, edges, vertices };
-        brep.validate().map_err(|e| failed(format!("faces into a record: {e}")))?;
-        Ok(Canonical { brep, faces: order, edges: edges_old })
+        let loose = Brep {
+            version: b::VERSION,
+            tolerance: self.tolerance,
+            regions,
+            shells: shell_records,
+            faces: self.faces.iter().map(|(f, _)| f.clone()).collect(),
+            edges: self.edges.iter().map(|e| b::Edge { uses: Vec::new(), ..e.clone() }).collect(),
+            vertices: self.vertices.clone(),
+        };
+        let part = loose.canonical().map_err(|e| failed(format!("faces into a record: {e}")))?;
+        Ok(Canonical {
+            brep: part.brep,
+            faces: part.faces.iter().map(|f| *f as usize).collect(),
+            edges: part.edges.iter().map(|e| *e as usize).collect(),
+        })
     }
 }
 
@@ -716,6 +658,74 @@ fn carried(h: &History, c: &Canonical, offsets: &Offsets, operands: usize, face:
     Some(History { operands, faces, edges })
 }
 
+/// The joined record `c` with each edge of one input split exactly at every vertex of another
+/// input that lies on it within `tol` (away from the edge's own ends), so that a sheet's corner
+/// on another's edge is a vertex of both and the sheets sew there (`Brep::split_edges`); `c`'s
+/// maps carried through.
+fn without_t_junctions(c: Canonical, offsets: &Offsets, tol: f64) -> Result<Canonical> {
+    let r = &c.brep;
+    let input_of_edge: Vec<Option<usize>> = c.edges.iter().map(|p| owner(offsets, *p, 1).map(|(k, _)| k)).collect();
+    let mut input_of_vertex: Vec<Option<usize>> = vec![None; r.vertices.len()];
+    for (e, k) in r.edges.iter().zip(&input_of_edge) {
+        for v in e.vertices {
+            if let Some(slot) = input_of_vertex.get_mut(v as usize) {
+                *slot = slot.or(*k);
+            }
+        }
+    }
+    let point = |v: u32| r.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
+    let mut splits: Vec<(u32, f64)> = Vec::new();
+    for (e, (edge, ke)) in r.edges.iter().zip(&input_of_edge).enumerate() {
+        let Ok(curve) = CurveEval::new(&edge.curve) else { continue };
+        let ends: Vec<Vec3> = edge.vertices.iter().filter_map(|v| point(*v)).collect();
+        // Only vertices within a chord's reach of the edge's samples can lie on it.
+        let [a, z] = edge.interval;
+        let samples: Vec<Vec3> = (0..=SAMPLES).filter_map(|k| curve.point(a + (z - a) * k as f64 / SAMPLES as f64)).collect();
+        let chord = samples.windows(2).map(|w| w[0].dist(w[1])).fold(0.0, f64::max);
+        for (v, kv) in input_of_vertex.iter().enumerate() {
+            let Some(p) = point(index(v)?) else { continue };
+            if kv == ke || ends.iter().any(|q| q.dist(p) <= tol) || samples.iter().all(|q| q.dist(p) > chord + tol) {
+                continue;
+            }
+            if let Some(t) = nearest_parameter(&curve, edge.interval, p).filter(|(_, d)| *d <= tol).map(|(t, _)| t) {
+                splits.push((index(e)?, t));
+            }
+        }
+    }
+    if splits.is_empty() {
+        return Ok(c);
+    }
+    let split = r.split_edges(&splits).map_err(|e| failed(format!("stitch: splitting edges at the other sheets' vertices: {e}")))?;
+    let faces =
+        split.faces.iter().map(|f| c.faces.get(*f as usize).copied().ok_or_else(|| failed("stitch: a face reference"))).collect::<Result<_>>()?;
+    let edges =
+        split.edges.iter().map(|e| c.edges.get(*e as usize).copied().ok_or_else(|| failed("stitch: an edge reference"))).collect::<Result<_>>()?;
+    Ok(Canonical { brep: split.brep, faces, edges })
+}
+
+/// Samples along an edge for finding the points of it near a vertex.
+const SAMPLES: usize = 64;
+
+/// The parameter of the curve's point nearest `p` inside `interval`, and the distance: the
+/// nearest of evenly spaced samples, then a golden-section search between its neighbours.
+fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+    let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
+    let at = |k: usize| a + (b - a) * k as f64 / SAMPLES as f64;
+    let best = (0..=SAMPLES).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
+    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(SAMPLES)));
+    let ratio = 0.5 * (5f64.sqrt() - 1.0);
+    for _ in 0..80 {
+        let (x, y) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
+        if dist(x) < dist(y) {
+            hi = y;
+        } else {
+            lo = x;
+        }
+    }
+    let t = 0.5 * (lo + hi);
+    (t > a && t < b).then(|| (t, dist(t)))
+}
+
 /// Sew surface bodies along edges that coincide (within `tol`; the bodies' working tolerance when
 /// not positive): one body, a solid when the faces close up. SMLib turns the faces so that
 /// neighbours agree (outward on a solid). The result's history is over `bodies`: each face the one
@@ -731,7 +741,7 @@ pub fn stitch(bodies: &[&Body], tol: f64) -> Result<Body> {
     let tol = if tol.is_finite() && tol > 0.0 { tol } else { size * 1e-6 + 1e-6 };
     let records: Vec<&Brep> = bodies.iter().map(|b| b.record()).collect();
     let (parts, offsets) = Parts::joined(&records)?;
-    let c = parts.canonical()?;
+    let c = without_t_junctions(parts.canonical()?, &offsets, tol)?;
     let (body, h) = imp::stitched(&c.brep, tol)?;
     let h = h.and_then(|h| carried(&h, &c, &offsets, bodies.len(), |operand, face| FaceOrigin::Face { operand, face }));
     Ok(body.with_checked_history(h, &record::counts(bodies)))

@@ -1231,115 +1231,65 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         let o = around.ok_or_else(|| fail("a cavity lies in no solid".into()))?;
         cavities.get_mut(o).ok_or_else(|| fail("cavity".into()))?.push(k);
     }
-    // Regions, and the shells numbered by first appearance in them.
-    let mut shell_group: Vec<usize> = Vec::new();
-    let mut shell_of: HashMap<usize, u32> = HashMap::new();
-    let mut number = |g: usize, shell_group: &mut Vec<usize>| -> u32 {
-        *shell_of.entry(g).or_insert_with(|| {
-            shell_group.push(g);
-            (shell_group.len() - 1) as u32
-        })
-    };
+    // The record as its parts stand (shell k is group k, face i part face i, edges and vertices
+    // as given), then put in canonical order.
+    let index = |i: usize| u32::try_from(i).map_err(|_| fail("index".into()));
     let open: Vec<usize> = (0..groups.len()).filter(|k| !closed.get(*k).copied().unwrap_or(false)).collect();
-    let infinite: Vec<u32> = outers.iter().chain(&open).map(|g| number(*g, &mut shell_group)).collect();
-    let mut regions = vec![b::Region { shells: infinite, void: false }];
+    let mut regions = vec![b::Region { shells: outers.iter().chain(&open).map(|g| index(*g)).collect::<Result<_>>()?, void: false }];
     for &o in &outers {
-        let mut shells = vec![number(o, &mut shell_group)];
+        let mut shells = vec![index(o)?];
         for &c in cavities.get(o).into_iter().flatten() {
-            shells.push(number(c, &mut shell_group));
+            shells.push(index(c)?);
         }
         regions.push(b::Region { shells, void: false });
     }
     for &o in &outers {
         for &c in cavities.get(o).into_iter().flatten() {
-            regions.push(b::Region { shells: vec![number(c, &mut shell_group)], void: true });
+            regions.push(b::Region { shells: vec![index(c)?], void: true });
         }
     }
-    // Faces in first appearance walking shells; edges walking faces → loops → uses (backwards on
-    // a face whose side in its shell is reversed), with their uses; vertices walking edges.
-    let index = |i: usize| u32::try_from(i).map_err(|_| fail("index".into()));
-    let mut face_new = vec![usize::MAX; nf];
-    let mut face_order = Vec::with_capacity(nf);
-    for g in &shell_group {
-        for &f in groups.get(*g).into_iter().flatten() {
-            if face_new.get(f) == Some(&usize::MAX) {
-                if let Some(slot) = face_new.get_mut(f) {
-                    *slot = face_order.len();
-                }
-                face_order.push(f);
-            }
-        }
-    }
-    let mut edge_new: Vec<Option<usize>> = vec![None; edges.len()];
-    let mut edge_order = Vec::with_capacity(edges.len());
-    let mut uses: Vec<Vec<b::EdgeUseRef>> = vec![Vec::new(); edges.len()];
-    for (fnew, &f) in face_order.iter().enumerate() {
-        let forward = faces.get(f).is_some_and(|x| x.forward);
-        for (li, l) in loops.get(f).into_iter().flatten().enumerate() {
-            let n = l.len();
-            for k in 0..n {
-                let p = if forward { k } else { n - 1 - k };
-                let &(e, fwd, _) = l.get(p).ok_or_else(|| fail("edge reference".into()))?;
-                let slot = edge_new.get_mut(e as usize).ok_or_else(|| fail("edge reference".into()))?;
-                if slot.is_none() {
-                    *slot = Some(edge_order.len());
-                    edge_order.push(e as usize);
-                }
-                let at = b::EdgeUseRef { face: index(fnew)?, r#loop: index(li)?, position: index(p)?, upper: !fwd };
-                uses.get_mut(e as usize).ok_or_else(|| fail("edge reference".into()))?.push(at);
-            }
-        }
-    }
-    let mut vertex_new: Vec<Option<u32>> = vec![None; vertices.len()];
-    let mut out_vertices = Vec::new();
-    let mut out_edges = Vec::with_capacity(edge_order.len());
-    for &e in &edge_order {
-        let edge = edges.get(e).ok_or_else(|| fail("edge reference".into()))?;
-        let mut ends = [0u32; 2];
-        for (end, v) in ends.iter_mut().zip(edge.vertices) {
-            let slot = vertex_new.get_mut(v as usize).ok_or_else(|| fail("vertex reference".into()))?;
-            *end = match slot {
-                Some(n) => *n,
-                None => {
-                    let n = index(out_vertices.len())?;
-                    let point = *vertices.get(v as usize).ok_or_else(|| fail("vertex reference".into()))?;
-                    out_vertices.push(b::Vertex { point, tolerance: tol });
-                    *slot = Some(n);
-                    n
-                }
-            };
-        }
-        let edge_uses = uses.get(e).cloned().unwrap_or_default();
-        out_edges.push(b::Edge { curve: edge.curve.clone(), interval: edge.interval, vertices: ends, tolerance: tol, uses: edge_uses });
-    }
-    let emap = |e: u32| edge_new.get(e as usize).copied().flatten().ok_or_else(|| fail("edge reference".into())).and_then(index);
-    let mut out_faces = Vec::with_capacity(nf);
-    for &f in &face_order {
-        let (Some(face), Some(ls), Some(pc), Some(domain)) = (faces.get(f), loops.get(f), pcs.get(f), domains.get(f)) else {
-            return Err(fail("face reference".into()));
-        };
+    let shells = groups
+        .iter()
+        .map(|g| {
+            let faces = g
+                .iter()
+                .map(|&f| Ok(b::OrientedFace { face: index(f)?, forward: faces.get(f).is_some_and(|x| x.forward) }))
+                .collect::<Result<_>>()?;
+            Ok(b::Shell::Faces { faces, wires: Vec::new() })
+        })
+        .collect::<Result<_>>()?;
+    let mut record_faces = Vec::with_capacity(nf);
+    for (f, ((face, ls), (pc, domain))) in faces.iter().zip(&loops).zip(pcs.iter().zip(&domains)).enumerate() {
         let mut record_loops = Vec::with_capacity(ls.len());
         for (l, c) in ls.iter().zip(pc) {
-            let mut oriented = Vec::with_capacity(l.len());
-            for (&(e, forward, _), pcurve) in l.iter().zip(c) {
-                oriented.push(b::OrientedEdge { edge: emap(e)?, forward, pcurve: pcurve.clone() });
-            }
+            let oriented = l.iter().zip(c).map(|(&(edge, forward, _), pcurve)| b::OrientedEdge { edge, forward, pcurve: pcurve.clone() }).collect();
             record_loops.push(b::Loop::Edges { edges: oriented });
         }
-        out_faces.push(b::Face { surface: face.surface.clone(), domain: *domain, loops: record_loops });
-    }
-    let mut shells = Vec::with_capacity(shell_group.len());
-    for g in &shell_group {
-        let mut oriented = Vec::new();
-        for &f in groups.get(*g).into_iter().flatten() {
-            let face = face_new.get(f).copied().ok_or_else(|| fail("face reference".into())).and_then(index)?;
-            oriented.push(b::OrientedFace { face, forward: faces.get(f).is_some_and(|x| x.forward) });
+        if record_loops.is_empty() {
+            return Err(fail(format!("face {f} has no loop")));
         }
-        shells.push(b::Shell::Faces { faces: oriented, wires: Vec::new() });
+        record_faces.push(b::Face { surface: face.surface.clone(), domain: *domain, loops: record_loops });
     }
-    let brep = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: out_faces, edges: out_edges, vertices: out_vertices };
-    brep.validate().map_err(|e| KernelError::Failed(format!("sew: the record is invalid: {e}")))?;
-    Ok(Assembled { brep, faces: face_new, edges: edge_new })
+    let record_edges = edges
+        .iter()
+        .map(|e| b::Edge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() })
+        .collect();
+    let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
+    let loose = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: record_faces, edges: record_edges, vertices: record_vertices };
+    let part = loose.canonical().map_err(|e| KernelError::Failed(format!("sew: the record is invalid: {e}")))?;
+    let mut face_new = vec![usize::MAX; nf];
+    for (c, &f) in part.faces.iter().enumerate() {
+        if let Some(slot) = face_new.get_mut(f as usize) {
+            *slot = c;
+        }
+    }
+    let mut edge_new = vec![None; edges.len()];
+    for (c, &e) in part.edges.iter().enumerate() {
+        if let Some(slot) = edge_new.get_mut(e as usize) {
+            *slot = Some(c);
+        }
+    }
+    Ok(Assembled { brep: part.brep, faces: face_new, edges: edge_new })
 }
 
 /// A face's parameter box: around its pcurves' control points (a B-spline lies in their hull),
