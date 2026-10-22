@@ -19,6 +19,7 @@ use std::collections::BTreeSet;
 
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::brep::{self as b, Brep, Curve2};
+use solidcraft_geom::bspline::{HPoint, NurbsSurface};
 use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
@@ -354,6 +355,15 @@ pub(crate) fn surface_body(r: &Brep) -> Result<Body> {
     record_body(r).map(|(body, _)| body.without_history())
 }
 
+/// `body` (made by an operation on `operands`) with the history that every face and edge is new to
+/// it.
+pub(crate) fn all_new(body: Body, operands: &[&Body]) -> Result<Body> {
+    let r = crate::native::brep_record(&body)?;
+    let faces = vec![record::generated(Vec::new()); r.faces.len()];
+    let h = record_history(&r, operands.len(), faces, |_, _, _| Vec::new());
+    body.with_history_counts(h, &record::counts(operands))
+}
+
 /// The faces `picked` of `body` (its record `r`; each with whether to turn it over) as their own
 /// body, each the body's face (Kept), every edge the body's.
 fn taken(body: &Body, r: &Brep, picked: &[(usize, bool)]) -> Result<Body> {
@@ -362,6 +372,73 @@ fn taken(body: &Body, r: &Brep, picked: &[(usize, bool)]) -> Result<Body> {
     let h = record_history(&c.brep, 1, faces, |e, _, _| c.edges.get(e).map(|&edge| EdgeOrigin::Edge { operand: 0, edge }).into_iter().collect());
     let (result, same) = record_body(&c.brep)?;
     with_history(result, same, h, &record::counts(&[body]))
+}
+
+// ---- NURBS faces --------------------------------------------------------------------------
+
+/// A NURBS surface as a record surface (a plain B-spline where every weight is 1).
+pub(crate) fn spline_surface(n: &NurbsSurface) -> b::Surface {
+    let [nu, nv] = n.count();
+    let [ku, kv] = n.knots().clone();
+    if n.homogeneous().iter().all(|h| h.w == 1.0) {
+        let points = (0..nu).map(|i| (0..nv).map(|j| a3(n.point(i, j).xyz())).collect()).collect();
+        return b::Surface::Spline { u_knots: ku, v_knots: kv, points };
+    }
+    let homogeneous = (0..nu).map(|i| (0..nv).map(|j| n.point(i, j)).map(|h| [h.x, h.y, h.z, h.w]).collect()).collect();
+    b::Surface::RationalSpline { u_knots: ku, v_knots: kv, homogeneous }
+}
+
+/// The NURBS curve of homogeneous control points `ctrl` on `knots` as a record curve, and its
+/// parameter interval.
+pub(crate) fn spline_curve(ctrl: &[HPoint], knots: Vec<f64>) -> Result<(b::Curve, [f64; 2])> {
+    let degree = knots.len().checked_sub(ctrl.len() + 1).filter(|d| *d >= 1).ok_or_else(|| invalid("a spline's knots"))?;
+    let interval = [*knots.get(degree).ok_or_else(|| invalid("knots"))?, *knots.get(ctrl.len()).ok_or_else(|| invalid("knots"))?];
+    let curve = if ctrl.iter().all(|h| h.w == 1.0) {
+        b::Curve::Spline { knots, points: ctrl.iter().map(|h| a3(h.xyz())).collect() }
+    } else {
+        b::Curve::RationalSpline { knots, homogeneous: ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() }
+    };
+    Ok((curve, interval))
+}
+
+/// The pcurve of an edge along a straight line of its face's parameters: from `a` at the
+/// interval's start to `z` at its end.
+pub(crate) fn uv_line(a: [f64; 2], z: [f64; 2], [t0, t1]: [f64; 2]) -> Curve2 {
+    Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, z] }
+}
+
+/// One face: the whole of the NURBS surface `n`, bounded by its four boundary curves (each the
+/// boundary row or column of its net on its knots, exact for a clamped surface), as a surface
+/// body with no history.
+pub(crate) fn tensor_sheet(n: &NurbsSurface) -> Result<Body> {
+    let [nu, nv] = n.count();
+    if nu < 2 || nv < 2 {
+        return Err(invalid("a face needs at least 2 x 2 control points"));
+    }
+    let [ku, kv] = n.knots().clone();
+    let [[u0, u1], [v0, v1]] = n.domain();
+    let corner = |i: usize, j: usize| n.point(i, j).project().ok_or_else(|| failed("a corner of the surface has no position"));
+    let corners = [corner(0, 0)?, corner(nu - 1, 0)?, corner(nu - 1, nv - 1)?, corner(0, nv - 1)?];
+    let mut parts = Parts { tolerance: tolerance_of(corners.into_iter()), ..Parts::default() };
+    parts.vertices = corners.iter().map(|p| b::Vertex { point: a3(*p), tolerance: parts.tolerance }).collect();
+    let row = |j: usize| (0..nu).map(|i| n.point(i, j)).collect::<Vec<_>>();
+    let column = |i: usize| (0..nv).map(|j| n.point(i, j)).collect::<Vec<_>>();
+    // Bottom (v0) and top (v1) run along u, left (u0) and right (u1) along v; the loop goes bottom,
+    // right, top backwards, left backwards: counter-clockwise in (u, v).
+    let sides = [
+        (row(0), ku.clone(), [0, 1], [[u0, v0], [u1, v0]], true),
+        (column(nu - 1), kv.clone(), [1, 2], [[u1, v0], [u1, v1]], true),
+        (row(nv - 1), ku, [3, 2], [[u0, v1], [u1, v1]], false),
+        (column(0), kv, [0, 3], [[u0, v0], [u0, v1]], false),
+    ];
+    let mut uses = Vec::with_capacity(4);
+    for (i, (ctrl, knots, [a, z], [pa, pz], forward)) in sides.into_iter().enumerate() {
+        let (curve, interval) = spline_curve(&ctrl, knots)?;
+        parts.edges.push(b::Edge { curve, interval, vertices: [index(a)?, index(z)?], tolerance: parts.tolerance, uses: Vec::new() });
+        uses.push(b::OrientedEdge { edge: index(i)?, forward, pcurve: uv_line(pa, pz, interval) });
+    }
+    parts.faces.push((b::Face { surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] }, true));
+    surface_body(&parts.canonical()?.brep)
 }
 
 // ---- Patches ----------------------------------------------------------------------------
