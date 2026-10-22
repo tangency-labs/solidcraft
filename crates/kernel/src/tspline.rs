@@ -138,7 +138,7 @@ fn patch_faces(patches: &[BezierPatch]) -> Result<Parts> {
         let ctrl: Vec<HPoint> = (0..=pt).flat_map(|j| (0..=ps).map(move |i| (i, j))).map(|(i, j)| p.point(i, j)).collect();
         let surface = NurbsSurface::from_homogeneous([ps, pt], [knots(ps), knots(pt)], ctrl).map_err(spline_err)?;
         parts.faces.push((
-            b::Face { surface: spline_surface(&surface), domain: [[0.0, 1.0], [0.0, 1.0]], loops: vec![b::Loop::Edges { edges: uses }] },
+            b::Face { nurbs: None, surface: spline_surface(&surface), domain: [[0.0, 1.0], [0.0, 1.0]], loops: vec![b::Loop::Edges { edges: uses }] },
             true,
         ));
     }

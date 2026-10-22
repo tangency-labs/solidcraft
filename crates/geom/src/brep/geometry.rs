@@ -122,7 +122,7 @@ impl Brep {
         }
         for (fi, f) in self.faces.iter().enumerate() {
             let face = index(fi);
-            let surface = SurfaceEval::new(&f.surface).map_err(|err| unevaluable(Record::Face(face), err))?;
+            let surface = SurfaceEval::new(f.parameters()).map_err(|err| unevaluable(Record::Face(face), err))?;
             let period = surface.domain().period;
             // Each edge loop's signed (u, v) area.
             let mut areas: Vec<(u32, f64)> = Vec::with_capacity(f.loops.len());

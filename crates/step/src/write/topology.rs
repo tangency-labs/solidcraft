@@ -454,7 +454,14 @@ impl BrepWriter<'_, '_, '_> {
         if let Some(Some(s)) = self.surfaces.get(f as usize) {
             return Ok(s.clone());
         }
-        let (s, map) = surface(&face_of(self.b, f)?.surface).map_err(|m| format!("face {f}: {m}"))?;
+        let face = face_of(self.b, f)?;
+        let (s, map) = surface(&face.surface).map_err(|m| format!("face {f}: {m}"))?;
+        // A face on its NURBS form is written as the analytic surface it is, with no pcurves
+        // (STEP's are in the angle); only which way its normal points carries over.
+        let map = match &face.nurbs {
+            Some(n) => form_map(&face.surface, n, face.domain, map).ok_or_else(|| format!("face {f}: its NURBS form has no normal"))?,
+            None => map,
+        };
         let s = (Arc::new(s), map);
         if let Some(slot) = self.surfaces.get_mut(f as usize) {
             *slot = Some(s.clone());
@@ -499,14 +506,21 @@ impl BrepWriter<'_, '_, '_> {
         let b = self.b;
         let mut associated = Vec::with_capacity(edge.uses.len());
         for u in &edge.uses {
-            let Some(Loop::Edges { edges }) = face_of(b, u.face)?.loops.get(u.r#loop as usize) else {
+            let face = face_of(b, u.face)?;
+            if face.nurbs.is_some() {
+                continue;
+            }
+            let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
                 return Err(format!("face {}: loop {} is no edge loop", u.face, u.r#loop));
             };
             let used = edges.get(u.position as usize).ok_or_else(|| format!("face {}: no use at {}", u.face, u.position))?;
             let (surface, map) = self.surface(u.face)?;
             associated.push(Associated::Pcurve(Pcurve { surface, curve: Arc::new(pcurve(&used.pcurve, map)?) }));
         }
-        let seam = matches!(edge.uses.as_slice(), [a, b] if a.face == b.face);
+        if associated.is_empty() {
+            return Ok(self.g.curve(&curve_3d));
+        }
+        let seam = associated.len() == 2 && matches!(edge.uses.as_slice(), [a, b] if a.face == b.face);
         let kind = if seam { SurfaceCurveKind::Seam } else { SurfaceCurveKind::Surface };
         Ok(self.g.curve(&Curve::SurfaceCurve { kind, curve_3d: Arc::new(curve_3d), associated, master: PreferredRep::Curve3d }))
     }
@@ -574,4 +588,40 @@ impl BrepWriter<'_, '_, '_> {
 fn signed_area(ring: &[[f64; 2]]) -> f64 {
     let n = ring.len();
     0.5 * (0..n).filter_map(|i| Some((ring.get(i)?, ring.get((i + 1) % n)?))).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>()
+}
+
+/// The map of a face on its NURBS form `n`: no pcurve goes through it, so it only says whether
+/// the face's natural normal (the NURBS's, which the loops follow) is the STEP surface's. The
+/// record's cylinder, cone, sphere and torus have their natural normal pointing away from the
+/// axis (the sphere's centre, the torus's centre circle); `None` when the NURBS has no normal at
+/// its domain's centre.
+fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
+    let eval = solidcraft_geom::brep::eval::SurfaceEval::new(n).ok()?;
+    let (p, su, sv) = eval.derivs(0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1]))?;
+    let normal = su.cross(sv);
+    let away = |f: &Frame| {
+        let o = solidcraft_geom::Vec3::new(f.origin[0], f.origin[1], f.origin[2]);
+        let z = solidcraft_geom::Vec3::new(f.x_axis[0], f.x_axis[1], f.x_axis[2]).cross(solidcraft_geom::Vec3::new(
+            f.y_axis[0],
+            f.y_axis[1],
+            f.y_axis[2],
+        ));
+        let d = p - o;
+        (o, z, d - z * d.dot(z))
+    };
+    let outward = match analytic {
+        BSurface::Cylinder { frame, .. } | BSurface::Cone { frame, .. } => away(frame).2,
+        BSurface::Sphere { frame, .. } => p - away(frame).0,
+        BSurface::Torus { frame, major_radius, .. } => {
+            let (o, _, radial) = away(frame);
+            p - (o + radial.normalized()? * *major_radius)
+        }
+        _ => return None,
+    };
+    let along = normal.dot(outward);
+    if !(along.abs() > 0.0) {
+        return None;
+    }
+    let keeps = (along > 0.0) == map.keeps_normal();
+    Some(Map { m: [[1.0, 0.0], [0.0, if keeps { 1.0 } else { -1.0 }]] })
 }

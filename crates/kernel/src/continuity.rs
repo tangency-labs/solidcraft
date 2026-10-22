@@ -251,7 +251,7 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
     }
     let face = |i: usize| -> Option<FaceSurface> {
         let f = record.faces.get(i)?;
-        FaceSurface::new(&f.surface, outward.get(i).copied().unwrap_or(true))
+        FaceSurface::new(f.parameters(), outward.get(i).copied().unwrap_or(true))
     };
     let mut seams = Vec::new();
     let mut unmeasured = 0usize;

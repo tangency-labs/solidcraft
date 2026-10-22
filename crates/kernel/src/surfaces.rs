@@ -379,7 +379,7 @@ pub(crate) fn tensor_sheet(n: &NurbsSurface) -> Result<Body> {
         parts.edges.push(b::Edge { curve, interval, vertices: [index(a)?, index(z)?], tolerance: parts.tolerance, uses: Vec::new() });
         uses.push(b::OrientedEdge { edge: index(i)?, forward, pcurve: uv_line(pa, pz, interval) });
     }
-    parts.faces.push((b::Face { surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] }, true));
+    parts.faces.push((b::Face { nurbs: None, surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] }, true));
     surface_body(&parts.canonical()?.brep)
 }
 
@@ -396,7 +396,7 @@ pub fn patch_region(plane: &Plane, region: &Region2) -> Result<Body> {
     let holes = region.holes.iter().map(|h| h.ccw().reversed());
     let loops = std::iter::once(region.outer.ccw()).chain(holes).map(|lp| sketch_loop(&mut parts, plane, &lp.segs)).collect::<Result<Vec<_>>>()?;
     let domain = uv_box(&loops).ok_or_else(|| invalid("the region has no area"))?;
-    parts.faces.push((b::Face { surface: crate::freeform::plane_surface(plane), domain, loops }, true));
+    parts.faces.push((b::Face { nurbs: None, surface: crate::freeform::plane_surface(plane), domain, loops }, true));
     let c = parts.canonical()?;
     let h = record_history(&c.brep, 0, vec![record::generated(Vec::new())], |_, _, _| Vec::new());
     let (body, same) = record_body(&c.brep)?;
@@ -842,7 +842,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     let loops = vec![b::Loop::Edges { edges }];
     let domain = uv_box(&loops).ok_or_else(|| invalid("the extended face has no area"))?;
     let forward = face_sides(r).first().copied().unwrap_or(true);
-    parts.faces.push((b::Face { surface, domain, loops }, forward));
+    parts.faces.push((b::Face { nurbs: None, surface, domain, loops }, forward));
     let c = parts.canonical()?;
     let h = record_history(&c.brep, 1, vec![record::from_face(0, 0, Change::Modified)], |e, _, _| {
         c.edges.get(e).and_then(|p| rim.get(*p)).map(|u| EdgeOrigin::Edge { operand: 0, edge: u.edge as usize }).into_iter().collect()
@@ -1325,7 +1325,7 @@ mod imp {
             let pl = Plane { origin: at, x: u, y: n.cross(u) };
             let lp = sketch_loop(&mut parts, &pl, &segs)?;
             let domain = uv_box(std::slice::from_ref(&lp)).ok_or_else(|| invalid("mitre plane"))?;
-            parts.faces.push((b::Face { surface: crate::freeform::plane_surface(&pl), domain, loops: vec![lp] }, true));
+            parts.faces.push((b::Face { nurbs: None, surface: crate::freeform::plane_surface(&pl), domain, loops: vec![lp] }, true));
         }
         SmBrep::from_record(&parts.canonical()?.brep, true).map_err(sm("sweep mitre"))
     }

@@ -337,7 +337,7 @@ impl EdgeFaces {
             let in_loop = in_loop.ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
             let pts = (0..=16).map(|k| along(curve, k as f64 / 16.0)).collect::<Option<Vec<_>>>();
             let pts = pts.ok_or_else(|| KernelError::Invalid(format!("{label}: an edge can't be evaluated")))?;
-            let surface = SurfaceEval::new(&face.surface).map_err(|err| KernelError::Failed(format!("boundary surface: {err}")))?;
+            let surface = SurfaceEval::new(face.parameters()).map_err(|err| KernelError::Failed(format!("boundary surface: {err}")))?;
             sides.push(EdgeSide { pts, surface, along: in_loop == forward, hint: None });
         }
         Ok(EdgeFaces { sides })
@@ -459,6 +459,7 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
         uses.extend(pieces);
     }
     let face = solidcraft_geom::brep::Face {
+        nurbs: None,
         surface: spline_surface(s),
         domain: s.domain(),
         loops: vec![solidcraft_geom::brep::Loop::Edges { edges: uses }],

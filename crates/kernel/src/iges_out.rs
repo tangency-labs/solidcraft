@@ -297,7 +297,7 @@ fn shell(w: &mut W, b: &Brep, si: u32, paint: &HashMap<usize, [f32; 3]>) -> Resu
     let mut face_data = Vec::with_capacity(faces.len());
     for of in faces {
         let face = b.faces.get(of.face as usize).ok_or_else(|| failed(format!("face {}: no such face", of.face)))?;
-        let (s, map) = topology::surface(&face.surface).map_err(|e| failed(format!("face {}: {e}", of.face)))?;
+        let (s, map) = topology::surface(face.parameters()).map_err(|e| failed(format!("face {}: {e}", of.face)))?;
         let keeps = map.keeps_normal();
         let outer = topology::outer_loop(b, face);
         let order: Vec<usize> = outer.into_iter().chain((0..face.loops.len()).filter(|l| Some(*l) != outer)).collect();

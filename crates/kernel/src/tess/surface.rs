@@ -180,11 +180,11 @@ mod tests {
                 brep::Surface::Cylinder { .. } | brep::Surface::Cone { .. } | brep::Surface::Sphere { .. } | brep::Surface::Torus { .. } => 1,
                 _ => 2,
             };
-            let (eval, map) = match eval_surface(&face.surface, face.domain) {
+            let (eval, map) = match eval_surface(face.parameters(), face.domain) {
                 Ok(e) => e,
                 Err(e) => panic!("not evaluable: {e} ({:?})", face.surface),
             };
-            let Ok(reference) = SurfaceEval::new(&face.surface) else { panic!("the record's evaluator: {:?}", face.surface) };
+            let Ok(reference) = SurfaceEval::new(face.parameters()) else { panic!("the record's evaluator: {:?}", face.surface) };
             let [[u0, u1], [v0, v1]] = face.domain;
             for i in 0..=6 {
                 for j in 0..=6 {

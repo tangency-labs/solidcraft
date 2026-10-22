@@ -1268,7 +1268,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         if record_loops.is_empty() {
             return Err(fail(format!("face {f} has no loop")));
         }
-        record_faces.push(b::Face { surface: face.surface.clone(), domain: *domain, loops: record_loops });
+        record_faces.push(b::Face { nurbs: None, surface: face.surface.clone(), domain: *domain, loops: record_loops });
     }
     let record_edges = edges
         .iter()

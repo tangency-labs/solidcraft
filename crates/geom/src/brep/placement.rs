@@ -139,6 +139,7 @@ impl Brep {
         let mut out = self.clone();
         for f in &mut out.faces {
             f.surface = motion.surface(&f.surface);
+            f.nurbs = f.nurbs.as_ref().map(|n| motion.surface(n));
         }
         for e in &mut out.edges {
             e.curve = motion.curve(&e.curve);

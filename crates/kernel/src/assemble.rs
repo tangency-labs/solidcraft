@@ -278,7 +278,7 @@ impl Assembly {
                 edges: l.iter().zip(pc).map(|(u, pcurve)| OrientedEdge { edge: u.edge, forward: u.forward, pcurve: pcurve.clone() }).collect(),
             })
             .collect();
-        Ok(Face { surface: f.surface.clone(), domain, loops: stored })
+        Ok(Face { nurbs: None, surface: f.surface.clone(), domain, loops: stored })
     }
 }
 

@@ -883,7 +883,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
             let domain = *domains.get(f as usize).ok_or("face reference")?;
-            faces.push(Face { surface: face.surface.clone(), domain, loops });
+            faces.push(Face { nurbs: None, surface: face.surface.clone(), domain, loops });
         }
         let mut out_shells = Vec::with_capacity(shells.len());
         for s in &shells {

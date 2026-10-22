@@ -169,11 +169,25 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool) -> R<Arrays> {
     let intervals: Vec<([f64; 2], f64)> = brep.edges.iter().map(|e| turned(&e.curve, e.interval)).collect();
 
     // Faces, loops and edgeuses, with the surfaces and, on B-spline faces, the trims.
-    let any_spline_face = brep.faces.iter().any(|f| matches!(f.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }));
+    let any_spline_face =
+        brep.faces.iter().any(|f| f.nurbs.is_some() || matches!(f.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }));
+    let any_form = brep.faces.iter().any(|f| f.nurbs.is_some());
     for f in &brep.faces {
         a.i(flat::FACE_LOOP_COUNT).push(int(f.loops.len())?);
         a.i(flat::FACE_TRIM_TYPE).push(0);
-        let spline = surface(&mut a, &f.surface, f.domain, analytic)?;
+        // A face with a NURBS form: what it is (its analytic entry), then the NURBS it is
+        // parameterised on, whose range and trims these are (FACE_NURBS_FORM).
+        let spline = match &f.nurbs {
+            Some(n) => {
+                surface(&mut a, &f.surface, f.domain, analytic)?;
+                nurbs_block(&mut a, n)?;
+                true
+            }
+            None => surface(&mut a, &f.surface, f.domain, analytic)?,
+        };
+        if any_form {
+            a.i(flat::FACE_NURBS_FORM).push(i64::from(f.nurbs.is_some()));
+        }
         for l in &f.loops {
             match l {
                 b::Loop::Vertex { vertex } => {
@@ -243,14 +257,35 @@ fn net(a: &mut Arrays, rows: impl Iterator<Item = ([f64; 3], f64)>) {
 }
 
 fn nurbs_face(a: &mut Arrays, u_knots: &[f64], v_knots: &[f64], nu: usize, nv: usize) -> R<()> {
-    let order = |k: &[f64], n: usize| k.len().checked_sub(n).filter(|o| *o >= 2).ok_or(Unsupported::Invalid("spline order"));
     a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_NURBS));
+    nurbs_sizes(a, u_knots, v_knots, nu, nv)
+}
+
+/// A NURBS block's sizes, orders and knots.
+fn nurbs_sizes(a: &mut Arrays, u_knots: &[f64], v_knots: &[f64], nu: usize, nv: usize) -> R<()> {
+    let order = |k: &[f64], n: usize| k.len().checked_sub(n).filter(|o| *o >= 2).ok_or(Unsupported::Invalid("spline order"));
     a.i(flat::FACE_NURBS_U_VERTEX_COUNT).push(int(nu)?);
     a.i(flat::FACE_NURBS_V_VERTEX_COUNT).push(int(nv)?);
     a.i(flat::FACE_NURBS_U_ORDER).push(int(order(u_knots, nu)?)?);
     a.i(flat::FACE_NURBS_V_ORDER).push(int(order(v_knots, nv)?)?);
     a.r(flat::FACE_NURBS_U_KNOTS).extend_from_slice(u_knots);
     a.r(flat::FACE_NURBS_V_KNOTS).extend_from_slice(v_knots);
+    Ok(())
+}
+
+/// The NURBS block of a face's NURBS form, with no surface kind or range of its own.
+fn nurbs_block(a: &mut Arrays, s: &b::Surface) -> R<()> {
+    match s {
+        b::Surface::Spline { u_knots, v_knots, points } => {
+            nurbs_sizes(a, u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len))?;
+            net(a, points.iter().flatten().map(|p| (*p, 1.0)));
+        }
+        b::Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            nurbs_sizes(a, u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len))?;
+            net(a, homogeneous.iter().flatten().map(|h| ([h[0] / h[3], h[1] / h[3], h[2] / h[3]], h[3])));
+        }
+        _ => return Err(Unsupported::Invalid("NURBS form is not a NURBS")),
+    }
     Ok(())
 }
 

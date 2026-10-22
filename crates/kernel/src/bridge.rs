@@ -438,7 +438,7 @@ impl Walk {
 impl Support {
     fn of(r: &Brep, face: usize, length: f64) -> Result<Support> {
         let f = r.faces.get(face).ok_or_else(|| KernelError::Invalid("no such face".into()))?;
-        let surf = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
+        let surf = SurfaceEval::new(f.parameters()).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
         let dom = surf.domain();
         let range = [0, 1].map(|d| match (dom.period[d], dom.range[d]) {
             (None, Some(r)) => r,
@@ -734,7 +734,7 @@ pub fn bridge(a: &[Frame], b: &[Frame], orders: [Continuity; 2], crown: [f64; 2]
 pub(crate) fn the_face(body: &Body) -> Result<(SurfaceEval, [[f64; 2]; 2])> {
     let r = body.record();
     let face = r.faces.first().ok_or_else(|| KernelError::Failed("bridge: no face".into()))?;
-    let surf = SurfaceEval::new(&face.surface).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
+    let surf = SurfaceEval::new(face.parameters()).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
     Ok((surf, face.domain))
 }
 
@@ -783,7 +783,7 @@ fn support_faces(r: &Brep, chain: &Chain, leave: Vec3, size: f64) -> Result<Vec<
         let mut best: Option<(f64, usize)> = None;
         for u in &edge.uses {
             let face = u.face as usize;
-            let Some(surf) = r.faces.get(face).and_then(|f| SurfaceEval::new(&f.surface).ok()) else { continue };
+            let Some(surf) = r.faces.get(face).and_then(|f| SurfaceEval::new(f.parameters()).ok()) else { continue };
             let Some(uv) = surf.project(mid, None, size * 1e-6 + 1e-9) else { continue };
             let Some(n) = surf.derivs(uv[0], uv[1]).and_then(|(_, su, sv)| su.cross(sv).normalized()) else { continue };
             let score = (leave - n * leave.dot(n)).len();
