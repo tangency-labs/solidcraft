@@ -8,9 +8,11 @@
 //! op list and the solution encoding are documented in the shim). Objects are
 //! codes `kind*100 + id` (`-1` = null): curve, surface, vertex, edge and face
 //! objects are real upstream objects, the others stand-ins that only answer
-//! `IsKindOf`. Paths that need a curve, surface, edge, face, vertex, poly vertex
-//! or volume's geometry (evaluation, parameter domains) or an object's zone
-//! tolerance are unported and deferred on the Rust side.
+//! `IsKindOf`. The Rust handles reach the same geometry through the
+//! [`SolutionObject`] hooks: the shim's line and plane, and its vertex, edge and face
+//! as records of one B-rep in the state the shim builds them ([`BareObjects`]). Paths
+//! that need a poly vertex or volume's geometry or an object's zone tolerance are
+//! deferred on the Rust side.
 //!
 //! Outputs: `ints` (indices, statuses, classifications, solution types, counts,
 //! object codes, node ids) and `floats` (solution values and parameters, points,
@@ -25,8 +27,19 @@ use solidcore::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
     MAX_PARAMS, MAX_TREES,
 };
+use solidcore::curve::curve::p2::Curve;
+use solidcore::curve::line::Line;
+use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tree::NodeId;
-use solidcore::math::Vec3;
+use solidcore::geom::vector2d::Point2;
+use solidcore::math::{Point3, Vec3};
+use solidcore::surface::plane::Plane;
+use solidcore::surface::surface::Surface;
+use solidcore::topology::edge as topo_edge;
+use solidcore::topology::face::p2 as topo_face;
+use solidcore::topology::vertex as topo_vertex;
+use solidcore::topology::{Brep, Edge, EdgeId, Face, FaceId, Vertex, VertexId};
 use solidcore::SolidError;
 use solidcore_ffi::units::geom_solution_array as ffi;
 
@@ -72,6 +85,120 @@ impl SolutionObject for Obj {
             13 => ObjectKind::PolyBrep,
             _ => ObjectKind::Other,
         }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        (self.kind() == ObjectKind::Curve).then(|| shim_line().natural_interval())
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        (self.kind() == ObjectKind::Surface).then(|| shim_plane().natural_uv_domain())
+    }
+
+    fn vertex_point(&self) -> Option<Point3> {
+        let b = BareObjects::new().ok()?;
+        (self.kind() == ObjectKind::Vertex)
+            .then(|| topo_vertex::point(&b.brep, b.vertex).ok())
+            .flatten()
+    }
+
+    fn edge_curve(&self) -> Option<Self> {
+        (self.kind() == ObjectKind::Edge).then_some(Obj(EDGE_CURVE))
+    }
+
+    fn edge_interval(&self) -> Option<Extent1d> {
+        let b = BareObjects::new().ok()?;
+        (self.kind() == ObjectKind::Edge)
+            .then(|| topo_edge::interval(&b.brep, b.edge).ok())
+            .flatten()
+    }
+
+    fn curve_point(&self, t: f64) -> Option<Point3> {
+        (self.kind() == ObjectKind::Curve)
+            .then(|| shim_line().evaluate_point(&solidcore::Kernel::default(), t).ok())
+            .flatten()
+    }
+
+    fn face_surface(&self) -> Option<Self> {
+        (self.kind() == ObjectKind::Face).then_some(Obj(FACE_SURFACE))
+    }
+
+    fn face_uv_domain(&self) -> Option<Extent2d> {
+        let b = BareObjects::new().ok()?;
+        (self.kind() == ObjectKind::Face)
+            .then(|| topo_face::uv_domain(&b.brep, b.face).ok())
+            .flatten()
+    }
+
+    fn surface_point(&self, u: f64, v: f64) -> Option<Point3> {
+        (self.kind() == ObjectKind::Surface)
+            .then(|| shim_plane()
+                .evaluate_point(&solidcore::Kernel::default(), Point2::new(u, v))
+                .ok())
+            .flatten()
+    }
+}
+
+/// The handle of the shim edges' curve (`the_line()`, a curve of its own that no object
+/// code names; kind 0, an id the generator never draws).
+const EDGE_CURVE: i64 = 99;
+/// The handle of the shim faces' surface (`the_plane()`; kind 1, an id never drawn).
+const FACE_SURFACE: i64 = 199;
+
+/// The shim's line: `SmLine((0,0,0), (1,2,3), 3)` (every curve object and the edges'
+/// curve).
+fn shim_line() -> Curve {
+    Curve::from(Line::from_points(
+        Point3::new(0.0, 0.0, 0.0),
+        Point3::new(1.0, 2.0, 3.0),
+        3,
+    ))
+}
+
+/// The shim's plane: `SmPlane((0,0,1), (0,0,1))` (every surface object and the faces'
+/// surface).
+fn shim_plane() -> Surface {
+    Surface::from(Plane::from_normal(
+        Point3::new(0.0, 0.0, 1.0),
+        Vec3::new(0.0, 0.0, 1.0),
+    ))
+}
+
+/// The shim's vertex, edge and face objects as records of one B-rep, in the state the
+/// shim builds them (default-constructed `SmVertex` / `SmEdge` / `SmFace` with only
+/// `m_pCurve` / `m_pSurface` set, never joined to a B-rep): a vertex at the origin with
+/// tolerance `0` and no vertex uses, an edge on the line with the empty interval,
+/// tolerance `0` and no edge uses, a face on the plane and nothing else (its shell is a
+/// placeholder no list names). All objects of a kind are alike, so one record each.
+struct BareObjects {
+    brep: Brep,
+    vertex: VertexId,
+    edge: EdgeId,
+    face: FaceId,
+}
+
+impl BareObjects {
+    fn new() -> Result<Self, SolidError> {
+        let mut brep = Brep::default();
+        let vertex = brep.add_vertex_record(Vertex::default())?;
+        let edge = brep.add_edge_record(Edge {
+            // never read: an edge's vertices are those of its (absent) edge uses
+            vertices: [VertexId::from_index(u32::MAX); 2],
+            edgeuses: Vec::new(),
+            interval: Extent1d::new(),
+            tolerance: 0.0,
+            curve: Some(shim_line()),
+        })?;
+        let shell = brep.add_shell()?;
+        let mut f = Face::new(shell);
+        f.surface = Some(shim_plane());
+        let face = brep.add_face_record(f)?;
+        Ok(Self {
+            brep,
+            vertex,
+            edge,
+            face,
+        })
     }
 }
 

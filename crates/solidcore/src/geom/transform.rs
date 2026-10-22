@@ -25,6 +25,7 @@
 //! | [`Transform::inv_transform_vector`]               | `InvTransformVector`                                  |
 //! | [`Transform::concat_transform`]                   | `ConcatTransform`                                     |
 //! | [`Transform::scale_simple`]                       | `ScaleSimple`                                         |
+//! | [`Transform::mirror_simple`]                      | `MirrorSimple`                                        |
 //! | [`Transform::transform_simple`]                   | `TransformSimple`                                     |
 //! | [`Transform::invert_simple`]                      | `InvertSimple`                                        |
 //! | [`Transform::set_axis2_placement`]                | `SetAxis2Placement`                                   |
@@ -349,6 +350,45 @@ impl Transform {
         self.set_to_y_axis(y);
         self.set_to_z_axis(z);
         self.set_to_disp(d);
+    }
+
+    /// Appends the mirror about the plane through `plane_pt` with normal
+    /// `plane_normal` (projection space) to this transform (`MirrorSimple`).
+    ///
+    /// # Errors
+    ///
+    /// The error of [`Vec3::unitize`] for a zero normal (upstream's `SER` on
+    /// `Unitize`); the transform is then unchanged.
+    pub fn mirror_simple(&mut self, plane_pt: Point3, plane_normal: Vec3) -> Result<()> {
+        // unitize Plane Normal
+        let n = plane_normal.unitize()?;
+
+        // Build mirror transform            = [1-2NxNx  -2NxNy  -2NxNz  0]
+        //                                     [ -2NyNy 1-2NyNy  -2NyNz  0]
+        //  with D = crPlanePt.Dot(pNormal) ;  [ -2NzNx  -2NzNy 1-2NzNz  0]
+        //                                     [  2D*Nx   2D*Ny   2D*Nz  1]
+        let d = plane_pt.dot(n);
+        let mut mirror = Self::IDENTITY;
+        mirror.set_to_x_axis(Vec3::new(
+            1.0 - 2.0 * n.x * n.x,
+            -2.0 * n.x * n.y,
+            -2.0 * n.x * n.z,
+        ));
+        mirror.set_to_y_axis(Vec3::new(
+            -2.0 * n.y * n.x,
+            1.0 - 2.0 * n.y * n.y,
+            -2.0 * n.y * n.z,
+        ));
+        mirror.set_to_z_axis(Vec3::new(
+            -2.0 * n.z * n.x,
+            -2.0 * n.z * n.y,
+            1.0 - 2.0 * n.z * n.z,
+        ));
+        mirror.set_to_disp(Vec3::new(2.0 * d * n.x, 2.0 * d * n.y, 2.0 * d * n.z));
+
+        // Mirror current transform
+        self.concat_transform(&mirror);
+        Ok(())
     }
 
     /// Appends the rigid motion `rotate_n_move` and then the optional scaling

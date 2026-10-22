@@ -43,6 +43,8 @@
 //! | [`Volume::is_curve_in_param_domain_simple`]            | `IsCurveInParamDomainSimple` (virtual)           |
 //! | [`Volume::trim_param_bounding_box_simple`]             | `TrimParamBoundingBoxSimple` (virtual)           |
 //! | [`Volume::transform_simple`]                           | `TransformSimple` (virtual)                      |
+//! | [`Volume::mirror`]                                     | `Mirror`                                         |
+//! | [`Volume::mirror_simple`]                              | `MirrorSimple` (virtual)                         |
 //! | [`Volume::has_discontinuities_simple`]                 | `HasDiscontinuitiesSimple` (virtual)             |
 //! | [`Volume::calculate_continuities_simple`]              | `CalculateContinuitiesSimple` (virtual)          |
 //! | [`Volume::type_code`], [`Volume::type_string`], [`Volume::class_string`], [`VOLUME_TYPE`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
@@ -1130,6 +1132,55 @@ impl Volume {
         }
         // build the Transform into this map
         self.transform_simple(rotate_n_move, scale)
+    }
+
+    /// Mirrors the volume's final out-space image about the XY plane of
+    /// `out_mirror_plane` (`Mirror`): built into the last map of the chain (or this
+    /// map) by its `MirrorSimple`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Volume::mirror_simple`].
+    pub fn mirror(&mut self, out_mirror_plane: &Axis2Placement) -> Result<()> {
+        let pt = out_mirror_plane.origin();
+        let normal = out_mirror_plane.z_axis();
+        // save on m_pNextMap linked list length - try to build the Mirror into the
+        // last NextMap
+        if let Some(last) = self.last_map_mut() {
+            return last.mirror_simple(pt, normal);
+        }
+        // build the Mirror into this map
+        self.mirror_simple(pt, normal)
+    }
+
+    /// Builds the out-space mirror about the plane through `plane_pt` with normal
+    /// `plane_normal` into the simple map (`MirrorSimple`, virtual): a transform
+    /// concatenates it; a B-spline volume transforms its control points
+    /// ([`BSplineVolume::mirror_simple`]); the base class appends a copy of an
+    /// `SmTransform` holding it to the next maps.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for a B-spline volume; the error of [`Vec3::unitize`] for a zero
+    /// normal.
+    pub fn mirror_simple(&mut self, plane_pt: Point3, plane_normal: Vec3) -> Result<()> {
+        match &mut self.kind {
+            VolumeKind::Transform(t) => return t.mirror_simple(plane_pt, plane_normal),
+            VolumeKind::BSpline(b) => {
+                return b.mirror_simple(
+                    self.orient_map.as_ref(),
+                    self.inv_orient_map.as_ref(),
+                    plane_pt,
+                    plane_normal,
+                );
+            }
+            _ => {}
+        }
+        // Create a Mirror SmTransform to compound with current mapping
+        let mut transform = Transform::IDENTITY; // identity map with no Orient map
+        transform.mirror_simple(plane_pt, plane_normal)?;
+        // Add mirror map to end of compound map list (a copy: owner flag 1)
+        self.add_next_map(Self::new(VolumeKind::Transform(transform)), 1)
     }
 
     // ---- simple maps ----------------------------------------------------------------

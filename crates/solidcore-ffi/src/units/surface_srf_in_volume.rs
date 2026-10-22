@@ -36,7 +36,7 @@
 //! | `MakeOwner`   | `MakeOwner`                                |                               | state |
 //! | `SetBase`     | `SetBaseSurface`                           | surface block `in_param copy owns` | state |
 //! | `SetVolume`   | `SetVolume`                                | volume block `copy owns`      | state |
-//! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | (status only) |
+//! | `Mirror`      | `CreateMirrorSurface`                      | `O X Y`                       | state of the mirrored surface |
 //! | `Exact`       | `MakeExactBSplineIfPossible`               |                               | (status only) |
 //! | `WriteDb`     | `WriteToDB` (ASCII, 17 digits; a generator helper) | `version`            | the bytes |
 //! | `ReadDb`      | `SmSrfInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]` (no object block) | `made [state]` |

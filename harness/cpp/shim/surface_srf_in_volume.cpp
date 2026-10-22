@@ -631,7 +631,10 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         SmSurface* m = NULL;
         SmStatus s = c->CreateMirrorSurface(ctx, ax, m);
         o.push_back(st(s));
-        // the mirrored surface is not inspected (its volume is the unported part)
+        // the state of the mirrored surface (a copy of this one with its volume mirrored;
+        // not freed: its ownership follows the copy flags)
+        if (s == SM_SUCCESS && m != NULL)
+            put_state(o, (SmSrfInVolume*)m);
         break;
     }
     case OP_EXACT:

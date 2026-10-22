@@ -15,8 +15,8 @@
 //!   `Extrusion`, `Global`), then the op status and, on success, its outputs. `State`:
 //!   `0` and the state. `Plane`, `Cylinder`, `Extrusion`: an intersection `more n
 //!   curves ntypes types nuv1 has_uv1... nuv2 has_uv2... ndev devs`. `Global`: the same
-//!   (`more` always `0`), or the status `-3` when upstream would run the general
-//!   intersector (the special case needs more, or the other surface has none).
+//!   (`more` always `0`), also when upstream runs the general intersector (the
+//!   special case needs more, or the other surface has none).
 //!   `Trim`: the state. A state is the `surface.surf_of_extrusion_p1` state, a curve
 //!   its curve layout.
 //! * [`is_nurb`]: the source status (`0` for an inline NURB), the statuses of the

@@ -18,9 +18,9 @@
 //! Deferred cases: `IntersectWithPlane` of a linear or coplanar generator whose
 //! plane/plane intersection gives a line (`SmSurface::CurveOnClassify`,
 //! `intersect.curve_class_p2`; a bounded plane the swept plane misses compares);
-//! `GlobalSurfaceIntersect` needing the general intersector
-//! (`intersect.adv_surface_intersector`, on a surface of extrusion that is not a
-//! `Surface` yet).
+//! `GlobalSurfaceIntersect` needing the general intersector (run by the C++ side; the
+//! Rust one needs a surface of extrusion as a `Surface`, which it is not yet: the
+//! `SmSurface` dispatch, `surface.surface_p2`).
 
 use std::path::Path;
 

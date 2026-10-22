@@ -13,8 +13,8 @@
 //! `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust
 //! error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: `Mirror` and `MakeExactBSplineOutSurfaceFrom*Space` (in no unit in
-//! `units.json`: dispatch gaps), the plane's `Transform` / `TrimWithDomain`
+//! Deferred cases: `MakeExactBSplineOutSurfaceFrom*Space` (in no unit in `units.json`: a
+//! dispatch gap), the plane's `Transform` / `TrimWithDomain`
 //! (`surface.plane_p2`) and the base surface's `STEPInversion`, which runs
 //! `SmSurface::GlobalPointSolve` (`surface.surface_p4`) once the volume inversion has
 //! succeeded. Volumes are chains of transform, plain, default and component
@@ -24,8 +24,8 @@
 //! build). `STEPInversion` and `ReadFromDB` run through `surface.volume_p2`; a
 //! `ReadFromDB` case reads the text upstream's `WriteToDB` wrote for a generated object
 //! (no plain volume). Hand-built inline cases cover `Evaluate` of orders (0, 0) with
-//! `bOnlyUpperHalf == FALSE` and `Transform` on chains whose last map is not a
-//! transform. Every run has at least
+//! `bOnlyUpperHalf == FALSE`, `Transform` on chains whose last map is not a
+//! transform, and 60 `CreateMirrorSurface` cases (fixed seed). Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn.
 
@@ -853,8 +853,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Mirror { origin, x, y } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
-            tri!(o, siv_of(&s)?.create_mirror_surface(&k, &ax));
+            let m = tri!(o, siv_of(&s)?.create_mirror_surface(&k, &ax));
             o.push(0.0);
+            put_state(&mut o, &m);
         }
         OpIn::Exact => {
             tri!(o, siv_of(&s)?.make_exact_b_spline_if_possible());
@@ -1188,6 +1189,35 @@ fn gen_case(rng: &mut Rng) -> Inputs {
 /// point (orders 0, 0) with `bOnlyUpperHalf == FALSE`, which upstream completes with
 /// the second-derivative branch, and `Transform` on a chain whose last map is not an
 /// `SmTransform` (upstream appends a copied transform).
+/// Generated `CreateMirrorSurface` cases the ffi wrapper accepts (the generator draws
+/// the op rarely and the wrapper takes transform chains only), from a fixed seed.
+fn mirror_cases() -> Result<Vec<Case>, HarnessError> {
+    const WANT: usize = 60;
+    let mut rng = Rng::new(0x5eed_4d17);
+    let mut cases = Vec::new();
+    for _ in 0..200_000 {
+        if cases.len() >= WANT {
+            break;
+        }
+        let mut i = gen_case(&mut rng);
+        let (origin, x, y) = gen_placement(&mut rng);
+        i.op = OpIn::Mirror { origin, x, y };
+        let Ok((op, input)) = cpp_input(&i) else {
+            continue;
+        };
+        if ffi::validate(op, &input).is_err() {
+            continue;
+        }
+        cases.push(Case {
+            unit: "surface.srf_in_volume".into(),
+            name: format!("mirror_{}", cases.len()),
+            source: CaseSource::Inline,
+            inputs: serde_json::to_value(&i).map_err(|e| harness(e.to_string()))?,
+        });
+    }
+    Ok(cases)
+}
+
 fn inline_cases() -> Result<Vec<Case>, HarnessError> {
     let plane = SurfIn::Plane {
         o: [0.0, 0.0, 0.0],
@@ -1315,6 +1345,7 @@ impl UnitDiff for Runner {
         };
         let mut cases = default_cases(self, &ctx)?;
         cases.extend(inline_cases()?);
+        cases.extend(mirror_cases()?);
         Ok(cases)
     }
 

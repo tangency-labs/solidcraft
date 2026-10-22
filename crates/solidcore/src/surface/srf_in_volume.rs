@@ -37,10 +37,11 @@
 //! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
 //! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`).
 //!   `InvEvaluatePoint`, `InvMapPoint` and `ReadFromDB` are wired to
-//!   `surface.volume_p2`. `SmVolume::Mirror` and
-//!   `MakeExactBSplineOutSurfaceFrom{Param,In}Space` are in no unit in `units.json`
-//!   (not `surface.volume_p2`), so they stay [`SolidError::Unported`], tagged with this
-//!   unit as a dispatch gap.
+//!   `surface.volume_p2`. `SmVolume::Mirror` is in no unit in `units.json`: co-ported
+//!   here as [`Volume::mirror`] (with `MirrorSimple` of the base class, `SmTransform`
+//!   and `SmBSplineVolume`). `MakeExactBSplineOutSurfaceFrom{Param,In}Space` are in no
+//!   unit either (not `surface.volume_p2`), so they stay [`SolidError::Unported`],
+//!   tagged with this unit as a dispatch gap.
 //! - **Ownership.** The base surface and the volume are held by value (the surface
 //!   boxed: it is itself a [`Surface`]). Upstream either shares them with the caller
 //!   or owns (and maybe copies) them, as the copy and owner flags say; here the copy
@@ -103,13 +104,9 @@ const MAX_DERIVS: usize = 3;
 
 // ---- back-edges ----------------------------------------------------------------------
 
-/// `SmVolume::Mirror`.
-fn volume_mirror(_volume: &mut Volume, _plane: &Axis2Placement) -> Result<()> {
-    // DISPATCH GAP: SmVolume::Mirror is in no unit in units.json
-    Err(SolidError::unported(
-        "SmVolume::Mirror",
-        "surface.srf_in_volume",
-    ))
+/// `SmVolume::Mirror` (in no unit in units.json; co-ported as [`Volume::mirror`]).
+fn volume_mirror(volume: &mut Volume, plane: &Axis2Placement) -> Result<()> {
+    volume.mirror(plane)
 }
 
 /// `SmVolume::MakeExactBSplineOutSurfaceFromParamSpace` / `...FromInSpace`.
@@ -503,8 +500,7 @@ impl SrfInVolume {
     ///
     /// # Errors
     ///
-    /// Those of the copy; [`SolidError::Unported`]: `SmVolume::Mirror`
-    /// (in no unit: a dispatch gap).
+    /// Those of the copy and of [`Volume::mirror`].
     pub fn create_mirror_surface(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
         // copy this surface
         let mut new_surface = self.copy(k)?;

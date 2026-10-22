@@ -67,8 +67,8 @@
 //!   `intersect.curve_class_p8`): that returns [`SolidError::Unported`], and the trimming below it is ported with the
 //!   classification. The general intersection `GlobalSurfaceIntersect` falls back to
 //!   needs `SmAdvSurfaceIntersector` on this surface, which is not a [`Surface`] (see
-//!   **Not a `SurfaceKind`** above), so it stays [`SolidError::Unported`] under
-//!   `intersect.adv_surface_intersector`.
+//!   **Not a `SurfaceKind`** above), so it stays [`SolidError::Unported`] under the
+//!   `SmSurface` dispatch (`surface.surface_p2`), a dispatch gap.
 //! - **`sm_IntersectGenerators` status.** `IntersectWithCylinder` and
 //!   `IntersectWithSurfOfExtrusion` ignore it as upstream: a failure keeps the curves
 //!   and types already added, with no more intersections needed (upstream clears the
@@ -216,10 +216,13 @@ fn deg2rad(adeg: f64) -> f64 {
 /// `SmSurface::GlobalSurfaceIntersect` of a surface of extrusion: the general
 /// intersector.
 fn base_global_surface_intersect() -> Result<ExtrusionIntersection> {
-    // UNPORTED(intersect.adv_surface_intersector): SmAdvSurfaceIntersector::SmAdvSurfaceIntersector
+    // DISPATCH GAP: SmAdvSurfaceIntersector::SmAdvSurfaceIntersector is ported
+    // (intersect.adv_surface_intersector, partial; no UNPORTED marker), but it takes two
+    // `Surface`s and a surface of extrusion is no `SurfaceKind` yet (the SmSurface
+    // dispatch, unit surface.surface_p2; #76)
     Err(SolidError::unported(
-        "SmAdvSurfaceIntersector::SmAdvSurfaceIntersector",
-        "intersect.adv_surface_intersector",
+        "SmAdvSurfaceIntersector (SurfaceKind::SurfOfExtrusion)",
+        "surface.surface_p2",
     ))
 }
 
@@ -242,8 +245,8 @@ impl SurfOfExtrusion {
     /// # Errors
     ///
     /// Those of the special cases; [`SolidError::Unported`] from the general
-    /// intersection (`SmAdvSurfaceIntersector`, unit
-    /// `intersect.adv_surface_intersector`).
+    /// intersection (`SmAdvSurfaceIntersector`, which needs this surface as a
+    /// `SurfaceKind`: a dispatch gap of `surface.surface_p2`).
     #[allow(clippy::too_many_arguments)] // upstream's signature
     pub fn global_surface_intersect(
         &self,

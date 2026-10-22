@@ -254,12 +254,14 @@ pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<O
         let st = m.types.inexact_surface(f.index() as usize).unwrap_or(-1);
         if st >= 0 && !EXACT_SURFACES.contains(&st) {
             let (unit, symbol) = match st {
-                15012 | 15013 => ("surface.cone_p1", "SmCone (no SurfaceKind)"),
-                15014 => ("surface.sphere", "SmSphere"),
-                15015 => ("surface.torus", "SmTorus (no SurfaceKind)"),
+                // the gap is the missing `SurfaceKind` variant (the `SmSurface` dispatch,
+                // unit `surface.surface_p2`; #76), not the kinds' own units (all ported)
+                15012 | 15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCone)"),
+                15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere)"),
+                15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus)"),
                 15030 => (
-                    "surface.surf_of_extrusion_p2",
-                    "SurfaceKind::SurfOfExtrusion",
+                    "surface.surface_p2",
+                    "SurfaceKind::SurfOfExtrusion (SmSurfOfExtrusion)",
                 ),
                 _ => (
                     HARNESS_ANALYTIC_IMPORT,

@@ -117,10 +117,10 @@ enum : int32_t
     TG_BSPLINE = 3, // the NURB of a surface source, as an SmBSplineSurface
 };
 
-// A GlobalSurfaceIntersect whose special case needs more (or that has none) would run the
-// general intersector (SmAdvSurfaceIntersector, unported): the shim does not run it and
-// answers this marker (the Rust side defers those cases).
-const double GENERAL = -3.0;
+// A GlobalSurfaceIntersect whose special case needs more (or that has none) runs the
+// general intersector (SmAdvSurfaceIntersector); the Rust side defers those cases (a
+// surface of extrusion is not a `Surface` kind there yet, so the general intersector
+// cannot take it).
 
 struct Peek : SmSurfOfExtrusion
 {
@@ -796,12 +796,6 @@ int32_t surface_op(int32_t op, Rd& rd, const SmContext& ctx, const uint8_t* byte
             if (special && pst != SM_SUCCESS)
             {
                 o.push_back(st(pst));
-                delete other;
-                break;
-            }
-            if (!special || t.more)
-            {
-                o.push_back(GENERAL);
                 delete other;
                 break;
             }

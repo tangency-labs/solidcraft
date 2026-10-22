@@ -162,9 +162,11 @@ bool fix_gaps_first_candidate_ok(SmTopologyIntersector* ti, const SmTArray<SmVer
 // combines in its B-rep unless the previous relationship is better, which returns SM_ERR),
 // or the second block would dereference a B-rep mate of the other vertex that is not a
 // vertex (the first block's SM_ERR returns before; a first block that combines is assumed
-// to reach the second, whose cases the port defers at CombineCoincidentVertices anyway;
-// were RemoveRelationship or CombineCoincidentVertices to fail partway this would
-// over-refuse, so re-check the assumption when topology.brep_p5 lands).
+// to reach the second). Since topology.brep_p5 the port runs CombineCoincidentVertices
+// and reports InvalidInput (-2) exactly where the second block dereferences, so this guard
+// can only over-refuse when RemoveRelationship or CombineCoincidentVertices fails partway
+// through the first block: the port then returns that status where the shim answers -2,
+// a mismatch the difftest would report (none in the generated or fixture cases).
 // The other mate of the B-rep vertex is checked by the caller: the first block
 // dereferences it at once.
 // Each combination must also be given vertices of the B-rep it runs in: a vertex

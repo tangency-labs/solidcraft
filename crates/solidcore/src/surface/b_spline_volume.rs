@@ -58,7 +58,7 @@
 //!   the `USE_VOLUMES` branch).
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -513,6 +513,37 @@ impl BSplineVolume {
         }
         // Transform
         t.transform_simple(rotate_n_move, scale);
+        // InvOrient
+        if let Some(inv) = inv_orient_map {
+            t.concat_transform(inv);
+        }
+        // apply the transformation to the volume
+        load_nlib_transform(&t, self)
+    }
+
+    /// Builds the out-space mirror about the plane through `plane_pt` with normal
+    /// `plane_normal` into the control points (`MirrorSimple`): the transform
+    /// `InvOrient(Mirror(Orient()))` is built from the volume's orient maps and handed
+    /// to [`load_nlib_transform`], which fails in upstream's build.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` from [`load_nlib_transform`].
+    pub fn mirror_simple(
+        &mut self,
+        orient_map: Option<&Transform>,
+        inv_orient_map: Option<&Transform>,
+        plane_pt: Point3,
+        plane_normal: Vec3,
+    ) -> Result<()> {
+        // build InvOrient(Mirror(Orient())) transform SMLib style
+        let mut t = Transform::IDENTITY; // identity mapping with no OrientMap
+                                         // Orient
+        if let Some(o) = orient_map {
+            t.concat_transform(o);
+        }
+        // Mirror (its status is ignored upstream)
+        ignore_status(t.mirror_simple(plane_pt, plane_normal))?;
         // InvOrient
         if let Some(inv) = inv_orient_map {
             t.concat_transform(inv);
