@@ -1200,7 +1200,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let other = self
             .other
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
-        self.proto_topo_mgr = Some(ProtoTopologyManager::new(
+        let mut mgr = ProtoTopologyManager::new(
             k,
             (this, brep.brep_arena(this)?),
             (other, brep.brep_arena(other)?),
@@ -1208,7 +1208,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             self.this_approx_tol_3d,
             capture_distance,
             0.0,
-        )?);
+        )?;
+        // Not upstream (tangency-labs/solidcore#480, plan/upstream-issues.md WR-214):
+        // a self-loop proto edge on a vertex is dropped, not split onto that vertex.
+        mgr.set_split_self_loops_on_vertices(false);
+        self.proto_topo_mgr = Some(mgr);
 
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
         let mut deleted = self.intersect_topology(k, brep)?;

@@ -1882,6 +1882,11 @@ pub struct ProtoTopologyManager<O> {
     pe_store: Vec<Option<ProtoEdge>>,
     /// Every proto face made.
     pf_store: Vec<Option<ProtoFace<O>>>,
+    /// Not upstream: `SmProtoEdge::Resolve` splits a self-loop proto edge even when
+    /// its vertex definition is on a vertex (`true`, the default and upstream's
+    /// behaviour); `false` drops such a proto edge instead (tangency-labs/solidcore#480,
+    /// see `topology::proto_topology::p2`).
+    split_self_loops_on_vertices: bool,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -1939,7 +1944,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pv_store: Vec::new(),
             pe_store: Vec::new(),
             pf_store: Vec::new(),
+            split_self_loops_on_vertices: true,
         })
+    }
+
+    /// Whether resolving a proto edge from a proto vertex back to itself splits it
+    /// even when its vertex definition is on a vertex in either B-rep (`true`, the
+    /// default, as upstream). Not upstream.
+    #[must_use]
+    pub const fn split_self_loops_on_vertices(&self) -> bool {
+        self.split_self_loops_on_vertices
+    }
+
+    /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
+    /// topology intersector sets it to `false` (tangency-labs/solidcore#480). Not
+    /// upstream.
+    pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
+        self.split_self_loops_on_vertices = split;
     }
 
     /// The destructor `~SmProtoTopologyManager`: deletes the listed proto faces,

@@ -53,6 +53,22 @@
 //! - **Curve intervals** are passed with the classification they belong to (upstream
 //!   reaches it through the interval's back pointer; `SmCurveInterval::GetCurve` is the
 //!   classification's curve).
+//! - **Not upstream: no split on a vertex** (tangency-labs/solidcore#480).
+//!   `SmProtoEdge::Resolve` splits a proto edge that runs from a proto vertex back to
+//!   itself along an open curve longer than `2 * m_dTol` by adding a vertex definition
+//!   that copies the first one's classifications. `CanCombineVertexDefinitions` has
+//!   just merged definitions up to `5 * (tol1 + tol2)` apart into that proto vertex,
+//!   keeping the one on a vertex. When the copied definition is on a vertex in either
+//!   B-rep, both ends land on that one vertex there (moved twice, to their midpoint)
+//!   while the other B-rep gets a short edge between two vertices; the merge then
+//!   fails in `MakeFaceuse` (a union whose coplanar faces' rims cross 4e-5 to 2e-4 mm
+//!   from a vertex, `SM_ERR`). With
+//!   [`ProtoTopologyManager::set_split_self_loops_on_vertices`]`(false)`, which the
+//!   Boolean's topology intersector sets, [`ProtoTopologyManager::resolve_proto_edge`]
+//!   treats such a proto edge as degenerate instead, as upstream does for one shorter
+//!   than `2 * m_dTol`. The default keeps upstream's split, so this unit's difftest
+//!   still compares the faithful port (7 generated cases reach the branch).
+//!   Confirmed on the C++ build (plan/upstream-issues.md WR-214).
 //! - `UpdateEdges` trims a definition at the split point; its alternative of splitting
 //!   the proto edge (`SmProtoEdge::Split`) sits behind `static constexpr SmBoolean
 //!   cbiDoSplit = FALSE` and is not ported.
@@ -1081,8 +1097,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// itself loses its definitions when its first curve is shorter than twice its
     /// tolerance; when it is longer with ends farther apart than that, the start proto
     /// vertex gets a second vertex definition at the curve's end (unless the ends are
-    /// already closest to different definitions). Then, of every pair of definitions
-    /// that can be combined, the redundant one is deleted. Returns the curves deleted.
+    /// already closest to different definitions). Not upstream: unless
+    /// [`ProtoTopologyManager::split_self_loops_on_vertices`] (the default), when the
+    /// definition to split is on a vertex in either B-rep, the proto edge loses its
+    /// definitions instead (tangency-labs/solidcore#480; see the module notes). Then, of every pair
+    /// of definitions that can be combined, the redundant one is deleted. Returns the
+    /// curves deleted.
     ///
     /// # Errors
     ///
@@ -1145,7 +1165,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         }
                     }
 
-                    if add_vtx_def {
+                    // Not upstream (tangency-labs/solidcore#480): the new definition
+                    // copies vd0's classifications, so when vd0 is on a vertex in
+                    // either B-rep both ends land on that one vertex there while the
+                    // other B-rep gets an edge between two vertices. Treat the proto
+                    // edge as degenerate instead, as the short-curve branch above does,
+                    // unless the caller keeps upstream's split.
+                    let on_vertex = match vd0 {
+                        Some(vd0) if !self.split_self_loops_on_vertices() => {
+                            let v0 = self.vd_ref(vd0)?;
+                            v0.src_topo_type(1) == PointClassType::Vertex
+                                || v0.src_topo_type(2) == PointClassType::Vertex
+                        }
+                        _ => false,
+                    };
+                    if add_vtx_def && on_vertex {
+                        for &ed in &eds {
+                            deleted.extend(self.destruct_and_delete(ed));
+                        }
+                        self.proto_edge_mut(pe)
+                            .ok_or(dangling("proto edge is deleted"))?
+                            .clear_edge_definitions();
+                    } else if add_vtx_def {
                         // Create a new VtxDef, and set pVD0 to sPt0, and NewVD to sPt1.
                         let vd0 = vd0.ok_or(dangling("proto vertex has no vertex definition"))?;
                         let v0 = self.vd_ref(vd0)?;
@@ -2286,6 +2327,109 @@ mod tests {
         m.resolve_proto_vertex(&k, &geo, pv).unwrap();
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[b, c]);
         assert!(m.vertex_def(a).is_none());
+    }
+
+    /// A proto edge from a proto vertex back to itself along an open curve 5e-5 long
+    /// (longer than twice the 1e-5 tolerance, ends as far apart), the proto vertex
+    /// holding one vertex definition with `pc1` and `pc2`, resolved with
+    /// `split_self_loops_on_vertices` set to `split`. Returns the manager, the proto
+    /// vertex and edge, and what `resolve_proto_edge` returned.
+    fn resolve_self_loop(
+        pc1: &PointClassification<H>,
+        pc2: &PointClassification<H>,
+        split: bool,
+    ) -> (
+        ProtoTopologyManager<H>,
+        ProtoVertexId,
+        ProtoEdgeId,
+        Result<Vec<H>>,
+    ) {
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+        let c0 = H(0, ClassObjectKind::Curve);
+        let mut m = manager();
+        assert!(
+            m.split_self_loops_on_vertices(),
+            "upstream's split is the default"
+        );
+        m.set_split_self_loops_on_vertices(split);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let vd = VertexDefinition::new(&k, &geo, pc1, pc2, p, 1e-5, 1e-9, None).unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(c0), false);
+        let ivl = geo.curves[0].natural_interval();
+        let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci1.mid = region_pc(R0);
+        let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci2.mid = region_pc(R1);
+        let pe = m
+            .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
+            .unwrap();
+        assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
+        let deleted = m.resolve_proto_edge(&k, &mut geo, pe);
+        (m, pv, pe, deleted)
+    }
+
+    fn vertex_pc() -> PointClassification<H> {
+        let mut pc = PointClassification::new(1e-5);
+        pc.set_class_object(PointClassType::Vertex, Some(H(20, ClassObjectKind::Vertex)));
+        pc
+    }
+
+    /// upstream: the proto vertex gets a second definition for the curve's end.
+    /// These pool stand-ins have no surfaces or vertex records, so
+    /// `CreateVertexDefinition` stops (no position found, UB-115; or the unported
+    /// `SmVertex::GetPoint`): reaching it shows the split branch ran, edge kept.
+    fn assert_split_attempted(
+        pc1: &PointClassification<H>,
+        pc2: &PointClassification<H>,
+        split: bool,
+    ) {
+        let (m, pv, pe, result) = resolve_self_loop(pc1, pc2, split);
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no position found") || msg.contains("SmVertex::GetPoint"),
+            "{msg}"
+        );
+        assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
+    }
+
+    #[test]
+    fn resolve_self_loop_off_a_vertex_still_splits() {
+        for split in [true, false] {
+            assert_split_attempted(&region_pc(R0), &region_pc(R1), split);
+        }
+    }
+
+    #[test]
+    fn resolve_self_loop_on_a_vertex_splits_by_default() {
+        // upstream's behaviour, which this unit's difftest compares
+        assert_split_attempted(&vertex_pc(), &region_pc(R1), true);
+        assert_split_attempted(&region_pc(R0), &vertex_pc(), true);
+    }
+
+    #[test]
+    fn resolve_self_loop_on_a_vertex_is_degenerate() {
+        // tangency-labs/solidcore#480: a definition on a vertex in either B-rep is not
+        // split (both ends would be that vertex there); the proto edge is dropped
+        for (pc1, pc2) in [(vertex_pc(), region_pc(R1)), (region_pc(R0), vertex_pc())] {
+            let (m, pv, pe, deleted) = resolve_self_loop(&pc1, &pc2, false);
+            assert_eq!(
+                deleted.unwrap().len(),
+                1,
+                "the definition's curve copy is deleted"
+            );
+            assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 0);
+            assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
+        }
     }
 
     #[test]
