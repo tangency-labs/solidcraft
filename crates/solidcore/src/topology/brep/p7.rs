@@ -22,10 +22,11 @@
 //!   build for `wasm32-unknown-unknown`); the caller reads the file. The reader is
 //!   [`BrepData::read_from_file`] (unit `topology.brep_data`), which bounds every count it
 //!   reads and the nesting of its polymorphic readers (AGENTS.md section 1).
-//! - **Arena records are never freed.** Upstream `delete`s of edge uses, vertex uses,
-//!   shells, regions and edges unlink the record (it stays in its arena as an orphan).
-//!   `m_pEdgeListHead->Remove` takes the edge off [`Brep::edge_list`] only. The
-//!   owning-list edits
+//! - **Arena records.** `GlueEdgesGeneral` destroys the deleted edge's stable arena
+//!   record after its last edgeuse pair moves. Other plain `delete`s of edge uses,
+//!   vertex uses, shells and regions unlink the record (it stays as an orphan).
+//!   `m_pEdgeListHead->Remove` takes the edge off [`Brep::edge_list`] before the
+//!   transfers begin. The owning-list edits
 //!   `SmEdge::Remove(eu)`, `SmVertex::Remove(vu)`, `SmRegion::Remove(shell)` and
 //!   `SmBrep::Remove(region)` (inline `SmOwningTopology` operations) edit the records'
 //!   use lists and back links.
@@ -89,9 +90,9 @@
 //!   back the region and shell it may have made (`MakeFaceWithCurves` warns about it).
 //! - **`GlueEdgesGeneral`**: the arena cannot share one curve between two edges, so
 //!   upstream's `pSurvCurve == pDelCurve` short cut (no `CurveMaxDistanceBetween`) is taken
-//!   only for two edges without curve (`NULL == NULL`). The glued-away edge leaves the edge
-//!   list (`m_pEdgeListHead->Remove`) and stays in the edge arena as an orphan without
-//!   edge uses, as upstream leaves it allocated.
+//!   only for two edges without curve (`NULL == NULL`). The glued-away edge leaves the
+//!   owning list before transfers and is destroyed after its last edgeuse pair moves,
+//!   as upstream does; unrelated typed ids remain valid.
 //! - **Notification context.** Face-from-curves entrypoints share one algorithm.
 //!   The kernel-context variant binds caller-owned stores to the actual kernel only
 //!   during construction notifications; the external-context API keeps its
@@ -1591,6 +1592,10 @@ pub fn glue_edges_general(
             ed::set_tolerance(b, surv, radius, true, true)?;
         }
 
+        // Upstream destroys the deleted edge once its last pair has moved.
+        if b.edge(del)?.edgeuses.is_empty() {
+            b.remove_edge_record(del)?;
+        }
         jj -= 2;
     }
 
@@ -2172,6 +2177,57 @@ mod tests {
         b.shell_mut(wire).unwrap().members =
             ShellMembers::Edgeuse(b.edge(edges[3]).unwrap().edgeuses[0]);
         (b, edges[3], edges[0], face)
+    }
+
+    #[test]
+    fn glue_destroys_transferred_edge_after_last_pair() {
+        let mut k = Kernel::default();
+        let (mut b, surviving, deleted, _) = glue_notification_fixture();
+        let ends = b.edge(deleted).unwrap().vertices;
+        let shared_ends = [ends[1], ends[0]];
+        // Make the wire coincide with the sheet edge, with opposite direction.
+        // Both edges share vertex identities, as GlueEdgesGeneral requires.
+        let wire_uses = ed::edgeuses(&b, surviving, None, None).unwrap();
+        for (eu, vertex) in wire_uses.into_iter().zip(shared_ends) {
+            let vu = eu1::vertexuse(&b, eu).unwrap().unwrap();
+            let old_vertex = b.vertexuse(vu).unwrap().vertex.unwrap();
+            b.vertex_mut(old_vertex)
+                .unwrap()
+                .vertexuses
+                .retain(|&candidate| candidate != vu);
+            b.vertex_mut(vertex).unwrap().vertexuses.push(vu);
+            b.vertexuse_mut(vu).unwrap().vertex = Some(vertex);
+        }
+        b.edge_mut(surviving).unwrap().vertices = shared_ends;
+        b.edge_mut(surviving).unwrap().curve =
+            Some(Curve::from(crate::curve::line::Line::from_points(
+                b.vertex(shared_ends[0]).unwrap().point,
+                b.vertex(shared_ends[1]).unwrap().point,
+                3,
+            )));
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        glue_edges_general(
+            &mut k,
+            &mut b,
+            Some(surviving),
+            OrientType::Opposite,
+            0.0,
+            false,
+            Some(deleted),
+            None,
+            &mut ed::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            },
+        )
+        .unwrap();
+        assert!(!p1::edges(&b, None).unwrap().contains(&deleted));
+        assert!(b.edge(deleted).is_err());
+        assert_eq!(b.edges().len(), 3);
+        assert_eq!(ed::edgeuses(&b, surviving, None, None).unwrap().len(), 2);
     }
 
     #[test]
