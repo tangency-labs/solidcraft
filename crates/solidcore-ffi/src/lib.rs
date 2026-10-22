@@ -51,6 +51,9 @@ pub const SC_ERR_EXCEPTION: i32 = -1000;
 pub const SC_ERR_BUFFER: i32 = -1001;
 /// Shim status: the shim rejected its arguments.
 pub const SC_ERR_ARG: i32 = -1002;
+/// Shim status on wasm32: the C++ kernel is not linked (returned by every stub of the
+/// module that `scripts/wasm_stub.py` generates for `difftest --digest-dir`).
+pub const SC_ERR_UNLINKED: i32 = -1009;
 
 /// Human readable, stable name of a shim status code (used in difftest outputs).
 pub fn status_name(s: i32) -> String {
@@ -59,6 +62,7 @@ pub fn status_name(s: i32) -> String {
         SC_ERR_EXCEPTION => "cpp_exception".into(),
         SC_ERR_BUFFER => "buffer_too_small".into(),
         SC_ERR_ARG => "shim_rejected_args".into(),
+        SC_ERR_UNLINKED => "cpp_unlinked".into(),
         other => format!("status_{other}"),
     }
 }
@@ -107,8 +111,28 @@ pub fn call_with_buffer<T: Copy + Default>(
     Err(FfiError::Status(SC_ERR_BUFFER))
 }
 
-/// Whether this build links the C++ kernel (feature `cpp`).
+/// Whether this build links the C++ kernel (feature `cpp`; on wasm32 the shims are
+/// stubs, see [`unlinked_calls`]).
 pub const LINKED: bool = cfg!(feature = "cpp");
+
+/// Number of shim calls so far that reached a stub instead of the C++ kernel: always 0
+/// natively; on wasm32 the count kept by the stub module from `scripts/wasm_stub.py`.
+pub fn unlinked_calls() -> u64 {
+    #[cfg(all(feature = "cpp", target_arch = "wasm32"))]
+    {
+        extern "C" {
+            fn sc_wasm_unlinked_calls() -> i64;
+        }
+        // SAFETY: the stub module's counter getter takes no arguments and touches no
+        // memory of ours.
+        let n = unsafe { sc_wasm_unlinked_calls() };
+        u64::try_from(n).unwrap_or(0)
+    }
+    #[cfg(not(all(feature = "cpp", target_arch = "wasm32")))]
+    {
+        0
+    }
+}
 
 #[cfg(feature = "cpp")]
 mod reader;

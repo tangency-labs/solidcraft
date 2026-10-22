@@ -51,6 +51,14 @@ fn main() {
     .unwrap();
     fs::write(out.join("units.rs"), src).expect("write units.rs");
 
+    // wasm32 (`--digest-dir`, see README): the C++ shims are left as imports (served by
+    // the `scripts/wasm_stub.py` stub module), and the stack matches the 8 MiB native main
+    // thread instead of wasm-ld's 1 MiB default.
+    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        println!("cargo:rustc-link-arg=--allow-undefined");
+        println!("cargo:rustc-link-arg=-zstack-size=8388608");
+    }
+
     // If the kernel was linked as shared libs, let the binary find them.
     if let Ok(lib_dir) = env::var("DEP_SOLIDCORE_CPP_LIB_DIR") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{lib_dir}");

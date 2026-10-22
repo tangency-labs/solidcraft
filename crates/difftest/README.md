@@ -64,6 +64,15 @@ hash of the Rust output's `Debug` form (f64 `Debug` is the shortest round-trip
 form). Equal digest files from two builds mean bit-identical Rust outputs, which
 is how a refactor or optimisation proves it changed no value.
 
+**Rust side only / wasm32** (`--digest-dir <dir>`, plus `--digest-debug` for the
+full outputs in `<dir>/<unit>.debug`): runs only `run_rust` and writes the same
+digest lines, so the Rust kernel can be compared between targets. The binary also
+builds for `wasm32-wasip1` with feature `cpp`: the C++ shims are then not linked but
+left as imports, which `scripts/wasm_stub.py` serves with stubs returning
+`SC_ERR_UNLINKED`; a case whose Rust side reaches C++ (fixture exports) is written as
+`needs-cpp`. `scripts/wasm-digest.sh [--jobs N] [selection]` (default `--green`)
+builds both targets, runs native and under `wasmtime`, and lists differing cases.
+
 **Profiling without perf/sudo**: `scripts/perf/sampler.py` (ptrace sampler,
 frame-pointer unwinding) and `scripts/perf/analyze.py` (self/inclusive tables):
 

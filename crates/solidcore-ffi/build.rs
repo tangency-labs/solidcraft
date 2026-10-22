@@ -83,6 +83,12 @@ fn main() {
     if !cpp {
         return;
     }
+    // wasm32 (`difftest --digest-dir` only): keep the declarations, compile and link
+    // nothing. The shim symbols stay undefined imports, served at run time by the stub
+    // module from `scripts/wasm_stub.py` (each returns `SC_ERR_UNLINKED`).
+    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        return;
+    }
 
     // ---- locate C++ build --------------------------------------------------
     let cpp_dir = env::var_os("SOLIDCORE_CPP_DIR")

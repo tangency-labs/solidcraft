@@ -50,7 +50,8 @@ pub const MAX_CURVES: usize = 64;
 /// Largest number of script ops.
 pub const MAX_OPS: usize = 64;
 /// Largest loop index argument of a script op.
-pub const MAX_LOOP_INDEX: usize = 1 << 40;
+/// (`usize::MAX` where `usize` is narrower than 41 bits, e.g. wasm32, which never calls C++.)
+pub const MAX_LOOP_INDEX: usize = if usize::BITS > 40 { 1 << 40 } else { usize::MAX };
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
