@@ -391,7 +391,7 @@ fn dom_of(d: &[f64; 4]) -> Extent2d {
 }
 
 /// The notification identity of a topology object (distinct per kind and index).
-fn key_of(e: EntityRef) -> ObjectRef {
+pub(crate) fn key_of(e: EntityRef) -> ObjectRef {
     let (type_code, kind, i) = match e {
         EntityRef::Brep(x) => (16011, 4, x.index()),
         EntityRef::Region(x) => (16012, 5, x.index()),

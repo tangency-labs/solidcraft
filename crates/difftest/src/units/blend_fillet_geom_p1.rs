@@ -18,11 +18,14 @@
 //! error upstream cannot produce), the op's values, and for the pseudo-B-rep queries that
 //! change the model its export (`v_*`, `e_*`, `g_*` keys).
 //!
+//! Faces (the model's target faces, `classify_face_point`'s, `evaluate_mate`'s) are built
+//! on both sides as the shim's `face_of` builds them (`natural_face`).
+//!
 //! Deferred on the Rust side (unported callees): `two_pnts` past its point drops
 //! (`intersect.surface_intersector_p4`), `classify_face_point` and `fb` `split_face` of
-//! a vertex classified to the split face (`SmFace::CreateUVTrimCurves` of
-//! `topology.face_p3`, inside the wired `CalculateUVDomainFromUVTrimCurves` of
-//! `topology.face_p1`), and `fb` `cliff`
+//! a vertex classified to the split face (`SmSurface::DropCurve` of
+//! `intersect.surface_drop_lib_p3`, making the faces' UV trim curves in
+//! `CalculateUVDomainFromUVTrimCurves`), and `fb` `cliff`
 //! (`intersect.surface_drop_lib_p1`'s own unwired `SmSurfaceDropCurve::DoTrace`, whose
 //! stub prints `intersect.surface_drop_curve`). `fb` `examine` past its pre-checks is
 //! refused by the shim (no `SmFilletSolver`; see the FFI module). Fixtures flagged
@@ -30,6 +33,8 @@
 //! crashes or hangs: HANG-29, UB-166, the examine path); every other refusal is a
 //! harness error; HANG-20 bounds the four global-solver ops at `MAX_SOLVER_MAGNITUDE`).
 //! Every run has at least [`MIN_GENERATED`] generated cases.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,7 +49,8 @@ use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::tol::ZONE_TOL_3D;
+use solidcore::geom::attribute::AttributeStore;
+use solidcore::geom::tol::{USE_DEFAULT, ZONE_TOL_3D};
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector2d::Vec2;
 use solidcore::intersect::point_class::PointClassType;
@@ -61,6 +67,9 @@ use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{
     Brep, EdgeId, Edgeuse, EdgeuseId, FaceId, VertexId, Vertexuse, VertexuseId, VertexuseOwner,
 };
@@ -1328,16 +1337,50 @@ pub(crate) fn analytic_surface(k: &Kernel, s: &AnalyticSrf) -> solidcore::Result
     })
 }
 
+/// `new (ctx) SmBrep()`: an empty B-rep with the kernel's default tolerances and its
+/// infinite region.
+pub(crate) fn new_brep(k: &mut Kernel) -> Result<Brep, HarnessError> {
+    solidcore::topology::brep::p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)
+        .map_err(|e| harness(e.to_string()))
+}
+
+/// The shim's `face_of`: `CreateFaceFromSurface` over the surface's natural domain, a
+/// face in its own shell of the infinite region bounded by edges on the natural trim
+/// curves (no UV trim curves yet: upstream makes them on demand with
+/// `SmSurface::DropCurve`, `intersect.surface_drop_lib_p3`), with the tolerances that
+/// sets. The shim refuses the case when upstream fails, so a Rust failure is a harness
+/// error.
+pub(crate) fn natural_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: Surface,
+) -> Result<FaceId, HarnessError> {
+    let domain = surface.natural_uv_domain();
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = super::topology_brep_p8::key_of;
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let mut marks = Marks::default();
+    let this_face = |f: FaceId| key_of(EntityRef::Face(f));
+    let mut fenv = FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    create_face_from_surface(k, b, Some(surface), &domain, &mut fenv)
+        .map_err(|e| harness(format!("CreateFaceFromSurface: {e}")))
+}
+
 /// A single face on `surface` in a fresh B-rep (`CreateFaceFromSurface` over the natural
 /// domain).
-fn face_brep(surface: Surface) -> Result<(Brep, FaceId), HarnessError> {
-    let mut b = Brep::new();
-    let domain = surface.natural_uv_domain();
-    let shell = b.add_shell().map_err(|e| harness(e.to_string()))?;
-    let f = b.add_face(shell).map_err(|e| harness(e.to_string()))?;
-    let face = b.face_mut(f).map_err(|e| harness(e.to_string()))?;
-    face.surface = Some(surface);
-    face.uv_domain = domain;
+fn face_brep(k: &mut Kernel, surface: Surface) -> Result<(Brep, FaceId), HarnessError> {
+    let mut b = new_brep(k)?;
+    let f = natural_face(k, &mut b, surface)?;
     Ok((b, f))
 }
 
@@ -1416,22 +1459,15 @@ pub(crate) struct RustModel {
 impl RustModel {
     pub(crate) fn build(m: &Model) -> Result<Self, HarnessError> {
         let h = |e: SolidError| harness(e.to_string());
-        let k = Kernel::default();
-        let mut target = Brep::new();
+        let mut k = Kernel::default();
+        let mut target = new_brep(&mut k)?;
         let mut target_edges = Vec::new();
         for c in &m.targets {
             target_edges.push(wire_edge(&k, &mut target, curve_of(c)?, None)?);
         }
         let mut target_faces = Vec::new();
         for s in &m.faces {
-            let surface = surface_of(s)?;
-            let domain = surface.natural_uv_domain();
-            let shell = target.add_shell().map_err(h)?;
-            let f = target.add_face(shell).map_err(h)?;
-            let face = target.face_mut(f).map_err(h)?;
-            face.surface = Some(surface);
-            face.uv_domain = domain;
-            target_faces.push(f);
+            target_faces.push(natural_face(&mut k, &mut target, surface_of(s)?)?);
         }
         let mut fillet = Brep::new();
         let mut fillet_edges = Vec::new();
@@ -1899,7 +1935,7 @@ macro_rules! try_status {
 }
 
 fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut o = Vec::new();
     match i {
         Inputs::CleanupNoise { uv: p } => {
@@ -2050,7 +2086,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             o.extend([d.x, d.y, d.z]);
         }
         Inputs::EvaluateMate { surface, uv: p } => {
-            let (b, f) = face_brep(surface_of(surface)?)?;
+            let (b, f) = face_brep(&mut k, surface_of(surface)?)?;
             match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
                 Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
@@ -2060,7 +2096,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             match try_status!(analytic_surface(&k, surface)) {
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0, 0.0]),
                 Ok(srf) => {
-                    let (b, f) = face_brep(srf)?;
+                    let (b, f) = face_brep(&mut k, srf)?;
                     o.push(0.0);
                     match try_status!(fg::evaluate_mate(&k, &b, f, uv(*p))) {
                         Ok(q) => o.extend([0.0, q.x, q.y, q.z]),
@@ -2111,18 +2147,10 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
             surface2,
             pos,
         } => {
-            let h = |e: SolidError| harness(e.to_string());
-            let mut b = Brep::new();
+            let mut b = new_brep(&mut k)?;
             let mut faces = Vec::new();
             for s in [surface1, surface2] {
-                let surface = surface_of(s)?;
-                let domain = surface.natural_uv_domain();
-                let shell = b.add_shell().map_err(h)?;
-                let f = b.add_face(shell).map_err(h)?;
-                let face = b.face_mut(f).map_err(h)?;
-                face.surface = Some(surface);
-                face.uv_domain = domain;
-                faces.push(f);
+                faces.push(natural_face(&mut k, &mut b, surface_of(s)?)?);
             }
             let (f1, f2) = (
                 *faces.first().ok_or_else(|| harness("face"))?,
@@ -3518,7 +3546,7 @@ mod tests {
         };
         let cases = Runner.cases(&ctx).unwrap();
         if env("CASE_CENSUS").is_some() {
-            let mut tally = std::collections::BTreeMap::<(i32, &str), usize>::new();
+            let mut tally = BTreeMap::<(i32, &str), usize>::new();
             for case in &cases {
                 // flagged regression inputs are rejected, never passes (and the HANG-20
                 // ones loop on the Rust side too)
@@ -3565,7 +3593,7 @@ mod tests {
             let ops = env("CASE_OPS").map_or_else(|| (20..40).collect(), list);
             let per_op = env("CASE_PER_OP").map_or(usize::MAX, |s| s.parse().unwrap());
             let skip = env("CASE_SKIP").map_or_else(Vec::new, list);
-            let mut taken = std::collections::BTreeMap::<i64, usize>::new();
+            let mut taken = BTreeMap::<i64, usize>::new();
             (0..cases.len())
                 .filter(|&i| {
                     let Ok(inp) = cases[i].parse::<Inputs>() else {
