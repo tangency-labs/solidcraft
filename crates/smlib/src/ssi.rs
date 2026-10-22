@@ -86,6 +86,59 @@ impl Surface {
         ffi::ssi::nurbs([int(degree[0])?, int(degree[1])?], int(nu)?, int(nv)?, knots_u, knots_v, &flat, weights).map(Surface).map_err(error)
     }
 
+    /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
+    /// record's own parameters: radians for angles), with the record's parameterisation and
+    /// normal. A spline is taken over its whole knot domain. A cone only as a whole turn, widening
+    /// along its axis; a revolution not at all ([`Error::Unsupported`]).
+    pub fn from_record(surface: &solidcraft_geom::brep::Surface, domain: [[f64; 2]; 2]) -> Result<Surface> {
+        use solidcraft_geom::brep::Surface as S;
+        let [u, v] = domain;
+        let deg = |r: [f64; 2]| r.map(f64::to_degrees);
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let len = |a: [f64; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        // SMLib's plane runs along its axes made unit: the record's parameters scale by their lengths.
+        let plane = |origin: [f64; 3], du: [f64; 3], dv: [f64; 3]| {
+            let (a, b) = (len(du), len(dv));
+            Surface::plane(origin, du, dv, [u[0] * a, u[1] * a], [v[0] * b, v[1] * b])
+        };
+        match surface {
+            S::Plane { origin, u_axis, v_axis } => plane(*origin, *u_axis, *v_axis),
+            S::PlaneThrough { origin, u_point, v_point } => plane(*origin, sub(*u_point, *origin), sub(*v_point, *origin)),
+            S::Cylinder { frame, radius } => Surface::cylinder(frame.origin, frame.x_axis, frame.y_axis, *radius, deg(u), v),
+            S::Cone { frame, radius_at_origin, half_angle } => {
+                let t = half_angle.tan();
+                if !(t > 0.0) || !(u[1] - u[0] >= std::f64::consts::TAU * (1.0 - 1e-12)) {
+                    return Err(Error::Unsupported);
+                }
+                // The apex lies where the radius is 0; heights run from it along the axis.
+                let at = -radius_at_origin / t;
+                let z = cross(frame.x_axis, frame.y_axis);
+                let apex = [0, 1, 2].map(|k| frame.origin[k] + z[k] * at);
+                Surface::cone(apex, frame.x_axis, frame.y_axis, half_angle.to_degrees(), [(v[0] - at).max(0.0), v[1] - at])
+            }
+            S::Sphere { frame, radius } => Surface::sphere(frame.origin, frame.x_axis, frame.y_axis, *radius, deg(u), deg(v)),
+            S::Torus { frame, major_radius, minor_radius } => {
+                Surface::torus(frame.origin, frame.x_axis, frame.y_axis, *major_radius, *minor_radius, deg(u), deg(v))
+            }
+            S::Spline { u_knots, v_knots, points } => {
+                let (nu, nv) = (points.len(), points.first().map_or(0, Vec::len));
+                let flat: Vec<[f64; 3]> = points.iter().flatten().copied().collect();
+                let degree = [u_knots.len().checked_sub(nu + 1).ok_or(Error::Argument)?, v_knots.len().checked_sub(nv + 1).ok_or(Error::Argument)?];
+                Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, None)
+            }
+            S::RationalSpline { u_knots, v_knots, homogeneous } => {
+                let (nu, nv) = (homogeneous.len(), homogeneous.first().map_or(0, Vec::len));
+                let all: Vec<[f64; 4]> = homogeneous.iter().flatten().copied().collect();
+                let flat: Vec<[f64; 3]> = all.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3]]).collect();
+                let weights: Vec<f64> = all.iter().map(|h| h[3]).collect();
+                let degree = [u_knots.len().checked_sub(nu + 1).ok_or(Error::Argument)?, v_knots.len().checked_sub(nv + 1).ok_or(Error::Argument)?];
+                Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, Some(&weights))
+            }
+            S::PlacedRevolution { .. } => Err(Error::Unsupported),
+        }
+    }
+
     /// The UV domain the intersection runs within, as `[u0, u1, v0, v1]`.
     pub fn domain(&self) -> Result<[f64; 4]> {
         ffi::ssi::domain(&self.0).map_err(error)
