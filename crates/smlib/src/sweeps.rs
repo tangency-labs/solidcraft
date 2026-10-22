@@ -204,11 +204,22 @@ impl Brep {
     ) -> Result<Vec<(Curve, [f64; 2])>> {
         init()?;
         let l = List::of(curves)?;
-        let out = ffi::sweeps::project_curves(&self.0, &face_point, pick_tolerance, &l.raw(), &direction, tolerance).map_err(|s| match s {
-            ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
-            ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
-            s => error(s),
-        })?;
+        let out = ffi::sweeps::project_curves(&self.0, &face_point, pick_tolerance, &l.raw(), &direction, tolerance).map_err(picked)?;
+        nurbs_list(&out)
+    }
+
+    /// The section of the face nearest `face_point` by the plane through `plane_point` square to
+    /// `plane_normal`, as the NURBS SMLib made with their intervals. None is [`Error::Empty`].
+    pub fn face_section(
+        &self,
+        face_point: [f64; 3],
+        pick_tolerance: f64,
+        plane_point: [f64; 3],
+        plane_normal: [f64; 3],
+        tolerance: f64,
+    ) -> Result<Vec<(Curve, [f64; 2])>> {
+        init()?;
+        let out = ffi::sweeps::face_section(&self.0, &face_point, pick_tolerance, &plane_point, &plane_normal, tolerance).map_err(picked)?;
         nurbs_list(&out)
     }
 
@@ -258,6 +269,15 @@ impl Brep {
         init()?;
         let l = List::of(profile)?;
         ffi::sweeps::screw_sweep(&l.raw(), &origin, &direction, pitch, turns, tolerance).map(Brep).map_err(error)
+    }
+}
+
+/// The error of a call that picks faces by points.
+fn picked(s: i32) -> Error {
+    match s {
+        ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
+        ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
+        s => error(s),
     }
 }
 
