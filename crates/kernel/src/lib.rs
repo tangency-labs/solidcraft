@@ -111,6 +111,7 @@ mod planar_faces;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
+mod point_path;
 mod polybool;
 mod polyhedron;
 mod prism;
@@ -207,6 +208,7 @@ pub use ops::{
     BoolOp, boolean, can_join_all_touching_faces, can_join_touching_faces, compound_disjoint_extrusions, half_space, is_planar, join_apart,
     place_matrix, split_by_plane, transform, transform_matrix, union_apart, with_attempt_budget,
 };
+pub use point_path::{PathPiece, PointPath, sweep_point_path_with};
 pub use polybool::{faceted_boolean, planar_boolean};
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};

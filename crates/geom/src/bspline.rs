@@ -1021,6 +1021,103 @@ impl<const N: usize> CurveN<N> {
         }
         Some((x, dx))
     }
+
+    /// The speed in space (the length of the first three coordinates' derivative) at `t`.
+    fn speed(&self, t: f64) -> Option<f64> {
+        let (_, d) = self.eval(t)?;
+        Some(d.iter().take(3).map(|x| x * x).sum::<f64>().sqrt())
+    }
+
+    /// The length in space (the first three coordinates) from `a` to `b`: 8-point Gauss–Legendre.
+    fn length_between(&self, a: f64, b: f64) -> Option<f64> {
+        let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+        GAUSS_8.iter().try_fold(0.0, |sum, (x, w)| Some(sum + w * half * self.speed(mid + half * x)?))
+    }
+}
+
+/// Nodes and weights of the 8-point Gauss–Legendre rule on [-1, 1].
+const GAUSS_8: [(f64, f64); 8] = [
+    (-0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+    (-0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (-0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (-0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.525_532_409_916_329, 0.313_706_645_877_887_3),
+    (0.796_666_477_413_626_7, 0.222_381_034_453_374_47),
+    (0.960_289_856_497_536_2, 0.101_228_536_290_376_26),
+];
+
+/// Pieces of each knot span that [`ArcLength`] integrates over.
+const ARC_PIECES_PER_SPAN: usize = 8;
+
+/// Length in space along a [`CurveN`] (its first three coordinates), for points evenly spaced
+/// by length: each knot span split into [`ARC_PIECES_PER_SPAN`] pieces, each integrated with
+/// 8-point Gauss–Legendre (a polynomial curve's speed is smooth within a span, so this is exact
+/// to rounding for the cubics it is used on).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArcLength {
+    /// Each piece's start and end parameter and the length before it.
+    pieces: Vec<[f64; 3]>,
+    total: f64,
+}
+
+impl ArcLength {
+    /// The table of `c` (`None` for a curve that does not evaluate or has no finite length).
+    pub fn of<const N: usize>(c: &CurveN<N>) -> Option<ArcLength> {
+        let (p, n) = (c.degree, c.ctrl.len());
+        if n <= p || c.knots.len() != n + p + 1 || n > MAX_KNOTS {
+            return None;
+        }
+        let mut pieces = Vec::new();
+        let mut total = 0.0;
+        for w in c.knots.get(p..=n)?.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if !(b > a) {
+                continue;
+            }
+            for i in 0..ARC_PIECES_PER_SPAN {
+                let (s, e) = (a + (b - a) * i as f64 / ARC_PIECES_PER_SPAN as f64, a + (b - a) * (i + 1) as f64 / ARC_PIECES_PER_SPAN as f64);
+                pieces.push([s, e, total]);
+                total += c.length_between(s, e)?;
+            }
+        }
+        (total.is_finite() && !pieces.is_empty()).then_some(ArcLength { pieces, total })
+    }
+
+    /// The whole length.
+    pub fn total(&self) -> f64 {
+        self.total
+    }
+
+    /// The parameter of `c` (the curve the table is of) at length `s` along it (clamped to the
+    /// curve): Newton's method within the piece holding it, kept inside that piece by bisection.
+    pub fn param_at<const N: usize>(&self, c: &CurveN<N>, s: f64) -> Option<f64> {
+        if !s.is_finite() {
+            return None;
+        }
+        let s = s.clamp(0.0, self.total);
+        let k = self.pieces.partition_point(|q| q[2] <= s).saturating_sub(1);
+        let [a, b, before] = *self.pieces.get(k)?;
+        let tol = 1e-13 * (1.0 + self.total);
+        let (mut lo, mut hi) = (a, b);
+        let piece = self.pieces.get(k + 1).map_or(self.total, |q| q[2]) - before;
+        let mut u = if piece > 0.0 { a + (b - a) * ((s - before) / piece).clamp(0.0, 1.0) } else { a };
+        for _ in 0..60 {
+            let f = before + c.length_between(a, u)? - s;
+            if f.abs() <= tol {
+                break;
+            }
+            if f > 0.0 {
+                hi = u;
+            } else {
+                lo = u;
+            }
+            let v = c.speed(u)?;
+            let next = if v > 0.0 { u - f / v } else { f64::NAN };
+            u = if next.is_finite() && next > lo && next < hi { next } else { 0.5 * (lo + hi) };
+        }
+        Some(u)
+    }
 }
 
 #[cfg(test)]

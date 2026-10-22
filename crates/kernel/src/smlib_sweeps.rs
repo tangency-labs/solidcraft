@@ -458,6 +458,11 @@ mod imp {
                 Curve::Arc { center: p(center), axis: p(k), reference: p(reference), radius, start: 0.0, end: turn }
             }
             crate::PathSeg::Curve { plane, seg } => curve(&plane, &seg)?,
+            crate::PathSeg::Cubic { p: ctrl } => Curve::Nurbs {
+                degree: 3,
+                points: ctrl.iter().map(|q| [q.x, q.y, q.z, 1.0]).collect(),
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            },
         })
     }
 
@@ -534,6 +539,9 @@ mod imp {
                     let n = plane.normal();
                     if translate { moved } else { turned_plane(&moved, b, n, t0.cross(t1).dot(n).atan2(t0.dot(t1))) }
                 }
+                // How SMLib's sweep turns the profile along a curve in space is its own frame's.
+                crate::PathSeg::Cubic { p: ctrl } if translate => moved_plane(&pl, ctrl[3] - ctrl[0]),
+                crate::PathSeg::Cubic { .. } => return Err(refuse("sweep round a corner next to a 3D sketch spline, the profile turning with it")),
             };
         }
         Ok(pl)
@@ -548,6 +556,7 @@ mod imp {
                 (a, crate::build::rotate_about(a, center, k, angle))
             }
             crate::PathSeg::Curve { plane, seg } => (plane.to_world(seg.start()), plane.to_world(seg.end())),
+            crate::PathSeg::Cubic { p: ctrl } => (ctrl[0], ctrl[3]),
         })
     }
 
@@ -591,6 +600,7 @@ mod imp {
             length += a.dist(b).max(match *s {
                 crate::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
                 crate::PathSeg::Curve { seg, .. } => seg.length(),
+                crate::PathSeg::Cubic { .. } => seg_len(s),
                 crate::PathSeg::Line { .. } => 0.0,
             });
         }
@@ -639,6 +649,7 @@ mod imp {
                     crate::PathSeg::Line { a, b } => crate::PathSeg::Line { a, b: a + (b - a) * 0.5 },
                     crate::PathSeg::Arc { a, center, axis, angle } => crate::PathSeg::Arc { a, center, axis, angle: angle * 0.5 },
                     crate::PathSeg::Curve { plane, seg } => crate::PathSeg::Curve { plane, seg: seg.split_half().0 },
+                    crate::PathSeg::Cubic { p: ctrl } => crate::PathSeg::Cubic { p: crate::point_path::cubic_split(&ctrl, 0.5).0 },
                 };
                 let there = carried(&at_mid, &[half], translate)?;
                 inside.extend(seeds(&there, pieces, |q| q));
@@ -700,6 +711,7 @@ mod imp {
             crate::PathSeg::Line { a, b } => a.dist(b),
             crate::PathSeg::Arc { a, center, angle, .. } => angle.abs() * a.dist(center),
             crate::PathSeg::Curve { seg, .. } => seg.length(),
+            crate::PathSeg::Cubic { p: ctrl } => crate::point_path::cubic_length(&ctrl).unwrap_or(f64::NAN),
         }
     }
 
@@ -727,6 +739,7 @@ mod imp {
                 let t = 0.5 * (lo + hi);
                 Some((plane.to_world(seg.point_at(t)), plane.dir_to_world(seg.derivative(t)).normalized()?))
             }
+            crate::PathSeg::Cubic { p: ctrl } => crate::point_path::cubic_along(&ctrl, f),
         }
     }
 
@@ -766,6 +779,13 @@ mod imp {
                 pts.windows(3)
                     .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
                     .map(|(u, v)| u.cross(v).atan2(u.dot(v)).abs())
+                    .sum()
+            }
+            crate::PathSeg::Cubic { p: ctrl } => {
+                let pts: Vec<Vec3> = std::iter::once(ctrl[0]).chain(crate::point_path::cubic_polyline(&ctrl, 1e-3)).collect();
+                pts.windows(3)
+                    .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
+                    .map(|(u, v)| u.cross(v).len().atan2(u.dot(v)))
                     .sum()
             }
         }

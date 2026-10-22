@@ -5700,12 +5700,13 @@ fn feature_tools_with_constructor(
                 Some(_) => Vec::new(),
                 None => path_segments(ps, path, start)?,
             };
-            let path_start = points.as_ref().and_then(|p| p.first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
+            let path_start =
+                points.as_ref().and_then(|p| p.points().first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
             let rails = rail_polylines(doc, st, rails, f.component, path_start)?;
             let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-            // A path through 3D sketch curves follows them as points.
-            if let Some(pts) = points {
-                return regions.iter().map(|r| Ok(tool(r, kernel::sweep_path_with(&ss.plane, r, &pts, &ctl)?))).collect();
+            // A path through 3D sketch curves: its drawn splines exactly, the rest as points.
+            if let Some(path) = points {
+                return regions.iter().map(|r| Ok(tool(r, kernel::sweep_point_path_with(&ss.plane, r, &path, &ctl)?))).collect();
             }
             regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect()
         }
@@ -5718,11 +5719,17 @@ fn feature_tools_with_constructor(
             if !(r > 1e-6) {
                 return Err(DocError::Invalid("pipe diameter must be positive".into()));
             }
-            if let Some(pts) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+                let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
                 let plane = Plane::from_normal(a, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
-                return Ok(unnamed(vec![kernel::sweep_path(&plane, &pipe_region(vals, r, wall)?, &pts)?]));
+                return Ok(unnamed(vec![kernel::sweep_point_path_with(
+                    &plane,
+                    &pipe_region(vals, r, wall)?,
+                    &along,
+                    &kernel::SweepControl::default(),
+                )?]));
             }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
@@ -5814,7 +5821,7 @@ pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::Sw
             let mapped = path_in_frame(doc, rs, consumer)?;
             let rs = mapped.as_ref();
             match path_points(rs, &rail.curves, start)? {
-                Some(pts) => Ok(pts),
+                Some(path) => Ok(path.points()),
                 None => Ok(kernel::path_polyline(&path_segments(rs, &rail.curves, start)?)?),
             }
         })
@@ -5900,20 +5907,24 @@ fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) ->
     Ok(Cow::Owned(mapped))
 }
 
-/// A path that uses 3D sketch curves (wires), as one chain of world points from the end nearest
-/// `start` (no start: the first curve runs toward the second). `None` when the path is all
-/// planar curves.
-fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<Vec<Vec3>>> {
+/// A path that uses 3D sketch curves (wires), as one chain of pieces from the end nearest
+/// `start` (no start: the first curve runs toward the second): each drawn 3D spline as its fit
+/// points (the kernel has its exact curve), every other curve as world points. `None` when the
+/// path is all planar curves.
+fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<kernel::PointPath>> {
     if !ids.iter().any(|id| ps.sketch.wire_index(id).is_some()) {
         return Ok(None);
     }
     if ids.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
-    let mut pieces: Vec<Vec<Vec3>> = Vec::with_capacity(ids.len());
+    let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(ids.len());
     for id in ids {
         if let Some(wi) = ps.sketch.wire_index(id) {
-            pieces.push(ps.sketch.wires.get(wi).map(|w| w.pts.clone()).unwrap_or_default());
+            pieces.push(match ps.sketch.wires.get(wi) {
+                Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
+                w => kernel::PathPiece::Polyline(w.map(|w| w.pts.clone()).unwrap_or_default()),
+            });
         } else {
             let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
             let mut pts: Vec<Vec3> = Vec::new();
@@ -5925,42 +5936,40 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
                     }
                 }
             }
-            pieces.push(pts);
+            pieces.push(kernel::PathPiece::Polyline(pts));
         }
     }
     // Pieces meet within the sketch's tolerance (projected curves are only that close).
     let tol = 1e-3;
-    let ends = |p: &Vec<Vec3>| (p.first().copied().unwrap_or_default(), p.last().copied().unwrap_or_default());
-    if let Some(f) = pieces.first().cloned() {
-        let (a, b) = ends(&f);
-        let flip = if start.is_finite() {
-            b.dist(start) < a.dist(start)
-        } else {
-            pieces.get(1).is_some_and(|n| {
-                let (na, nb) = ends(n);
-                na.dist(a).min(nb.dist(a)) < na.dist(b).min(nb.dist(b))
-            })
-        };
-        if flip && let Some(p0) = pieces.first_mut() {
-            p0.reverse();
+    let ends = |p: &kernel::PathPiece| {
+        let pts = p.points();
+        (pts.first().copied().unwrap_or_default(), pts.last().copied().unwrap_or_default())
+    };
+    let mut pieces = pieces.into_iter();
+    let Some(first) = pieces.next() else { return Ok(None) };
+    let rest: Vec<kernel::PathPiece> = pieces.collect();
+    let (a, b) = ends(&first);
+    let flip = if start.is_finite() {
+        b.dist(start) < a.dist(start)
+    } else {
+        rest.first().is_some_and(|n| {
+            let (na, nb) = ends(n);
+            na.dist(a).min(nb.dist(a)) < na.dist(b).min(nb.dist(b))
+        })
+    };
+    let first = if flip { first.reversed() } else { first };
+    let mut last = ends(&first).1;
+    let mut chain = vec![first];
+    for p in rest {
+        let (a, b) = ends(&p);
+        let (p, a, b) = if b.dist(last) < a.dist(last) { (p.reversed(), b, a) } else { (p, a, b) };
+        if a.dist(last) > tol {
+            return Err(DocError::Invalid("the path curves are not connected end to end".into()));
         }
+        chain.push(p);
+        last = b;
     }
-    let mut chain: Vec<Vec3> = Vec::new();
-    for mut p in pieces {
-        if let Some(last) = chain.last().copied() {
-            let (a, b) = ends(&p);
-            if b.dist(last) < a.dist(last) {
-                p.reverse();
-            }
-            if p.first().is_some_and(|a| a.dist(last) > tol) {
-                return Err(DocError::Invalid("the path curves are not connected end to end".into()));
-            }
-            chain.extend(p.into_iter().skip(1));
-        } else {
-            chain = p;
-        }
-    }
-    Ok(Some(chain))
+    Ok(Some(kernel::PointPath { pieces: chain }))
 }
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
@@ -5968,8 +5977,8 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
     // A path through 3D sketch curves is followed as a 3D polyline.
-    if let Some(pts) = path_points(ps, ids, start)? {
-        return Ok(pts.windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
+    if let Some(path) = path_points(ps, ids, start)? {
+        return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
     let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
     for id in ids {
@@ -6278,7 +6287,7 @@ fn seg_len(s: &kernel::PathSeg) -> f64 {
         kernel::PathSeg::Line { a, b } => (b - a).len(),
         kernel::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
         // Patterns flatten their paths; a curve left is measured along its chord.
-        kernel::PathSeg::Curve { plane, seg } => plane.to_world(seg.start()).dist(plane.to_world(seg.end())),
+        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Cubic { .. } => s.start().dist(s.end()),
     }
 }
 
@@ -6302,8 +6311,8 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
             let v = rotate_vec(a - center, k, s * t / r);
             (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
         }
-        kernel::PathSeg::Curve { plane, seg } => {
-            let (a, b) = (plane.to_world(seg.start()), plane.to_world(seg.end()));
+        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Cubic { .. } => {
+            let (a, b) = (s.start(), s.end());
             let d = (b - a).normalized().unwrap_or(Vec3::X);
             (a + d * t, d)
         }
@@ -6319,6 +6328,7 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
             kernel::PathSeg::Arc { a: end, center, axis: k * -1.0, angle }
         }
         kernel::PathSeg::Curve { plane, seg } => kernel::PathSeg::Curve { plane, seg: seg.reversed() },
+        kernel::PathSeg::Cubic { p: [a, b, c, d] } => kernel::PathSeg::Cubic { p: [d, c, b, a] },
     }
 }
 

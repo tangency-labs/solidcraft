@@ -237,7 +237,7 @@ pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg])
                     (part, Box::new(move |p| crate::build::rotate_about(p, center, k, angle)))
                 }
                 // The path was flattened: no curves are left.
-                PathSeg::Curve { .. } => return Err(KernelError::Invalid("a free-form path curve".into())),
+                PathSeg::Curve { .. } | PathSeg::Cubic { .. } => return Err(KernelError::Invalid("a free-form path curve".into())),
             };
             let next = far_wire(&part, &cur, map.as_ref())?;
             sides.extend(swept_sides(&part, &seeds, &[]));
