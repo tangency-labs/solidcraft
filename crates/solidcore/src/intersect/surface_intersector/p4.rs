@@ -57,6 +57,9 @@
 //!   domain: [`Surface::global_surface_solve_with`] returns them with the solutions,
 //!   and the walk over the pairs is
 //!   [`SurfaceIntersector::find_interior_curves_from_node_pairs`].
+//!   That walk retains each curve's lazily built cache for the call, as upstream's
+//!   cache manager does. Existing output curves are immutable; flushing only
+//!   appends curves, whose caches are built when first visited.
 //! - **Offset surfaces.** `DoLawIntersection` needs both surfaces to be
 //!   `SmOffsetSurface`s ([`SurfaceKind::OffsetSurface`], else `SM_ERR_NULL_POINTER`).
 //!   Past that check its law points wait on `SmFilletLaw::Evaluate`
@@ -71,6 +74,7 @@
 
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -430,6 +434,7 @@ impl SurfaceIntersector<'_> {
         if self.doing_self_intersection {
             return Err(SolidError::sm_err(OP_FIC));
         }
+        let mut curve_caches: Vec<Option<CurveCache<()>>> = Vec::new();
         for pair in pairs {
             // a fast test: is the intersection of these two nodes near a 3D curve
             let mut int_bbox = pair.bboxes[0];
@@ -438,12 +443,18 @@ impl SurfaceIntersector<'_> {
             let int_bbox = int_bbox.intersect(&pair.bboxes[1])?;
 
             let mut is_near_curve = false;
-            for curve in &out.curves_3d {
+            // flush_curve only appends to out.curves_3d. Keep existing caches,
+            // adding lazy slots for curves appended by an earlier pair.
+            curve_caches.resize_with(out.curves_3d.len(), || None);
+            for (curve, slot) in out.curves_3d.iter().zip(&mut curve_caches) {
                 // NER: no cache (or no tree) is SM_ERR_NULL_POINTER
-                let cache = match make_curve_cache::<()>(k, curve, None) {
-                    Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP_FIC)),
+                let cache = match slot {
+                    Some(cache) => cache,
+                    None => slot.insert(match make_curve_cache::<()>(k, curve, None) {
+                        Ok(c) => c,
+                        Err(e) if e.is_unported() => return Err(e),
+                        Err(_) => return Err(SolidError::null_pointer(OP_FIC)),
+                    }),
                 };
                 let tree = cache
                     .tree()
@@ -1549,5 +1560,69 @@ mod tests {
         if let Err(e) = si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out) {
             assert!(e.is_unported(), "{e}");
         }
+    }
+
+    #[test]
+    fn interior_pair_caches_preserve_lazy_errors_and_call_isolation() {
+        let k = Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let mut si = SurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
+        let line = Curve::from(
+            crate::curve::line::Line::create_line_segment(
+                3,
+                Vec3::new(0.0, 0.5, 0.0),
+                Vec3::new(1.0, 0.5, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        let invalid = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::default());
+        let near = Extent3d::from_bounds(0.4, 0.4, -0.1, 0.6, 0.6, 0.1);
+        let far = Extent3d::from_bounds(5.0, 5.0, 5.0, 6.0, 6.0, 6.0);
+        let pair = InteriorNodePair {
+            bboxes: [near, near],
+            uv_domains: [unit(), unit()],
+        };
+        let mut out = TsectCurves::default();
+        out.curves_3d.extend([line, invalid]);
+
+        // The near first curve hides the malformed second curve, even when the
+        // first tree is reused by subsequent pairs.
+        si.find_interior_curves_from_node_pairs(&k, &[pair; 8], &mut out)
+            .unwrap();
+        assert_eq!(out.curves_3d.len(), 2);
+        assert_eq!(
+            out.curves_3d[0].evaluate_point(&k, 0.5).unwrap(),
+            Vec3::new(0.5, 0.5, 0.0)
+        );
+        let far_pair = InteriorNodePair {
+            bboxes: [far, far],
+            ..pair
+        };
+        assert_eq!(
+            si.find_interior_curves_from_node_pairs(&k, &[pair, far_pair], &mut out),
+            Err(SolidError::null_pointer(OP_FIC))
+        );
+
+        // Pair validation still precedes even the first curve-cache build.
+        let disjoint = InteriorNodePair {
+            bboxes: [near, far],
+            ..pair
+        };
+        out.curves_3d.remove(0);
+        let mut expanded = near;
+        expanded.expand_absolute(si.this_approx_tol_3d);
+        assert_eq!(
+            si.find_interior_curves_from_node_pairs(&k, &[disjoint], &mut out),
+            expanded.intersect(&far).map(|_| ())
+        );
+        si.find_interior_curves_from_node_pairs(&k, &[], &mut out)
+            .unwrap();
+        // No cache from the earlier call may survive replacing its output curve.
+        assert_eq!(
+            si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out),
+            Err(SolidError::null_pointer(OP_FIC))
+        );
     }
 }
