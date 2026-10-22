@@ -1,5 +1,6 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_loft`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's `capi/src/smlib_sweeps.cpp`), declared by hand.
+//! `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's
+//! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
 //! the curve lists.
 
@@ -99,6 +100,7 @@ unsafe extern "C" {
         cap: i32,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_loft_to_point(kinds: *const i64, n_kinds: i64, reals: *const f64, n_reals: i64, apex: *const f64, out: *mut *mut RawBrep) -> i32;
     fn smlib_screw_sweep(
         kinds: *const i64,
         n_kinds: i64,
@@ -158,6 +160,12 @@ pub fn loft(sections: &List, sizes: &[i64], degree: i32, cap: bool) -> Result<Ha
 }
 
 #[cfg(feature = "native")]
+pub fn loft_to_point(section: &List, apex: &[f64; 3]) -> Result<Handle, i32> {
+    let (k, nk, r, nr) = raw(section)?;
+    new_brep(|out| unsafe { smlib_loft_to_point(k, nk, r, nr, apex.as_ptr(), out) })
+}
+
+#[cfg(feature = "native")]
 pub fn screw_sweep(profile: &List, origin: &[f64; 3], direction: &[f64; 3], pitch: f64, turns: f64, tolerance: f64) -> Result<Handle, i32> {
     let (k, nk, r, nr) = raw(profile)?;
     new_brep(|out| unsafe { smlib_screw_sweep(k, nk, r, nr, origin.as_ptr(), direction.as_ptr(), pitch, turns, tolerance, out) })
@@ -191,6 +199,11 @@ pub fn sweep(_: &List, _: &List, _: i32, _: bool) -> Result<Handle, i32> {
 
 #[cfg(not(feature = "native"))]
 pub fn loft(_: &List, _: &[i64], _: i32, _: bool) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn loft_to_point(_: &List, _: &[f64; 3]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 

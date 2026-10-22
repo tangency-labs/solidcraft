@@ -60,6 +60,19 @@ fn sweeps_lofts_and_screws() {
     let sections = vec![vec![circle([0.0; 3], 5.0)], vec![circle([0.0, 0.0, 6.0], 3.0)]];
     let b = Brep::loft(&sections, 1, true).unwrap();
     assert_close(solid_volume(&b, "frustum"), PI * 2.0 * (25.0 + 9.0 + 15.0), 1e-5, "lofted frustum");
+    // A ring lofted to a ring: the outline and the hole are one section, lofted loop to loop.
+    let ring = |z: f64| {
+        let hole = Curve::Arc { center: [0.0, 0.0, z], axis: [0.0, 0.0, -1.0], reference: [1.0, 0.0, 0.0], radius: 12.0, start: 0.0, end: TAU };
+        vec![circle([0.0, 0.0, z], 20.0), hole]
+    };
+    let b = Brep::loft(&[ring(0.0), ring(20.0)], 1, true).unwrap();
+    assert_close(solid_volume(&b, "tube"), PI * (400.0 - 144.0) * 20.0, 1e-5, "lofted tube");
+    // A square to a point 15 above it: a pyramid, A h / 3.
+    let base = polygon(&[[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]);
+    let b = Brep::loft_to_point(&base, [0.0, 0.0, 15.0]).unwrap();
+    assert_close(solid_volume(&b, "pyramid"), 2000.0, 1e-9, "pyramid");
+    assert_eq!(Brep::loft_to_point(&base, [3.0, 4.0, 0.0]).err(), Some(Error::Argument), "apex in the base's plane");
+    assert_eq!(Brep::loft_to_point(&[circle([0.0; 3], 5.0)], [0.0, 0.0, 5.0]).err(), Some(Error::Argument), "curved base");
     let tooth = polygon(&[[4.0, 0.0, 0.0], [4.4, 0.0, 0.0], [4.4, 0.0, 0.4], [4.0, 0.0, 0.4]]);
     let b = Brep::screw_sweep(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, 1e-4).unwrap();
     assert_close(solid_volume(&b, "screw"), 0.16 * TAU * 4.2 * 3.0, 1e-4, "screw sweep");
