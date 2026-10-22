@@ -45,7 +45,11 @@ fn net(s: &Seg2) -> Result<(Vec<Vec2>, Vec<f64>, Vec<f64>)> {
                 pts.push(at(a0 + d, radius));
                 weights.push(1.0);
                 let u = (j + 1) as f64 / m as f64;
-                knots.extend(if j + 1 < m { [u, u].as_slice() } else { [1.0, 1.0, 1.0].as_slice() });
+                if j + 1 < m {
+                    knots.extend([u, u]);
+                } else {
+                    knots.extend([1.0; 3]);
+                }
             }
             (pts, weights, knots)
         }
@@ -95,6 +99,7 @@ pub(crate) fn segment(plane: &Plane, s: &Seg2) -> Result<(Curve, Curve2)> {
             [x * h, y * h, z * h, *h]
         })
         .collect();
-    let pcurve = Curve2::RationalSpline { knots: knots.clone(), homogeneous: pts.iter().zip(&weights).map(|(q, h)| [q.x * h, q.y * h, *h]).collect() };
+    let pcurve =
+        Curve2::RationalSpline { knots: knots.clone(), homogeneous: pts.iter().zip(&weights).map(|(q, h)| [q.x * h, q.y * h, *h]).collect() };
     Ok((Curve::RationalSpline { knots, homogeneous }, pcurve))
 }
