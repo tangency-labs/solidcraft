@@ -22,8 +22,6 @@ mod blend_variable;
 #[cfg(test)]
 mod blend_wrong_way_tests;
 mod body;
-mod boolean_diagnostics;
-mod boolean_guard;
 mod boolean_record;
 mod boundary;
 mod boundary_network;
@@ -32,7 +30,6 @@ mod build;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
 mod clearance;
-mod coaxial_overlap;
 mod continuity;
 mod coplanar;
 mod corner_g2;
@@ -163,7 +160,6 @@ pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint};
-pub use boolean_diagnostics::{BooleanDiagnostics, BooleanFallback, BooleanStrategy, capture_boolean_diagnostics};
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
 pub use bridge::{Continuity, Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
@@ -172,7 +168,6 @@ pub use build::{
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use clearance::{Clearance, Occupancy};
-pub use coaxial_overlap::{CoaxialOverlap, coaxial_candidate, coaxial_overlap};
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamVerdict, SeamWorst, pick_edges, seam_diagnostics,
 };
@@ -200,7 +195,7 @@ pub use native::{brep_record, decode_native_body, encode_native_body, native_pre
 pub use offset::with_same_surface;
 pub use ops::{
     BoolOp, boolean, can_join_all_touching_faces, can_join_touching_faces, compound_disjoint_extrusions, half_space, is_planar, join_apart,
-    place_matrix, split_by_plane, transform, transform_matrix, union_apart, with_attempt_budget,
+    place_matrix, split_by_plane, transform, transform_matrix, union_apart,
 };
 pub use point_path::{PathPiece, PointPath, SpaceBezier, curve_path, edge_path, sketch_record_curve, sweep_point_path_with};
 pub use polybool::faceted_boolean;
