@@ -1,0 +1,7 @@
+{
+  "unit": "surface.plane_p2",
+  "cases": [
+    {"name": "fuzz00896_transform_of_a_plane_whose_nurb", "origin": "fuzz-out/n2000/surface.plane_p2/fuzz00896.json (crash: cpp: killed by signal 11)", "issue": "UB-68", "cpp": "harness: invalid argument: transform of a plane whose NURB cannot be made", "rust": "ok", "inputs": {"a": {"make": {"domain": [2147483648, -3, 5, 3], "kind": "bounded", "o": [0, 0, 0], "scale": [1, 1], "x": [1, 0, 0], "y": [0, 1, 0]}}, "frame": [[1, 0, 0], [0, 1, 0], [1, 0, 0]], "op": "transform"}},
+    {"name": "fuzz01393_bounded_plane_whose_nurb_cannot_be", "origin": "fuzz-out/n2000/surface.plane_p2/fuzz01393.json (crash: cpp: killed by signal 11)", "issue": "UB-68", "cpp": "harness: invalid argument: bounded plane whose NURB cannot be made", "rust": "ok", "inputs": {"a": {"make": {"domain": [-0.00036, -0.0, 0.000188, -0.00048], "kind": "bounded", "o": [-0.00084, -0.00014, -0.0002], "scale": [1.0, 1.0], "x": [0.0, -1.0, 0.0], "y": [0.553, 0.0, 0.833]}}, "b": {"kind": "plane", "plane": {"make": {"domain": [-0.00028, 0.000158, -2.1e-06, 0.000853], "kind": "bounded", "o": [0.0003, 0.0004, 0.00026], "scale": [1.0, 1.0], "x": [0.0, 1.0, 0.0], "y": [-0.993, 0.0, 0.114]}}}, "da": [-1.0, -4.27, 2.66, -3.66], "db": [-1.0, 0.000158, 0.5, 0.000853], "op": "intersect"}}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "unit": "topology.edgeuse_p2",
+  "cases": [
+    {"name": "fuzz00649_c_invalid_argument_bad_index_count", "origin": "fuzz-out/n2000/topology.edgeuse_p2/fuzz00649.json (timeout: rust: no result after 20 s)", "cpp": "harness: c++: invalid argument: bad index/count 4294967296 (max 64)", "rust": "harness: sample count 4294967296 above 64", "inputs": {"brep": {"file": "torus.smb", "kind": "file"}, "eu": 1, "n": 4294967296, "op": "convex", "step_off": false, "tol_deg": 2.0}}
+  ]
+}

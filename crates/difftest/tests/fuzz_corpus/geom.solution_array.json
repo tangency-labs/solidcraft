@@ -1,0 +1,6 @@
+{
+  "unit": "geom.solution_array",
+  "cases": [
+    {"name": "fuzz01720_node_id", "origin": "fuzz-out/n2000/geom.solution_array/fuzz01720.json (crash: rust: killed by signal 6 (memory allocation of 773094113280 bytes failed))", "cpp": "harness: invalid argument: node id", "rust": "ok", "inputs": {"ops": [{"op": "append", "sols": [{"ep": [0.5, 0.000998, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "ev": 4.69, "no": 2, "nodes": [4294967296, -1, -1, -1, -1], "nv": 2, "objs": [1402, 802, -1, -1, -1], "sp": [6.88, 3.54, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "sv": 1.0, "t": 1}]}]}}
+  ]
+}

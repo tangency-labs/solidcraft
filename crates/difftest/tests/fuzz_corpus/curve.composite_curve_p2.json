@@ -1,0 +1,6 @@
+{
+  "unit": "curve.composite_curve_p2",
+  "cases": [
+    {"name": "fuzz00786_curve_euclidean_point_out_of_range", "origin": "fuzz-out/n2000/curve.composite_curve_p2/fuzz00786.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: curve: Euclidean point out of range", "rust": "ok", "inputs": {"comps": [{"curves": [{"segment": {"a": [-4, 0.1, 0], "b": [-3, -1, -9223372036854775808]}}]}], "dirs": [3], "op": "offsets", "params": {"atol": 0.0025, "corner": 0, "dist": 0.3, "normal": [0, 0, 1], "trim": true, "xtol": 0.001}}}
+  ]
+}

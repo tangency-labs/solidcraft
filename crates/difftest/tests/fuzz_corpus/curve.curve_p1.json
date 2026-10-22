@@ -1,0 +1,6 @@
+{
+  "unit": "curve.curve_p1",
+  "cases": [
+    {"name": "fuzz01447_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/curve.curve_p1/fuzz01447.json (crash: rust: killed by signal 6 (memory allocation of 4294967296 bytes failed))", "issue": "HANG-41", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"angle": 0.0, "chord": 1.0, "curve": {"line": {"domain": [4.08, 9.04], "p": [-1.74, -7.94, -8.92], "v": [2.13, -1.25, -0.647]}}, "ivl": [4.08, 9.04], "minseg": 9223372036854775807, "op": "tess"}}
+  ]
+}

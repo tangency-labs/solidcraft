@@ -1,0 +1,7 @@
+{
+  "unit": "blend.hcr",
+  "cases": [
+    {"name": "fuzz00490_runs", "origin": "fuzz-out/n2000/blend.hcr/fuzz00490.json (timeout: cpp: no result after 20 s)", "issue": "HANG-40", "cpp": "error: rejected: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "rust": "error: rejected: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "inputs": {"ang_tol": 0.2, "approx_tol": 1e-06, "brep": {"curve": {"cpts": [[0.0, 0.0, 0.0, 1.0]], "dim": 3, "p": 3, "u": [1.0]}, "kind": "wire", "t0": 0.0, "t1": 1.0}, "edge": 1, "op": "edge_visibility", "premark": false, "vertex": -1, "view": [0.0, 0.0, 1.0], "visible": true}},
+    {"name": "fuzz00700_runs", "origin": "fuzz-out/n2000/blend.hcr/fuzz00700.json (timeout: rust: no result after 20 s)", "issue": "HANG-40", "cpp": "error: rejected: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "rust": "error: rejected: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "inputs": {"ang_tol": 0.2, "approx_tol": 1e-06, "brep": {"curve": {"cpts": [[0.0, 0.0, 0.0, 1.0]], "dim": 3, "p": 3, "u": [1.0]}, "kind": "wire", "t0": 0.0, "t1": 1.0}, "edge": 0, "op": "edge_visibility", "premark": false, "vertex": 552624, "view": [0.0, 0.0, 1.0], "visible": true}}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "unit": "surface.trim_srf_cache",
+  "cases": [
+    {"name": "fuzz00171_empty_u_knots", "origin": "fuzz-out/n2000/surface.trim_srf_cache/fuzz00171.json (panic: cpp runner: attempt to subtract with overflow)", "cpp": "harness: empty u knots", "rust": "harness: surface input: nurbs::srf_basic::Surface::new: invalid input: empty u knot vector", "inputs": {"kinds": [15120], "op": "new", "opts": [0.0, 28.8, 0.0, 0.0, 0.0926, 0.001], "srf": {"srf": {"net": [[[-2.4, 1.0, 1.8, -1.7976931348623157e+308]]], "p": 2, "q": 1, "u": [], "v": [1.41]}}}},
+    {"name": "fuzz01393_empty_v_knots", "origin": "fuzz-out/n2000/surface.trim_srf_cache/fuzz01393.json (panic: cpp runner: attempt to subtract with overflow)", "cpp": "harness: empty v knots", "rust": "harness: surface input: nurbs::srf_basic::Surface::new: invalid input: empty v knot vector", "inputs": {"enabled": true, "modified": true, "op": "point_test", "srf": {"srf": {"net": [[[1, 1, 0, -1.7976931348623157e+308]]], "p": 1, "q": 1, "u": [1], "v": []}}, "uv": [-1, 2]}}
+  ]
+}

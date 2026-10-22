@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.crv_approx",
+  "cases": [
+    {"name": "fuzz00475_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.crv_approx/fuzz00475.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/crv_approx.rs:240)", "issue": "UB-235", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"ae": 90.0, "as": 0.0, "cen": [1.0, -2.0, 3.0], "deg": 4, "nc": 9223372036854775807, "op": "circ_arc", "rad": 5.0, "x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0]}},
+    {"name": "fuzz01067_curve_need_1_p_n_and", "origin": "fuzz-out/n2000/nlib.crv_approx/fuzz01067.json (crash: rust: killed by signal 6 (memory allocation of 517815827880 bytes failed))", "cpp": "harness: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "rust": "ok", "inputs": {"crv": {"cpts": [[2.15, 0.299, 1.7976931348623157e+308, -1.7976931348623157e+308]], "p": 4, "u": [2.49]}, "deg": 2147483648, "op": "non_rat", "par": "inherited", "tol": 0.000343}}
+  ]
+}

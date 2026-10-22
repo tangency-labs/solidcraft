@@ -1,0 +1,6 @@
+{
+  "unit": "topology.face_p3",
+  "cases": [
+    {"name": "fuzz01109_c_invalid_argument_b_rep_value", "origin": "fuzz-out/n2000/topology.face_p3/fuzz01109.json (timeout: cpp: no result after 20 s)", "cpp": "harness: c++: invalid argument: B-rep value above 1e150 (HANG-29)", "rust": "harness: c++ types: invalid argument: B-rep value above 1e150 (HANG-29)", "inputs": {"brep": {"dom": [0, 0, 1, 1], "kind": "face", "surface": {"bspline": {"net": [[[0, 0, 0, -1.7976931348623157e+308], [0, 1, 0, -1.7976931348623157e+308]], [[1, 0, 0, -1.7976931348623157e+308], [1, 1, 1e+300, -1.7976931348623157e+308]]], "p": 1, "q": 1, "u": [0, 0, 1, 1], "v": [0, 0, 1, 1]}}}, "face": 1, "op": "degenerate", "skip_quick": false}}
+  ]
+}

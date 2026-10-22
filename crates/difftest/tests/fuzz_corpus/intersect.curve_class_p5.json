@@ -1,0 +1,6 @@
+{
+  "unit": "intersect.curve_class_p5",
+  "cases": [
+    {"name": "fuzz01268_invalid_curve_class_p5_input_or", "origin": "fuzz-out/n2000/intersect.curve_class_p5/fuzz01268.json (crash: cpp: killed by signal 11)", "issue": "UB-109", "cpp": "harness: invalid argument: invalid curve_class_p5 input or undefined native path", "rust": "harness: invalid argument: invalid curve_class_p5 input or undefined native path", "inputs": {"bounds": [0.0], "flag1": true, "op": 6}}
+  ]
+}

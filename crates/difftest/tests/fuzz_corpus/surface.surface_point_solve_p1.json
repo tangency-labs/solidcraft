@@ -1,0 +1,6 @@
+{
+  "unit": "surface.surface_point_solve_p1",
+  "cases": [
+    {"name": "fuzz01268_surface_point_out_of_range", "origin": "fuzz-out/n2000/surface.surface_point_solve_p1/fuzz01268.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: surface: point out of range", "rust": "ok", "inputs": {"dom": [0.0, 0.0, 1.0, 1.0], "op": "closed", "solver": 10, "surf": {"bspline": {"srf": {"net": [[[0.0, 0.0, 0.0, -1.7976931348623157e+308], [0.0, -1e+300, 0.0, -1.7976931348623157e+308]], [[1.0, 0.0, 0.0, -1.7976931348623157e+308], [1.0, 1.0, 0.673, -1.7976931348623157e+308]]], "p": 1, "q": 1, "u": [0.0, 0.0, 1.0, 1.0], "v": [0.0, 0.0, 1.0, 1.0]}}}, "test": [-0.389, 0.274, -0.863], "tol": 0.0069}}
+  ]
+}

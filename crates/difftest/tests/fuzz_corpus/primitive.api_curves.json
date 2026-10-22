@@ -1,0 +1,6 @@
+{
+  "unit": "primitive.api_curves",
+  "cases": [
+    {"name": "fuzz00414_multiplicities", "origin": "fuzz-out/n2000/primitive.api_curves/fuzz00414.json (crash: rust: killed by signal 6 (memory allocation of 4294967296 bytes failed))", "issue": "UB-238", "cpp": "harness: invalid argument: multiplicities", "rust": "ok", "inputs": {"degree": 3, "knots": [0.0, 0.508], "mults": [4], "op": "canonical", "points": [[8.68, -18.8, 7.97]]}}
+  ]
+}

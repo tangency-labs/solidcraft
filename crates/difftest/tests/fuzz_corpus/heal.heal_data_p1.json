@@ -1,0 +1,6 @@
+{
+  "unit": "heal.heal_data_p1",
+  "cases": [
+    {"name": "fuzz00523_script_value_above_1e150_hang_29", "origin": "fuzz-out/n2000/heal.heal_data_p1/fuzz00523.json (timeout: cpp: no result after 20 s)", "issue": "HANG-29", "cpp": "harness: script value above 1e150 (HANG-29)", "rust": "harness: c++ export: invalid argument: surface: need 1 <= p <= n, 1 <= q <= m, r = n+p+1, s = m+q+1", "inputs": {"brep": {"dom": [0.0423, 0.16, 0.913, 0.713], "kind": "face", "surface": {"bspline": {"net": [[[4000.0, 1000.0, 1e+300, -1.7976931348623157e+308]]], "p": 3, "q": 1, "u": [1.0], "v": [1.0]}}}, "case": "heal", "steps": [{"make": true, "step": "make_uv_trim_curves"}], "targets": {"e": "none", "f": "all", "v": "all"}}}
+  ]
+}

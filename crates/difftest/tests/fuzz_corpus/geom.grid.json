@@ -1,0 +1,6 @@
+{
+  "unit": "geom.grid",
+  "cases": [
+    {"name": "fuzz09254_grid_box", "origin": "fuzz-out/geom/geom.grid/fuzz09254.json (timeout: rust: no result after 20 s)", "issue": "HANG-40", "cpp": "harness: invalid argument: grid box", "rust": "ok", "inputs": {"grid": {"bbox": [-0.0001, -0.0001, -0.0001, 1e+300, 1.0, 1.0], "size": [10, 10, 10]}, "ops": [{"op": "dump"}]}}
+  ]
+}

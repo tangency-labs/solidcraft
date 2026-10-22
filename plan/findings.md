@@ -15098,6 +15098,22 @@ reconciliation with main's `surface.offset_surface`. With both, the affected dif
   Not committed as a fixture (it fails the unit); tracking it down is a follow-up in
   `surface.offset_surface`.
 
+## Fuzz crash corpus replayed on main (2026-10-22)
+
+The 2,061 unique crash/panic/timeout inputs of the 2026-10-20 fuzz sweep corpus were
+replayed one at a time on main `4bb0f022` (`difftest --fuzz-exec`, 4 GiB address-space
+limit, 20 s per side). 1,780 are now refused by an FFI guard or harness check, 208 run on
+both sides, 46 still crash (7) or hang (39) the C++ reference, and 27 are still open on the
+Rust side. One reduced input per unit, category and guard message is kept in
+`crates/difftest/tests/fuzz_corpus/` (197 cases, checked by
+`cargo test -p difftest --features cpp --test fuzz_corpus`).
+
+- **Rust still hangs (> 20 s; the C++ side refuses 24 of them and runs 1):** `curve.composite_curve_p2` fuzz00198, `curve.composite_curve_p2` fuzz00430, `curve.composite_curve_p2` fuzz00435, `curve.composite_curve_p2` fuzz01007, `curve.composite_curve_p2` fuzz01111, `curve.composite_curve_p2` fuzz01988, `curve.crv_on_surf` fuzz00526, `curve.crv_on_surf` fuzz01785, `curve.curve_cache` fuzz01735, `curve.curve_p1` fuzz01951, `curve.curve_p8` fuzz01456, `curve.curve_p8` fuzz01856, `curve.curve_p9` fuzz00144, `curve.curve_p9` fuzz01043, `curve.curve_p9` fuzz01222, `heal.heal_data_p1` fuzz00977, `heal.heal_data_p1` fuzz01666, `nlib.crv_approx` fuzz05147, `query.tess` fuzz00241, `query.tess` fuzz00353, `surface.surface_p8` fuzz01603, `surface.surface_point_solve_p1` fuzz00979, `surface.surface_point_solve_p2` fuzz00474, `surface.surface_point_solve_p2` fuzz01057, `surface.surface_point_solve_p3` fuzz00349. Known from the sweep ("Rust hangs on extreme coords"); `heal.heal_data_p1` and `surface.surface_point_solve_p2`/`p3` are the slow-not-hung cases of the 2026-10-21 entry above.
+- **Rust aborts:** `curve.curve_p1` fuzz01255 (`memory allocation of 6442450944 bytes failed` on the Rust side; the C++ guard refuses the input as `value 1e300 not finite or too large`).
+- **Inputs whose replay depends on the memory limit (23, not committed):** a side attempts an allocation that fails with `ENOMEM` under 4 GiB (strace), e.g. `nurbs.b_spline_curve_p2` fuzz00841 (`expert`, `stride = 2^31`): `control_points_expert` reserves `stride * count` doubles fallibly, which fails under the limit, but without a limit it succeeds and zero-fills `2^32` doubles (about 50 s of system time here). Same pattern in `geom.grid`, `geom.local_solve1d`, `geom.solution_array`, `intersect.ray_tracer`, `nlib.crv_approx`, `nlib.crv_fit_p1`/`p2`, `nlib.srf_adv_p3`, `nlib.srf_basic`, `nlib.srf_fit`, `nlib.srf_offset`, `nurbs.b_spline_curve_n_lib`, `nurbs.nurbs_crv`, `primitive.api_curves` (list in the PR's inventory).
+- **Rust-only replay of C++ hangs still hangs (11):** the `topology.edgeuse_p2`/`p3`, `face_p3`, `loopuse` and `vertex` HANG-29 inputs build their Rust B-rep through the same C++ export that hangs, so skipping the C++ operation does not help; `surface.surface_point_solve_p2` fuzz00961 / `p3` fuzz00316 take 75 s / 290 s in Rust.
+- **`surface.plane_p2` fuzz00842** (was a C++ crash after 42 preceding cases): alone, both sides run and differ (`values.rec.len`: cpp 41787, rust 1).
+
 ## topology.topology_traverser: `IsInnerShell` rebuilt the target surface cache per ray (perf, 2026-10-21)
 
 - **Symptom.** Case `adversarial_02_op7_00` (`fixtures/topology.topology_traverser/traversals.json`,

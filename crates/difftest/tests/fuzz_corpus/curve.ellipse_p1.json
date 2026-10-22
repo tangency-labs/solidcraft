@@ -1,0 +1,6 @@
+{
+  "unit": "curve.ellipse_p1",
+  "cases": [
+    {"name": "fuzz00284_polar_exactness_table_shorter_than_the", "origin": "fuzz-out/n2000/curve.ellipse_p1/fuzz00284.json (crash: cpp: killed by signal 11)", "issue": "UB-57", "cpp": "harness: invalid argument: polar exactness table shorter than the angle table", "rust": "harness: record: invalid argument: polar exactness table shorter than the angle table", "inputs": {"build": {"read_db": {"binary": false, "circle": true, "record": {"angles": [-91.7, -46.1, -0.455], "dim": 3, "exact": [], "form": 1, "head": [-4.32, -4.91, 2.73, -0.611, -0.368, -0.701, -0.188, -0.793, 0.579, -91.7, -0.456, 3.84, 3.84], "inside_out": 0, "knots": [0.0, 0.5, 1.0], "kt": 1, "n": 4, "p": 2, "possible": 1, "rat": 1, "vals": [1.0]}, "version": 32}}}}
+  ]
+}

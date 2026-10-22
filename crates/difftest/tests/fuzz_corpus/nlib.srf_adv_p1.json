@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.srf_adv_p1",
+  "cases": [
+    {"name": "fuzz01437_ffi_rejected_bad_index_count_flag", "origin": "fuzz-out/n2000/nlib.srf_adv_p1/fuzz01437.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/srf_nurb.rs:1107)", "cpp": "harness: ffi rejected: bad index/count/flag 9223372036854776000", "rust": "ok", "inputs": {"cont": 3, "ndr": 0, "op": "unbounded", "sur": {"net": [[[2.44, -0.224, 8.48, -1.7976931348623157e+308], [3.64, -0.722, 7.63, -1.7976931348623157e+308], [5.41, 0.369, -9.12, -1.7976931348623157e+308], [0.00994, 0.135, 3.58, -1.7976931348623157e+308]], [[2.21, 6.08, -921.0, -1.7976931348623157e+308], [-7.0, 4.59, -9.03, -1.7976931348623157e+308], [-5.96, -4.15, 2.4, -1.7976931348623157e+308], [-8.46, -0.974, 1.28, -1.7976931348623157e+308]]], "p": 1, "q": 9223372036854775807, "u": [229.0], "v": [8.55]}, "uv": [[454.0, 8.55]]}},
+    {"name": "fuzz01998_ffi_rejected_extend_by_distance_g1", "origin": "fuzz-out/n2000/nlib.srf_adv_p1/fuzz01998.json (timeout: cpp: no result after 20 s)", "issue": "HANG-6", "cpp": "harness: ffi rejected: extend by distance: G1/G2 step lost to rounding (distance too short)", "rust": "ok", "inputs": {"cont": 3, "dir": 1, "dist": -0.0, "end": 1, "op": "extend_by_dist", "sur": {"sms": {"$upstream_file": "offset_nurb.sms"}}}}
+  ]
+}
