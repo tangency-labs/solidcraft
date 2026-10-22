@@ -530,7 +530,7 @@ pub fn sweep_path(plane: &Plane, region: &Region2, path: &[Vec3]) -> Result<Body
 pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
     ctl.check()?;
     if crate::backend()? == crate::Backend::Smlib {
-        return smlib_sweep_points(plane, region, path, ctl);
+        return smlib_sweep_points(plane, region, &crate::PointPath::polyline(path.to_vec()), ctl);
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
@@ -566,18 +566,22 @@ pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &Swe
     ruled(plane, &profile, &pts, ctl)
 }
 
-/// [`sweep_path_with`] through SMLib: a path of points is the polyline through them, its
-/// straight runs the lines between them. A line, or a polyline with corners, is swept as those
-/// lines ([`crate::sweep_with`], which mitres the corners); a smooth polyline of more points stands for a curve (a drawn 3D spline) that SMLib has no
-/// path for yet.
-fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
-    let pts = clean(path)?;
-    let smooth = pts.len() > 2 && !pts.windows(3).any(|w| turn(w[1] - w[0], w[2] - w[1]) > CORNER);
-    if smooth {
-        return Err(crate::smlib_sweeps::refuse("sweep along a smooth path of points (a 3D sketch spline)"));
+/// [`crate::sweep_point_path_with`] through SMLib: each drawn 3D spline exactly (its spans), each
+/// polyline as the lines between its points ([`crate::PointPath::segs`]), swept by
+/// [`crate::sweep_with`], which mitres the corners. A smooth polyline of more points stands for a
+/// curve that reaches the kernel only as points (a projected, linked or included 3D curve), which
+/// SMLib has no path for yet.
+pub(crate) fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &crate::PointPath, ctl: &SweepControl) -> Result<Body> {
+    for piece in &path.pieces {
+        if let crate::PathPiece::Polyline(pts) = piece {
+            let pts = clean(pts)?;
+            if pts.len() > 2 && !pts.windows(3).any(|w| turn(w[1] - w[0], w[2] - w[1]) > CORNER) {
+                return Err(crate::smlib_sweeps::refuse("sweep along a smooth path of points (a projected or linked 3D curve)"));
+            }
+        }
     }
-    let segs: Vec<crate::PathSeg> = pts.windows(2).map(|w| crate::PathSeg::Line { a: w[0], b: w[1] }).collect();
-    if segs.len() > 1000 {
+    let segs = path.segs()?;
+    if segs.is_empty() || segs.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
     }
     crate::sweep_with(plane, region, &segs, ctl)

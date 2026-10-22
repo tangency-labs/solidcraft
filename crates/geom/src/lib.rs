@@ -15,6 +15,7 @@ pub mod blend;
 pub mod brep;
 pub mod bspline;
 mod bvh;
+pub mod catmull_rom;
 mod chain;
 pub mod compare;
 pub mod env;

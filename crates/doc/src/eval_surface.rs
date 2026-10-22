@@ -371,7 +371,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
             let body = match path_points(ps, path, start)? {
-                Some(pts) => {
+                Some(path) => {
+                    let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
@@ -608,7 +609,7 @@ fn network_sources(
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
             match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
-                Some(pts) => NetSource::Points(pts),
+                Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
                     let mut chains = curve_chains(&ss, &c.curves)?.into_iter();
