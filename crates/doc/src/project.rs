@@ -243,20 +243,25 @@ fn resolve_uncached(
             }
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Iso { body: name, at: q, dir: dir.clone() };
-            let along = match dir.trim().to_ascii_lowercase().as_str() {
-                "u" => Some(true),
-                "v" => Some(false),
-                _ => None,
-            };
-            match (st.bodies.get(bi).filter(|b| !b.body.is_mesh()), along) {
-                // A solid's face along its own parameter: the surface's isoparametric curve.
-                (Some(target), Some(along_u)) => {
+            match st.bodies.get(bi).filter(|b| !b.body.is_mesh()) {
+                Some(target) => {
                     let face = usize::try_from(f).map_err(|_| DocError::Invalid("face index exceeds platform limit".into()))?;
-                    (wires, exact) = exact_wires(crate::kernel::iso_curves(&target.body, face, q, along_u)?)?;
+                    let curves = match dir.trim().to_ascii_lowercase().as_str() {
+                        // Along the face's own parameter: the surface's isoparametric curve.
+                        "u" => crate::kernel::iso_curves(&target.body, face, q, true)?,
+                        "v" => crate::kernel::iso_curves(&target.body, face, q, false)?,
+                        // Along a direction: the face cut by the plane through the point that
+                        // holds the face's normal there and the direction.
+                        other => {
+                            let v: Vec<f64> = other.split([',', ' ']).filter_map(|x| x.trim().parse().ok()).collect();
+                            let [x, y, z] = v[..] else { return Err(DocError::Invalid(format!("iso direction `{dir}`"))) };
+                            crate::kernel::face_section_along(&target.body, face, q, Vec3::new(x, y, z))?
+                        }
+                    };
+                    (wires, exact) = joined_wires(curves, size * 1e-6)?;
                 }
-                // Along an explicit direction (the face cut by a plane), or on a mesh body: its
-                // triangles' section.
-                _ => {
+                // A mesh body has only its triangles: their section.
+                None => {
                     wires = crate::project3d::iso_curve(&mesh, f, q, dir);
                     exact = vec![Vec::new(); wires.len()];
                 }
@@ -373,12 +378,16 @@ fn projected_wires(
 ) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
     let from = segs.first().map(|s| ss.plane.to_world(s.start())).unwrap_or(at);
     let toward = if (at - from).dot(normal) < 0.0 { normal * -1.0 } else { normal };
-    let curves = crate::kernel::project_onto_face(&target.body, at, &ss.plane, segs, toward)?;
-    let tol = size * 1e-6;
+    joined_wires(crate::kernel::project_onto_face(&target.body, at, &ss.plane, segs, toward)?, size * 1e-6)
+}
+
+/// Record curves as wires: curves that meet end to end (within `tol`) one wire, each wire its
+/// points (for display) and its exact curves.
+fn joined_wires(curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>, tol: f64) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
     let (mut wires, mut exact): (Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>) = (Vec::new(), Vec::new());
     for (curve, interval) in curves {
         let pts = crate::kernel::PathPiece::Segs(crate::kernel::curve_path(&curve, interval)?).points();
-        let (Some(start), Some(_)) = (pts.first().copied(), pts.last()) else { continue };
+        let Some(start) = pts.first().copied() else { continue };
         match (wires.last_mut(), exact.last_mut()) {
             (Some(w), Some(e)) if w.last().is_some_and(|end| end.dist(start) <= tol) => {
                 w.extend(pts.into_iter().skip(1));
@@ -389,17 +398,6 @@ fn projected_wires(
                 exact.push(vec![WireCurve { curve, interval }]);
             }
         }
-    }
-    Ok((wires, exact))
-}
-
-/// Record curves as wires, one each: its points (for display) and the curve itself.
-fn exact_wires(curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
-    let mut wires = Vec::with_capacity(curves.len());
-    let mut exact = Vec::with_capacity(curves.len());
-    for (curve, interval) in curves {
-        wires.push(crate::kernel::PathPiece::Segs(crate::kernel::curve_path(&curve, interval)?).points());
-        exact.push(vec![WireCurve { curve, interval }]);
     }
     Ok((wires, exact))
 }
