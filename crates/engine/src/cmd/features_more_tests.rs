@@ -630,7 +630,13 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
             .world_state()
             .bodies
             .iter()
-            .find(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(40.5 + pick_offset, 0., 7.5)))
+            .find(|b| {
+                b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(
+                    40.5 + pick_offset,
+                    0.,
+                    7.5,
+                ))
+            })
             .unwrap()
             .name
             .clone();
@@ -654,7 +660,13 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
         assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
         let world = s.world_state();
         for x in [39.5, 119.5] {
-            assert!(world.bodies.iter().any(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(x, 0., 7.5))));
+            assert!(
+                world.bodies.iter().any(|b| b
+                    .body
+                    .mesh(&solidcraft_kernel::MeshTolerance::chord(0.001))
+                    .unwrap()
+                    .contains(solidcraft_geom::Vec3::new(x, 0., 7.5)))
+            );
         }
         let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
         loaded.refresh();
@@ -802,7 +814,15 @@ fn check_body_offset(auto: bool) {
     assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
     assert_eq!(s.doc.body_offsets["Sleeve"], offset);
     assert_eq!(s.doc.body_component("Sleeve", s.model.state().body("Sleeve").unwrap().feature), holder);
-    assert!(s.world_state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(solidcraft_geom::Vec3::new(0., 10.5, 7.5)));
+    assert!(
+        s.world_state()
+            .body("Sleeve")
+            .unwrap()
+            .body
+            .mesh(&solidcraft_kernel::MeshTolerance::chord(0.001))
+            .unwrap()
+            .contains(solidcraft_geom::Vec3::new(0., 10.5, 7.5))
+    );
 }
 
 #[test]
@@ -984,7 +1004,11 @@ fn cylinder_auto_inference_saves_a_profile_anchor_and_replays_both_depth_signs()
         let body = &state.body("Sleeve").unwrap().body;
         assert_eq!(body.shell_count(), 1);
         assert_eq!(
-            body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(Vec3::new(0., if mode == "emboss" { 10.5 } else { 9.5 }, 7.5)),
+            body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().contains(Vec3::new(
+                0.,
+                if mode == "emboss" { 10.5 } else { 9.5 },
+                7.5
+            )),
             mode == "emboss"
         );
         run(&mut s, "edit.undo", json!({}));
@@ -1022,7 +1046,10 @@ fn cylinder_auto_inference_ignores_remote_finite_tangent_walls_in_each_body_orde
         let remote = s.model.state().body("Remote").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         run(&mut s, "solid.emboss", json!({"sketch":"Badge","depth":1}));
         assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
-        assert_eq!(s.model.state().body("Remote").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume, remote);
+        assert_eq!(
+            s.model.state().body("Remote").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume,
+            remote
+        );
     }
 }
 
@@ -1865,12 +1892,7 @@ fn a_ring_cut_round_a_hole_takes_in_the_hole_it_is_drawn_round() {
         let before = volume(&mut s);
         // Profile 2: the ring between the hole's wall and the larger circle.
         let r = s.execute("solid.extrude", &json!({"direction":"negative","distance":"3","operation":"cut","profiles":[2]}));
-        let clean = r
-            .as_ref()
-            .ok()
-            .and_then(|v| v["feature"].as_u64())
-            .and_then(|id| s.model.result(id))
-            .is_some_and(|f| f.error.is_none());
+        let clean = r.as_ref().ok().and_then(|v| v["feature"].as_u64()).and_then(|id| s.model.result(id)).is_some_and(|f| f.error.is_none());
         (r.is_ok(), before - volume(&mut s), clean)
     };
     let taken = std::f64::consts::PI * (36.0 - 9.0) * 3.0;

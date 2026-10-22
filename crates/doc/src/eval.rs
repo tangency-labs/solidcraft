@@ -301,7 +301,10 @@ impl ModelBody {
         if k == 0 {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
-        let plan = match self.body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(self.body.size(), k), angle: Some(q.refined_angle(k)) }) {
+        let plan = match self
+            .body
+            .mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(self.body.size(), k), angle: Some(q.refined_angle(k)) })
+        {
             Ok(plan) => plan,
             Err(e) => {
                 log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
@@ -6089,8 +6092,10 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
         let lineages = crate::lineage::Lineage::lumps(&cut.body, cut.lineage.as_ref(), &lumps);
         for (lump, lineage) in lumps.into_iter().zip(lineages) {
             let tol = (lump.size() * 1e-4).max(1e-6);
-            let touches =
-                lump.mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2))).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
+            let touches = lump
+                .mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2)))
+                .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
+                .unwrap_or(false);
             if touches {
                 out.push(Traced { body: lump, lineage });
             }
@@ -6847,11 +6852,22 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut reduced = false;
+            // The kernel blends exactly the edges given: the feature adds each one's tangent
+            // chain when it asks for it. A radius law runs along one edge, so a variable or
+            // spline round takes its edge alone.
+            let chain = match &f.kind {
+                FeatureKind::Fillet { tangent_chain, style, .. } => {
+                    *tangent_chain && !matches!(style, crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. })
+                }
+                FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
+                _ => false,
+            };
             let mut blended = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 if let Some(w) = w {
                     notes.push(w);
                 }
@@ -7864,6 +7880,7 @@ mod chain_tests {
                 style: crate::FilletStyle::Constant,
                 fit: Default::default(),
                 corner: Default::default(),
+                tangent_chain: true,
             },
             None,
         )

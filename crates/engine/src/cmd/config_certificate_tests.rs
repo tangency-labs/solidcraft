@@ -203,7 +203,11 @@ fn legacy_v9_annulus_outer_side_emboss_keeps_its_original_heuristic_anchor() {
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&legacy.to_string()).unwrap());
     assert!(reopened.model.result(feature_id).unwrap().error.is_none());
-    assert!((reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume).abs() < 1e-8);
+    assert!(
+        (reopened.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - volume)
+            .abs()
+            < 1e-8
+    );
 }
 
 #[test]
