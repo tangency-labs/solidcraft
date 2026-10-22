@@ -920,6 +920,90 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
     crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::pieces([&bottom]), Some(region), from * sign, to - from, sign, draft)
 }
 
+/// A planar region on `plane` as the schema 4 record of one face (an open sheet): the plane's
+/// own axes as its parameters (its natural normal the sketch's), the outer loop
+/// counter-clockwise and the holes clockwise, each sketch segment one edge of its exact record
+/// curve ([`crate::point_path::sketch_record_curve`]) with its exact pcurve on the plane. The record
+/// equivalent of a profile face: SMLib takes it with `Brep::from_record`.
+pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom::brep::Brep> {
+    use solidcraft_geom::brep::{self as rec, pcurve};
+    if !frame_ok(plane) {
+        return Err(KernelError::Invalid("the face's plane is not finite and orthonormal".into()));
+    }
+    region_ok(r)?;
+    let region = oriented(r)?;
+    let tolerance = 1e-7;
+    let d = |v: Vec3| [v.x, v.y, v.z];
+    let surface = rec::Surface::Plane { origin: d(plane.origin), u_axis: d(plane.x), v_axis: d(plane.y) };
+    let bad = |what: &str| KernelError::Invalid(format!("profile {what}"));
+    // Edges and vertices numbered as the face's loops first meet them.
+    let mut edges: Vec<rec::Edge> = Vec::new();
+    let mut vertices: Vec<rec::Vertex> = Vec::new();
+    let mut loops: Vec<Vec<u32>> = Vec::new();
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for (li, l) in region.loops().enumerate() {
+        let segs = &l.lp.segs;
+        let first = u32::try_from(vertices.len()).map_err(|_| bad("size"))?;
+        let mut ids = Vec::with_capacity(segs.len());
+        for (k, s) in segs.iter().enumerate() {
+            let (curve, interval) = crate::point_path::sketch_record_curve(plane, s).ok_or_else(|| bad("curve"))?;
+            let start = u32::try_from(vertices.len()).map_err(|_| bad("size"))?;
+            vertices.push(rec::Vertex { point: d(plane.to_world(s.start())), tolerance });
+            let end = if k + 1 == segs.len() { first } else { start + 1 };
+            let e = u32::try_from(edges.len()).map_err(|_| bad("size"))?;
+            let (li, k) = (u32::try_from(li).map_err(|_| bad("size"))?, u32::try_from(k).map_err(|_| bad("size"))?);
+            edges.push(rec::Edge {
+                curve,
+                interval,
+                vertices: [start, end],
+                tolerance,
+                uses: vec![rec::EdgeUseRef { face: 0, r#loop: li, position: k, upper: false }],
+            });
+            ids.push(e);
+            for q in s.polyline(tolerance) {
+                for (i, x) in [q.x, q.y].into_iter().enumerate() {
+                    if let (Some(a), Some(b)) = (lo.get_mut(i), hi.get_mut(i)) {
+                        *a = a.min(x);
+                        *b = b.max(x);
+                    }
+                }
+            }
+        }
+        loops.push(ids);
+    }
+    let uses: Vec<Vec<pcurve::EdgeUse<'_>>> = loops
+        .iter()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|&e| {
+                    let edge = edges.get(e as usize)?;
+                    Some(pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward: true, tolerance, given: None })
+                })
+                .collect()
+        })
+        .collect();
+    let pcurves = pcurve::pcurves(&surface, &uses, tolerance).map_err(|e| KernelError::Failed(format!("profile pcurves: {e}")))?;
+    let face_loops = loops
+        .iter()
+        .zip(pcurves)
+        .map(|(ids, pcs)| rec::Loop::Edges {
+            edges: ids.iter().zip(pcs).map(|(&edge, pcurve)| rec::OrientedEdge { edge, forward: true, pcurve }).collect(),
+        })
+        .collect();
+    let pad = tolerance * 10.0;
+    let brep = rec::Brep {
+        version: rec::VERSION,
+        tolerance,
+        regions: vec![rec::Region { shells: vec![0], void: false }],
+        shells: vec![rec::Shell::Faces { faces: vec![rec::OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![rec::Face { surface, domain: [[lo[0] - pad, hi[0] + pad], [lo[1] - pad, hi[1] + pad]], loops: face_loops }],
+        edges,
+        vertices,
+    };
+    brep.validate().map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
+    Ok(brep)
+}
+
 /// Ruled loft through two or more planar sections (outer loops only). The sections and the
 /// same sections in reverse order give the same body.
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
@@ -1377,7 +1461,9 @@ impl PathSeg {
         let w = |p: Vec2| plane.to_world(p);
         match *s {
             Seg2::Line { a, b } => PathSeg::Line { a: w(a), b: w(b) },
-            Seg2::Arc { center, sweep, .. } => PathSeg::Arc { a: w(s.start()), center: w(center), axis: plane.normal() * sweep.signum(), angle: sweep.abs() },
+            Seg2::Arc { center, sweep, .. } => {
+                PathSeg::Arc { a: w(s.start()), center: w(center), axis: plane.normal() * sweep.signum(), angle: sweep.abs() }
+            }
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => PathSeg::Curve { plane: *plane, seg: *s },
         }
     }

@@ -75,7 +75,9 @@ impl PathPiece {
         if spans.is_empty() {
             return Ok(None);
         }
-        let seg = |p: [Vec3; 4]| SpaceBezier::cubic(p).map(PathSeg::Bezier).ok_or_else(|| KernelError::Invalid("the 3D sketch spline is not finite".into()));
+        let seg = |p: [Vec3; 4]| {
+            SpaceBezier::cubic(p).map(PathSeg::Bezier).ok_or_else(|| KernelError::Invalid("the 3D sketch spline is not finite".into()))
+        };
         Ok(Some(if *reversed {
             spans.into_iter().rev().map(|[a, b, c, d]| seg([d, c, b, a])).collect::<Result<_>>()?
         } else {
@@ -153,13 +155,30 @@ pub fn edge_path(body: &Body, edge: usize) -> Result<Vec<PathSeg>> {
     curve_path(&e.curve, e.interval)
 }
 
-/// The record curve `c` on `[t0, t1]` as path segments ([`edge_path`]).
-pub(crate) fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<PathSeg>> {
-    let bad = |what: &str| KernelError::Invalid(format!("the edge's {what} does not evaluate"));
-    if !(t0.is_finite() && t1.is_finite() && t0 < t1) {
+/// Most control points a record curve given to [`curve_path`] may have.
+const MAX_CURVE_POINTS: usize = 100_000;
+
+/// The record curve `c` on `[t0, t1]` as path segments ([`edge_path`]); the numbers are checked
+/// first (they may come from a design file).
+pub fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<PathSeg>> {
+    let bad = |what: &str| KernelError::Invalid(format!("the curve's {what} does not evaluate"));
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1 && t0.abs() < 1e9 && t1.abs() < 1e9) {
         return Err(bad("interval"));
     }
     let v = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+    let frame_ok = |f: &brep::Frame| {
+        let (x, y) = (v(f.x_axis), v(f.y_axis));
+        v(f.origin).is_finite() && (x.len() - 1.0).abs() < 1e-6 && (y.len() - 1.0).abs() < 1e-6 && x.dot(y).abs() < 1e-6
+    };
+    let finite = |pts: &[[f64; 3]]| pts.len() <= MAX_CURVE_POINTS && pts.iter().all(|q| v(*q).is_finite());
+    match c {
+        brep::Curve::Line { start, end } if !finite(&[*start, *end]) => return Err(bad("line")),
+        brep::Curve::Circle { frame, radius } if !(frame_ok(frame) && radius.is_finite() && *radius > 0.0) => return Err(bad("circle")),
+        brep::Curve::Ellipse { frame, radii } if !(frame_ok(frame) && radii.iter().all(|r| r.is_finite() && *r > 0.0)) => return Err(bad("ellipse")),
+        brep::Curve::Polyline { points } | brep::Curve::Spline { points, .. } if !finite(points) => return Err(bad("points")),
+        brep::Curve::RationalSpline { homogeneous, .. } if homogeneous.len() > MAX_CURVE_POINTS => return Err(bad("points")),
+        _ => {}
+    }
     let out = match c {
         brep::Curve::Line { start, end } => {
             let (s, e) = (v(*start), v(*end));
@@ -184,7 +203,8 @@ pub(crate) fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<Path
                 .map(|i| {
                     let a = t0 + d * i as f64;
                     let w = (d / 2.0).cos();
-                    let ctrl = [HPoint::weighted(at(a, 1.0), 1.0), HPoint::weighted(at(a + d / 2.0, 1.0 / w), w), HPoint::weighted(at(a + d, 1.0), 1.0)];
+                    let ctrl =
+                        [HPoint::weighted(at(a, 1.0), 1.0), HPoint::weighted(at(a + d / 2.0, 1.0 / w), w), HPoint::weighted(at(a + d, 1.0), 1.0)];
                     SpaceBezier::new(&ctrl).map(PathSeg::Bezier).ok_or_else(|| bad("ellipse"))
                 })
                 .collect::<Result<_>>()?
@@ -216,6 +236,53 @@ pub(crate) fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<Path
         }
     };
     Ok(out)
+}
+
+/// A sketch segment on `plane` as the record curve that is it, on its interval, running the
+/// segment's way: a line, a circle (an arc's; clockwise ones on the frame turned over), a cubic
+/// or Bézier as a spline of its degree, a conic as a rational quadratic. `None` for a segment
+/// with non-finite numbers.
+pub fn sketch_record_curve(plane: &Plane, s: &solidcraft_geom::Seg2) -> Option<(brep::Curve, [f64; 2])> {
+    use solidcraft_geom::Seg2;
+    let w = |p: solidcraft_geom::Vec2| {
+        let q = plane.to_world(p);
+        [q.x, q.y, q.z]
+    };
+    let d = |v: Vec3| [v.x, v.y, v.z];
+    let bezier = |pts: &[solidcraft_geom::Vec2]| {
+        let n = pts.len().checked_sub(1)?;
+        let knots = std::iter::repeat_n(0.0, n + 1).chain(std::iter::repeat_n(1.0, n + 1)).collect();
+        Some((brep::Curve::Spline { knots, points: pts.iter().map(|p| w(*p)).collect() }, [0.0, 1.0]))
+    };
+    let out = match *s {
+        Seg2::Line { a, b } => (brep::Curve::Line { start: w(a), end: w(b) }, [0.0, 1.0]),
+        Seg2::Arc { center, radius, start, sweep } => {
+            let (y, t0) = if sweep >= 0.0 { (plane.y, start) } else { (plane.y * -1.0, -start) };
+            let frame = brep::Frame { origin: w(center), x_axis: d(plane.x), y_axis: d(y) };
+            (brep::Curve::Circle { frame, radius }, [t0, t0 + sweep.abs()])
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => bezier(&[p0, p1, p2, p3])?,
+        Seg2::Bezier { n, p } => bezier(p.get(..=usize::from(n))?)?,
+        Seg2::Conic { a, apex, b, w: wt } => {
+            let h = |p: solidcraft_geom::Vec2, k: f64| {
+                let q = w(p);
+                [q[0] * k, q[1] * k, q[2] * k, k]
+            };
+            (
+                brep::Curve::RationalSpline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], homogeneous: vec![h(a, 1.0), h(apex, wt), h(b, 1.0)] },
+                [0.0, 1.0],
+            )
+        }
+    };
+    let finite = |q: &[f64]| q.iter().all(|x| x.is_finite());
+    let ok = match &out.0 {
+        brep::Curve::Line { start, end } => finite(start) && finite(end),
+        brep::Curve::Circle { frame, radius } => finite(&frame.origin) && radius.is_finite() && *radius > 0.0,
+        brep::Curve::Spline { points, .. } => points.iter().all(|q| finite(q)),
+        brep::Curve::RationalSpline { homogeneous, .. } => homogeneous.iter().all(|q| finite(q) && q[3] > 0.0),
+        _ => false,
+    };
+    (ok && out.1.iter().all(|t| t.is_finite())).then_some(out)
 }
 
 /// The B-spline (homogeneous `ctrl` on `knots`) on `[t0, t1]` as its Bézier spans, one per knot

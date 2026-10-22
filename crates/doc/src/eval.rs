@@ -5844,17 +5844,7 @@ fn pipe_region(vals: &BTreeMap<String, Value>, r: f64, wall: &Option<crate::Expr
 }
 
 pub fn map_wire(wire: &mut solidcraft_sketch::Wire, matrix: &Mat) {
-    for point in wire.pts.iter_mut().chain(&mut wire.fit) {
-        *point = crate::apply_point(matrix, *point);
-    }
-    if let Some(arc) = &mut wire.arc {
-        let normal = crate::apply_vector(matrix, arc.normal);
-        arc.center = crate::apply_point(matrix, arc.center);
-        arc.start = crate::apply_point(matrix, arc.start);
-        arc.end = crate::apply_point(matrix, arc.end);
-        arc.normal = normal.normalized().unwrap_or(arc.normal);
-        arc.radius = arc.center.dist(arc.start);
-    }
+    wire.map(|p| crate::apply_point(matrix, p), |v| crate::apply_vector(matrix, v));
 }
 
 /// A feature's sketch as its component sees it: a sketch of another component that is placed
@@ -5909,8 +5899,9 @@ fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) ->
 
 /// A path that uses 3D sketch curves (wires), as one chain of pieces from the end nearest
 /// `start` (no start: the first curve runs toward the second): each drawn 3D spline as its fit
-/// points (the kernel has its exact curve), every other curve as world points. `None` when the
-/// path is all planar curves.
+/// points (the kernel has its exact curve), each curve held exactly (a planar sketch curve, a
+/// linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a linked
+/// curve known only as points as those points. `None` when the path is all planar curves.
 fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<kernel::PointPath>> {
     if !ids.iter().any(|id| ps.sketch.wire_index(id).is_some()) {
         return Ok(None);
@@ -5923,20 +5914,19 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
         if let Some(wi) = ps.sketch.wire_index(id) {
             pieces.push(match ps.sketch.wires.get(wi) {
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
+                Some(w) if !w.exact.is_empty() => {
+                    let mut segs = Vec::new();
+                    for c in &w.exact {
+                        segs.extend(kernel::curve_path(&c.curve, c.interval)?);
+                    }
+                    kernel::PathPiece::Segs(segs)
+                }
                 w => kernel::PathPiece::Polyline(w.map(|w| w.pts.clone()).unwrap_or_default()),
             });
         } else {
             let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-            let mut pts: Vec<Vec3> = Vec::new();
-            for s in ps.sketch.segs(ci) {
-                for q in s.polyline(1e-2) {
-                    let w = ps.plane.to_world(q);
-                    if pts.last().is_none_or(|l| l.dist(w) > 1e-9) {
-                        pts.push(w);
-                    }
-                }
-            }
-            pieces.push(kernel::PathPiece::Polyline(pts));
+            let segs = ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci));
+            pieces.push(kernel::PathPiece::Segs(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect()));
         }
     }
     // Pieces meet within the sketch's tolerance (projected curves are only that close).
@@ -6022,19 +6012,7 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     if let Some(profile) = profile {
         segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
     }
-    let n = ps.plane.normal();
-    Ok(segs
-        .iter()
-        .flat_map(|s| match *s {
-            solidcraft_geom::Seg2::Line { a, b } => vec![kernel::PathSeg::Line { a: w(a), b: w(b) }],
-            solidcraft_geom::Seg2::Arc { center, sweep, .. } => {
-                vec![kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }]
-            }
-            solidcraft_geom::Seg2::Cubic { .. } | solidcraft_geom::Seg2::Conic { .. } | solidcraft_geom::Seg2::Bezier { .. } => {
-                vec![kernel::PathSeg::Curve { plane: ps.plane, seg: *s }]
-            }
-        })
-        .collect())
+    Ok(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
 }
 
 /// A closed chain `segs` (in the plane `path`) begun where `profile`'s plane crosses it nearest
@@ -6342,7 +6320,7 @@ fn seg_len(s: &kernel::PathSeg) -> f64 {
         kernel::PathSeg::Line { a, b } => (b - a).len(),
         kernel::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
         // Patterns flatten their paths; a curve left is measured along its chord.
-        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Cubic { .. } => s.start().dist(s.end()),
+        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Bezier(_) => s.start().dist(s.end()),
     }
 }
 
@@ -6366,7 +6344,7 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
             let v = rotate_vec(a - center, k, s * t / r);
             (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
         }
-        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Cubic { .. } => {
+        kernel::PathSeg::Curve { .. } | kernel::PathSeg::Bezier(_) => {
             let (a, b) = (s.start(), s.end());
             let d = (b - a).normalized().unwrap_or(Vec3::X);
             (a + d * t, d)
@@ -6375,16 +6353,7 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
 }
 
 fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
-    match *s {
-        kernel::PathSeg::Line { a, b } => kernel::PathSeg::Line { a: b, b: a },
-        kernel::PathSeg::Arc { a, center, axis, angle } => {
-            let k = axis.normalized().unwrap_or(Vec3::Z);
-            let end = center + rotate_vec(a - center, k, angle);
-            kernel::PathSeg::Arc { a: end, center, axis: k * -1.0, angle }
-        }
-        kernel::PathSeg::Curve { plane, seg } => kernel::PathSeg::Curve { plane, seg: seg.reversed() },
-        kernel::PathSeg::Cubic { p: [a, b, c, d] } => kernel::PathSeg::Cubic { p: [d, c, b, a] },
-    }
+    s.reversed()
 }
 
 /// Point and tangent at arc length `d` along a chain (clamped to its ends).

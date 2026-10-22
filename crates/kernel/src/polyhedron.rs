@@ -77,7 +77,7 @@ fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)
 /// The convex polyhedron bounded by the half-spaces.
 pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
     let (verts, faces) = combinatorics(hs)?;
-    crate::smlib_sweeps::solid_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")
+    crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")
 }
 
 /// The record of the closed polyhedron with corners `verts` whose faces are `faces` (the

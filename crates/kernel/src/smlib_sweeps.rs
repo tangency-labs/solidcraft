@@ -71,7 +71,7 @@ pub(crate) struct Draft {
 }
 
 #[cfg(feature = "smlib")]
-pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sphere, sweep, sweep_controlled};
+pub(crate) use imp::{body_from_record, extrude, loft, loft_rails, loft_to_point, revolve, screw, sphere, sweep, sweep_controlled};
 
 /// The error of an SMLib operation in a build without SMLib.
 #[cfg(not(feature = "smlib"))]
@@ -83,7 +83,7 @@ pub(crate) fn not_built() -> KernelError {
 mod stubs {
     use super::*;
 
-    pub(crate) fn solid_from_record(_: &solidcraft_geom::brep::Brep, _: &str) -> Result<Body> {
+    pub(crate) fn body_from_record(_: &solidcraft_geom::brep::Brep, _: &str) -> Result<Body> {
         Err(not_built())
     }
     pub(crate) fn sphere(_: Vec3, _: f64) -> Result<Body> {
@@ -115,7 +115,7 @@ mod stubs {
     }
 }
 #[cfg(not(feature = "smlib"))]
-pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sphere, sweep, sweep_controlled};
+pub(crate) use stubs::{body_from_record, extrude, loft, loft_rails, loft_to_point, revolve, screw, sphere, sweep, sweep_controlled};
 
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
@@ -183,6 +183,13 @@ mod imp {
         pieces.iter().map(|x| curve(plane, &x.seg)).collect()
     }
 
+    /// A chain of sketch segments on `plane` as SMLib's curves, one each, exactly (lines, arcs,
+    /// Béziers and conics as NURBS): what SMLib's sweeps take as a profile or a path.
+    #[allow(dead_code)] // For the sheet builders, which still build their own wires.
+    pub(crate) fn chain_curves(plane: &Plane, segs: &[Seg2]) -> Result<Vec<Curve>> {
+        segs.iter().map(|s| curve(plane, s)).collect()
+    }
+
     /// The kernel body of an SMLib result SMLib's own check finds valid.
     fn body_of(brep: &Brep, what: &str) -> Result<Body> {
         let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
@@ -192,9 +199,9 @@ mod imp {
         crate::native::body_from_smlib(brep)
     }
 
-    /// The solid a schema 4 record describes, taken by SMLib as a modeller's own record (no
-    /// healing) and checked there.
-    pub(crate) fn solid_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
+    /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
+    /// modeller's own record (no healing) and checked there.
+    pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(&brep, what)
     }
