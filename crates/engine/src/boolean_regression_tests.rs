@@ -55,7 +55,16 @@ fn intersection_never_keeps_material_outside_the_trimming_cylinder() {
     let before = volume(&s, "Base");
     let r = s.execute("solid.cylinder", &json!({"radius": 16.65, "height": 14.59, "operation": "intersect", "targets": ["Base"]}));
     let state = s.model.state();
-    let reach = state.body("Base").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().positions.iter().map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+    let reach = state
+        .body("Base")
+        .unwrap()
+        .body
+        .mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3))
+        .unwrap()
+        .positions
+        .iter()
+        .map(|p| p.x.hypot(p.y))
+        .fold(0.0, f64::max);
     match r {
         Ok(_) => assert!(reach < 16.65 + 1e-2, "kept material out to radius {reach}"),
         Err(e) => assert!((volume(&s, "Base") - before).abs() < 1e-9 && reach > 16.9, "{e}"),
@@ -544,7 +553,8 @@ fn joined_loft_frames_plan_their_display_at_every_quality() {
         let body = &state.body(name).unwrap().body;
         for q in DisplayQuality::ALL {
             for k in 0..=MAX_REFINE {
-                let plan = body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(body.size(), k), angle: Some(q.refined_angle(k)) });
+                let plan =
+                    body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(body.size(), k), angle: Some(q.refined_angle(k)) });
                 assert!(plan.is_ok(), "{name} at {} + {k}: {:?}", q.id(), plan.err());
             }
         }
@@ -595,7 +605,10 @@ fn oblique_cuts_through_a_chamfered_ring_are_exact() {
     // Faces meshed coarsely keep to their surfaces: chords cut a little area off round faces,
     // and nothing adds any (triangles fanning across a chamfer from the notch's hole or from the
     // cuts' trims, folded over each other, added a few mm² each).
-    let (coarse, fine) = (body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap().measure().area, body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().area);
+    let (coarse, fine) = (
+        body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap().measure().area,
+        body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().area,
+    );
     assert!(coarse < fine && coarse > fine - 2.0, "area meshed at 0.05: {coarse} vs {fine}");
     println!(
         "ring {whole:.6} / {ring:.6} mm³; cuts {cut1:.6}, {cut2:.6}; notch {:.6} / {notch:.6}; area meshed at 0.05 {coarse:.4} / {fine:.4}",
@@ -611,7 +624,8 @@ fn notch_into_a_ring_chamfer_is_cut_exactly() {
     let script: Value = serde_json::from_str(include_str!("../../../examples/regressions/oblique_cuts_through_chamfered_ring.json")).unwrap();
     let steps = script.get("commands").and_then(Value::as_array).unwrap();
     let mut s = Session::default();
-    let measure = |s: &Session| s.model.state().body("R").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
+    let measure =
+        |s: &Session| s.model.state().body("R").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
     s.run_script(&Value::Array(steps[..5].to_vec())).unwrap();
     let before = measure(&s);
     // The notch's sketch and its cut.
@@ -942,7 +956,10 @@ fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
             let reference = expected.body(&body.name).unwrap();
             // Fixed fine chord tolerance: cap subdivision can change the default
             // adaptive mesh's cylinder faceting without changing its analytic surface.
-            let (a, b) = (body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume, reference.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume);
+            let (a, b) = (
+                body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume,
+                reference.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume,
+            );
             assert!((a - b).abs() < b.max(1.) * 1e-6, "{operation}: {} {a} vs {b}", body.name);
             assert!(body.body.validity().is_empty(), "{operation}: {}", body.name);
             let (a, b) = (body.mesh(), reference.mesh());
@@ -957,7 +974,11 @@ fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
             let unchanged = &actual.body("Other").unwrap().body;
             assert_eq!(unchanged.face_count(), other.face_count());
             assert_eq!(unchanged.color(), other.color());
-            assert_eq!(unchanged.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions, other.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions, "unaffected imported body");
+            assert_eq!(
+                unchanged.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions,
+                other.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().positions,
+                "unaffected imported body"
+            );
         }
     }
 }
@@ -1135,7 +1156,8 @@ fn cut_up_to_the_plate_top_face_opens_the_hole() {
     // The same design without the cut.
     script["commands"].as_array_mut().unwrap().pop();
     let before = replay_value(&script);
-    let fine = |s: &Session| s.model.state().body("Body7").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
+    let fine =
+        |s: &Session| s.model.state().body("Body7").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
     let (removed, want) = (fine(&before) - fine(&s), std::f64::consts::PI * 3.04 * 3.04 * 1.2);
     assert!((removed - want).abs() < 0.01, "removed {removed} mm³, want {want}");
 }

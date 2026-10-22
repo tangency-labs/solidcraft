@@ -195,7 +195,10 @@ pub fn collisions(s: &Session) -> Vec<(String, String, f64)> {
 /// Edges are tested for crossing the other's surface too: plates crossing face to face have
 /// no sample point inside (#3323).
 fn overlap(a: &Body, b: &Body) -> Option<f64> {
-    let (ma, mb) = (a.mesh(&solidcraft_kernel::MeshTolerance::chord((a.size() * 1e-3).max(1e-3))).ok()?, b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).ok()?);
+    let (ma, mb) = (
+        a.mesh(&solidcraft_kernel::MeshTolerance::chord((a.size() * 1e-3).max(1e-3))).ok()?,
+        b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).ok()?,
+    );
     mesh_overlap(&ma, &mb, 1e-4 * a.size().max(b.size()).max(1.0))
 }
 

@@ -2,7 +2,7 @@
 //! ([`crate::blend_smlib`]): the blend faces, the corners where blends meet (a sphere, a patch, a
 //! bevel or a mitre, as its fillet corners choose) and the end faces rebuilt round them. A blend
 //! whose contact lines would leave the faces it rolls on is SMLib's refusal, reported as
-//! [`KernelError::TooLarge`]. A tangent chain is the caller's to select.
+//! [`KernelError::TooLarge`]. A tangent chain is the caller's to select ([`tangent_chain`]).
 //!
 //! The helpers here read a body's schema 4 record: planar faces' outward normals, the direction
 //! into a face across an edge, an edge's tangent at its ends.
@@ -387,6 +387,67 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
         return Err(KernelError::Invalid("select 1…1000 edges".into()));
     }
     crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip)
+}
+
+/// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
+/// nearest edge of `body` to it), then a point on every other edge that continues one of them
+/// tangentially (within 0.5° at a shared vertex), until no more do. An edge only one face uses
+/// ends a chain. Picks that find no edge are refused.
+pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    /// Edges meeting at an angle below this continue one another.
+    const TANGENT_DEGREES: f64 = 0.5;
+    if picks.is_empty() || picks.len() > 1000 || picks.iter().any(|p| !p.is_finite()) {
+        return Err(KernelError::Invalid("select 1…1000 edges by finite points".into()));
+    }
+    let rec = Faces::of(body)?;
+    let size = body.size();
+    let mut chain: Vec<usize> = Vec::new();
+    for p in picks {
+        let (e, dist) = body.nearest_edge(*p, (size * 2e-3).max(1e-3))?.ok_or_else(|| KernelError::Invalid("the body has no edges".into()))?;
+        if dist > size * 0.05 + 1e-3 {
+            return Err(KernelError::Invalid(format!("no edge near the pick at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)));
+        }
+        if !chain.contains(&e) {
+            chain.push(e);
+        }
+    }
+    let picked = chain.len();
+    // The unit direction edge `e` leaves its end `v` in.
+    let leaving = |e: usize, v: u32| -> Option<Vec3> {
+        let [a, b] = rec.rec.edges.get(e)?.vertices;
+        if a == b {
+            return None;
+        }
+        if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
+    };
+    let cos = TANGENT_DEGREES.to_radians().cos();
+    let mut k = 0;
+    while k < chain.len() {
+        let Some(&e) = chain.get(k) else { break };
+        k += 1;
+        let Some(edge) = rec.rec.edges.get(e) else { continue };
+        for v in edge.vertices {
+            let Some(d) = leaving(e, v) else { continue };
+            for (f, other) in rec.rec.edges.iter().enumerate() {
+                if chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) {
+                    continue;
+                }
+                if leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
+                    chain.push(f);
+                }
+            }
+        }
+    }
+    let mut out = picks.to_vec();
+    for e in chain.into_iter().skip(picked) {
+        let edge = rec.rec.edges.get(e).ok_or_else(|| KernelError::Failed("a chain edge".into()))?;
+        let mid = CurveEval::new(&edge.curve)
+            .ok()
+            .and_then(|c| c.point(0.5 * (edge.interval[0] + edge.interval[1])))
+            .ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?;
+        out.push(mid);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

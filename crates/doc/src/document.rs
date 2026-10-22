@@ -274,10 +274,6 @@ impl ExtrudeConvention {
     }
 }
 
-fn draft_corner_is_default(c: &solidcraft_kernel::DraftCorner) -> bool {
-    *c == solidcraft_kernel::DraftCorner::default()
-}
-
 /// Extent of an extrude.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct Extent {
@@ -305,10 +301,13 @@ pub struct Extent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Taper angle")]
     pub taper: Option<Expr>,
-    /// How a taper closes the profile's sharp corners ([`solidcraft_kernel::draft_corners`] says
-    /// what each rule gives at each corner).
-    #[serde(default, skip_serializing_if = "draft_corner_is_default")]
-    pub corner: solidcraft_kernel::DraftCorner,
+    /// How a taper closes the profile's sharp corners, when the user chose
+    /// ([`solidcraft_kernel::draft_corners`] says what each rule gives at each corner). Without
+    /// it each profile takes preserve curvature where the kernel can build it exactly and the
+    /// tangent rule where a curve that is neither a line nor an arc has a corner, and the
+    /// feature's warning says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<solidcraft_kernel::DraftCorner>,
     /// To Object: end at the face (or vertex/point) at this point, instead of `distance`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<FacePick>,
@@ -657,6 +656,10 @@ pub enum FeatureKind {
         /// (default) or a G2 patch repeating each blend up to the second order.
         #[serde(default, skip_serializing_if = "FilletCorner::is_rolling")]
         corner: FilletCorner,
+        /// Round each picked edge's tangent chain with it (the default: edges continuing it
+        /// smoothly at its ends, as far as they go), or only the picked edges.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        tangent_chain: bool,
     },
     Chamfer {
         edges: Vec<Position>,
@@ -675,6 +678,9 @@ pub enum FeatureKind {
         flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
+        /// Cut each picked edge's tangent chain with it (the default), or only the picked edges.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        tangent_chain: bool,
     },
     Box {
         #[serde(with = "point_expr")]

@@ -1056,7 +1056,12 @@ pub(crate) fn loft_reversed(sections: &[(Plane, Loop2)]) -> Result<bool> {
 
 /// The loft's sections as the walls are built through them: in canonical order (`reversed`
 /// turns them round), each oriented the same way, re-split to the same number of segments and
-/// started at the segment that lines up with the lead section's first.
+/// started at the segment that lines up with the section before it. Every section is matched to
+/// its neighbour, as the walls pair them: it winds the way the section before it does about the
+/// normal they share (its plane's normal, turned over where it faces back from the one before),
+/// so sections whose planes turn on round the loft (a bar bent half a turn) keep one winding;
+/// and it starts where its vertices line up best with the section before it. The first section is
+/// matched to the one with the most segments, whose count every section takes.
 pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: bool) -> Result<Vec<(Plane, NumberedLoop)>> {
     let n = sections.iter().map(|(_, l)| l.lp.segs.len()).max().unwrap_or(0);
     if n == 0 || n > MAX_SEGS {
@@ -1067,45 +1072,35 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
     if reversed {
         ordered.reverse();
     }
-    // Orient every section counter-clockwise about the first section's normal (`Body::new`
-    // turns the solid outward), then match segment counts and starting points to the section
-    // with the most segments.
-    let n0 = ordered.first().map(|(p, _)| p.normal()).unwrap_or(Vec3::Z);
-    let parallel = ordered.iter().all(|(p, _)| p.normal().dot(n0).abs() > 1.0 - 1e-9);
-    let oriented: Vec<(Plane, NumberedLoop)> = ordered
-        .iter()
-        .map(|(p, l)| {
-            let ccw = p.normal().dot(n0) >= 0.0;
-            (*p, l.oriented(!ccw))
-        })
-        .collect();
-    let lead = oriented.iter().max_by_key(|(_, l)| l.lp.segs.len()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
-    let lead_c = lead.0.to_world(lead.1.lp.centroid());
-    let lead_dirs: Vec<Vec3> = lead.1.lp.segs.iter().map(|s| lead.0.to_world(s.start()) - lead_c).collect();
-    let mut out = Vec::with_capacity(oriented.len());
-    for (p, l) in &oriented {
-        let c = l.lp.centroid();
-        // Break angles: the lead section's vertex directions seen in this plane.
-        let angles: Vec<f64> = lead_dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y)).angle()).collect();
-        let mut r = l.resample(n, &angles);
-        // Circle resampling creates increasing local angles. An antiparallel sketch
-        // plane must run clockwise locally to keep the same winding in world space.
-        // Curving a run through a right angle does not reverse a section's winding.
-        if parallel && p.normal().dot(n0) < 0.0 {
-            r = r.oriented(true);
-        }
-        // Start where every vertex lines up best with the lead's vertex of the same number (the
-        // largest sum of dot products of their directions from the centroids). The one vertex
-        // closest in direction to the lead's first vertex twisted non-convex sections (#881): a
-        // zig-zag's centroid sits off its outline, so its first vertex can point away from the
-        // lead's.
-        let dirs: Vec<Vec2> = lead_dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
+    let lead = ordered.iter().max_by_key(|(_, l)| l.lp.segs.len()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
+    let corners = |p: &Plane, l: &NumberedLoop| -> (Vec3, Vec<Vec3>) {
+        let c = p.to_world(l.lp.centroid());
+        (c, l.lp.segs.iter().map(|s| p.to_world(s.start()) - c).collect())
+    };
+    let first_normal = ordered.first().map(|(p, _)| p.normal()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
+    // What each section is matched to: the normal the windings share, and the corners' directions
+    // from the centre (the lead's for the first section, then the section before).
+    let (mut normal, mut dirs) = (first_normal, corners(&lead.0, &lead.1.oriented(lead.0.normal().dot(first_normal) < 0.0)).1);
+    let mut out = Vec::with_capacity(ordered.len());
+    for (p, l) in &ordered {
+        let back = p.normal().dot(normal) < 0.0;
+        let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
+        // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
+        // clockwise in its plane; wound the other way when the plane faces back.
+        let angles: Vec<f64> = local.iter().map(|d| d.angle()).collect();
+        let mut r = l.oriented(back).resample(n, &angles).oriented(back);
+        // Start where every vertex lines up best with the matched one of the same number (the
+        // largest sum of dot products of their directions from the centroids): the single vertex
+        // closest in direction twisted non-convex sections (#881).
+        let c = r.lp.centroid();
         let m = r.lp.segs.len();
         let fit =
-            |k: usize| -> f64 { dirs.iter().enumerate().filter_map(|(i, d)| r.lp.segs.get((i + k) % m).map(|s| (s.start() - c).dot(*d))).sum() };
+            |k: usize| -> f64 { local.iter().enumerate().filter_map(|(i, d)| r.lp.segs.get((i + k) % m).map(|s| (s.start() - c).dot(*d))).sum() };
         if let Some(k) = (0..m).min_by(|a, b| fit(*b).total_cmp(&fit(*a))) {
             r.rotate_left(k);
         }
+        normal = if back { p.normal() * -1.0 } else { p.normal() };
+        dirs = corners(p, &r).1;
         out.push((*p, r));
     }
     Ok(out)

@@ -301,7 +301,10 @@ impl ModelBody {
         if k == 0 {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
-        let plan = match self.body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(self.body.size(), k), angle: Some(q.refined_angle(k)) }) {
+        let plan = match self
+            .body
+            .mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(self.body.size(), k), angle: Some(q.refined_angle(k)) })
+        {
             Ok(plan) => plan,
             Err(e) => {
                 log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
@@ -2454,6 +2457,28 @@ pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, 
     Ok(out)
 }
 
+/// The corner rule a taper takes for profile `r` of `ss` when the user chose none: preserve
+/// curvature, unless a corner of the profile cannot keep it exactly (a curve that is neither a
+/// line nor an arc), then the tangent rule, with a note in `notes` saying where and why.
+fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, notes: &mut Vec<String>) -> Result<kernel::DraftCorner> {
+    let reports = kernel::draft_corners(r, distance, taper)?;
+    let inexact = reports.iter().find(|c| {
+        c.options.iter().any(|o| o.rule == kernel::DraftCorner::PreserveCurvature && o.fill == Err(kernel::CornerRefusal::NotExact))
+    });
+    Ok(match inexact {
+        Some(c) => {
+            notes.push(format!(
+                "the taper's corners of profile at ({}, {}) in {} use the tangent rule: a curve of it is neither a line nor an arc, so its walls cannot continue as themselves exactly; corner: round also builds",
+                show_mm(c.at.x),
+                show_mm(c.at.y),
+                ss.name
+            ));
+            kernel::DraftCorner::Tangent
+        }
+        None => kernel::DraftCorner::PreserveCurvature,
+    })
+}
+
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
@@ -4463,6 +4488,7 @@ fn feature_tools_with_constructor(
     st: &ModelState,
     constructor: &mut Option<ExtrudeConstructor>,
     to_body: &mut Option<String>,
+    warning: &mut Option<String>,
 ) -> Result<Vec<Traced>> {
     *to_body = None;
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
@@ -4550,15 +4576,22 @@ fn feature_tools_with_constructor(
                 ];
                 // How far a tool grows past its profile, at most: its sides' run over its length.
                 let growth = len * taper.tan().abs();
+                let mut notes = Vec::new();
                 let tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, extent.corner)?;
+                        let roles = crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                        let corner = match extent.corner {
+                            Some(c) => c,
+                            None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
+                        };
+                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, corner)?;
                         Ok(roles.tool(body, None))
                     })
                     .collect::<Result<_>>()?;
+                for note in notes {
+                    append_warning(warning, note);
+                }
                 // Profiles apart by more than the tools grow (the letters of a text): the tools
                 // are apart too, and go into the body as one, in one boolean rather than one per
                 // profile, each on a body grown or cut by the ones before. (A join meeting several
@@ -5895,7 +5928,7 @@ fn replay(
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
             let moved = with_named_face_points(doc, st, src).map(|(g, _)| g);
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
@@ -6089,8 +6122,10 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
         let lineages = crate::lineage::Lineage::lumps(&cut.body, cut.lineage.as_ref(), &lumps);
         for (lump, lineage) in lumps.into_iter().zip(lineages) {
             let tol = (lump.size() * 1e-4).max(1e-6);
-            let touches =
-                lump.mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2))).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
+            let touches = lump
+                .mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2)))
+                .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
+                .unwrap_or(false);
             if touches {
                 out.push(Traced { body: lump, lineage });
             }
@@ -6421,7 +6456,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Sweep { operation, targets, .. } => {
             let mut constructor = None;
             let mut to_body = None;
-            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body)?;
+            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
@@ -6847,11 +6882,22 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut reduced = false;
+            // The kernel blends exactly the edges given: the feature adds each one's tangent
+            // chain when it asks for it. A radius law runs along one edge, so a variable or
+            // spline round takes its edge alone.
+            let chain = match &f.kind {
+                FeatureKind::Fillet { tangent_chain, style, .. } => {
+                    *tangent_chain && !matches!(style, crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. })
+                }
+                FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
+                _ => false,
+            };
             let mut blended = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 if let Some(w) = w {
                     notes.push(w);
                 }
@@ -7864,6 +7910,7 @@ mod chain_tests {
                 style: crate::FilletStyle::Constant,
                 fit: Default::default(),
                 corner: Default::default(),
+                tangent_chain: true,
             },
             None,
         )
