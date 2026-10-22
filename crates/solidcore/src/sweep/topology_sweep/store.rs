@@ -1941,6 +1941,158 @@ mod borrowed_tests {
 }
 
 #[cfg(test)]
+mod bounding_box_tests {
+    use super::borrowed_tests::{register, Identities};
+    use super::*;
+    use crate::curve::ellipse::{Ellipse, EllipseOptions};
+    use crate::geom::{extent1d::Extent1d, extent2d::Extent2d, extent3d::Extent3d};
+    use crate::math::{Point3, Vec3};
+    use crate::nurbs::{b_spline_surface::BSplineSurface, math::CPoint};
+    use crate::surface::surface::Surface;
+    use crate::topology::brep::p5 as brep_p5;
+    use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+    use crate::topology::topology_traverser::Marks;
+    use crate::topology::ShellId;
+
+    #[test]
+    fn borrowed_bounding_box_includes_curved_edge_and_honours_lock() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let circle = Ellipse::new_circle(
+            &k,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_raw(0.0, 180.0),
+            2.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        let curve = Curve::from(circle);
+        let interval = curve.natural_interval();
+        brep_p5::create_wire_edge_from_curve(&mut k, &mut b, curve, interval).unwrap();
+        let vertex = b.vertices().ids().next().unwrap();
+        let mut records = BTreeMap::new();
+        let mut attrs = AttributeStore::new();
+        let mut next = 0;
+        {
+            let mut store = SweepStore::new(&Identities, &mut records, &mut attrs, &mut next);
+            let context = store.register_kernel(&mut k).unwrap();
+            let id = register(&mut store, context, &mut b).unwrap();
+            let mut bbox = Extent3d::new();
+            store.bounding_box(id, &mut bbox).unwrap();
+            // Both end vertices are on y=0; the arc reaches y=2.
+            assert!(bbox.max().y >= 2.0);
+            store
+                .with_brep_mut(id, |k, b, _, _| {
+                    crate::query::brep::lock_bounding_box(k, b, false)
+                })
+                .unwrap();
+            store
+                .brep_mut(id)
+                .unwrap()
+                .vertex_mut(vertex)
+                .unwrap()
+                .point
+                .x = 100.0;
+            let locked = bbox;
+            store.bounding_box(id, &mut bbox).unwrap();
+            assert_eq!(bbox, locked);
+        }
+        assert_eq!(b.vertex(vertex).unwrap().point.x, 100.0);
+    }
+
+    #[test]
+    fn borrowed_bounding_box_includes_trimmed_surface_interior() {
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let id = BrepId::from_index(0);
+        b.set_key(Identities.topology(id, EntityRef::Brep(id)).key);
+        let mut net = vec![vec![CPoint::new(0.0, 0.0, 0.0, 1.0); 3]; 3];
+        for (i, row) in net.iter_mut().enumerate() {
+            for (j, cp) in row.iter_mut().enumerate() {
+                *cp = CPoint::new(
+                    i as f64 * 3.0,
+                    j as f64 * 2.0,
+                    if i == 1 && j == 1 { 5.0 } else { 0.0 },
+                    1.0,
+                );
+            }
+        }
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let surface = Surface::from(
+            BSplineSurface::from_data(2, 2, 2, 2, 5, 5, &net, &knots, &knots).unwrap(),
+        );
+        let domain = Extent2d::from_bounds(0.2, 0.25, 0.8, 0.75);
+        let mut records = BTreeMap::new();
+        let mut attrs = AttributeStore::new();
+        let face = {
+            let key_of = |entity| Identities.topology(id, entity);
+            let face_key = |face| key_of(EntityRef::Face(face));
+            let mut env = NotifyEnv {
+                records: &mut records,
+                attributes: &mut attrs,
+                context: None,
+                key_of: &key_of,
+            };
+            let mut marks = Marks::default();
+            create_face_from_surface(
+                &mut k,
+                &mut b,
+                Some(surface),
+                &domain,
+                &mut FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &face_key,
+                },
+            )
+            .unwrap()
+        };
+        let before = format!("{b:?}");
+        let mut next = 0;
+        {
+            let mut store = SweepStore::new(&Identities, &mut records, &mut attrs, &mut next);
+            let context = store.register_kernel(&mut k).unwrap();
+            let id = register(&mut store, context, &mut b).unwrap();
+            let mut bbox = Extent3d::new();
+            store.bounding_box(id, &mut bbox).unwrap();
+            // The default loose surface box includes its elevated control point;
+            // a vertex/edge-only approximation cannot reach this height.
+            assert!(bbox.max().z >= 5.0);
+        }
+        assert_eq!(b.face(face).unwrap().uv_domain, domain);
+        assert_eq!(b.face(face).unwrap().loops.len(), 1);
+        assert_eq!(format!("{b:?}"), before);
+    }
+
+    #[test]
+    fn bounding_box_replaces_empty_output_and_preserves_it_on_error() {
+        let mut store = SweepStore::owned();
+        let context = store.insert_kernel(Kernel::default()).unwrap();
+        let id = store.create_brep(context).unwrap();
+        let sentinel = Extent3d::from_point(Point3::new(11.0, 12.0, 13.0));
+        let mut output = sentinel;
+        store.bounding_box(id, &mut output).unwrap();
+        assert_eq!(output, Extent3d::new());
+        output = sentinel;
+        assert!(store
+            .bounding_box(BrepId::from_index(1234), &mut output)
+            .is_err());
+        assert_eq!(output, sentinel);
+        store
+            .brep_mut(id)
+            .unwrap()
+            .add_face_record(crate::topology::Face::new(ShellId::from_index(0)))
+            .unwrap();
+        let error = store.bounding_box(id, &mut output).unwrap_err();
+        assert!(!error.is_unported());
+        assert_eq!(output, sentinel);
+        assert!(store.with_brep_mut(id, |_, _, _, _| Ok(())).is_ok());
+    }
+}
+
+#[cfg(test)]
 mod production_path_tests {
     use super::borrowed_tests::{register, Identities};
     use super::*;

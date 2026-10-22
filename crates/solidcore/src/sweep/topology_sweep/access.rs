@@ -86,16 +86,6 @@ pub struct SweepScene {
     pub brep: BrepId,
 }
 
-macro_rules! deferred {
-    ($(#[$doc:meta])* fn $name:ident($($arg:ident: $ty:ty),* $(,)?) -> $out:ty; $(,)? $unit:literal, $symbol:literal $(,)?) => {
-        $(#[$doc])*
-        fn $name(&mut self, $($arg: $ty),*) -> Result<$out> {
-            $(let _ = $arg;)*
-            Err(SolidError::Unported { upstream: $symbol, unit: $unit })
-        }
-    };
-}
-
 /// B-rep resolution and external services for a topology sweep.
 ///
 /// Implementations must resolve contexts and attribute keys using the caller's
@@ -594,13 +584,19 @@ pub trait SweepAccess {
             )
         })
     }
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    deferred!(
-        /// `SmBrep::CalculateBoundingBox`.
-        fn bounding_box(brep: BrepId, output: &mut Extent3d) -> ();,
-        "query.brep",
-        "SmBrep::CalculateBoundingBox"
-    );
+    /// `SmBrep::CalculateBoundingBox` with its default arguments.
+    /// The caller's output is replaced only after the query succeeds.
+    fn bounding_box(&mut self, brep: BrepId, output: &mut Extent3d) -> Result<()> {
+        let bbox = self.with_brep_mut(brep, |kernel, model, _, _| {
+            crate::query::brep::calculate_bounding_box(
+                kernel,
+                model,
+                crate::query::brep::BoundingBoxOptions::default(),
+            )
+        })?;
+        *output = bbox;
+        Ok(())
+    }
     /// `SmEdgeuse::EvaluateBinormal`. Upstream writes these two outputs only after
     /// all fallible evaluations succeed (the optional UV vector is not requested).
     fn binormal(
