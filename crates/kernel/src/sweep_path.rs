@@ -568,8 +568,7 @@ pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &Swe
 
 /// [`sweep_path_with`] through SMLib: a path of points is the polyline through them, its
 /// straight runs the lines between them. A line, or a polyline with corners, is swept as those
-/// lines ([`crate::sweep_with`], which takes a path with corners only where SMLib has a sweep for
-/// it); a smooth polyline of more points stands for a curve (a drawn 3D spline) that SMLib has no
+/// lines ([`crate::sweep_with`], which mitres the corners); a smooth polyline of more points stands for a curve (a drawn 3D spline) that SMLib has no
 /// path for yet.
 fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
     let pts = clean(path)?;

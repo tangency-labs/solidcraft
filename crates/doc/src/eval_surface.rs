@@ -378,10 +378,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
                 None => {
                     let segs = path_segments(ps, path, start)?;
-                    let path_start = match segs.first() {
-                        Some(kernel::PathSeg::Line { a, .. } | kernel::PathSeg::Arc { a, .. }) => *a,
-                        None => start,
-                    };
+                    let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_with(&ss.plane, &chains, &segs, &ctl)?
