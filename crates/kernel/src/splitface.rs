@@ -151,16 +151,9 @@ fn cutters(tool: &SplitTool, reach: &Aabb3) -> Result<Vec<Vec<Patch>>> {
 /// where the surface is), facing out of the body.
 fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     body.require_brep("a split tool")?;
-    let record = crate::native::brep_record(body)?;
+    let record = body.record();
     let f = record.faces.get(face).ok_or_else(|| invalid(format!("the tool body has no face {face}")))?;
-    let forward = record
-        .shells
-        .iter()
-        .find_map(|s| match s {
-            brep::Shell::Faces { faces, .. } => faces.iter().find(|o| o.face as usize == face).map(|o| o.forward),
-            _ => None,
-        })
-        .ok_or_else(|| invalid(format!("face {face} of the tool body lies in no shell")))?;
+    let forward = body.face_forward(face);
     // The surface's own parameter box, unbounded where it is.
     let dom = SurfaceEval::new(&f.surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
     let range = |k: usize| dom.range[k].map_or(ALL, |(a, b)| [a, b]);
@@ -440,7 +433,7 @@ pub(crate) fn face_sides(body: &Body, tool: &SplitTool) -> Result<Vec<f64>> {
 /// and how many there are. Faces are in one region when they meet at an edge the tool does not
 /// run along; an edge along the tool (a split line) parts them.
 pub(crate) fn regions(split: &Body, tool: &SplitTool) -> Result<(Vec<usize>, usize)> {
-    let record = crate::native::brep_record(split)?;
+    let record = split.record();
     let fields: Vec<ToolSide> = cutters(tool, &reach_of(split))?
         .iter()
         .map(|g| g.iter().map(Measured::new).collect::<Result<Vec<_>>>().map(ToolSide))
@@ -590,7 +583,7 @@ fn split(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<us
 /// The edges of `split` that no edge of the body was before (its split lines), as polylines
 /// through their exact points.
 fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
-    let record = crate::native::brep_record(split)?;
+    let record = split.record();
     let mut out = Vec::new();
     for (e, prov) in record.edges.iter().zip(&h.edges) {
         if prov.origins.iter().any(|o| matches!(o, EdgeOrigin::Edge { .. })) {
@@ -814,7 +807,7 @@ mod tests {
         let quarter = std::f64::consts::PI * 36.0 / 4.0;
         // (Face areas come from meshes.)
         assert!(rel(tops[0], quarter) < 1e-3 && rel(tops[1], 200.0 - quarter) < 1e-3, "{tops:?}");
-        let record = crate::native::brep_record(&s).unwrap();
+        let record = s.record();
         assert!(record.edges.iter().any(|e| matches!(e.curve, brep::Curve::Circle { .. } | brep::Curve::RationalSpline { .. })));
         // A listed face the tool misses is named: the plane z = 10 crosses the sides, not the top.
         let mid = Plane { origin: Vec3::new(0.0, 0.0, 10.0), ..Plane::XY };

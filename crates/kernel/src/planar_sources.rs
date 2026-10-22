@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// The oriented plane each face of `body` lies on (in face order), from its record: the
 /// surface's plane, its normal turned with the face; none for a face on any other surface.
 pub(super) fn actual_planes(body: &Body) -> Result<Vec<Option<Plane>>> {
-    let record = crate::native::brep_record(body)?;
+    let record = body.record();
     let mut forward = vec![true; record.faces.len()];
     for shell in &record.shells {
         if let brep::Shell::Faces { faces, .. } = shell {
@@ -362,7 +362,7 @@ mod tests {
 
     /// The corner points of face `i` of `b`, from its record.
     fn face_points(b: &Body, i: usize) -> Vec<Vec3> {
-        let record = crate::native::brep_record(b).unwrap();
+        let record = b.record();
         let mut out = Vec::new();
         for l in &record.faces[i].loops {
             match l {
@@ -385,7 +385,7 @@ mod tests {
 
     /// The edges of face `i` of `b` as their end points, from its record.
     fn face_edges(b: &Body, i: usize) -> Vec<(Vec3, Vec3)> {
-        let record = crate::native::brep_record(b).unwrap();
+        let record = b.record();
         let at = |v: u32| {
             let p = record.vertices[v as usize].point;
             Vec3::new(p[0], p[1], p[2])
@@ -404,7 +404,7 @@ mod tests {
     /// beyond `a` along x), each face's source that of the face of its own operand on the same
     /// plane (none from `b` when `b_sources` is false).
     fn side_by_side(a: &Body, b: &Body, b_sources: bool) -> Body {
-        let (ra, rb) = (crate::native::brep_record(a).unwrap(), crate::native::brep_record(b).unwrap());
+        let (ra, rb) = (a.record(), b.record());
         let mut r = ra.clone();
         let (nf, ne, nv, ns) = (r.faces.len() as u32, r.edges.len() as u32, r.vertices.len() as u32, r.shells.len() as u32);
         for mut face in rb.faces.clone() {
@@ -433,7 +433,7 @@ mod tests {
             region.shells.iter_mut().for_each(|s| *s += ns);
             r.regions.push(region);
         }
-        let mut combined = crate::native::body_from_smlib(&solidcraft_smlib::Brep::from_record(&r, true).unwrap()).unwrap();
+        let mut combined = Body::from_record(r).unwrap();
         let planes = |x: &Body| actual_planes(x).unwrap();
         let (pa, pb, pc) = (planes(a), planes(b), planes(&combined));
         let a_right = a.outline_bounds().max.x;

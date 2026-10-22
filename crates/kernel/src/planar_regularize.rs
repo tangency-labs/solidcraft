@@ -1,6 +1,7 @@
 //! Exact topological removal of construction-induced planar subdivisions.
 //! Shared edge identity and complete construction lineage select the edges; SMLib joins the
-//! faces either side of them where they are topological (`solidcraft_smlib::Brep::merge_faces`).
+//! faces either side of them where they are topological (`solidcraft_smlib::Brep::merge_faces`,
+//! every other edge kept by a point at its middle).
 use super::Body;
 use crate::{KernelError, Result, guard};
 use solidcraft_geom::Vec3;
@@ -12,6 +13,12 @@ fn edge_points(e: &brep::Edge) -> Vec<Vec3> {
     let Ok(c) = CurveEval::new(&e.curve) else { return Vec::new() };
     let [t0, t1] = e.interval;
     (0..=4).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 4.0)).collect()
+}
+
+/// The point halfway along a record edge's interval.
+fn edge_middle(e: &brep::Edge) -> Option<Vec3> {
+    let [t0, t1] = e.interval;
+    CurveEval::new(&e.curve).ok()?.point(0.5 * (t0 + t1))
 }
 
 fn failed(e: impl std::fmt::Display) -> KernelError {
@@ -79,7 +86,7 @@ impl Body {
                         .filter(|p| actual.is_some_and(|actual| super::planar_sources::same_support(p, &actual)))
                 })
                 .collect();
-            let record = crate::native::brep_record(&self)?;
+            let record = self.record();
             let mut shell_of = vec![usize::MAX; record.faces.len()];
             for (k, shell) in record.shells.iter().enumerate() {
                 if let brep::Shell::Faces { faces, .. } = shell {
@@ -127,15 +134,23 @@ impl Body {
             if eligible.is_empty() {
                 return Ok(None);
             }
+            // SMLib removes the topological edges and vertices but those under the points kept:
+            // every edge not chosen (at its middle) stays.
+            let keep: Vec<[f64; 3]> = record
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| eligible.binary_search(k).is_err())
+                .map(|(_, e)| edge_middle(e).map(|p| [p.x, p.y, p.z]))
+                .collect::<Option<_>>()
+                .ok_or_else(|| failed("an edge of the body has no middle point"))?;
+            if keep.len() > solidcraft_smlib::MAX_POINTS {
+                return Ok(None);
+            }
             let (sb, ob) = crate::native::smlib_body_ordered(&self)?;
             let ob = ob.ok_or_else(|| failed("SMLib numbers the body's edges unlike its record"))?;
-            let at: Vec<usize> = eligible
-                .iter()
-                .map(|e| if ob.edges.is_empty() { Some(*e) } else { ob.edges.iter().position(|c| c == e) })
-                .collect::<Option<_>>()
-                .ok_or_else(|| failed("an edge is not in SMLib's body"))?;
-            let (r, removed) = sb.tagged(0).map_err(failed)?.merge_faces(&at).map_err(failed)?;
-            if removed == 0 {
+            let r = sb.tagged(0).map_err(failed)?.merge_faces(&keep, (self.size() * 1e-6).max(1e-9)).map_err(failed)?;
+            if r.counts().map_err(failed)?.first() == Some(&self.face_count()) {
                 return Ok(None);
             }
             let check = r.check(solidcraft_smlib::CheckLevel::All).map_err(failed)?;
