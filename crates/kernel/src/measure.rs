@@ -48,9 +48,10 @@ pub struct MassMeasure {
 /// dRelativeAccuracy".
 const ACCURACY: f64 = 1e-4;
 
-/// Measure a body. A solid body's volume, area and centre are SMLib's, integrated on its exact
-/// surfaces, and its box is SMLib's exact box; a body SMLib cannot measure is an error. A mesh
-/// body is measured from its triangles, exactly.
+/// Measure a body. A B-rep body's volume, area and centre are SMLib's, integrated on its exact
+/// surfaces over its material regions (a sheet's: its faces' area and their centre, volume 0),
+/// and its box is SMLib's exact box; a body SMLib cannot measure is an error. A mesh body is
+/// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     if let Some((pos, tris)) = b.triangle_mesh() {
         // Exact for a mesh body; topology counts are facets, sides and vertices.

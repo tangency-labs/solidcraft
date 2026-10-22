@@ -7,7 +7,7 @@ use crate::{Brep, Result, error, ffi};
 /// finest SMLib allows. Analytic primitives then come out within 2e-7 of their closed forms.
 pub const MEASURE_ACCURACY: f64 = 1e-8;
 
-/// Mass properties of a closed solid at unit density (mm, mm², mm³, mm⁵). For a density ρ the
+/// Mass properties of a body at unit density (mm, mm², mm³, mm⁵). For a density ρ the
 /// mass is ρ·`volume` and the inertia scales by ρ.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MassProperties {
@@ -33,8 +33,9 @@ impl MassProperties {
 
 impl Brep {
     /// Mass properties at `relative_accuracy` (clamped to [1e-8, 1e-1]; [`MEASURE_ACCURACY`] is
-    /// the finest). A body that is not a closed manifold solid is an error; [`Brep::area`]
-    /// measures those.
+    /// the finest): the sum over the body's material regions, so several lumps, or lumps
+    /// touching along edges or at points, measure too. A body with no material (a sheet, an open
+    /// shell) has volume 0 and no inertia, its faces' area and the centroid of that area.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassProperties> {
         let m = ffi::measure::mass_properties(&self.0, relative_accuracy).map_err(error)?;
         let [area, volume, cx, cy, cz, ixx, iyy, izz, iyz, izx, ixy] = m;
