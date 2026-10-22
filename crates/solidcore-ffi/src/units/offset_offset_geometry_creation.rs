@@ -10,10 +10,14 @@
 //! holds the `.smb` file of each file block (ignored otherwise). The output starts
 //! with `0`, or with `-1 status` (`-3 status`) when the first (second) B-rep could not
 //! be built, and nothing else follows.
+//! Unit-local B-rep block `6 kind a b` builds a real `SmCylinder` (`kind=0`,
+//! radius/height) or `SmTorus` (`kind=1`, major/minor radii), at the origin with
+//! full angular domains. Dimensions are finite and positive. Unlike the shared
+//! blocks, this block has no validate-only or gap-initialization flags.
 //!
 //! | [`Op`]   | after the blocks | outputs |
 //! |----------|------------------|---------|
-//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a surface that is exactly an `SmSurfOfRevolution` |
+//! | `Export` |                  | per B-rep `len export` (`len 0` for an absent one), each export a `0`-prefixed graph as [`super::topology_vertexuse`] exports it; then per B-rep `n_faces` (`0` for an absent one) and per face (export order) `-1`, or `n byte*n`: the binary `WriteToDB` record (version 33) of a revolution, extrusion, cone, cylinder, sphere or torus, dispatched by the graph's native surface type code |
 //! | `Run`    | `dist approx make_analytics n_local (face surface)* inset extend n_shell face* n_pairs (eu eu)* n_ops ops*` | per op its code, a status and its outputs (below): an op's out-parameters follow a success status only, the states of existing topology (edge states, a face's domain and surface) follow every status |
 //!
 //! The run header takes any finite `dist` (zero included) and any finite `approx` that
@@ -42,9 +46,9 @@
 //! walks no loops and needs only a curve on each edge and, for a single edge, a face
 //! with surface and a B-spline curve). `-6` ends
 //! the script at an op the Rust side defers at without comparing anything: a non-local
-//! `FaceuseOffset` of a face whose surface is neither an `SmPlane` nor a plain
-//! `SmBSplineSurface` (HANG-26: an `SmSurfOfRevolution`'s offset self-intersection takes
-//! 20 s to minutes, or never returns at large distances), and an `EdgeuseOffset` with
+//! `FaceuseOffset` of a face whose concrete kind is not exported, or of an exactly
+//! `SmSurfOfRevolution` surface when self-intersection is enabled (HANG-26: its offset
+//! self-intersection takes 20 s to minutes, or never returns at large distances), and an `EdgeuseOffset` with
 //! `|offset distance| > 1e6` (HANG-27).
 //!
 //! The `n_local` pairs name store surfaces only (kind 7): `SmLocalOperationGeometryCreation`
@@ -411,7 +415,7 @@ fn curve(rd: &mut Reader<'_>) -> Result<(usize, f64, f64), FfiError> {
 
 /// A B-rep block.
 fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    match rd.index(3)? {
+    match rd.index(6)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -444,7 +448,15 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
                 }
             }
         }
-        _ => {}
+        3 => {}
+        6 => {
+            rd.index(1)?;
+            if rd.finite()? <= 0.0 || rd.finite()? <= 0.0 {
+                return Err(bad("primitive dimensions must be positive"));
+            }
+            return Ok(());
+        }
+        _ => return Err(bad("unsupported B-rep fixture kind")),
     }
     rd.flag()?;
     rd.flag()?;
@@ -479,62 +491,73 @@ pub fn counts(export: &[f64]) -> Option<[usize; 10]> {
 /// second B-rep); `None` when the output is a build failure.
 #[must_use]
 pub fn split_exports(out: &[f64]) -> Option<(Vec<f64>, Option<Vec<f64>>)> {
-    if out.first() != Some(&0.0) {
-        return None;
-    }
-    let mut at = 1usize;
-    let mut blocks: Vec<Option<Vec<f64>>> = Vec::new();
-    for _ in 0..2 {
-        let len = *out.get(at)? as usize;
-        at += 1;
-        if len == 0 {
-            blocks.push(None);
-            continue;
-        }
-        let block = out.get(at..at + len)?.to_vec();
-        at += len;
-        blocks.push(Some(block));
-    }
-    let a = blocks.first().cloned().flatten()?;
-    let b = blocks.get(1).cloned().flatten();
-    Some((a, b))
+    let mut rd = Reader::new(out);
+    let [a, b] = export_blocks(&mut rd)?;
+    Some((a?.to_vec(), b.map(<[f64]>::to_vec)))
 }
 
-/// The per-face `SmSurfOfRevolution` records after an `Export` output's two blocks:
-/// per B-rep, per face in export order, the binary `WriteToDB` bytes of a surface that
-/// is exactly an `SmSurfOfRevolution` (`None` for other faces; an empty list for an
-/// absent B-rep). `None` when the output is a build failure or malformed.
-#[must_use]
-pub fn split_revolutions(out: &[f64]) -> Option<[Vec<Option<Vec<u8>>>; 2]> {
-    if out.first() != Some(&0.0) {
+fn export_blocks<'a>(rd: &mut Reader<'a>) -> Option<[Option<&'a [f64]>; 2]> {
+    if rd.num().ok()? != 0.0 {
         return None;
     }
-    let mut at = 1usize;
-    for _ in 0..2 {
-        let len = *out.get(at)? as usize;
-        at = at.checked_add(1 + len)?;
+    let mut blocks = [None, None];
+    let limit = rd.input.len();
+    for block in &mut blocks {
+        let len = rd.index(limit).ok()?;
+        if len != 0 {
+            let values = rd.take(len).ok()?;
+            if values.first() != Some(&0.0) {
+                return None;
+            }
+            *block = Some(values);
+        }
     }
+    blocks.first().copied().flatten()?;
+    Some(blocks)
+}
+
+/// The per-face concrete surface records after an `Export` output's two blocks:
+/// binary `WriteToDB` bytes in native face order (`None` for kinds represented by
+/// the graph alone; an empty list for an absent B-rep). The graph's surface type
+/// selects the reader. Counts must match the graph and bytes must be exact integers.
+/// Returns `None` for a failed build, malformed record, or trailing output.
+#[must_use]
+pub fn split_surface_records(out: &[f64]) -> Option<[Vec<Option<Vec<u8>>>; 2]> {
+    let mut rd = Reader::new(out);
+    let blocks = export_blocks(&mut rd)?;
     let mut breps: [Vec<Option<Vec<u8>>>; 2] = [Vec::new(), Vec::new()];
-    for faces in &mut breps {
-        let n = *out.get(at)? as usize;
-        at += 1;
+    for (faces, block) in breps.iter_mut().zip(blocks) {
+        let expected = match block {
+            Some(block) => {
+                let mut header = Reader::new(block);
+                header.skip(5).ok()?;
+                header.index(out.len()).ok()?
+            }
+            None => 0,
+        };
+        let n = rd.index(out.len()).ok()?;
+        if n != expected {
+            return None;
+        }
         for _ in 0..n {
-            let len = *out.get(at)?;
-            at += 1;
-            if len < 0.0 {
+            let len = rd.num().ok()?;
+            if len == -1.0 {
                 faces.push(None);
                 continue;
             }
-            let len = len as usize;
-            let bytes = out
-                .get(at..at.checked_add(len)?)?
+            if len.fract() != 0.0 || len <= 0.0 || len > out.len() as f64 {
+                return None;
+            }
+            let bytes = rd
+                .take(len as usize)
+                .ok()?
                 .iter()
-                .map(|&b| u8::try_from(b as i64).ok())
+                .map(|&b| (b.fract() == 0.0 && (0.0..=255.0).contains(&b)).then_some(b as u8))
                 .collect::<Option<Vec<u8>>>()?;
-            at += len;
             faces.push(Some(bytes));
         }
     }
+    rd.done().ok()?;
     Some(breps)
 }
 
@@ -845,4 +868,93 @@ pub fn eval(op: Op, paths: [&str; 2], input: &[f64]) -> Result<Vec<f64>, FfiErro
     script(&mut rd, c)?;
     rd.done()?;
     raw(op, &joined, input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn export(faces: usize, other_faces: Option<usize>, tail: &[f64]) -> Vec<f64> {
+        let mut out = vec![0.0];
+        for count in [Some(faces), other_faces] {
+            if let Some(count) = count {
+                let mut block = vec![0.0; 12];
+                block[5] = count as f64;
+                out.push(block.len() as f64);
+                out.extend(block);
+            } else {
+                out.push(0.0);
+            }
+        }
+        out.extend_from_slice(tail);
+        out
+    }
+
+    #[test]
+    fn surface_records_preserve_face_slots_both_arenas_and_all_byte_values() {
+        let out = export(
+            2,
+            Some(1),
+            &[2.0, -1.0, 3.0, 0.0, 1.0, 255.0, 1.0, 1.0, 42.0],
+        );
+        assert_eq!(
+            split_surface_records(&out),
+            Some([vec![None, Some(vec![0, 1, 255])], vec![Some(vec![42])],])
+        );
+        let out = export(1, None, &[1.0, -1.0, 0.0]);
+        assert_eq!(split_surface_records(&out), Some([vec![None], vec![]]));
+    }
+
+    #[test]
+    fn primitive_fixture_blocks_require_known_kinds_and_positive_finite_dimensions() {
+        for kind in [0.0, 1.0] {
+            for size in [0.01, 1.0, 100.0] {
+                let input = [6.0, kind, size, size];
+                let mut rd = Reader::new(&input);
+                brep_block(&mut rd, "").unwrap();
+                rd.done().unwrap();
+            }
+            for size in [-1.0, -0.0, 0.0, f64::NAN, f64::INFINITY, f64::MAX] {
+                for input in [[6.0, kind, size, 1.0], [6.0, kind, 1.0, size]] {
+                    assert!(brep_block(&mut Reader::new(&input), "").is_err());
+                }
+            }
+        }
+        for kind in [-1.0, 0.5, 2.0, f64::NAN] {
+            assert!(brep_block(&mut Reader::new(&[6.0, kind, 1.0, 1.0]), "").is_err());
+        }
+    }
+
+    #[test]
+    fn surface_records_reject_malformed_counts_lengths_bytes_and_trailing_data() {
+        for value in [-2.0, -0.5, 0.5, f64::NAN, f64::INFINITY, f64::MAX] {
+            assert!(split_surface_records(&export(1, None, &[value, -1.0, 0.0])).is_none());
+            assert!(split_surface_records(&export(1, None, &[1.0, value, 0.0])).is_none());
+        }
+        for byte in [-1.0, 0.5, 256.0, f64::NAN, f64::INFINITY] {
+            assert!(split_surface_records(&export(1, None, &[1.0, 1.0, byte, 0.0])).is_none());
+        }
+        for tail in [
+            vec![],
+            vec![1.0],
+            vec![1.0, 2.0, 1.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 0.0],
+            vec![2.0, -1.0, -1.0, 0.0],
+            vec![1.0, -1.0, 1.0, -1.0],
+            vec![1.0, -1.0, 0.0, 17.0],
+        ] {
+            assert!(
+                split_surface_records(&export(1, None, &tail)).is_none(),
+                "{tail:?}"
+            );
+        }
+        let valid = export(1, None, &[1.0, -1.0, 0.0]);
+        for length in [f64::NAN, f64::INFINITY, f64::MAX, -1.0, 1.5] {
+            let mut out = valid.clone();
+            out[1] = length;
+            assert!(split_exports(&out).is_none());
+            assert!(split_surface_records(&out).is_none());
+        }
+    }
 }

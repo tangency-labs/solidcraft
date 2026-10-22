@@ -31,15 +31,18 @@
 // Rust runner seeds the ported executive's cache the same way (`insert_extended_surface`).
 #include "sc_topology_fixture.h"
 
+#include <SmCylinder.h>
 #include <SmDatabaseIO.h>
 #include <SmOffsetExecutive.h>
 #include <SmOffsetGeometryCreation.h>
 #include <SmRelation.h>
 #include <SmSSIData.h>
 #include <SmSurfOfRevolution.h>
+#include <SmTorus.h>
 
 #include <cstdlib>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <array>
 
@@ -154,19 +157,26 @@ struct Two
 };
 
 const double ST_OK = 0.0;
-// The database version of the exported SmSurfOfRevolution records (OG_EXPORT).
-const ULONG REVOLUTION_DB_VERSION = 33;
+// The database version of the exported concrete surface records (OG_EXPORT).
+const ULONG SURFACE_DB_VERSION = 33;
 // The op the Rust side defers at without running anything comparable, so the script
-// stops here (the runner mirrors each predicate): a non-local FaceuseOffset of a face
-// whose surface is an SmBSplineSurface subclass other than SmPlane (an
-// SmSurfOfRevolution's offset self-intersection takes 20 s to minutes, HANG-26), and an
-// EdgeuseOffset with
+// stops here (the runner mirrors each predicate): a non-local FaceuseOffset whose
+// concrete kind is not exported, or an SmSurfOfRevolution with self-intersection
+// enabled (20 s to minutes, HANG-26), and an EdgeuseOffset with
 // |offset distance| above MAX_EDGEUSE_OFFSET_DISTANCE (HANG-27).
 const double ST_NOT_RUN = -6.0;
 // HANG-27: SmCrvOnSurf::ApproximateCurve of an EdgeuseOffset rail grows with the
 // offset distance (Mouse.smb: 1 s at 1e4, 10 s at 1e6, 28 s at 1e8, no return within
 // 90 s at 1e250 and 1e300); the bound keeps every script under the fuzz's 20 s.
 const double MAX_EDGEUSE_OFFSET_DISTANCE = 1.0e6;
+
+bool has_surface_record(long type)
+{
+    return type == SmSurfOfRevolution_TYPE || type == SmSurfOfExtrusion_TYPE ||
+           type == SmCone_TYPE || type == SmCylinder_TYPE || type == SmSphere_TYPE ||
+           type == SmTorus_TYPE;
+}
+
 bool eu_ok(SmEdgeuse* eu)
 {
     if (eu == nullptr || eu->GetEdge() == nullptr || eu->GetEdge()->GetCurve() == nullptr)
@@ -351,6 +361,43 @@ bool would_reverse(SmEdgeuse* eu, SmCurve* c3, SmEdgeuse* orig)
     return pv[1].Dot(pv2[1]) < 0.0;
 }
 
+// Unit-local block 6 constructs the concrete classes explicitly. Legacy files
+// named cylinder/torus can instead contain SmCone/SmSurfOfRevolution records.
+SmBrep* build_input(Rd& rd, const char* path, SmStatus& status)
+{
+    Rd peek = rd;
+    if (peek.idx() != 6)
+        return build(rd, path, status);
+    rd = peek;
+    int64_t kind = rd.idx();
+    double a = rd.num(), b = rd.num();
+    const SmContext& ctx = the_context();
+    SmPoint3d origin(0.0, 0.0, 0.0);
+    SmVector3d x(1.0, 0.0, 0.0), y(0.0, 1.0, 0.0);
+    SmBSplineSurface* surface = kind == 0
+        ? static_cast<SmBSplineSurface*>(new (ctx) SmCylinder(origin, x, y, a, 0.0, 360.0, b,
+                                                             FALSE, FALSE, FALSE, &ctx))
+        : static_cast<SmBSplineSurface*>(new (ctx) SmTorus(origin, x, y,
+                                                         SmExtent2d(0.0, 0.0, 360.0, 360.0),
+                                                         a, b, FALSE, FALSE, nullptr, &ctx));
+    status = surface->MakeNurb();
+    if (status != SM_SUCCESS)
+    {
+        delete surface;
+        return nullptr;
+    }
+    SmBrep* brep = new (ctx) SmBrep();
+    brep->m_bValidateOnly = FALSE;
+    SmFace* face = nullptr;
+    status = brep->CreateFaceFromSurface(surface, surface->GetNaturalUVDomain(), face);
+    if (status != SM_SUCCESS)
+    {
+        delete brep;
+        return nullptr;
+    }
+    return brep;
+}
+
 bool build_two(Rd& rd, const char* path, Two& t, std::vector<double>& o)
 {
     std::string p(path);
@@ -362,7 +409,7 @@ bool build_two(Rd& rd, const char* path, Two& t, std::vector<double>& o)
         pb = p.substr(nl + 1);
     }
     SmStatus st_a;
-    t.brep[0] = build(rd, pa.c_str(), st_a);
+    t.brep[0] = build_input(rd, pa.c_str(), st_a);
     if (t.brep[0] == nullptr)
     {
         o.push_back(-1.0);
@@ -373,7 +420,7 @@ bool build_two(Rd& rd, const char* path, Two& t, std::vector<double>& o)
     if (has_b)
     {
         SmStatus st_b;
-        t.brep[1] = build(rd, pb.c_str(), st_b);
+        t.brep[1] = build_input(rd, pb.c_str(), st_b);
         if (t.brep[1] == nullptr)
         {
             o.push_back(-3.0);
@@ -559,9 +606,10 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
             if (op == S_FACEUSE_OFFSET)
             {
                 long ty = fu->GetFace()->GetSurface()->GetType();
-                if (ty != SmPlane_TYPE && ty != SmBSplineSurface_TYPE)
+                if ((ty != SmPlane_TYPE && ty != SmBSplineSurface_TYPE && !has_surface_record(ty)) ||
+                    (ty == SmSurfOfRevolution_TYPE && !skip))
                 {
-                    o.push_back(ST_NOT_RUN); // the Rust defers here (analytic export)
+                    o.push_back(ST_NOT_RUN); // unsupported import or HANG-26, not a parity pass
                     return;
                 }
             }
@@ -941,9 +989,9 @@ void run_og(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back((double)ex.size());
             o.insert(o.end(), ex.begin(), ex.end());
         }
-        // per B-rep, per face (export order): the binary WriteToDB record of a surface
-        // that is exactly an SmSurfOfRevolution (the export's surface block carries only
-        // its B-spline part), so the Rust side can read the real surface back
+        // Per B-rep, per face (export order): the binary WriteToDB record of a
+        // supported concrete subclass. The graph's surface block carries only its
+        // B-spline part; its type code selects the Rust polymorphic reader.
         for (int b = 0; b < 2; b++)
         {
             if (t.brep[b] == nullptr)
@@ -955,18 +1003,15 @@ void run_og(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             for (SmFace* f : t.g[b].faces)
             {
                 SmSurface* s = f->GetSurface();
-                if (s == nullptr || s->GetType() != SmSurfOfRevolution_TYPE)
+                if (s == nullptr || !has_surface_record(s->GetType()))
                 {
                     o.push_back(-1.0);
                     continue;
                 }
                 std::ostringstream oss;
                 SmDatabaseIOStream db(SM_BINARY, &oss);
-                if (s->WriteToDB(db, REVOLUTION_DB_VERSION) != SM_SUCCESS)
-                {
-                    o.push_back(-1.0);
-                    continue;
-                }
+                if (s->WriteToDB(db, SURFACE_DB_VERSION) != SM_SUCCESS)
+                    throw std::runtime_error("offset creator surface record export failed");
                 std::string bytes = oss.str();
                 o.push_back((double)bytes.size());
                 for (char ch : bytes)
