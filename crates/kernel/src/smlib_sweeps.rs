@@ -72,7 +72,8 @@ pub(crate) struct Draft {
 
 #[cfg(feature = "smlib")]
 pub(crate) use imp::{
-    body_from_record, curve, extrude, loft, loft_rails, loft_to_point, path_curve, revolve, screw, sphere, sweep, sweep_controlled,
+    body_from_record, curve, extrude, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, sphere, sweep,
+    sweep_controlled,
 };
 
 /// The error of an SMLib operation in a build without SMLib.
@@ -89,6 +90,9 @@ mod stubs {
         Err(not_built())
     }
     pub(crate) fn sphere(_: Vec3, _: f64) -> Result<Body> {
+        Err(not_built())
+    }
+    pub(crate) fn project_onto_face(_: &Body, _: Vec3, _: &Plane, _: &[Seg2], _: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
         Err(not_built())
     }
     pub(crate) fn extrude(_: &Plane, _: &[Piece], _: Option<&Region2>, _: f64, _: f64, _: f64, _: Option<Draft>) -> Result<Body> {
@@ -117,7 +121,9 @@ mod stubs {
     }
 }
 #[cfg(not(feature = "smlib"))]
-pub(crate) use stubs::{body_from_record, extrude, loft, loft_rails, loft_to_point, revolve, screw, sphere, sweep, sweep_controlled};
+pub(crate) use stubs::{
+    body_from_record, extrude, loft, loft_rails, loft_to_point, project_onto_face, revolve, screw, sphere, sweep, sweep_controlled,
+};
 
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
@@ -206,6 +212,35 @@ mod imp {
     pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(&brep, what)
+    }
+
+    /// The sketch segments `segs` on `plane` projected along `direction` onto the face of
+    /// `body` at `face_at`: SMLib's projection (smlib_project_curves), each projected curve the
+    /// B-spline SMLib made, as a record curve on its interval, within a millionth of the body's
+    /// size of the true projection.
+    pub(crate) fn project_onto_face(
+        body: &Body,
+        face_at: Vec3,
+        plane: &Plane,
+        segs: &[Seg2],
+        direction: Vec3,
+    ) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+        let c = segs.iter().map(|s| curve(plane, s)).collect::<Result<Vec<_>>>()?;
+        let size = body.size().max(1e-9);
+        let out = body.smlib()?.project_curves(p(face_at), size * 1e-3 + 1e-6, &c, p(direction), (size * 1e-6).max(1e-6)).map_err(|e| match e {
+            solidcraft_smlib::Error::Empty => KernelError::Invalid("the curve projects to nothing on the face".into()),
+            solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid("no face of the body at the projection's point".into()),
+            e => failed("curve projection", e),
+        })?;
+        out.into_iter()
+            .map(|(c, interval)| match c {
+                Curve::Nurbs { points, knots, .. } => {
+                    let homogeneous = points.iter().map(|q| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]]).collect();
+                    Ok((solidcraft_geom::brep::Curve::RationalSpline { knots, homogeneous }, interval))
+                }
+                _ => Err(failed("curve projection", "a projected curve is not a B-spline")),
+            })
+            .collect()
     }
 
     /// SMLib's sphere about `center`, each face swept from the arc (segment 0) of the half disc
