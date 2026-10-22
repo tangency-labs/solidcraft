@@ -161,7 +161,7 @@ mod tests {
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
         assert!((session.model.state().sketch(boss).unwrap().plane.origin.z - 12.).abs() < 1e-6);
         assert!((session.model.state().sketch(bore).unwrap().plane.origin.z - 26.).abs() < 1e-6);
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         let plate = world.body("Plate").unwrap().mesh();
         assert!((plate.bounds().max.z - 26.).abs() < 1e-6);
         assert!(plate.contains(solidcraft_geom::Vec3::new(5., 25., 10.)));
@@ -171,7 +171,7 @@ mod tests {
         assert!(plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));
         let reopened = crate::Session::new(solidcraft_doc::Document::from_json(&session.doc.to_json()).unwrap());
         assert!((reopened.model.state().sketch(bore).unwrap().plane.origin.z - 26.).abs() < 1e-6);
-        let reopened_world = reopened.world_state();
+        let reopened_world = reopened.world_state().unwrap();
         let reopened_plate = reopened_world.body("Plate").unwrap().mesh();
         assert!(!reopened_plate.contains(solidcraft_geom::Vec3::new(40., 25., 2.)));
         assert!(reopened_plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));

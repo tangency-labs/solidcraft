@@ -171,9 +171,9 @@ fn a_saved_view_is_its_camera_and_a_standard_view_is_unchanged() {
     let top = dir.snapshot(&script, "top.png", &["--view", "top"]);
     let mut s = Session::default();
     s.run_script(&serde_json::from_slice(&std::fs::read(&script).unwrap()).unwrap()).unwrap();
-    let mut cam = solidcraft_engine::view::home_camera(&s);
+    let mut cam = solidcraft_engine::view::home_camera(&s).unwrap();
     cam.set_view(solidcraft_engine::render::StandardView::Top);
-    let scene = solidcraft_engine::view::scene(&s, &cam);
+    let scene = solidcraft_engine::view::scene(&s, &cam).unwrap();
     assert_same(&top, &solidcraft_engine::capture::png(&scene, &cam, SIZE.0, SIZE.1).unwrap().bytes, "the home camera turned to the top");
     assert_same(&top, &dir.mcp(&script, "mcp-top.png", json!({"view": "top"})), "the MCP top view");
     assert_differs(&top, &saved, "top and the saved view");
@@ -335,9 +335,9 @@ fn a_forced_cpu_snapshot_is_the_cpu_rasterizers_and_says_so() {
     assert!(stderr.contains("CPU rasterizer"), "{stderr}");
     let mut s = Session::default();
     s.run_script(&serde_json::from_slice(&std::fs::read(&script).unwrap()).unwrap()).unwrap();
-    let mut cam = solidcraft_engine::view::home_camera(&s);
+    let mut cam = solidcraft_engine::view::home_camera(&s).unwrap();
     cam.set_view(solidcraft_engine::render::StandardView::Top);
-    let scene = solidcraft_engine::view::scene(&s, &cam);
+    let scene = solidcraft_engine::view::scene(&s, &cam).unwrap();
     let cpu = solidcraft_engine::render::render_png(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize).unwrap();
     assert_eq!(std::fs::read(dir.0.join("cpu.png")).unwrap(), cpu);
 }

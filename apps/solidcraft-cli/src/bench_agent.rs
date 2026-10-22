@@ -184,7 +184,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         s.execute(id, &c["params"]).map_err(|e| format!("command {i} ({id}): {e}"))?;
         run.push(t.elapsed().as_secs_f64() * 1000.0);
         let t = std::time::Instant::now();
-        s.world_state().warm_meshes(|| true);
+        s.world_state().map_err(|e| e.to_string())?.warm_meshes(|| true);
         shown.push(t.elapsed().as_secs_f64() * 1000.0);
         if run.len() == 100 || i + 1 == commands.len() {
             let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
@@ -198,7 +198,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             shown.clear();
         }
     }
-    let world = s.world_state();
+    let world = s.world_state().map_err(|e| e.to_string())?;
     println!(
         "{}",
         json!({"step": "built", "ms": began.elapsed().as_secs_f64() * 1000.0, "commands": commands.len(), "features": s.doc.features.len(), "bodies": world.bodies.len()})
@@ -233,7 +233,7 @@ mod tests {
             }
         }
         assert!(s.model.results.iter().all(|r| r.error.is_none()));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         assert!(world.bodies.len() > 40, "{} bodies", world.bodies.len());
         assert!(world.bodies.iter().any(|b| b.name.contains("spoke")));
     }

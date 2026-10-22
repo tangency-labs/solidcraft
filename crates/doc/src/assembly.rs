@@ -84,6 +84,23 @@ pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     Some(out)
 }
 
+/// Whether `m` is a placement an occurrence may have: finite, a rotation (orthonormal axes, not
+/// mirrored) and a translation within 1e9 mm, its last column `0, 0, 0, 1`. Every placement is
+/// checked against this where it enters the document (a design file, a command, an import).
+pub fn is_placement(m: &Mat) -> bool {
+    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
+    let (x, y, z) = (axis(0), axis(1), axis(2));
+    m.iter().flatten().all(|v| v.is_finite())
+        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
+        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
+        && x.dot(y).abs() < 1e-6
+        && x.dot(z).abs() < 1e-6
+        && y.dot(z).abs() < 1e-6
+        && x.cross(y).dot(z) > 0.0
+        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
+        && (m[3][3] - 1.0).abs() < 1e-9
+}
+
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
 pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
     let k = axis.normalized().unwrap_or(Vec3::Z);
@@ -392,7 +409,8 @@ impl Document {
         false
     }
 
-    /// Add an occurrence of an existing component into `parent`.
+    /// Add an occurrence of an existing component into `parent`, placed by `transform` (which
+    /// must pass [`is_placement`]).
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {
             return Err(DocError::Unknown(format!("component {component}")));
@@ -402,6 +420,9 @@ impl Document {
         }
         if self.occurrences.len() >= 100_000 {
             return Err(DocError::Invalid("too many occurrences".into()));
+        }
+        if !is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
         }
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;

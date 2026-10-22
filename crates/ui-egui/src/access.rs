@@ -21,7 +21,7 @@ pub fn map(app: &SolveApp) -> Option<AccessMap> {
     if let Some(m) = CACHE.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, m)| m.clone())) {
         return Some(m);
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let meshes: Vec<_> = st.bodies.iter().filter(|b| app.session.body_visible(&b.name)).map(|b| b.mesh()).collect();
     // Every new map gets a new version (the GPU uploads it once).
     let version = VERSION.with(|v| {

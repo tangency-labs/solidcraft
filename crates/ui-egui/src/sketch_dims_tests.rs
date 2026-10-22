@@ -54,7 +54,7 @@ fn tabs_cycle_rectangle_dimensions_indefinitely_and_enter_commits_values() {
         assert_eq!(dims.iter().map(|d| d.value.as_str()).collect::<Vec<_>>(), ["32", "14"]);
         assert!(dims.iter().all(|d| d.locked));
         h.step(&json!({"key": "Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(sketch.sketch.curves.iter().filter(|curve| !curve.construction).count(), 4);
         assert_eq!(sketch.profiles.len(), 1);
@@ -75,7 +75,7 @@ fn line_dimensions_wrap_both_directions_and_enter_uses_length_and_angle() {
     tab(&mut h, true);
     assert_focus(&h, 0);
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.sketch.curves.len(), 1);
     let points: Vec<_> = sketch.sketch.points.iter().map(|point| point.pos).collect();
@@ -92,7 +92,7 @@ fn single_dimension_keeps_focus_for_tab_and_shift_tab() {
     }
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.profiles.len(), 1);
     assert!((sketch.profiles[0].area - std::f64::consts::PI * 16.0).abs() < 1e-6);
@@ -122,7 +122,7 @@ fn forward_tab_completes_expression_then_cycles_and_shift_tab_moves_back() {
     assert_focus(&h, 0);
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "width");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.profiles.len(), 1);
     assert!((sketch.profiles[0].area - 120.0).abs() < 1e-6);
@@ -191,7 +191,7 @@ fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     assert!((crate::sketch_dims::locked_value(&h.app, tool, "Width").unwrap() - 31.3563).abs() < 1e-6);
     assert!((crate::sketch_dims::locked_value(&h.app, tool, "Height").unwrap() - 12.7).abs() < 1e-6);
     h.step(&json!({"key":"Enter"})).unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert!(sk.constraints.iter().any(|c| c.kind.value().is_some_and(|v| (v - 31.3563).abs() < 1e-6)));
 }
@@ -220,7 +220,7 @@ fn a_typed_rho_shapes_the_conic_whose_apex_is_placed_next() {
     assert!(h.app.tool.as_ref().unwrap().dims[0].locked);
     h.step(&json!({"key": "Enter"})).unwrap();
 
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let (apex, rho) = sketch
         .curves
@@ -247,7 +247,7 @@ fn a_rho_outside_zero_to_one_is_refused_before_it_reaches_the_command() {
     type_value(&mut h, "5");
     h.step(&json!({"key": "Enter"})).unwrap();
 
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert!(sketch.curves.is_empty(), "a refused rho must place nothing");
     let tool = h.app.tool.as_ref().expect("the tool stays active for a correction");
@@ -270,7 +270,7 @@ fn rounded_rectangle_takes_typed_width_height_and_radius() {
     type_value(&mut h, "4");
     let undo = h.app.session.undo.len();
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let kinds: Vec<_> = sketch.sketch.curves.iter().map(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Arc { .. })).collect();
     assert_eq!(kinds.iter().filter(|arc| **arc).count(), 4, "four corner arcs");
@@ -289,7 +289,7 @@ fn rounded_rectangle_clicks_use_a_default_radius() {
     h.step(&json!({"start": "sketch.rectangle.rounded"})).unwrap();
     h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
     h.step(&json!({"click": {"sketch": [40, 20]}})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.profiles.len(), 1, "{:?}", h.app.status);
     let (w, hh) = (40.0, 20.0);
@@ -321,7 +321,7 @@ fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview
         let shown = crate::sketch_dims::shown(&h.app, tool, &hover);
         assert!(shown.dist(end) < 1e-9, "{deg}: preview at {shown:?}");
         h.step(&json!({"click": {"world": [at.x, at.y, 0]}})).unwrap();
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(sid).unwrap().sketch;
         let (line, a, b) = sk
             .curves
@@ -358,7 +358,7 @@ fn a_line_end_on_a_circle_outside_the_axis_snap_stays_at_the_cursor() {
     let at = Vec2::from_angle(20f64.to_radians()) * 30.0;
     h.step(&json!({"move": {"world": [at.x, at.y, 0]}})).unwrap();
     h.step(&json!({"click": {"world": [at.x, at.y, 0]}})).unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(sid).unwrap().sketch;
     let b = sk.curves.iter().find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None }).unwrap();
     let end = sk.point(b).unwrap();

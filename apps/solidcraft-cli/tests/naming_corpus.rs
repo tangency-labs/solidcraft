@@ -168,7 +168,7 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
     // Faces a feature picks by point and stores by name (shell, draft, hole, …).
     let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
     if f.face_names.iter().any(|n| !n.is_empty()) {
-        let fst = solidcraft_engine::doc::face_point_state(doc, &before, &f.kind, f.component);
+        let fst = solidcraft_engine::doc::face_point_state(doc, &before, &f.kind, f.component).unwrap();
         for (k, (p, n)) in f.kind.face_points().into_iter().zip(&f.face_names).enumerate() {
             if n.is_empty() {
                 continue;
@@ -269,7 +269,7 @@ fn record_refs(out: &mut Vec<String>, s: &Session, f: &Feature) {
             FaceAttachmentStatus::Lost { message, .. } => format!("lost: {message}"),
             FaceAttachmentStatus::Legacy { .. } => {
                 // Found by its name among the faces facing the same way, nearest the pick.
-                let fst = solidcraft_engine::doc::state_in_frame(doc, &before, f.component);
+                let fst = solidcraft_engine::doc::state_in_frame(doc, &before, f.component).unwrap();
                 let mut list: Vec<String> = match name {
                     Some(n) => fst
                         .bodies

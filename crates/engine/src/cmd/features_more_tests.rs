@@ -17,14 +17,14 @@ fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
         for (height, expected) in [(8., "cut"), (12., "join")] {
             let params = json!({"faces":[[offset+2.,2,10],[offset+8.,8,10]],"face_body":"Stock",
                 "to":[offset+5.,5,height],"direction":"negative"});
-            assert_eq!(crate::auto_operation(&s, &params), Some(expected));
+            assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected));
         }
         for distance in [-2., 2.] {
             let mut params = json!({"faces":[[offset+2.,2,10],[offset+8.,8,10]],"distance":distance});
             let expected = if distance < 0. { "cut" } else { "join" };
-            assert_eq!(crate::auto_operation(&s, &params), Some(expected));
+            assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected));
             params["face_body"] = json!("Stock");
-            assert_eq!(crate::auto_operation(&s, &params), Some(expected));
+            assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected));
             let mut actual = s.scratch();
             if offset != 0. {
                 run(&mut actual, "component.activate", json!({"component":part["component"]}));
@@ -54,7 +54,7 @@ fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
     let mut params = json!({"faces":[[32,2,10],[38,8,10]],"face_body":"Stock","distance":-2});
     // The picked part takes part beside the active component's own body (#5679): going in cuts
     // it, and the top level's own body is left alone.
-    assert_eq!(crate::auto_operation(&s, &params), Some("cut"), "the picked body takes part beside the active component's own");
+    assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some("cut"), "the picked body takes part beside the active component's own");
     for operation in ["auto", "cut"] {
         let mut t = s.scratch();
         let mut p = params.clone();
@@ -69,9 +69,9 @@ fn grouped_face_auto_operation_keeps_implicit_and_explicit_participants() {
         );
     }
     params["participants"] = json!(["Stock"]);
-    assert_eq!(crate::auto_operation(&s, &params), Some("cut"));
+    assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some("cut"));
     params["participants"] = json!(["Other"]);
-    assert_eq!(crate::auto_operation(&s, &params), Some("join"));
+    assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some("join"));
 }
 
 /// A part inserted into a new design (a STEP file) sits in its own component under the empty
@@ -628,6 +628,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
         let placements = serde_json::to_value(&s.doc.occurrences).unwrap();
         let target = s
             .world_state()
+            .unwrap()
             .bodies
             .iter()
             .find(|b| {
@@ -658,7 +659,7 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
         let selected = s.doc.features.last().unwrap().face_names.first().unwrap();
         assert!(!selected.is_empty() && source_names.contains(selected), "{selected:?} not in {source_names:?}");
         assert!((exact_cylinder_volume(&s) - before - 21.).abs() < 0.02);
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         for x in [39.5, 119.5] {
             assert!(
                 world.bodies.iter().any(|b| b
@@ -816,6 +817,7 @@ fn check_body_offset(auto: bool) {
     assert_eq!(s.doc.body_component("Sleeve", s.model.state().body("Sleeve").unwrap().feature), holder);
     assert!(
         s.world_state()
+            .unwrap()
             .body("Sleeve")
             .unwrap()
             .body
@@ -1320,7 +1322,7 @@ fn cutting_a_text_removes_each_letter_whether_its_letters_stand_apart_or_touch()
         } else {
             run(&mut s, "sketch.text", json!({"text":text,"at":[5,12],"height":14}));
         }
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
         // The profiles cut: the letters, not their counters (the inside of an O, whose outline
         // is a hole of its letter).
@@ -1335,7 +1337,7 @@ fn cutting_a_text_removes_each_letter_whether_its_letters_stand_apart_or_touch()
         run(&mut s, "solid.extrude", json!({"distance":2,"operation":"cut"}));
         let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
         assert!((volume - (200.0 * 40.0 * 10.0 - 2.0 * area)).abs() < 1e-3 * area, "{text:?}: {volume} for {area} mm² cut 2 mm deep");
-        assert_eq!(s.world_state().bodies.len(), 1);
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     }
 }
 
@@ -1353,7 +1355,7 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
         run(&mut s, "solid.extrude", json!({"distance":-10}));
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.text", json!({"text":"tres long","at":at,"height":8}));
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
         // The letters' area, counters left out (a letter's hole is its own profile too).
         let sorted = |ids: &[String]| {
@@ -1370,7 +1372,7 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
         let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
         let (block, text) = (200.0 * 40.0 * 10.0, 2.0 * area);
         assert!(volume > block + text && volume < block + 1.3 * text, "hanging {hanging}: {volume} for {text} mm³ of straight text");
-        assert_eq!(s.world_state().bodies.len(), 1);
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     }
 }
 
@@ -1445,7 +1447,7 @@ fn a_tapered_foot_under_a_part_joins_as_drawn() {
             // for a hair first.
             let tol = if round || half < 15.0 { 2e-4 } else { 1e-9 } * (part + frustum);
             assert!((v - (part + frustum)).abs() < tol, "round {round}, half {half}, taper {taper}: {v} for {}", part + frustum);
-            assert_eq!(s.world_state().bodies.len(), 1);
+            assert_eq!(s.world_state().unwrap().bodies.len(), 1);
             let state = s.model.state();
             let mesh = state.body("B").unwrap().mesh();
             // Beside the part, above the foot's start: nothing.
@@ -1826,7 +1828,7 @@ fn a_line_of_text_cuts_into_a_block_at_any_depth() {
         run(&mut s, "solid.extrude", json!({"distance":-40}));
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":7.81}));
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
         // The letters' area, counters left out (a letter's hole is its own profile too).
         let sorted = |ids: &[String]| {
@@ -1840,7 +1842,7 @@ fn a_line_of_text_cuts_into_a_block_at_any_depth() {
         run(&mut s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}));
         let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
         removed.push((105.0 * 26.0 * 40.0 - volume) / depth);
-        assert_eq!(s.world_state().bodies.len(), 1);
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     }
     let (shallow, deep) = (removed[0], removed[1]);
     assert!((deep - shallow).abs() < 1e-3 * shallow, "{shallow} mm² taken out at 1 mm, {deep} mm² at 3.5 mm");
@@ -1863,7 +1865,7 @@ fn fillets_on_tapered_bosses_saved_before_still_find_their_edges() {
     }
     // The build that saved it measured 69454.885209 mm³.
     assert!((volume - 69454.8852092132).abs() < 1e-3, "{volume}");
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
 }
 
 /// #1360: a ring drawn round a hole, its inner circle on the hole's wall, cut into a chamfered

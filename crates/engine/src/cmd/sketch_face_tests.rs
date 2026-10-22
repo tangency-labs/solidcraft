@@ -6,7 +6,7 @@ fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))
 }
 fn top_pick(s: &Session, body: &str) -> Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let body = world.body(body).unwrap();
     let face = body
         .body
@@ -35,11 +35,11 @@ fn exact_selected_base_follows_height_and_never_retargets_control() {
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
     run(&mut s, "parameters.change", json!({"name":height,"expression":"20 mm"}));
     assert!((s.model.state().sketch(sketch).unwrap().plane.origin.z - 20.).abs() < 1e-6);
-    assert!((s.world_state().body("Badge").unwrap().mesh().bounds().max.z - 22.).abs() < 1e-6);
+    assert!((s.world_state().unwrap().body("Badge").unwrap().mesh().bounds().max.z - 22.).abs() < 1e-6);
     run(&mut s, "timeline.delete", json!({"features":["BaseFeature"]}));
     assert!(s.model.result(sketch).unwrap().error.is_some());
     assert!(s.model.state().body("Badge").is_none());
-    assert!((s.world_state().body("Control").unwrap().mesh().bounds().max.z - 30.).abs() < 1e-6);
+    assert!((s.world_state().unwrap().body("Control").unwrap().mesh().bounds().max.z - 30.).abs() < 1e-6);
     let before = s.doc.to_json();
     let reopened = Session::new(solidcraft_doc::Document::from_json(&before).unwrap());
     assert!(reopened.model.result(sketch).unwrap().error.is_some());
@@ -163,7 +163,7 @@ fn exact_nested_source_and_cross_owner_pending_paths_capture_only_involved_posit
     run(&mut s, "occurrence.move", json!({"occurrence":unrelated["occurrence"],"translate":[300,0,0],"capture":false}));
     let author = run(&mut s, "component.create", json!({"name":"Author","parent":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":author["occurrence"],"translate":[100,0,0],"angle":"90 deg","capture":false}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let key = s
         .placed_document()
         .body_frames_with_source(&s.model.state())
@@ -592,7 +592,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
 /// Every flat face of every body: (body, face index, a point well inside it, its normal). The
 /// middle of the face's largest triangle, so an L-shaped face is picked on itself.
 fn flat_faces(s: &Session) -> Vec<(String, usize, Vec3, Vec3)> {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mut out = Vec::new();
     for body in &world.bodies {
         let mesh = body.mesh();
@@ -673,7 +673,7 @@ fn every_flat_face_of_one_sketch_extruded_up_and_down_takes_an_attached_sketch()
     let script: Value = serde_json::from_str(&std::fs::read_to_string(root.join("up-down-join.json")).unwrap()).unwrap();
     let mut s = Session::default();
     s.run_script(&script).unwrap();
-    assert_eq!(s.world_state().bodies.len(), 1, "the two extrudes join into one body");
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1, "the two extrudes join into one body");
     assert_eq!(sketch_and_extrude_on_every_flat_face(&s, &dir, "synthetic"), 12, "8 side walls, top, bottom, 2 at the sketch plane");
     let reopened = save_and_reopen(&mut s, &dir, "synthetic.solidcraft");
     assert_eq!(sketch_and_extrude_on_every_flat_face(&reopened, &dir, "synthetic-reopened"), 12);

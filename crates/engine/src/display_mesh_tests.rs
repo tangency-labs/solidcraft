@@ -64,7 +64,7 @@ fn steps_around(m: &Mesh, face: usize, origin: Vec3, axis: Vec3) -> (usize, f64)
 #[test]
 fn a_large_sheet_shows_its_small_bends_and_holes_round() {
     let s = large_sheet();
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let b = &st.bodies[0];
     let m = b.mesh();
     assert!(b.body.size() * 1e-3 > 3.0, "the chord tolerance is more than any radius here");
@@ -97,7 +97,7 @@ fn a_large_sheet_shows_its_small_bends_and_holes_round() {
         }
     }
     // And the scene the renderers take draws those same polylines.
-    let scene = crate::view::scene(&s, &crate::view::home_camera(&s));
+    let scene = crate::view::scene(&s, &crate::view::home_camera(&s).unwrap()).unwrap();
     let drawn: usize =
         scene.lines.iter().filter(|l| l.points.iter().all(|p| ((p.x - 30.0).hypot(p.y - 20.0) - 2.0).abs() < 1e-6)).map(|l| l.points.len() - 1).sum();
     assert!(drawn >= 2 * (TAU / DISPLAY_ANGLE).ceil() as usize, "{drawn} rim segments in the scene");
@@ -106,7 +106,7 @@ fn a_large_sheet_shows_its_small_bends_and_holes_round() {
 #[test]
 fn what_reads_the_display_mesh_of_a_large_sheet_answers_as_before() {
     let s = large_sheet();
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let b = &st.bodies[0];
     let m = b.mesh();
     let coarse = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord((b.body.size() * 1e-3).max(1e-3))).unwrap();

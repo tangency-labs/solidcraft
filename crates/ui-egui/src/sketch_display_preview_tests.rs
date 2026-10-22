@@ -90,7 +90,7 @@ fn pixel_preview_temporary_curves_match_committed_geometry_and_sampling() {
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run(command, params).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let a = spans(&preview);
         let b = spans(committed);
@@ -215,7 +215,7 @@ fn slot_preview_matches_every_committed_side_and_cap() {
             "{command}: paint all four outline curves"
         );
         h.app.run(command, params).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(preview.curves.len(), committed.curves.len(), "{command}");
         for index in 0..committed.curves.len() {
@@ -262,12 +262,12 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
                 .collect::<Vec<_>>()
         };
         let preview = paths(output);
-        assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+        assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
 
         let click = crate::sketch_dims::placed(&h.app, &t, t.hover.as_ref().unwrap());
         h.app.tool = Some(t);
         super::place(&mut h.app, click);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(committed.curves.len(), 4, "{command}: final click commits the typed width");
         let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };

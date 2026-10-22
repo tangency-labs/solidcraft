@@ -261,7 +261,9 @@ struct WorldCache {
     pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     active_component: u64,
     active_occurrence_path: Option<Vec<u64>>,
-    world: Arc<solidcraft_doc::ModelState>,
+    /// The placed model, or why it could not be placed (kept too, so a model that cannot be
+    /// placed is not placed again on every read).
+    world: std::result::Result<Arc<solidcraft_doc::ModelState>, String>,
     /// The moved components' bodies as placed for `world`, reused by the next world state.
     placed: Arc<std::sync::Mutex<solidcraft_doc::PlacedBodies>>,
     /// Every placed body's world name, own name and frame for `world` ([`Session::body_frames`]),
@@ -730,29 +732,30 @@ impl Session {
         if self.doc.occurrences.is_empty() {
             return Some(state);
         }
-        self.world_cache.lock().ok()?.as_ref().filter(|cache| cache.matches(self, &state)).map(|cache| cache.world.clone())
+        self.world_cache.lock().ok()?.as_ref().filter(|cache| cache.matches(self, &state)).and_then(|cache| cache.world.clone().ok())
     }
 
     /// Re-evaluate the model after a document change.
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
-    pub fn world_state(&self) -> Arc<solidcraft_doc::ModelState> {
+    /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
+    pub fn world_state(&self) -> Result<Arc<solidcraft_doc::ModelState>> {
         let st = self.model.state();
         if self.doc.occurrences.is_empty() {
-            return st;
+            return Ok(st);
         }
         if let Ok(c) = self.world_cache.lock()
             && let Some(cached) = c.as_ref()
             && cached.matches(self, &st)
         {
-            return cached.world.clone();
+            return cached.world.clone().map_err(EngineError::Other);
         }
         // The bodies the last world state placed: unchanged ones are not transformed and meshed
         // again (a design built command by command changed one body at a time).
         let placed = self.world_cache.lock().ok().and_then(|c| c.as_ref().map(|c| c.placed.clone())).unwrap_or_default();
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
-        let mut w = {
+        let w = {
             if self.pending_moves.is_empty() {
                 solidcraft_doc::world_state_reusing(&self.doc, &st, &mut reuse)
             } else {
@@ -768,21 +771,40 @@ impl Session {
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        if let Ok(mut c) = self.world_cache.lock() {
+            *c = Some(WorldCache {
+                doc: self.doc.clone(),
+                model: st,
+                pending_moves: self.pending_moves.clone(),
+                active_component: self.active_component,
+                active_occurrence_path: self.active_occurrence_path.clone(),
+                world: w.as_ref().map(Arc::clone).map_err(ToString::to_string),
+                placed,
+                frames: Arc::default(),
+            });
+        }
+        w
+    }
+
+    /// `w` with the active component's sketches shown at the placement being authored.
+    fn authored_sketches(&self, mut w: solidcraft_doc::ModelState) -> Result<solidcraft_doc::ModelState> {
         // Sketch definitions are displayed once, at the placement currently being authored.
         if self.active_occurrence_path.is_some() && self.active_component != 0 {
             let first = self.occurrence_placement(&self.doc.first_path(self.active_component)).map(|p| p.world).unwrap_or(solidcraft_doc::IDENTITY);
-            if let Some(inverse) = solidcraft_doc::mat_inverse(&first) {
+            let inverse = solidcraft_doc::mat_inverse(&first)
+                .ok_or_else(|| EngineError::Other(format!("the placement of component {} cannot be inverted", self.active_component)))?;
+            {
                 let delta = solidcraft_doc::mat_mul(&self.active_component_frame(), &inverse);
                 for sketch in w.sketches.iter_mut().filter(|sk| self.doc.feature(sk.feature).is_some_and(|f| f.component == self.active_component)) {
                     let sketch = Arc::make_mut(sketch);
                     let plane = sketch.plane;
-                    if let Some(mapped) = solidcraft_geom::Plane::new(
+                    sketch.plane = solidcraft_geom::Plane::new(
                         solidcraft_doc::apply_point(&delta, plane.origin),
                         solidcraft_doc::apply_vector(&delta, plane.x),
                         solidcraft_doc::apply_vector(&delta, plane.y),
-                    ) {
-                        sketch.plane = mapped;
-                    }
+                    )
+                    .ok_or_else(|| EngineError::Other("a sketch plane cannot be placed at the authored placement".into()))?;
                     for wire in &mut sketch.sketch.wires {
                         if wire.space == solidcraft_doc::sketch::WireSpace::Component {
                             solidcraft_doc::map_wire(wire, &delta);
@@ -791,20 +813,7 @@ impl Session {
                 }
             }
         }
-        let w = Arc::new(w);
-        if let Ok(mut c) = self.world_cache.lock() {
-            *c = Some(WorldCache {
-                doc: self.doc.clone(),
-                model: st,
-                pending_moves: self.pending_moves.clone(),
-                active_component: self.active_component,
-                active_occurrence_path: self.active_occurrence_path.clone(),
-                world: w.clone(),
-                placed,
-                frames: Arc::default(),
-            });
-        }
-        w
+        Ok(w)
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
@@ -1134,7 +1143,7 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
-        let mapped = if outermost { frames::to_local(self, spec.id, params) } else { None };
+        let mapped = if outermost { frames::to_local(self, spec.id, params)? } else { None };
         let params = mapped.as_ref().unwrap_or(params);
         if outermost {
             crash::command_begin(self, spec.id, given);
@@ -1542,22 +1551,20 @@ impl Session {
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
-            before: self.world_state(),
-            after: after.world_state(),
-            replies,
-        })
+        let (after, replies) = self.scratch().preview_in_place(commands, None)?;
+        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies })
     }
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| {
-            let world = session.world_state();
+        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
+            let world = session.world_state()?;
             let mut shown = (*world).clone();
             shown.bodies.retain(|body| session.body_visible(&body.name));
-            Arc::new(shown)
+            Ok(Arc::new(shown))
         };
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview { before: visible(self), after: visible(&after), replies })
+        let (after, replies) = self.scratch().preview_in_place(commands, None)?;
+        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

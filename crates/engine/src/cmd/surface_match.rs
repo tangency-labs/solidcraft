@@ -73,7 +73,7 @@ mod tests {
     /// at either end. The seam is where `solid.extrude` starts the circle, so it is read off the
     /// body rather than assumed.
     fn picks(s: &Session) -> Vec<Vec3> {
-        let boss = s.world_state().body("Boss").unwrap().body.clone();
+        let boss = s.world_state().unwrap().body("Boss").unwrap().body.clone();
         let e = boss
             .edges(boss.size() * 1e-2)
             .unwrap()
@@ -109,7 +109,7 @@ mod tests {
     /// is from the picked seam line, the angle between the two surfaces' normals across it, and
     /// the continuity it holds.
     fn seam(s: &Session) -> (f64, f64, Continuity) {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let made = st.body("Skirt").unwrap().body.clone();
         let target = st.body("Boss").unwrap().body.clone();
         solidcraft_kernel::seam_continuity(&made, &target, &picks(s)).unwrap()
@@ -127,7 +127,7 @@ mod tests {
         assert!((gap - 1.0).abs() < 0.05, "the skirt starts a millimetre off the seam: {gap}");
         let chain = picks(&s);
         run(&mut s, "surface.match", json!({"body": "Skirt", "target": "Boss", "edges": chain, "order": "g2"}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert!(st.body("Skirt").is_some(), "the matched body keeps its name");
         assert!(st.body("Boss").is_some(), "the body it was matched to stays too");
         assert!(st.body("Skirt").unwrap().body.is_surface(), "a match stays a surface");

@@ -225,14 +225,14 @@ fn certified_side_transfer_preserves_geometry_and_unsupported_taper_refuses_atom
     run(&mut s, "component.move_bodies", json!({"component":destination,"bodies":["Round"]}));
     run(&mut s, "config.activate", json!({"row":"Painted"}));
     assert_eq!(painted_radius(&s, "Round", 10.), 2);
-    let before = s.world_state().body("Round").unwrap().mesh().bounds();
+    let before = s.world_state().unwrap().body("Round").unwrap().mesh().bounds();
     let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     run(&mut s, "config.activate", json!({"row":"Painted"}));
     assert_eq!(painted_radius(&s, "Round", 10.), 2);
     assert!(
-        s.world_state().body("Round").unwrap().mesh().bounds().min.dist(before.min) < 1e-8,
+        s.world_state().unwrap().body("Round").unwrap().mesh().bounds().min.dist(before.min) < 1e-8,
         "before {before:?}, reopened {:?}",
-        s.world_state().body("Round").unwrap().mesh().bounds()
+        s.world_state().unwrap().body("Round").unwrap().mesh().bounds()
     );
     // A successful ordinary modifier has no exact untapered source certificate.
     let FeatureKind::Extrude { extent, .. } = &mut s.doc_mut().feature_mut(source).unwrap().kind else { panic!() };

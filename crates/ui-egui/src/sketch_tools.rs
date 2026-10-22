@@ -97,7 +97,7 @@ const TRIM_STEP_PX: f32 = 4.0;
 
 /// The sketch-plane position under screen position `pos`.
 fn on_sketch_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
@@ -725,7 +725,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
 pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
     sk.points
@@ -756,7 +756,7 @@ fn arg(p: &(Vec2, Option<String>)) -> Value {
 
 /// Length of a curve (for default sizes).
 fn curve_len(app: &SolveApp, id: &str) -> f64 {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return 10.0 };
     ss.sketch.curve_index(id).map(|c| ss.sketch.polyline(c).windows(2).map(|w| w[0].dist(w[1])).sum::<f64>()).unwrap_or(10.0)
 }
@@ -797,7 +797,7 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     if distinct.len() < 3 {
         return None;
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let plane = &state.sketch(app.session.active_sketch?)?.plane;
     let screen = proj.to_screen(plane.to_world(first))?;
     (screen.distance(pos) <= 8.0).then_some(first)
@@ -874,7 +874,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             // Empty space while sketching: the sketch plane.
             let target = target.or_else(|| {
-                let st = app.session.world_state();
+                let st = crate::open_meshing::session_world(&app.session);
                 let ss = st.sketch(app.session.active_sketch?)?;
                 let (o, d) = proj.ray(pos);
                 let w = ss.plane.intersect_ray(o, d)?;
@@ -1146,7 +1146,7 @@ pub(crate) fn trim_hover_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<
     if let Some(piece) = TRIM_PIECE.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
         return piece;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let piece = solidcraft_engine::cmd::trim_piece(&st.sketch(sketch)?.sketch, id, *at);
     TRIM_PIECE.with(|c| *c.borrow_mut() = Some((key, piece.clone())));
     piece
@@ -1180,7 +1180,7 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
 /// Rubber band for point tools and pick markers.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = crate::theme::Tokens::get();
@@ -1264,7 +1264,7 @@ const GLYPH: f32 = 15.0;
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
@@ -1492,7 +1492,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some((label, p)) = SNAP.with(|s| *s.borrow()) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
     let tk = crate::theme::Tokens::get();

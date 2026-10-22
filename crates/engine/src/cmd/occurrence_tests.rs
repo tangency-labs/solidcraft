@@ -248,7 +248,7 @@ fn instance_selection_delete_removes_only_selected_instance() {
     run(&mut s, "selection.delete", json!({"items": items}));
     assert!(s.doc.occurrences.iter().any(|o| o.id == first));
     assert!(!s.doc.occurrences.iter().any(|o| o.id == second));
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     assert!(s.doc.components.iter().any(|c| c.id == component));
 }
 
@@ -343,7 +343,7 @@ fn synthesized_name_collision_keeps_source_and_instance_separate() {
     let instance = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     assert_ne!(instance, candidate);
     let frames = s.doc.body_frames(&s.model.state());
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(frames.iter().all(|(name, _, _, _)| world.body(name).is_some()));
     assert_eq!(world.bodies.len(), world.bodies.iter().map(|b| &b.name).collect::<std::collections::BTreeSet<_>>().len());
     run(&mut s, "browser.visibility", json!({"visible":false,"paths":[[second]]}));
@@ -556,10 +556,10 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
     let instance = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     let source = s.occurrence_placement(&[second]).unwrap().bodies[0].source.clone();
     run(&mut s, "material.assign", json!({"bodies":[instance],"material":"Brass"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(s.doc.body_color(world.body(&instance).unwrap()), s.doc.body_color(world.body(&source).unwrap()));
     run(&mut s, "appearance.assign", json!({"components":[component.to_string()],"color":"#0000ff","opacity":0.7}));
-    assert_eq!(s.doc.body_color(s.world_state().body(&instance).unwrap()), Some([0.0, 0.0, 1.0]));
+    assert_eq!(s.doc.body_color(s.world_state().unwrap().body(&instance).unwrap()), Some([0.0, 0.0, 1.0]));
     run(&mut s, "appearance.assign", json!({"bodies":[instance],"color":"#ff0000","opacity":0.5}));
     run(&mut s, "appearance.assign", json!({"faces":[{"body":instance,"point":[21,1,2]}],"color":"#00ff00","opacity":0.4}));
     // Exercise the point-based face fallback as well as persistent face-name matching.
@@ -568,7 +568,7 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
     }
     run(&mut s, "body.rename", json!({"body":source,"name":"Shared Renamed"}));
     run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     for id in [first, second] {
         let bodyname = s.occurrence_bodies(&[id], false).unwrap()[0].clone();
         let body = world.body(&bodyname).unwrap();

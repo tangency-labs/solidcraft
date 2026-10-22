@@ -103,7 +103,7 @@ fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
 
 fn corner(s: &Session) -> solidcraft_geom::Vec2 {
     let id = s.active_sketch.expect("sketch mode");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let sk = &st.sketch(id).expect("the shown sketch").sketch;
     sk.resolve_point("l1.start").and_then(|i| sk.point(i)).expect("the corner")
 }

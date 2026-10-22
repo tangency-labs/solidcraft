@@ -31,7 +31,7 @@ struct Topology {
 
 /// Every solid body's topology, by name.
 fn topology(s: &Session) -> BTreeMap<String, Topology> {
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     st.bodies
         .iter()
         .filter(|b| !b.body.is_mesh())
@@ -174,7 +174,7 @@ fn pi_case_faces_per_step_at_both_heights() {
         for (k, want) in FACES {
             let mut t = s.scratch();
             t.execute("timeline.rollback", &json!({"position": k})).unwrap();
-            let st = t.world_state();
+            let st = t.world_state().unwrap();
             let body = st.bodies.iter().find(|b| b.name == "Body1").unwrap();
             assert_eq!(body.body.face_count(), want, "{case}: faces after feature {k}");
             // Each outer side: the faces in its plane.

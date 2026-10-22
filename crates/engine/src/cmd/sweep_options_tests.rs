@@ -31,7 +31,7 @@ fn setup() -> Session {
 }
 
 fn measure(s: &Session, body: &str) -> solidcraft_kernel::BodyMeasure {
-    solidcraft_kernel::measure(&s.world_state().body(body).unwrap().body).unwrap()
+    solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap()
 }
 
 fn sweep(s: &mut Session, sketch: &str, body: &str, extra: Value) -> Result<Value, String> {
@@ -92,7 +92,7 @@ fn twisted_sweep_faces_follow_the_profile_curves() {
     // The end cap turns with the twist: at 90 deg a square's corners are back where they were,
     // at 45 deg its top reaches out to the corner radius along the axes.
     let reach = |s: &Session| {
-        let mesh = s.world_state().body("Twisted").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+        let mesh = s.world_state().unwrap().body("Twisted").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         mesh.positions.iter().filter(|p| (p.z - 40.0).abs() < 1e-6).map(|p| p.x).fold(f64::MIN, f64::max)
     };
     assert!((reach(&s) - 5.0).abs() < 1e-3, "{}", reach(&s));

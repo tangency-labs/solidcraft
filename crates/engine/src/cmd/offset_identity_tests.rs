@@ -129,7 +129,7 @@ fn pasted_offset_boundary_has_scoped_identity_and_independent_dimensions_and_mat
     healthy(&reopened);
     assert!((volume(&reopened, extrusion) - sharp).abs() < 1e-6);
     assert!((volume(&reopened, copied_extrusion) - rounded).abs() < 0.002);
-    let state = reopened.world_state();
+    let state = reopened.world_state().unwrap();
     let bounds = state.body(&copied_body).unwrap().mesh().bounds();
     assert!((bounds.min.x - (100. - 37.6)).abs() < 1e-6);
     assert!((bounds.max.x - (100. + 37.6)).abs() < 1e-6);

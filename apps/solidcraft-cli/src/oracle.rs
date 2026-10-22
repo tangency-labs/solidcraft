@@ -186,7 +186,7 @@ fn step_export_check(s: &solidcraft_engine::Session, volume: f64) -> (bool, Stri
 /// Our part as a triangle soup (curved faces refined onto the surface).
 fn our_mesh(s: &solidcraft_engine::Session) -> Result<Vec<Tri>, String> {
     let mut ours: Vec<Tri> = Vec::new();
-    for b in &s.world_state().bodies {
+    for b in &s.world_state().map_err(|e| e.to_string())?.bodies {
         let m = b.body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(MESH_TOL)).map_err(|e| e.to_string())?;
         let p = |i: u32| m.positions.get(i as usize).map(|v: &Vec3| [v.x, v.y, v.z]);
         for t in &m.triangles {

@@ -99,7 +99,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut app = SolveApp::new(session, Services::default());
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
-    let placed = app.session.world_state().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
+    let placed = app.session.world_state().unwrap().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
     app.session.selection = vec![solidcraft_engine::Sel::Body { name: placed }];
     app.start("appearance.assign");
     let crate::dialogs::Kind::Appearance(appearance) = &app.dialog.as_ref().unwrap().kind else { panic!("appearance dialog") };
@@ -112,7 +112,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
         scene.tris.is_empty(),
         "opaque triangles {}, bodies {:?}",
         scene.tris.len(),
-        app.session.world_state().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
+        app.session.world_state().unwrap().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
     );
     let (vertices, remainder) = scene.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>();
     assert!(remainder.is_empty());

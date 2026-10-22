@@ -157,7 +157,7 @@ fn selected_linetypes(app: &SolveApp) -> [bool; 4] {
     if curves.is_empty() {
         return types;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return types };
     for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))) {
         let k = if c.infinite {
@@ -185,7 +185,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
         return;
     }
     let lines: Vec<String> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         curves
             .iter()
@@ -242,7 +242,7 @@ fn viewport(app: &SolveApp, ctx: &egui::Context) -> egui::Rect {
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| app.session.world_state().sketch(s).map(|_| ())).is_some()
+    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Has the viewport room for the palette and a command dialog side by side? A narrow view has
@@ -317,7 +317,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (opts, name, remaining, solved, total, geometry, open_ends, untied_ends) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
@@ -585,7 +585,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap();
         h.settle();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(unconstrained_total(&sketch.sketch), 3);
         assert_eq!(sketch.report.dof, 3);
@@ -648,12 +648,12 @@ mod tests {
             assert_eq!(after.dims.iter().map(|d| &d.value).collect::<Vec<_>>(), before.dims.iter().map(|d| &d.value).collect::<Vec<_>>());
             assert_eq!(h.app.session.undo.len(), history);
             h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             assert!(!sketch.curves.is_empty(), "{command}");
             assert!(sketch.curves.iter().all(|c| c.construction), "{command}");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
             set_mode(&mut h.app, 0);
         }
     }
@@ -684,7 +684,7 @@ mod tests {
             assert!(options.contains(egui::pos2(x as f32, y as f32)), "lower option must be visible after scrolling");
             h.call("ui.click", json!({"x":x,"y":y}));
             h.settle();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
             assert_eq!(h.app.session.undo.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
@@ -833,7 +833,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let active = h.app.session.active_sketch.unwrap();
-        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().sketch(active).unwrap().sketch.view.slice;
+        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().unwrap().sketch(active).unwrap().sketch.view.slice;
         assert!(!slice_on(&mut h));
         // Clicking the row's label (not just the checkbox) toggles the option, same as before
         // the checkbox and the label became separate widgets in their own column.
@@ -961,7 +961,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let line = |h: &crate::scenario::Harness| {
-            let st = h.app.session.world_state();
+            let st = h.app.session.world_state().unwrap();
             let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
             dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
         };

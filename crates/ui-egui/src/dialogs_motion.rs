@@ -777,7 +777,7 @@ pub fn commands(app: &SolveApp, k: &Mo, inputs: &[SelInput]) -> Result<Vec<(Stri
             let mut occs: Vec<u64> = Vec::new();
             for x in inputs.first().map(|i| i.items.as_slice()).unwrap_or(&[]) {
                 if let solidcraft_engine::Sel::Body { name } = x
-                    && let Some(b) = app.session.world_state().body(name)
+                    && let Some(b) = crate::open_meshing::session_world(&app.session).body(name)
                 {
                     let comp = app.session.doc.model_body_component(b);
                     if let Some(o) = app.session.doc.occurrence_of(comp).map(|o| o.id)

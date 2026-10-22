@@ -1496,7 +1496,7 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
     let parameter = result["param"].as_str().unwrap().to_string();
     let point_ids = sketch(&s).curves[1].kind.point_ids();
     let verify = |s: &Session, distance: f64| {
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let sk = &state.sketch(1).unwrap().sketch;
         assert_eq!(sk.curves[0], original.curves[0]);
         assert_eq!(&sk.points[..original.points.len()], &original.points);
@@ -1686,7 +1686,7 @@ fn periodic_closed_offset_chain_break_drag_reopen_and_material_volume() {
     let sketch_id = s.active_sketch.unwrap();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":sketch_id,"profiles":[selected.0],"distance":3,"operation":"new"}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let volume = solidcraft_kernel::measure(&state.bodies.last().unwrap().body).unwrap().volume;
     assert!((volume - expected).abs() < 0.05, "{volume} vs {expected}");
 }
@@ -1764,7 +1764,7 @@ fn periodic_offset_extrusion_survives_post_extrude_span_changes_and_cold_reopen(
     let initial_doc = s.doc.to_json();
     for major in [12.0, 16.0, 20.0] {
         run(&mut s, "parameters.change", json!({"name":"d1","expression":major}));
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let sk = state.sketch(sk_id).unwrap();
         let ring = sk.profiles.iter().find(|p| p.whole_curve_boundaries().as_ref() == Some(&boundary)).unwrap();
         assert_ne!(ring.outer_curves.len(), initial_count, "the repro must actually change graph span multiplicity");
@@ -1819,7 +1819,7 @@ fn periodic_offset_extrusion_survives_post_extrude_span_changes_and_cold_reopen(
         assert!((volume - expected).abs() < 0.05, "{major}: {volume} vs independent {expected}");
         let mut cold = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), ..Default::default() };
         cold.refresh();
-        let cold_state = cold.world_state();
+        let cold_state = cold.world_state().unwrap();
         assert_eq!(cold_state.bodies.len(), 1);
         let cold_volume = solidcraft_kernel::measure(&cold_state.bodies[0].body).unwrap().volume;
         assert!((cold_volume - volume).abs() < 1e-8);
@@ -2024,7 +2024,7 @@ fn offset_driver_edits_reopens_and_undoes_without_moving_sources() {
     let param = result["param"].as_str().unwrap().to_string();
     let outputs = ids(&result["curves"]);
     let check = |s: &Session, distance: f64| {
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let sk = &state.sketch(1).unwrap().sketch;
         assert!((sk.offset_distance(&outputs[0]).unwrap().abs() - distance).abs() < 1e-8);
         let constraint = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&param)).unwrap();
@@ -2200,7 +2200,7 @@ fn offset_driver_uses_design_units_and_dimension_delete_freezes_current_distance
     assert!((sketch(&s).offsets[0].distance - 5.08).abs() < 1e-8);
     assert!(s.doc.param(param).is_none());
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!((reopened.world_state().sketch(1).unwrap().sketch.offsets[0].distance - 5.08).abs() < 1e-8);
+    assert!((reopened.world_state().unwrap().sketch(1).unwrap().sketch.offsets[0].distance - 5.08).abs() < 1e-8);
 }
 
 #[test]
@@ -2227,7 +2227,7 @@ fn offset_driver_arc_first_retires_breaks_undoes_and_reopens() {
     assert!(sketch(&s).offsets.is_empty());
     assert_eq!(sketch(&s).segs(sketch(&s).curve_index(&survivor).unwrap()), before);
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(reopened.world_state().sketch(1).unwrap().sketch.offsets.is_empty());
+    assert!(reopened.world_state().unwrap().sketch(1).unwrap().sketch.offsets.is_empty());
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.param(param).is_some());
     run(&mut s, "edit.redo", json!({}));

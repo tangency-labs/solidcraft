@@ -144,7 +144,7 @@ fn state_for_sketch<'a>(
     });
     match attachment {
         Some(anchor) => solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp),
-        None => Ok(solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp))),
+        None => solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp)),
     }
 }
 
@@ -655,7 +655,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     let mut doc = (*s.doc).clone();
     let raw = s.model.state_before(id);
     let component = doc.feature(id).map(|feature| feature.component).unwrap_or(0);
-    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component));
+    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component))?;
     let plane = sketch_plane(&doc, id, &state)?;
     let names = state.body(body).map(solidcraft_doc::naming::face_names).unwrap_or_default();
 

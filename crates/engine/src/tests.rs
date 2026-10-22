@@ -1386,14 +1386,14 @@ fn extrude_auto_operation() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     // A face pushed in (negative distance) cuts.
     let p = json!({"face": [20, 15, 20], "distance": -5, "operation": "auto"});
-    assert_eq!(auto_operation(&s, &p), Some("cut"));
+    assert_eq!(auto_operation(&s, &p).unwrap(), Some("cut"));
     run(&mut s, "solid.extrude", p);
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0) < 1e-6);
     // Pulled out, it joins.
-    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": 5})), Some("join"));
+    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": 5})).unwrap(), Some("join"));
     // Pushed in far past the bottom (halfway is below the box), it still cuts (#1257).
-    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": -50})), Some("cut"));
-    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": 50, "direction": "negative"})), Some("cut"));
+    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": -50})).unwrap(), Some("cut"));
+    assert_eq!(auto_operation(&s, &json!({"face": [20, 15, 15], "distance": 50, "direction": "negative"})).unwrap(), Some("cut"));
     // A sketch on XY under the box: up goes into it (cut), down grows out of it (join), and a
     // profile beside the box still defaults to Join (New Body remains explicit).
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
@@ -1401,9 +1401,9 @@ fn extrude_auto_operation() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [60, 5], "p1": [70, 15]}));
     run(&mut s, "sketch.finish", json!({}));
     let at = |x: f64, d: f64| json!({"profiles": [{"point": [x, 10]}], "distance": d});
-    assert_eq!(auto_operation(&s, &at(10.0, 8.0)), Some("cut"));
-    assert_eq!(auto_operation(&s, &at(10.0, -8.0)), Some("join"));
-    assert_eq!(auto_operation(&s, &at(65.0, 8.0)), Some("join"));
+    assert_eq!(auto_operation(&s, &at(10.0, 8.0)).unwrap(), Some("cut"));
+    assert_eq!(auto_operation(&s, &at(10.0, -8.0)).unwrap(), Some("join"));
+    assert_eq!(auto_operation(&s, &at(65.0, 8.0)).unwrap(), Some("join"));
     run(&mut s, "solid.extrude", json!({"profiles": [{"point": [10, 10]}], "distance": 8, "operation": "auto"}));
     assert!(rel(volume(&mut s), 40.0 * 30.0 * 15.0 - 100.0 * 8.0) < 1e-6);
 }
@@ -1480,11 +1480,11 @@ fn extrude_auto_operation_follows_the_to_object() {
         // From the top face to the bottom face: through the body.
         let down = json!({"face": [20, 15, 20], "to": [10, 10, 0], "distance": 19, "direction": direction});
         assert!(extrude_reach(&s, &down).is_some_and(|h| (h + 20.0).abs() < 1e-6), "{down}");
-        assert_eq!(auto_operation(&s, &down), Some("cut"), "{down}");
+        assert_eq!(auto_operation(&s, &down).unwrap(), Some("cut"), "{down}");
         // From the top face up to the box above: out of the body.
         let up = json!({"face": [20, 15, 20], "to": [10, 10, 50], "distance": 19, "direction": direction});
         assert!(extrude_reach(&s, &up).is_some_and(|h| (h - 30.0).abs() < 1e-6), "{up}");
-        assert_eq!(auto_operation(&s, &up), Some("join"), "{up}");
+        assert_eq!(auto_operation(&s, &up).unwrap(), Some("join"), "{up}");
     }
     // Without a To object the direction still counts.
     assert_eq!(extrude_reach(&s, &json!({"face": [20, 15, 20], "distance": 5, "direction": "negative"})), Some(-5.0));
@@ -1537,7 +1537,7 @@ fn auto_extrude_joins_side_contact_elbow_and_keeps_new_body_explicit() {
         // The profile centre is outside the vertical arm. Contact is along its
         // y=10 side, not behind the centre along the extrusion's X direction.
         let p = json!({"distance": 10, "to": [0, 15, 25], "operation": operation});
-        assert_eq!(auto_operation(&s, &p), Some("join"));
+        assert_eq!(auto_operation(&s, &p).unwrap(), Some("join"));
         run(&mut s, "solid.extrude", p);
         assert!((volume(&mut s) - 5000.0).abs() < 1e-6);
         let st = s.model.state();
@@ -1561,7 +1561,7 @@ fn auto_extrude_joins_corner_screw_boss() {
     run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 1}));
     run(&mut s, "sketch.finish", json!({}));
     let p = json!({"profiles": [{"point": [12, 10]}], "distance": 5, "operation": "auto"});
-    assert_eq!(auto_operation(&s, &p), Some("join"));
+    assert_eq!(auto_operation(&s, &p).unwrap(), Some("join"));
     run(&mut s, "solid.extrude", p);
     assert!(rel(volume(&mut s), 3000.0 + PI * 15.0 * 5.0) < 1e-3);
     let st = s.model.state();
@@ -1580,8 +1580,8 @@ fn auto_extrude_starts_new_body_in_empty_component() {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 2}));
     run(&mut s, "sketch.finish", json!({}));
-    assert_eq!(auto_operation(&s, &json!({"distance": 5})), Some("new"));
-    assert_eq!(auto_operation(&s, &json!({"distance": 5, "participants": ["missing"]})), Some("new"));
+    assert_eq!(auto_operation(&s, &json!({"distance": 5})).unwrap(), Some("new"));
+    assert_eq!(auto_operation(&s, &json!({"distance": 5, "participants": ["missing"]})).unwrap(), Some("new"));
 }
 
 /// Measuring picked geometry: distance between faces, angle, edge length.
@@ -1817,7 +1817,7 @@ fn holes_at_sketch_points_threads_and_components() {
     );
     let reopened = Session::new(back);
     assert_eq!(reopened.model.state().body("Shaft").unwrap().component, assigned);
-    assert_eq!(reopened.world_state().threads.len(), s.world_state().threads.len());
+    assert_eq!(reopened.world_state().unwrap().threads.len(), s.world_state().unwrap().threads.len());
 }
 
 #[test]
@@ -1938,11 +1938,11 @@ fn components_occurrences_and_world_placement() {
     run(&mut s, "component.activate", json!({"component": 0}));
     // Instances share the contents; a copy is independent.
     run(&mut s, "occurrence.copy", json!({"component": cid, "translate": [0, 20, 0]}));
-    let w = s.world_state();
+    let w = s.world_state().unwrap();
     assert_eq!(w.bodies.len(), 3, "{:?}", w.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
     let pn = run(&mut s, "component.paste_new", json!({"component": cid, "translate": [0, -30, 0]}));
     assert_eq!(pn["features"].as_array().map(|a| a.len()), Some(2));
-    assert_eq!(s.world_state().bodies.len(), 4);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 4);
     // Ground stops moves; pending moves show until captured or reverted.
     run(&mut s, "occurrence.ground", json!({"occurrence": occ}));
     assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "translate": [1, 0, 0]})).is_err());
@@ -1988,8 +1988,8 @@ fn components_occurrences_and_world_placement() {
     run(&mut s, "edit.redo", json!({}));
     run(&mut s, "timeline.roll_to", json!({"position": 1}));
     // The ownership boundary is later: before it Base remains the sole root body.
-    assert_eq!(s.world_state().bodies.len(), 1);
-    assert_eq!(s.world_state().body("Base").unwrap().component, 0);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+    assert_eq!(s.world_state().unwrap().body("Base").unwrap().component, 0);
     run(&mut s, "timeline.roll_to", json!({}));
     // Saved and loaded; older designs get occurrences.
     let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
@@ -2071,7 +2071,7 @@ fn sample_plate_step_round_trip() {
     let mut s = Session::default();
     s.run_script(&crate::sample::script()).unwrap();
     let imp = step_round_trip(&mut s, "sample");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     assert_eq!(imp.bodies.len(), st.bodies.len());
     for (a, b) in st.bodies.iter().zip(&imp.bodies) {
         assert_eq!(a.name, b.name);
@@ -2142,7 +2142,7 @@ fn face_colours_and_opacity_export() {
     let mut s2 = Session::default();
     run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
     let _ = std::fs::remove_file(&p);
-    let st = s2.world_state();
+    let st = s2.world_state().unwrap();
     let looks = s2.doc.face_colors(&st.bodies[0]);
     assert_eq!(looks.len(), 1);
     assert_eq!(looks[0].1.color, [255, 0, 0]);
@@ -2156,13 +2156,13 @@ fn iges_export_and_open() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "body_name": "Plate"}));
     run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "base": [10, 10, 5], "body_name": "Pin"}));
     run(&mut s, "appearance.assign", json!({"bodies": ["Pin"], "color": "#ff0000"}));
-    let want: Vec<f64> = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+    let want: Vec<f64> = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
     let p = std::env::temp_dir().join(format!("solidcraft-iges-{}.igs", std::process::id()));
     run(&mut s, "file.export", json!({"path": p.to_string_lossy()}));
     let mut s2 = Session::default();
     run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
     let _ = std::fs::remove_file(&p);
-    let st = s2.world_state();
+    let st = s2.world_state().unwrap();
     let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
     assert_eq!(names, ["Plate", "Pin"]);
     for (b, v) in st.bodies.iter().zip(&want) {
@@ -2179,7 +2179,7 @@ fn split_body_by_a_face() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
     run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 40, "base": [5, 10, -5], "body_name": "Tool"}));
     run(&mut s, "solid.split_body", json!({"body": "Block", "tool": {"body": "Tool", "point": [9, 10, 10]}}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let mut v: Vec<f64> =
         st.bodies.iter().filter(|b| b.name.starts_with("Block")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
     v.sort_by(f64::total_cmp);
@@ -2200,7 +2200,7 @@ fn split_body_by_a_sketch_line() {
     run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 2, "id": "c"}));
     run(&mut s, "sketch.finish", json!({}));
     let volumes = |s: &Session| {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let mut v: Vec<f64> =
             st.bodies.iter().filter(|b| b.name.starts_with("Block")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
         v.sort_by(f64::total_cmp);
@@ -2237,12 +2237,12 @@ fn chord_and_variable_fillets() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
     run(&mut s, "solid.fillet", json!({"edges": [[10, 10, 30]], "radius": 4, "type": "chord"}));
     let r = 4.0 / 2f64.sqrt();
-    let v = solidcraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let v = solidcraft_kernel::measure(&s.world_state().unwrap().body("B").unwrap().body).unwrap().volume;
     assert!(rel(v, 6000.0 - (1.0 - PI / 4.0) * r * r * 20.0) < 1e-4, "{v}");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
     run(&mut s, "solid.fillet", json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 5, "start": [10, 0, 30]}));
-    let v = solidcraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let v = solidcraft_kernel::measure(&s.world_state().unwrap().body("B").unwrap().body).unwrap().volume;
     let removed = (1.0 - PI / 4.0) * 20.0 * (4.0 + 10.0 + 25.0) / 3.0;
     assert!(rel(v, 6000.0 - removed) < 1e-4, "{v}");
     assert!(s.execute("solid.fillet", &json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable"})).is_err());
@@ -2250,7 +2250,7 @@ fn chord_and_variable_fillets() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "B"}));
     run(&mut s, "solid.fillet", json!({"edges": [[10, 10, 30]], "radius": 4, "type": "variable", "radius2": 0, "start": [10, 0, 30]}));
-    let v = solidcraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let v = solidcraft_kernel::measure(&s.world_state().unwrap().body("B").unwrap().body).unwrap().volume;
     assert!(rel(v, 6000.0 - (1.0 - PI / 4.0) * 20.0 * 16.0 / 3.0) < 1e-4, "{v}");
     // A radius through a middle point (a user parameter), straight between: 2 → 4 → 2.
     let mut s = Session::default();
@@ -2261,7 +2261,7 @@ fn chord_and_variable_fillets() {
         "solid.fillet",
         json!({"edges": [[10, 10, 30]], "radius": 2, "type": "variable", "radius2": 2, "start": [10, 0, 30], "mid": [[0.5, "waist"]]}),
     );
-    let vol = |s: &Session| solidcraft_kernel::measure(&s.world_state().body("B").unwrap().body).unwrap().volume;
+    let vol = |s: &Session| solidcraft_kernel::measure(&s.world_state().unwrap().body("B").unwrap().body).unwrap().volume;
     let removed = 2.0 * (1.0 - PI / 4.0) * 10.0 * (4.0 + 8.0 + 16.0) / 3.0;
     assert!(rel(vol(&s), 6000.0 - removed) < 1e-4, "{}", vol(&s));
     // The middle radius follows its parameter.
@@ -2285,7 +2285,7 @@ fn components_export_as_step_assembly() {
     run(&mut s, "component.create", json!({"name": "Pin"}));
     run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10, "base": [5, 5, 5]}));
     run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [20, 0, 0]}));
-    let want: f64 = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    let want: f64 = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
     let imp = step_round_trip(&mut s, "asm");
     assert_eq!(imp.bodies.len(), 3, "{:?}", imp.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
     let got: f64 = imp.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
@@ -2783,7 +2783,7 @@ fn booleans_stay_in_their_component() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [8, 2], "p1": [28, 8]}));
     run(&mut s, "sketch.finish", json!({}));
     let vol = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap_or(0.0);
-    assert_eq!(auto_operation(&s, &json!({"sketch": "Slot", "distance": 10})), Some("cut"));
+    assert_eq!(auto_operation(&s, &json!({"sketch": "Slot", "distance": 10})).unwrap(), Some("cut"));
     run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 10, "operation": "cut", "name": "Cut"}));
     assert!((vol(&mut s, "ABox") - (2000.0 - 12.0 * 6.0 * 10.0)).abs() < 1e-6, "{}", vol(&mut s, "ABox"));
     assert!((vol(&mut s, "BBox") - 2000.0).abs() < 1e-6, "B untouched: {}", vol(&mut s, "BBox"));
@@ -3408,14 +3408,14 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10}));
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[30,0,0]}));
-    let prepared = computed.world_state();
+    let prepared = computed.world_state().unwrap();
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
     s.accept_computed(computed);
-    assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
-    assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
 }
 
 /// Every file command checked the size with the metadata and then read to the end. A character

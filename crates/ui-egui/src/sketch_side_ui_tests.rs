@@ -15,7 +15,7 @@ fn sketch_from(yaw: f64, pitch: f64, name: &str) -> (Harness, Vec3, Plane) {
     h.step(&json!({"start":"sketch.create"})).unwrap();
     h.step(&json!({"click":{"plane":name}})).unwrap();
     h.settle();
-    let plane = h.app.session.world_state().sketches.first().map(|s| s.plane).expect("a sketch on the plane");
+    let plane = h.app.session.world_state().unwrap().sketches.first().map(|s| s.plane).expect("a sketch on the plane");
     (h, eye, plane)
 }
 
@@ -61,7 +61,7 @@ fn a_flipped_sketch_extrudes_toward_the_viewer_and_reopens_the_same() {
     let sketch = h.app.session.active_sketch.unwrap();
     h.app.finish_sketch();
     h.app.run("solid.extrude", json!({"sketch":sketch,"distance":4,"operation":"new_body","body_name":"Block"})).unwrap();
-    let bounds = |h: &Harness| h.app.session.world_state().body("Block").map(|b| b.mesh().bounds()).expect("an extruded body");
+    let bounds = |h: &Harness| h.app.session.world_state().unwrap().body("Block").map(|b| b.mesh().bounds()).expect("an extruded body");
     let before = bounds(&h);
     assert!(before.min.y < -3.9 && before.max.y < 1e-6, "extruded away from the viewer: {before:?}");
     let path = h.dir.join("flipped-sketch.solidcraft");
@@ -81,7 +81,7 @@ fn a_construction_plane_seen_from_below_gets_a_sketch_facing_down() {
     h.step(&json!({"key":"L"})).unwrap();
     h.settle();
     let sketch = h.app.session.active_sketch.expect("a sketch on P");
-    let plane = h.app.session.world_state().sketch(sketch).map(|s| s.plane).unwrap();
+    let plane = h.app.session.world_state().unwrap().sketch(sketch).map(|s| s.plane).unwrap();
     assert!(plane.normal().z < -0.999 && (plane.origin.z - 5.0).abs() < 1e-9, "{plane:?}");
     assert!(h.app.cam.eye().z < 5.0, "the view stays below the plane");
 }

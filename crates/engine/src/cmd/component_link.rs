@@ -110,7 +110,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
     }
-    let world = part.world_state();
+    let world = part.world_state()?;
     let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh()).map(|b| b.name.clone()).collect();
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));

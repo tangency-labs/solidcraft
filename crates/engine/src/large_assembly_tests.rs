@@ -69,7 +69,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
     let doc = generated_assembly(parts);
     let mut s = Session::new(doc.clone());
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().find(|r| r.error.is_some()));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), parts * 4);
     assert!(world.bodies.iter().all(|b| b.component != 0 && b.transferred));
     world.warm_meshes(|| true);
@@ -109,7 +109,7 @@ fn bench_generated_assembly() {
     let evaluate = ms(t);
     let features: f64 = s.model.results.iter().map(|r| r.ms).sum();
     let t = std::time::Instant::now();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     world.warm_meshes(|| true);
     let mesh = ms(t);
     let t = std::time::Instant::now();

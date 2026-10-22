@@ -90,7 +90,7 @@ fn rigid(m: &Mat) -> bool {
 }
 
 pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
-    let world = s.world_state();
+    let world = s.world_state()?;
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
     for body in &state.bodies {

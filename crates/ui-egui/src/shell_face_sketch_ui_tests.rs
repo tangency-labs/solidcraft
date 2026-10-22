@@ -24,7 +24,7 @@ fn assert_attached(h: &Harness) {
     assert_eq!(anchor.target.body, "Case");
     assert_eq!(serde_json::to_value(&anchor.target.certificate).unwrap()["kind"], "shell_planar");
     assert!(matches!(h.app.session.doc.sketch_face_attachment(id, &h.app.session.model), FaceAttachmentStatus::Healthy { .. }));
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let solved = world.sketch(id).unwrap();
     assert!(solved.plane.origin.y.abs() < 1e-8);
     assert!(solved.plane.normal().y.abs() > 0.999);
@@ -86,7 +86,7 @@ fn rounded_shell_corner_is_one_physical_face_above_and_below_the_floor() {
     h.call("ui.view", json!({"view":"iso"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert_eq!(state.body("Case").unwrap().body.face_count(), 19, "no artificial lower corner faces remain in the BRep");
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();

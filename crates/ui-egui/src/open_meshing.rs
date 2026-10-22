@@ -126,7 +126,7 @@ impl Drop for Meshing {
 pub(crate) fn start(app: &mut SolveApp, remember: Option<String>) {
     app.open_meshing_next = false;
     let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-    let mut meshing = Meshing::start(app.session.world_state(), plans, app.viewport.gpu.is_some());
+    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), plans, app.viewport.gpu.is_some());
     meshing.remember = remember;
     app.open_meshing = Some(meshing);
     app.fit_view();
@@ -176,7 +176,7 @@ pub(crate) fn framing(app: &SolveApp) -> bool {
 /// picture.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(m) = app.open_meshing.as_ref() else { return };
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     if !Arc::ptr_eq(&world, &m.world) {
         if m.complete {
             // The design changed after its open: the viewport draws it as ever.
@@ -214,13 +214,26 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
+/// The session's placed model, as every panel, pick and hover reads it. A model that cannot be
+/// placed shows no placed bodies, and the viewport says why ([`placement_error`]); the session
+/// keeps the failure, so it is not placed again on every read.
+pub(crate) fn session_world(s: &solidcraft_engine::Session) -> Arc<ModelState> {
+    s.world_state().unwrap_or_default()
+}
+
+/// Why the session's model cannot be placed, if it cannot.
+pub(crate) fn placement_error(s: &solidcraft_engine::Session) -> Option<String> {
+    s.world_state().err().map(|e| e.to_string())
+}
+
 /// The world the viewport draws: while an opened design is being meshed, the bodies meshed so
 /// far (the picture grows a few times a second), then all of them, in the order they came, until
-/// the design changes; otherwise the session's.
+/// the design changes; otherwise the session's ([`session_world`]).
 pub(crate) fn shown_world(app: &SolveApp) -> Arc<ModelState> {
-    let Some(m) = app.open_meshing.as_ref() else { return app.session.world_state() };
-    if !Arc::ptr_eq(&app.session.world_state(), &m.world) {
-        return app.session.world_state();
+    let world = session_world(&app.session);
+    let Some(m) = app.open_meshing.as_ref() else { return world };
+    if !Arc::ptr_eq(&world, &m.world) {
+        return world;
     }
     m.shown.as_ref().map(|(_, st)| st.clone()).unwrap_or_else(|| Arc::new(ModelState::default()))
 }

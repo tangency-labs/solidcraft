@@ -120,7 +120,7 @@ fn pick_timing_on_curved_models() {
     for (name, mut app, pitch) in scenes {
         app.set_origin_shown(false);
         (app.cam.yaw, app.cam.pitch) = (0.6, pitch);
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         app.cam.fit(&st.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh_bounds())));
         let (tris, segs) = st
             .bodies

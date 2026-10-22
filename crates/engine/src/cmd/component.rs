@@ -125,17 +125,7 @@ fn move_vector(p: &Value, key: &str, default: Vec3, coordinate: bool, cmd: &str)
 }
 
 pub(super) fn valid_position(m: &Mat) -> bool {
-    let column = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
-    let (x, y, z) = (column(0), column(1), column(2));
-    m.iter().flatten().all(|x| x.is_finite())
-        && m[3][..3].iter().all(|x| x.abs() <= 1e9)
-        && [x, y, z].iter().all(|axis| (axis.dot(*axis) - 1.0).abs() < 1e-6)
-        && x.dot(y).abs() < 1e-6
-        && x.dot(z).abs() < 1e-6
-        && y.dot(z).abs() < 1e-6
-        && x.cross(y).dot(z) > 0.0
-        && [m[0][3], m[1][3], m[2][3]].iter().all(|x| x.abs() < 1e-9)
-        && (m[3][3] - 1.0).abs() < 1e-9
+    solidcraft_doc::is_placement(m)
 }
 
 pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {

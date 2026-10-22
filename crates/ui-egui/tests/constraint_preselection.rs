@@ -215,7 +215,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "fix" => matches!(c.kind, ConstraintKind::Fix { .. }),

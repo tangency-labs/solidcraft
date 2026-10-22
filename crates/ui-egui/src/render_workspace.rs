@@ -1596,7 +1596,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let mut visibility = std::collections::hash_map::DefaultHasher::new();
         app.session.visibility.hidden_bodies.hash(&mut visibility);
         app.session.visibility.hidden_occurrences.hash(&mut visibility);
-        let signature = (app.session.revision, Arc::as_ptr(&app.session.world_state()) as usize, visibility.finish());
+        let signature = (app.session.revision, Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize, visibility.finish());
         app.render_workspace
             .prepare_preview(signature, || solidcraft_engine::product_scene::extract(&app.session).map_err(|error| error.to_string()))?;
         let scene = app.render_workspace.scene.as_ref().ok_or("no product scene")?;

@@ -1066,7 +1066,11 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let i = view_index(s, p, cmd)?;
     let v = s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "view"))?;
-    s.pending_moves = exploded_at(&explode_moves(s, &v), 1.0);
+    let moves = exploded_at(&explode_moves(s, &v), 1.0);
+    if !moves.values().all(solidcraft_doc::is_placement) {
+        return Err(bad(cmd, format!("exploded view `{}` moves an occurrence out of range", v.name)));
+    }
+    s.pending_moves = moves;
     s.revision += 1;
     Ok(json!({"view": v.id, "name": v.name}))
 }

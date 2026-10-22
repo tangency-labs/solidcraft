@@ -40,7 +40,7 @@ fn a_loop_of_sketch_curves_is_the_loop_patch() {
     let FeatureKind::SurfaceBoundary { curves, orders, .. } = &f.kind else { panic!("{:?}", f.kind) };
     assert_eq!(curves, &["s1", "s2", "s3", "s4"]);
     assert!(orders.iter().all(|o| *o == Continuity::G1), "{orders:?}");
-    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
 }
 
 /// A quarter cylinder sheet (its top edge open at y = 10, z = 0) and a 3D line above it.
@@ -84,7 +84,7 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     assert_eq!(u[0].continuity, Continuity::G2);
     assert_eq!(u[1].curves, vec![top.clone()]);
     // Joined into the sheet: one body, two faces.
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.body(&body).map(|b| b.body.face_count()), Some(2));
     drop(st);
@@ -123,5 +123,5 @@ fn curves_that_meet_are_one_chain() {
     assert_eq!(p["v"], json!([{"sketch": sketch, "curves": ["c"]}, {"sketch": sketch, "curves": ["d"]}]), "{p}");
     // And it builds: the chain a1–a2 is one boundary of the patch.
     h.app.run("surface.boundary", p.clone()).unwrap();
-    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
 }

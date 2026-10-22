@@ -98,11 +98,11 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
         Motion::Explode(moves, _) => {
             let mut t = s.scratch();
             t.pending_moves.clear();
-            let assembled = crate::view::bounds(&t);
+            let assembled = crate::view::bounds(&t)?;
             t.pending_moves = exploded_at(moves, 1.0);
-            let mut c = crate::view::home_camera(&t);
-            c.fit(&assembled.union(&crate::view::bounds(&t)));
-            c
+            let mut c = crate::view::home_camera(&t)?;
+            c.fit(&assembled.union(&crate::view::bounds(&t)?));
+            Ok(c)
         }
         Motion::Drive(..) => crate::view::home_camera(s),
     };
@@ -144,7 +144,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
                 t.pending_moves = exploded_at(moves, if *back { 1.0 - (2.0 * u - 1.0).abs() } else { u });
             }
         }
-        let scene = crate::view::scene_with_guides(&t, &cam, s.section, guides);
+        let scene = crate::view::scene_with_guides(&t, &cam, s.section, guides)?;
         let picture = capture::rgba_with(Some(renderer), &scene, &cam, width, height).map_err(|e| bad(cmd, e))?;
         drawn_by = picture.renderer;
         if gif {
@@ -178,8 +178,11 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
 
 /// The camera the frames are drawn from: the session's (`view.apply`), or `home` framing the
 /// model, with the fields `given` sets (`ui.camera`'s reply sets them all).
-fn camera(s: &Session, home: impl FnOnce() -> Camera, given: Option<&Value>, cmd: &str) -> Result<Camera> {
-    let base = s.camera.unwrap_or_else(home);
+fn camera(s: &Session, home: impl FnOnce() -> Result<Camera>, given: Option<&Value>, cmd: &str) -> Result<Camera> {
+    let base = match s.camera {
+        Some(c) => c,
+        None => home()?,
+    };
     let Some(given) = given else { return Ok(base) };
     let fields = given.as_object().ok_or_else(|| bad(cmd, "`camera` must be an object, such as ui.camera's reply"))?;
     let mut v = serde_json::to_value(base).map_err(|e| bad(cmd, e.to_string()))?;

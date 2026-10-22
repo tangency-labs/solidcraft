@@ -562,7 +562,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in c {
         app.run(&id, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let b = st.body("Body2").unwrap().mesh().bounds();
     assert!((b.min.z - 10.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "{b:?}");
     // Edit Joint shows the mate unflipped; Flip puts B back into A's volume.
@@ -575,7 +575,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in apply_commands(&app, &e).unwrap() {
         app.run(&id, p).unwrap();
     }
-    let b = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    let b = app.session.world_state().unwrap().body("Body2").unwrap().mesh().bounds();
     assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
 }
 

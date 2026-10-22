@@ -1110,7 +1110,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
-        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component);
+        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;

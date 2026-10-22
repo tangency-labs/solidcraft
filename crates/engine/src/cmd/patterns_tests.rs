@@ -116,7 +116,7 @@ fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompu
             }),
         );
         let sign = if flipped { -1.0 } else { 1.0 };
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let body = &st.bodies[0].body;
         // Analytic slots: the source, +1, -1, +2. The second direction is independent.
         for i in [0.0, 1.0, -1.0, 2.0] {
@@ -155,7 +155,7 @@ fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spaci
                 }),
             );
             let step = total / if total == 360.0 { 6.0 } else { 5.0 };
-            let st = s.world_state();
+            let st = s.world_state().unwrap();
             for slot in [0.0, 1.0, -1.0, 2.0, -2.0, 3.0] {
                 let a = (step * slot * if flipped { -1.0 } else { 1.0 }).to_radians();
                 let p = Vec3::new(40.0 + 20.0 * a.cos(), 60.0 + 20.0 * a.sin(), 2.5);

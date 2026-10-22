@@ -216,7 +216,7 @@ fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     let local = model.sketch(s.active_sketch.unwrap()).unwrap();
     close(local.plane.origin.x, 0.0);
     close(local.plane.origin.z, 2.0);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let displayed = world.sketch(s.active_sketch.unwrap()).unwrap();
     close(displayed.plane.origin.x, 20.0);
     close(displayed.plane.origin.z, 2.0);

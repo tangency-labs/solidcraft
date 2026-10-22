@@ -102,7 +102,7 @@ fn target(app: &SolveApp) -> Option<String> {
 /// The frame of text `link` in the active sketch, as shown (solved).
 fn frame(app: &SolveApp, link: &str) -> Option<Frame> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(sid)?.sketch;
     let source = sk.link(link).filter(|l| l.kind == LinkKind::Text)?;
     let LinkSource::Text { at, height, angle, style, .. } = &source.source else { return None };
@@ -147,7 +147,7 @@ struct Screen {
 
 fn screen(app: &SolveApp, proj: &Proj, f: &Frame) -> Option<Screen> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let plane = state.sketch(sid)?.plane;
     let to_screen = |local: Vec2| proj.to_screen(plane.to_world(f.to_sketch(local)));
     let [a, b, c, d] = f.corners();
@@ -178,7 +178,7 @@ pub(crate) fn over(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
 
 /// Where the pointer is on the active sketch's plane.
 fn on_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(app.session.active_sketch?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
@@ -409,7 +409,7 @@ mod tests {
         h.app.session.selection.clear();
         h.frames(2);
         let sid = h.app.session.active_sketch.unwrap();
-        let inside = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let inside = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         h.step(&json!({"click":{"sketch":[inside.x,inside.y]},"double":true})).unwrap();
         h.frames(2);
         match h.app.dialog.as_ref().map(|d| &d.kind) {

@@ -502,7 +502,7 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
                     before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component)
                         || (matches!(op, "cut" | "intersect") && s.cut_takes_every_body(before))
                 },
-                |name| s.world_state().body(name).is_some(),
+                |name| crate::open_meshing::session_world(s).body(name).is_some(),
             );
         }
         if !found && matches!(op, "cut" | "intersect") {

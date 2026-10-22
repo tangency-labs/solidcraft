@@ -154,8 +154,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     s.execute("sketch.circle.center", &json!({"center":[2,3],"radius":1})).unwrap();
     s.section = Some((Vec3::new(0., 0., 3.), Vec3::Z));
     let cam = Camera::default();
-    let old = scene(&s, &cam);
-    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts);
+    let old = scene(&s, &cam).unwrap();
+    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts).unwrap();
     assert_eq!(old.lines.len(), default.lines.len());
     for (a, b) in old.lines.iter().zip(&default.lines) {
         assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
@@ -165,7 +165,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let sampled = scene_with_sketch_sampler(&s, &cam, |_, _, plane| {
         planes.push(*plane);
         parts.clone()
-    });
+    })
+    .unwrap();
     assert_eq!(planes.len(), 1);
     assert!(planes[0].origin.dist(Vec3::new(20., 30., 40.)) < 1e-9);
     assert!(planes[0].x.dist(Vec3::X) < 1e-9);
@@ -186,7 +187,7 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let active = s.active_sketch.unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     s.visibility.hidden_sketches.push(active);
-    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
+    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled")).unwrap();
     assert!(hidden.lines.iter().all(|line| !line.on_top));
 }
 

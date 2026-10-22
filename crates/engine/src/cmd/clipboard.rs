@@ -620,7 +620,7 @@ mod tests {
         let spring = r["pasted"][1]["name"].as_str().unwrap_or_default().to_string();
         let def = run(&mut s, "timeline.inspect", json!({"feature": spring}));
         assert_eq!(def["definition"]["targets"], json!(["Plate (2)"]), "{def}");
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let v = |name: &str| solidcraft_kernel::measure(&st.body(name).unwrap().body).unwrap().volume;
         // A spring on the wrong plate is hundreds of mm³ off. The two plates are measured apart
         // (one moved 50 mm), which the boolean and the measure each round in their own way:

@@ -1032,7 +1032,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         .collect();
     let from_view = match &app.viewport.hover {
         Some(crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. }) => {
-            app.session.world_state().body(body).map(|body| body.feature)
+            crate::open_meshing::session_world(&app.session).body(body).map(|body| body.feature)
         }
         _ => None,
     };

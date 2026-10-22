@@ -188,7 +188,7 @@ fn paste_into_another_sketch_lands_on_its_plane() {
     assert!(p[0].dist(Vec2::new(0.0, 0.0)) < 1e-6 && p[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{p:?}");
     assert_eq!(sk.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 3);
     assert!(!sk.constraints.iter().any(|c| c.kind.refers_to_point(0)));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let ss = st.sketch(b).unwrap();
     let w = ss.plane.to_world(Vec2::new(20.0, 10.0));
     assert!(w.y.abs() < 1e-9 && (w.x - 20.0).abs() < 1e-9, "{w:?}");

@@ -1,20 +1,9 @@
 //! Recorded ownership changes are evaluated at their timeline position.
 use crate::{DocError, Document, Mat, ModelBody, ModelState, Result};
-use solidcraft_geom::Vec3;
 use std::collections::BTreeSet;
 
 pub fn valid_transfer_matrix(m: &Mat) -> bool {
-    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
-    let (x, y, z) = (axis(0), axis(1), axis(2));
-    m.iter().flatten().all(|v| v.is_finite())
-        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
-        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
-        && x.dot(y).abs() < 1e-6
-        && x.dot(z).abs() < 1e-6
-        && y.dot(z).abs() < 1e-6
-        && x.cross(y).dot(z) > 0.0
-        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
-        && (m[3][3] - 1.0).abs() < 1e-9
+    crate::is_placement(m)
 }
 
 /// Validate the stored boundary before allocation, loading, or evaluation.

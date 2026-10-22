@@ -60,8 +60,8 @@ fn fixture() -> Harness {
 fn representative(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let s = &h.app.session;
-    let profiles: Vec<_> = s.world_state().sketches.iter().take(2).map(|sk| Sel::Profile { sketch: sk.feature, index: 0 }).collect();
-    let path = s.world_state().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
+    let profiles: Vec<_> = s.world_state().unwrap().sketches.iter().take(2).map(|sk| Sel::Profile { sketch: sk.feature, index: 0 }).collect();
+    let path = s.world_state().unwrap().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
     for (index, input) in d.inputs.iter_mut().enumerate() {
         if command == "joint.gear" {
             continue;
@@ -107,7 +107,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         };
     }
     if let Kind::PathPlane { sketch, .. } = &mut d.kind {
-        *sketch = Some(s.world_state().sketches.last().unwrap().feature);
+        *sketch = Some(s.world_state().unwrap().sketches.last().unwrap().feature);
     }
     if let Kind::Mirror = &d.kind {
         d.extra.insert("combine".into(), json!(false));

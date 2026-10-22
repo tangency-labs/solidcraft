@@ -314,7 +314,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
 }
 
 fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
-    app.session.world_state().body(body).map(|b| b.feature)
+    crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
 
 /// Bodies in a component and its subcomponents.
@@ -449,7 +449,7 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         Sel::Face { body, index, .. } => Some((body, *index)),
         _ => None,
     })?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let body = state.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(body);
     let name = names.get(index)?;
@@ -677,7 +677,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let profiles = !app.session.visibility.hidden_profiles.contains(&id);
     let dims = app.session.visibility.shown_dimensions.contains(&id);
     let editing = app.session.active_sketch == Some(id);
-    let has_profiles = app.session.world_state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
+    let has_profiles = crate::open_meshing::session_world(&app.session).sketch(id).is_some_and(|s| !s.profiles.is_empty());
     vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
@@ -948,7 +948,7 @@ fn alignment_items(selection: &[Sel]) -> Vec<Item> {
 fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     use solidcraft_engine::sketch::CurveKind;
     let Some(sid) = app.session.active_sketch else { return Vec::new() };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
     if app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
         return alignment_items(&app.session.selection);
@@ -1202,7 +1202,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.isolate" => {
             // The picked bodies stay (shown first if they were hidden), everything else goes.
-            let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            let others: Vec<String> = crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
             if !bodies.is_empty() {
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
             }
@@ -1476,14 +1476,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.extrudeSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let n = app.session.world_state().sketch(id).map_or(0, |s| s.profiles.len());
+                let n = crate::open_meshing::session_world(&app.session).sketch(id).map_or(0, |s| s.profiles.len());
                 let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
                 let _ = app.run("select.set", json!({ "items": items }));
                 app.start("solid.extrude");
             }
         }
         "ui.lookAt" => {
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
@@ -1609,7 +1609,7 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
 
 /// Add the edges that continue the selected edges smoothly to the selection.
 fn tangent_chain(app: &mut SolveApp) {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mut out: Vec<Sel> = Vec::new();
     for s in &app.session.selection {
         let Sel::Edge { body, index, .. } = s else { continue };

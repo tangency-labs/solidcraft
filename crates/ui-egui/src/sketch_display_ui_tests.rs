@@ -51,7 +51,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let plane = ss.plane;
     let index = ss.sketch.curve_index("c1").unwrap();
@@ -97,7 +97,7 @@ fn pixel_cache_full_view_resize_and_hidpi_invalidate_within_same_grid_bucket() {
     h.app.cam.target = Vec3::ZERO;
     let baseline = h.app.session.doc.to_json();
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert_eq!(state.bodies.len(), 1, "body batch invariance needs an actual mesh");
     let ss = state.sketch(sid).unwrap();
     let index = ss.sketch.curve_index("c1").unwrap();
@@ -159,7 +159,7 @@ fn pixel_adapter_uses_exact_ellipse_periodic_fit_and_control_spline_spans() {
         h.settle();
         let baseline = h.app.session.doc.to_json();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sid).unwrap();
         let exact = ss.sketch.exact_segs(0).unwrap();
         assert!(
@@ -202,7 +202,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
     h.app.run("browser.visibility", json!({"paths":[[first]],"visible":false})).unwrap();
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     assert!(ss.plane.origin.dist(Vec3::new(20.0, 30.0, 40.0)) < 1e-8);
     let tilt = 35.0f64.to_radians();
@@ -227,7 +227,7 @@ fn pixel_annulus_fill_keeps_hole_and_cpu_bridge_matches_cached_boundaries() {
     h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":0.5})).unwrap();
     h.settle();
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let ppp = h.app.viewport.pixels_per_point();
@@ -271,7 +271,7 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
     let mut h = Harness::new();
     let sid = circle(&mut h);
     let baseline = h.app.session.doc.to_json();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let mut plane = state.sketch(sid).unwrap().plane;
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let mut limited = 0;
@@ -343,7 +343,7 @@ fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
     h.settle();
     let baseline = h.app.session.doc.to_json();
     let sid = h.app.session.active_sketch.unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sid).unwrap();
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
     let ppp = h.app.viewport.pixels_per_point();

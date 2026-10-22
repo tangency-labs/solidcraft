@@ -211,7 +211,14 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     }
 
     // Every body in the world, imported components included.
-    let world = s.world_state();
+    let world = match s.world_state() {
+        Ok(w) => w,
+        Err(e) => {
+            out["status"] = json!("fail");
+            out["error"] = json!(e.to_string());
+            return out;
+        }
+    };
     let mut bodies = Vec::new();
     let mut c = Checks { list: Vec::new(), pass: true };
     let want_valid = want["valid"].as_bool().unwrap_or(true);

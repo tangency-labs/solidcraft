@@ -18,7 +18,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 fn world_bbox(s: &Session, body: &str) -> (Vec3, Vec3) {
-    let w = s.world_state();
+    let w = s.world_state().unwrap();
     let b = w.body(body).unwrap_or_else(|| panic!("no body {body}")).mesh().bounds();
     (b.min, b.max)
 }

@@ -157,7 +157,7 @@ impl StraightPreview {
 }
 
 fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut surfaces = Vec::new();
     let mut budget = 65_536usize;
     if inputs.iter().all(|input| matches!(input, Sel::Profile { .. })) {
@@ -297,7 +297,7 @@ mod tests {
     fn face_mesh_feedback_reuses_cap_and_handles_both_distance_signs() {
         let mut harness = Harness::new();
         harness.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let state = harness.app.session.world_state();
+        let state = harness.app.session.world_state().unwrap();
         let face = state
             .body("Stock")
             .unwrap()
@@ -353,7 +353,7 @@ mod tests {
         let mut h = Harness::new();
         let made = h.app.run("component.create", json!({"name":"Imported part","grounded":false})).unwrap();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         let face =
             world.body("Stock").unwrap().body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
         h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
@@ -375,7 +375,7 @@ mod tests {
     fn zero_distance_is_refused_without_a_scratch_preview() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         let face =
             world.body("Stock").unwrap().body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
         h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];

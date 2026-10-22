@@ -180,7 +180,7 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
 fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
     pick(app, proj, pos).into_iter().find_map(|hit| {
         let Hit::SketchCurve { sketch, id, straight: true, .. } = hit else { return None };
@@ -683,7 +683,7 @@ fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
         "Z" => Vec3::Z,
         _ => return None,
     };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(app.session.active_sketch?)?.plane;
     let o = plane.origin;
     if (o - dir * o.dot(dir)).len() > 1e-6 {
@@ -1036,7 +1036,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         return crate::sketch_tools::preview(app, t, painter, proj);
     }
     let Some(sid) = app.session.active_sketch else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).

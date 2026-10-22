@@ -4417,7 +4417,7 @@ mod tests {
         app.open_path(&path);
         let offered = app.stand_up.clone().unwrap_or_default();
         assert_eq!(offered.len(), 1, "the file's body is offered");
-        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session);
+        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session).unwrap();
         assert!((size(&app).max.y - size(&app).min.y - 40.0).abs() < 1e-6);
         control(&mut app, &json!({"stand_up": true})).unwrap();
         let b = size(&app);

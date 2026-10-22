@@ -327,7 +327,7 @@ fn block_and_circle_on(sketch: Value, at: [f64; 2]) -> (Harness, Vec3) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let centre = ss
         .sketch
@@ -451,11 +451,12 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
     let (id, _, _) = hole(&h);
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     let circle = h
         .app
         .session
         .world_state()
+        .unwrap()
         .sketches
         .first()
         .unwrap()
@@ -471,7 +472,7 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.app.run("sketch.move_point", json!({"point": format!("{circle}.center"), "to": [20, 9]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let moved = ss
         .sketch
@@ -602,7 +603,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
     h.app.run("sketch.text", json!({"text": "L", "at": [5, 5], "height": 10})).unwrap();
     let outline = |h: &Harness| {
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketches.first().unwrap();
         let sk = &ss.sketch;
         let text = |p: &&SPoint| p.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == LinkKind::Text);
@@ -616,7 +617,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let plane = st.sketches.first().unwrap().plane;
     assert_eq!(outline(&h).len(), 6, "the L's outline has six corners");
     (h, plane.to_world(corner), centre.map(|c| plane.to_world(c)))
@@ -765,7 +766,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": view}})).unwrap();
     h.settle();
-    let plane = h.app.session.world_state().sketches.first().unwrap().plane;
+    let plane = h.app.session.world_state().unwrap().sketches.first().unwrap().plane;
     let centre = plane.to_world(Vec2::new(at[0], at[1]));
     let mut points = Aabb3::EMPTY;
     local.iter().for_each(|p| points.add(plane.to_world(*p)));
@@ -773,7 +774,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.step(&json!({"start": "solid.hole"})).unwrap();
     let ray = hits_at(&h, click);
     let Some(Hit::Face { body, index, .. }) = ray.iter().find(|x| matches!(x, Hit::Face { .. })) else { panic!("no face under {centre:?}: {ray:?}") };
-    let m = h.app.session.world_state().body(body).unwrap().mesh();
+    let m = h.app.session.world_state().unwrap().body(body).unwrap().mesh();
     let face: Vec<[Vec3; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f as usize == *index).filter_map(|(t, _)| m.tri(t)).collect();
     let near_points = |t: &[Vec3; 3]| {
         let mut b = Aabb3::EMPTY;
@@ -852,7 +853,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
     // text outline's points (`view::sketch_point_visible`), and no linked point while Show
     // Projected is off. An id names its first link; a point whose link is gone counts as shown.
     let (h, _, _) = block_with_lettering(None);
-    let mut sk = h.app.session.world_state().sketches.first().unwrap().sketch.clone();
+    let mut sk = h.app.session.world_state().unwrap().sketches.first().unwrap().sketch.clone();
     let text = sk.links.iter().find(|l| l.kind == LinkKind::Text).unwrap().clone();
     let edges = sk.links.iter().find(|l| l.kind != LinkKind::Text).unwrap().clone();
     // Later links reusing the ids, with the other kind: the first link of an id is the one.

@@ -25,7 +25,8 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
-    let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+    let bodies: Vec<String> =
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
     if bodies.is_empty() {
         return;
     }

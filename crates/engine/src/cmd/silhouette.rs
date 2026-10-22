@@ -20,7 +20,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let camera = camera(p)?;
     let rows = rows(p)?;
     let wanted = body_names(p)?;
-    let state = s.world_state();
+    let state = s.world_state()?;
     if let Some(names) = &wanted {
         for name in names {
             if !state.bodies.iter().any(|b| b.name == *name) {

@@ -63,7 +63,7 @@ fn model(name: &str, s: &Session) -> Value {
         .iter()
         .map(|r| json!({"id": r.id, "name": r.name, "error": r.error, "warning": r.warning, "skipped": r.skipped, "state": state(name, &r.state)}))
         .collect();
-    json!({"results": results, "world": state(name, &s.world_state())})
+    json!({"results": results, "world": state(name, &s.world_state().unwrap())})
 }
 
 /// The same edit on both: a parameter's value when the design has one, else a new body.
