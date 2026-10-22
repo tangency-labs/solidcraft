@@ -168,36 +168,33 @@ impl Reversed for EvalCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::Solid;
 
-    /// Every face of `solid` evaluates as truck evaluates it, over its own parameter box.
-    fn assert_matches_truck(solid: &Solid) -> [usize; 4] {
-        let mut kinds = [0; 4];
-        for face in solid.face_iter() {
-            let surface = face.surface();
-            let kind = match surface {
-                mt::Surface::Plane(_) => 0,
-                mt::Surface::BSplineSurface(_) => 1,
-                mt::Surface::NurbsSurface(_) => 2,
-                mt::Surface::RevolutedCurve(_) => 3,
+    /// Every face of `b` evaluates, through [`eval_surface`] and its [`Params`], as the record's
+    /// own evaluator ([`SurfaceEval`]) evaluates it, over the face's parameter box: the same
+    /// point and the same natural normal. Counts of planes, analytic surfaces and others.
+    fn assert_matches_the_record(b: &brep::Brep) -> [usize; 3] {
+        let mut kinds = [0; 3];
+        for face in &b.faces {
+            let kind = match face.surface {
+                brep::Surface::Plane { .. } | brep::Surface::PlaneThrough { .. } => 0,
+                brep::Surface::Cylinder { .. } | brep::Surface::Cone { .. } | brep::Surface::Sphere { .. } | brep::Surface::Torus { .. } => 1,
+                _ => 2,
             };
-            let Some(eval) = eval_surface(&surface) else { panic!("not evaluable: {surface:?}") };
-            // Sample the face's parameter box from its boundary vertices.
-            let pts: Vec<(f64, f64)> = face.vertex_iter().filter_map(|v| surface.search_parameter(v.point(), None, 100)).collect();
-            if pts.is_empty() {
-                continue;
-            }
-            let (u0, u1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
-            let (v0, v1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+            let (eval, map) = match eval_surface(&face.surface, face.domain) {
+                Ok(e) => e,
+                Err(e) => panic!("not evaluable: {e} ({:?})", face.surface),
+            };
+            let Ok(reference) = SurfaceEval::new(&face.surface) else { panic!("the record's evaluator: {:?}", face.surface) };
+            let [[u0, u1], [v0, v1]] = face.domain;
             for i in 0..=6 {
                 for j in 0..=6 {
-                    let (u, v) = (u0 + (u1 - u0) * i as f64 / 6.0, v0 + (v1 - v0) * j as f64 / 6.0);
-                    let (p, n) = eval.eval(u, v);
-                    let want = from_p3(surface.subs(u, v));
-                    assert!(p.dist(want) < 1e-9 * (1.0 + want.len()), "point at ({u}, {v}): {p:?} vs {want:?}");
-                    let wn = from_v3(surface.normal(u, v));
-                    if wn.len() > 0.5 {
-                        assert!(n.dist(wn) < 1e-6, "normal at ({u}, {v}): {n:?} vs {wn:?} ({surface:?})");
+                    let uv = [u0 + (u1 - u0) * i as f64 / 6.0, v0 + (v1 - v0) * j as f64 / 6.0];
+                    let q = map.to_eval(uv);
+                    let (p, n) = eval.eval(q[0], q[1]);
+                    let Some((want, su, sv)) = reference.derivs(uv[0], uv[1]) else { panic!("reference at {uv:?}") };
+                    assert!(p.dist(want) < 1e-9 * (1.0 + want.len()), "point at {uv:?}: {p:?} vs {want:?}");
+                    if let Some(wn) = su.cross(sv).normalized().filter(|_| su.cross(sv).len() > 1e-9 * (su.len() * sv.len()).max(1e-12)) {
+                        assert!(n.dist(wn) < 1e-6, "normal at {uv:?}: {n:?} vs {wn:?} ({:?})", face.surface);
                     }
                     kinds[kind] += 1;
                 }
@@ -206,32 +203,36 @@ mod tests {
         kinds
     }
 
-    fn solid(b: crate::Body) -> Solid {
-        (*b.solid).clone()
+    fn record(b: crate::Result<crate::Body>) -> brep::Brep {
+        match b.and_then(|b| crate::brep_record(&b)) {
+            Ok(r) => r,
+            Err(e) => panic!("{e}"),
+        }
     }
 
     #[test]
-    fn primitives_evaluate_like_truck() {
-        let Ok(bx) = crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)) else { panic!("box") };
-        let Ok(cyl) = crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0) else { panic!("cylinder") };
-        let Ok(sph) = crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0) else { panic!("sphere") };
-        let Ok(tor) = crate::torus(Vec3::ZERO, 6.0, 1.5) else { panic!("torus") };
-        let mut kinds = [0; 4];
-        for b in [bx, cyl, sph, tor] {
-            for (k, n) in kinds.iter_mut().zip(assert_matches_truck(&solid(b))) {
+    fn primitives_evaluate_like_the_record() {
+        let bodies = [
+            crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)),
+            crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0),
+            crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0),
+            crate::torus(Vec3::ZERO, 6.0, 1.5),
+        ];
+        let mut kinds = [0; 3];
+        for b in bodies {
+            for (k, n) in kinds.iter_mut().zip(assert_matches_the_record(&record(b))) {
                 *k += n;
             }
         }
-        // Planes, rational patches (sphere) and revolved profiles (cylinder, torus) all covered.
-        assert!(kinds[0] > 0 && kinds[3] > 0 && kinds[1] + kinds[2] > 0, "{kinds:?}");
+        // Planes and the analytic surfaces (cylinder, sphere, torus) all covered.
+        assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
     }
 
     #[test]
-    fn transformed_and_mirrored_bodies_evaluate_like_truck() {
+    fn transformed_and_mirrored_bodies_evaluate_like_the_record() {
         let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0) else { panic!("cylinder") };
         // Column-major: x → 3 − x, z → z + 1.
         let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]];
-        let Ok(m) = crate::transform_matrix(&cyl, mirror) else { panic!("transform") };
-        assert!(assert_matches_truck(&solid(m)).iter().sum::<usize>() > 0);
+        assert!(assert_matches_the_record(&record(crate::transform_matrix(&cyl, mirror))).iter().sum::<usize>() > 0);
     }
 }

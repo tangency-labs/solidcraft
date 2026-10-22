@@ -121,16 +121,38 @@ fn turn(a: Vec3, b: Vec3) -> f64 {
 mod tests {
     use super::*;
 
+    fn record(b: crate::Result<crate::Body>) -> brep::Brep {
+        match b.and_then(|b| crate::brep_record(&b)) {
+            Ok(r) => r,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    fn sample(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Nodes {
+        match sample_edge(b, ei, rules, h) {
+            Ok(n) => n,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    fn ends(b: &brep::Brep, ei: usize) -> [Vec3; 2] {
+        b.edges[ei].vertices.map(|v| {
+            let p = b.vertices[v as usize].point;
+            Vec3::new(p[0], p[1], p[2])
+        })
+    }
+
     #[test]
     fn circle_edges_are_within_tolerance_and_end_on_vertices() {
-        let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0) else { panic!("cylinder") };
+        let cyl = record(crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0));
         for tol in [0.1, 0.01, 0.001] {
-            for e in cyl.solid.edge_iter() {
-                let pts = sample_edge(&e, &Rules { tol, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None }, f64::INFINITY).points;
+            for (ei, e) in cyl.edges.iter().enumerate() {
+                let pts = sample(&cyl, ei, &Rules { tol, max_len: f64::INFINITY, turn: None }, f64::INFINITY).points;
                 assert!(pts.len() >= 2);
-                assert_eq!(pts.first().copied(), Some(from_p3(e.absolute_front().point())));
-                assert_eq!(pts.last().copied(), Some(from_p3(e.absolute_back().point())));
-                if matches!(e.curve(), mt::Curve::Line(_)) {
+                let [front, back] = ends(&cyl, ei);
+                assert_eq!(pts.first().copied(), Some(front));
+                assert_eq!(pts.last().copied(), Some(back));
+                if matches!(e.curve, Curve::Line { .. }) {
                     assert_eq!(pts.len(), 2);
                     continue;
                 }
@@ -146,60 +168,61 @@ mod tests {
 
     #[test]
     fn edges_are_split_to_the_side_length_and_turn() {
-        let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0) else { panic!("cylinder") };
-        for e in cyl.solid.edge_iter() {
-            let pts = sample_edge(&e, &Rules { tol: 1.0, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None }, 1.2).points;
+        let cyl = record(crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0));
+        for (ei, e) in cyl.edges.iter().enumerate() {
+            let pts = sample(&cyl, ei, &Rules { tol: 1.0, max_len: f64::INFINITY, turn: None }, 1.2).points;
             for w in pts.windows(2) {
                 assert!(w[0].dist(w[1]) <= 1.2 + 1e-9, "side {}", w[0].dist(w[1]));
             }
-            if matches!(e.curve(), mt::Curve::Line(_)) {
+            if matches!(e.curve, Curve::Line { .. }) {
                 // 5 mm in sides of at most 1.2: five equal sides.
                 assert_eq!(pts.len(), 6);
             }
             // The ends are the vertices' own points, to the last bit.
-            assert_eq!(pts.first().copied(), Some(from_p3(e.absolute_front().point())));
-            assert_eq!(pts.last().copied(), Some(from_p3(e.absolute_back().point())));
+            let [front, back] = ends(&cyl, ei);
+            assert_eq!(pts.first().copied(), Some(front));
+            assert_eq!(pts.last().copied(), Some(back));
         }
         // A coarse tolerance alone would leave a few long chords; a 30° facet angle keeps every
         // side within 30° of arc: at least 12 around each of the two circles.
-        let thirty = Rules {
-            tol: 5.0,
-            max_len: f64::INFINITY,
-            extent: 0.0,
-            turn: Some(crate::tess::size::Turn { angle: std::f64::consts::PI / 6.0, floor: 0.0 }),
-            boundary_tol: None,
-        };
-        let mut seen = std::collections::HashSet::new();
-        let sides: usize = cyl
-            .solid
-            .edge_iter()
-            .filter(|e| seen.insert(e.id()) && !matches!(e.curve(), mt::Curve::Line(_)))
-            .map(|e| sample_edge(&e, &thirty, f64::INFINITY).points.len() - 1)
+        let thirty =
+            Rules { tol: 5.0, max_len: f64::INFINITY, turn: Some(crate::tess::size::Turn { angle: std::f64::consts::PI / 6.0, floor: 0.0 }) };
+        let sides: usize = (0..cyl.edges.len())
+            .filter(|&ei| !matches!(cyl.edges[ei].curve, Curve::Line { .. }))
+            .map(|ei| sample(&cyl, ei, &thirty, f64::INFINITY).points.len() - 1)
             .sum();
         assert!(sides >= 24, "{sides}");
     }
 
-    /// An intersection edge's nodes carry their parameters on both faces: each face on one of
-    /// the edge's surfaces gets them, and the surface there is the node.
+    /// The nodes of every edge where two curved faces meet carry their curve parameters: each
+    /// face's pcurve of the edge puts each node on that face's surface, at the node.
     #[test]
-    fn intersection_nodes_carry_their_parameters_on_both_faces() {
-        let Ok(pin) = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0) else { panic!("pin") };
-        let Ok(cross) = crate::cylinder(Vec3::new(5.0, -1.0, 2.0), Vec3::Y, 1.0, 12.0) else { panic!("cross") };
-        let Ok(Some(body)) = crate::boolean(&pin, &cross, crate::BoolOp::Cut) else { panic!("cut") };
-        let rules = Rules { tol: 0.01, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None };
-        let surfaces: Vec<EvalSurface> = body.solid.face_iter().filter_map(|f| super::super::surface::eval_surface(&f.surface())).collect();
+    fn edge_nodes_carry_their_parameters_on_both_faces() {
+        let pin = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0);
+        let cross = crate::cylinder(Vec3::new(5.0, -1.0, 2.0), Vec3::Y, 1.0, 12.0);
+        let body = record(pin.and_then(|pin| {
+            let cross = cross?;
+            crate::boolean(&pin, &cross, crate::BoolOp::Cut)?.ok_or_else(|| crate::KernelError::Failed("cut: nothing left".into()))
+        }));
+        let rules = Rules { tol: 0.01, max_len: f64::INFINITY, turn: None };
+        let curved = |f: u32| !matches!(body.faces[f as usize].surface, brep::Surface::Plane { .. } | brep::Surface::PlaneThrough { .. });
         let (mut edges, mut checked) = (0, 0);
-        let mut seen = std::collections::HashSet::new();
-        for e in body.solid.edge_iter().filter(|e| seen.insert(e.id()) && matches!(e.curve(), mt::Curve::IntersectionCurve(_))) {
-            let n = sample_edge(&e, &rules, f64::INFINITY);
-            let on: Vec<_> = surfaces.iter().filter_map(|s| n.params_on(s).map(|q| (s, q))).collect();
-            assert_eq!(on.len(), 2, "both faces of an intersection edge know its parameters");
+        for (ei, e) in body.edges.iter().enumerate() {
+            if e.uses.len() != 2 || !e.uses.iter().all(|u| curved(u.face)) {
+                continue;
+            }
+            let n = sample(&body, ei, &rules, f64::INFINITY);
             edges += 1;
-            for (s, q) in on {
-                for (p, uv) in n.points.iter().zip(q).skip(1).take(n.points.len().saturating_sub(2)) {
-                    let Some(uv) = uv else { continue };
-                    let Some((at, _, _)) = s.derivs(uv[0], uv[1]) else { panic!("evaluates") };
-                    assert!(at.dist(*p) < 1e-7, "{at:?} vs {p:?}");
+            for u in &e.uses {
+                let face = &body.faces[u.face as usize];
+                let brep::Loop::Edges { edges: loop_edges } = &face.loops[u.r#loop as usize] else { panic!("an edge loop") };
+                let oe = &loop_edges[u.position as usize];
+                let Ok((s, map)) = crate::tess::surface::eval_surface(&face.surface, face.domain) else { panic!("evaluates") };
+                for (t, p) in n.params.iter().zip(&n.points) {
+                    let Some(q) = oe.pcurve.eval(*t) else { panic!("pcurve at {t}") };
+                    let q = map.to_eval(q);
+                    let Some((at, _, _)) = s.derivs(q[0], q[1]) else { panic!("evaluates") };
+                    assert!(at.dist(*p) < 1e-6 + e.tolerance, "{at:?} vs {p:?}");
                     checked += 1;
                 }
             }
