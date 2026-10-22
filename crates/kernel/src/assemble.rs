@@ -13,9 +13,7 @@
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
-use solidcraft_geom::brep::{
-    Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex,
-};
+use solidcraft_geom::brep::{Brep, Curve, Curve2, Edge, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceProv};
@@ -206,172 +204,100 @@ impl Assembly {
         CurveEval::new(&e.curve).ok()?.point(t)
     }
 
-    /// The record of the faces left and added, in canonical order.
+    /// The record of the faces left and added, in canonical order (`Brep::canonical`), checked:
+    /// each face's loops stored relative to its surface's natural normal with their pcurves and
+    /// parameter box, shells and regions as the source's (a region whose outer shell lost every
+    /// face is gone).
     pub(crate) fn finish(&self) -> Result<Finished> {
-        // Faces in canonical order: by region, shell and the shell's own order (the assembly's).
-        let mut by_shell: Vec<Vec<usize>> = vec![Vec::new(); self.shells];
-        for (i, f) in self.faces.iter().enumerate() {
-            if let Some(f) = f {
-                by_shell.get_mut(f.shell).ok_or_else(|| invalid("shell reference"))?.push(i);
-            }
-        }
-        let mut shell_order: Vec<usize> = Vec::new();
-        let mut shell_new: Vec<Option<u32>> = vec![None; self.shells];
-        let mut regions: Vec<Region> = Vec::new();
-        for region in &self.regions {
-            let mut shells = Vec::new();
-            for &s in &region.shells {
-                let s = s as usize;
-                if by_shell.get(s).is_none_or(Vec::is_empty) {
-                    continue;
-                }
-                let slot = shell_new.get_mut(s).ok_or_else(|| invalid("shell reference"))?;
-                let n = match slot {
-                    Some(n) => *n,
-                    None => {
-                        let n = index(shell_order.len())?;
-                        shell_order.push(s);
-                        *slot = Some(n);
-                        n
-                    }
-                };
-                shells.push(n);
-            }
-            // A bounded region whose outer shell went is gone (its faces were all taken away).
-            if regions.is_empty() || region.shells.first().is_some_and(|s| by_shell.get(*s as usize).is_some_and(|f| !f.is_empty())) {
-                regions.push(Region { shells, void: region.void });
-            }
-        }
-        let order: Vec<usize> = shell_order.iter().filter_map(|s| by_shell.get(*s)).flatten().copied().collect();
-        let mut face_map: Vec<Option<usize>> = vec![None; self.faces.len()];
-        for (k, i) in order.iter().enumerate() {
-            if let Some(slot) = face_map.get_mut(*i) {
-                *slot = Some(k);
-            }
-        }
-        // Each face's pcurves and stored loops, in canonical face order.
-        let mut faces: Vec<Face> = Vec::with_capacity(order.len());
-        let mut forward: Vec<bool> = Vec::with_capacity(order.len());
-        for &i in &order {
+        // The faces left and added, in assembly order, each in its shell.
+        let kept: Vec<usize> = self.faces.iter().enumerate().filter(|(_, f)| f.is_some()).map(|(i, _)| i).collect();
+        let mut by_shell: Vec<Vec<u32>> = vec![Vec::new(); self.shells];
+        let mut faces: Vec<Face> = Vec::with_capacity(kept.len());
+        let mut sides: Vec<bool> = Vec::with_capacity(kept.len());
+        for (k, &i) in kept.iter().enumerate() {
             let f = self.faces.get(i).and_then(Option::as_ref).ok_or_else(|| invalid("face reference"))?;
-            let loops: Vec<Vec<AUse>> = f
-                .loops
-                .iter()
-                .map(|l| {
-                    let mut l = l.clone();
-                    if !f.natural_out {
-                        reverse(&mut l);
-                    }
-                    l
-                })
-                .collect();
-            let uses: Vec<Vec<EdgeUse<'_>>> = loops
-                .iter()
-                .map(|l| {
-                    l.iter()
-                        .map(|u| {
-                            let e = self.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
-                            Ok(EdgeUse {
-                                edge: u.edge,
-                                curve: &e.curve,
-                                interval: e.interval,
-                                forward: u.forward,
-                                tolerance: e.tolerance,
-                                given: u.given.as_ref(),
-                            })
-                        })
-                        .collect::<Result<Vec<_>>>()
-                })
-                .collect::<Result<_>>()?;
-            let pcurves = pcurves_within(&f.surface, &uses, self.tolerance, f.domain).map_err(|e| invalid(format!("face {i}: {e}")))?;
-            let domain = domain_of(&f.surface, &pcurves, f.domain).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
-            let stored = loops
-                .iter()
-                .zip(&pcurves)
-                .map(|(l, pc)| Loop::Edges {
-                    edges: l.iter().zip(pc).map(|(u, pcurve)| OrientedEdge { edge: u.edge, forward: u.forward, pcurve: pcurve.clone() }).collect(),
-                })
-                .collect();
-            faces.push(Face { surface: f.surface.clone(), domain, loops: stored });
-            forward.push(f.natural_out);
+            by_shell.get_mut(f.shell).ok_or_else(|| invalid("shell reference"))?.push(index(k)?);
+            faces.push(self.stored(i, f)?);
+            sides.push(f.natural_out);
         }
-        // Edges in first appearance walking faces → loops → uses (backwards in a face whose
-        // side in its shell is reversed), with their uses in that order.
-        let mut edge_new: Vec<Option<u32>> = vec![None; self.edges.len()];
-        let mut edge_order: Vec<usize> = Vec::new();
-        let mut walked: Vec<Vec<EdgeUseRef>> = Vec::new();
-        for (fi, (f, fw)) in faces.iter().zip(&forward).enumerate() {
-            for (li, l) in f.loops.iter().enumerate() {
-                let Loop::Edges { edges } = l else { continue };
-                let n = edges.len();
-                for k in 0..n {
-                    let p = if *fw { k } else { n - 1 - k };
-                    let u = edges.get(p).ok_or_else(|| invalid("edge use"))?;
-                    let slot = edge_new.get_mut(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
-                    let ne = match slot {
-                        Some(ne) => *ne,
-                        None => {
-                            let ne = index(edge_order.len())?;
-                            edge_order.push(u.edge as usize);
-                            walked.push(Vec::new());
-                            *slot = Some(ne);
-                            ne
-                        }
-                    };
-                    let at = EdgeUseRef { face: index(fi)?, r#loop: index(li)?, position: index(p)?, upper: !u.forward };
-                    walked.get_mut(ne as usize).ok_or_else(|| invalid("edge use"))?.push(at);
-                }
-            }
-        }
-        for f in &mut faces {
-            for l in &mut f.loops {
-                if let Loop::Edges { edges } = l {
-                    for u in edges {
-                        u.edge = edge_new.get(u.edge as usize).copied().flatten().ok_or_else(|| invalid("edge reference"))?;
-                    }
-                }
-            }
-        }
-        // Vertices in first appearance walking edges (start, end).
-        let mut vertex_new: Vec<Option<u32>> = vec![None; self.vertices.len()];
-        let mut vertices: Vec<Vertex> = Vec::new();
-        let mut edges: Vec<Edge> = Vec::with_capacity(edge_order.len());
-        for (e, uses) in edge_order.iter().zip(walked) {
-            let a = self.edges.get(*e).ok_or_else(|| invalid("edge reference"))?;
-            let mut ends = [0u32; 2];
-            for (slot, v) in ends.iter_mut().zip(a.vertices) {
-                let nv = vertex_new.get_mut(v as usize).ok_or_else(|| invalid("vertex reference"))?;
-                *slot = match nv {
-                    Some(n) => *n,
-                    None => {
-                        let n = index(vertices.len())?;
-                        vertices.push(self.vertices.get(v as usize).cloned().ok_or_else(|| invalid("vertex reference"))?);
-                        *nv = Some(n);
-                        n
-                    }
-                };
-            }
-            edges.push(Edge { curve: a.curve.clone(), interval: a.interval, vertices: ends, tolerance: a.tolerance, uses });
-        }
-        let shells = shell_order
+        let shells = by_shell
             .iter()
-            .map(|s| {
-                let faces = by_shell
-                    .get(*s)
-                    .into_iter()
-                    .flatten()
-                    .map(|i| {
-                        let k = face_map.get(*i).copied().flatten().ok_or_else(|| invalid("face reference"))?;
-                        Ok(OrientedFace { face: index(k)?, forward: *forward.get(k).ok_or_else(|| invalid("face reference"))? })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(Shell::Faces { faces, wires: Vec::new() })
+            .map(|members| {
+                let faces =
+                    members.iter().map(|&k| Ok(OrientedFace { face: k, forward: *sides.get(k as usize).ok_or_else(|| invalid("face reference"))? }));
+                Ok(Shell::Faces { faces: faces.collect::<Result<_>>()?, wires: Vec::new() })
             })
             .collect::<Result<Vec<_>>>()?;
-        let record = Brep { version: VERSION, tolerance: self.tolerance, regions, shells, faces, edges, vertices };
-        record.validate().map_err(invalid)?;
-        record.check_geometry().map_err(invalid)?;
-        Ok(Finished { record, faces: face_map, edges: edge_order })
+        let used = |s: u32| by_shell.get(s as usize).is_some_and(|f| !f.is_empty());
+        let mut regions: Vec<Region> = Vec::new();
+        for region in &self.regions {
+            // A bounded region whose outer shell went is gone (its faces were all taken away).
+            if regions.is_empty() || region.shells.first().is_some_and(|s| used(*s)) {
+                regions.push(Region { shells: region.shells.iter().copied().filter(|s| used(*s)).collect(), void: region.void });
+            }
+        }
+        let edges = self.edges.iter().map(|a| Edge {
+            curve: a.curve.clone(),
+            interval: a.interval,
+            vertices: a.vertices,
+            tolerance: a.tolerance,
+            uses: Vec::new(),
+        });
+        let loose =
+            Brep { version: VERSION, tolerance: self.tolerance, regions, shells, faces, edges: edges.collect(), vertices: self.vertices.clone() };
+        let part = loose.canonical().map_err(invalid)?;
+        part.brep.check_geometry().map_err(invalid)?;
+        let mut face_map: Vec<Option<usize>> = vec![None; self.faces.len()];
+        for (c, &k) in part.faces.iter().enumerate() {
+            if let Some(slot) = kept.get(k as usize).and_then(|i| face_map.get_mut(*i)) {
+                *slot = Some(c);
+            }
+        }
+        Ok(Finished { record: part.brep, faces: face_map, edges: part.edges.iter().map(|e| *e as usize).collect() })
+    }
+
+    /// Face `i` as the record stores it: its loops relative to its surface's natural normal, each
+    /// use with its pcurve (the record's own where the use kept one), and its parameter box.
+    fn stored(&self, i: usize, f: &AFace) -> Result<Face> {
+        let loops: Vec<Vec<AUse>> = f
+            .loops
+            .iter()
+            .map(|l| {
+                let mut l = l.clone();
+                if !f.natural_out {
+                    reverse(&mut l);
+                }
+                l
+            })
+            .collect();
+        let uses: Vec<Vec<EdgeUse<'_>>> = loops
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .map(|u| {
+                        let e = self.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
+                        Ok(EdgeUse {
+                            edge: u.edge,
+                            curve: &e.curve,
+                            interval: e.interval,
+                            forward: u.forward,
+                            tolerance: e.tolerance,
+                            given: u.given.as_ref(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<_>>()?;
+        let pcurves = pcurves_within(&f.surface, &uses, self.tolerance, f.domain).map_err(|e| invalid(format!("face {i}: {e}")))?;
+        let domain = domain_of(&f.surface, &pcurves, f.domain).ok_or_else(|| invalid(format!("face {i}: no parameter box")))?;
+        let stored = loops
+            .iter()
+            .zip(&pcurves)
+            .map(|(l, pc)| Loop::Edges {
+                edges: l.iter().zip(pc).map(|(u, pcurve)| OrientedEdge { edge: u.edge, forward: u.forward, pcurve: pcurve.clone() }).collect(),
+            })
+            .collect();
+        Ok(Face { surface: f.surface.clone(), domain, loops: stored })
     }
 }
 
