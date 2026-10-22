@@ -1,5 +1,6 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_sweep_placed`, `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_sweep_stations`, `smlib_planar_faces`; the fork's
+//! `smlib_sweep_placed`, `smlib_project_curves` (with `smlib_curves_*`), `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`,
+//! `smlib_sweep_stations`, `smlib_planar_faces`; the fork's
 //! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
 //! the curve lists.
@@ -104,6 +105,29 @@ unsafe extern "C" {
         out: *mut *mut RawBrep,
         placed: *mut f64,
     ) -> i32;
+    fn smlib_project_curves(
+        brep: *const RawBrep,
+        face_point: *const f64,
+        pick_tolerance: f64,
+        kinds: *const i64,
+        n_kinds: i64,
+        reals: *const f64,
+        n_reals: i64,
+        direction: *const f64,
+        tolerance: f64,
+        out: *mut *mut RawCurves,
+    ) -> i32;
+    fn smlib_curves_size(curves: *const RawCurves, n_kinds: *mut i64, n_reals: *mut i64, n_curves: *mut i64) -> i32;
+    fn smlib_curves_read(
+        curves: *const RawCurves,
+        kinds: *mut i64,
+        n_kinds: i64,
+        reals: *mut f64,
+        n_reals: i64,
+        intervals: *mut f64,
+        n_intervals: i64,
+    ) -> i32;
+    fn smlib_curves_free(curves: *mut RawCurves);
     fn smlib_loft(
         kinds: *const i64,
         n_kinds: i64,
@@ -183,6 +207,61 @@ pub fn sweep_placed(profile: &List, path: &List, frame: i32, cap: bool, placed: 
     new_brep(|out| unsafe { smlib_sweep_placed(k, nk, r, nr, pk, npk, pr, npr, frame, i32::from(cap), out, at) })
 }
 
+/// The C API's `smlib_curves`.
+#[cfg(feature = "native")]
+#[repr(C)]
+pub struct RawCurves {
+    _private: [u8; 0],
+}
+
+/// Curves a call made, read out of the C API's `smlib_curves`: a curve list (kinds, reals) and
+/// two interval numbers per curve.
+pub struct OutCurves {
+    pub kinds: Vec<i64>,
+    pub reals: Vec<f64>,
+    pub intervals: Vec<f64>,
+}
+
+/// `smlib_project_curves`: the curve list projected along `direction` onto the face of `brep`
+/// nearest `face_point`.
+#[cfg(feature = "native")]
+pub fn project_curves(
+    brep: &Handle,
+    face_point: &[f64; 3],
+    pick_tolerance: f64,
+    curves: &List,
+    direction: &[f64; 3],
+    tolerance: f64,
+) -> Result<OutCurves, i32> {
+    let (k, nk, r, nr) = raw(curves)?;
+    let mut out: *mut RawCurves = std::ptr::null_mut();
+    let s = unsafe { smlib_project_curves(brep.raw(), face_point.as_ptr(), pick_tolerance, k, nk, r, nr, direction.as_ptr(), tolerance, &mut out) };
+    if s != super::OK {
+        return Err(s);
+    }
+    if out.is_null() {
+        return Err(super::ERR_EMPTY);
+    }
+    let read = || -> Result<OutCurves, i32> {
+        let (mut nk, mut nr, mut nc) = (0i64, 0i64, 0i64);
+        let s = unsafe { smlib_curves_size(out, &mut nk, &mut nr, &mut nc) };
+        if s != super::OK {
+            return Err(s);
+        }
+        let len = |n: i64| usize::try_from(n).map_err(|_| ERR_ARG);
+        let ni = nc.checked_mul(2).ok_or(ERR_ARG)?;
+        let mut c = OutCurves { kinds: vec![0; len(nk)?], reals: vec![0.0; len(nr)?], intervals: vec![0.0; len(ni)?] };
+        let s = unsafe { smlib_curves_read(out, c.kinds.as_mut_ptr(), nk, c.reals.as_mut_ptr(), nr, c.intervals.as_mut_ptr(), ni) };
+        if s != super::OK {
+            return Err(s);
+        }
+        Ok(c)
+    };
+    let c = read();
+    unsafe { smlib_curves_free(out) };
+    c
+}
+
 #[cfg(feature = "native")]
 pub fn loft(sections: &List, sizes: &[i64], degree: i32, cap: bool) -> Result<Handle, i32> {
     let (k, nk, r, nr) = raw(sections)?;
@@ -235,6 +314,11 @@ pub fn sweep(_: &List, _: &List, _: i32, _: bool) -> Result<Handle, i32> {
 
 #[cfg(not(feature = "native"))]
 pub fn sweep_placed(_: &List, _: &List, _: i32, _: bool, _: &mut [f64; 36]) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn project_curves(_: &Handle, _: &[f64; 3], _: f64, _: &List, _: &[f64; 3], _: f64) -> Result<OutCurves, i32> {
     Err(NOT_BUILT)
 }
 

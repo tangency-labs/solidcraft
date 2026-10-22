@@ -189,6 +189,29 @@ impl Brep {
         Ok((brep, [motion(0), motion(1), motion(2)]))
     }
 
+    /// The `curves` projected along `direction` (pointing from them toward the face) onto the
+    /// face nearest `face_point` (within `pick_tolerance`; [`Error::NoMatch`] or
+    /// [`Error::Ambiguous`] otherwise): SMLib's parallel projection onto the face's surface,
+    /// trimmed to the face, each curve within `tolerance` of the true projection, as the NURBS
+    /// SMLib made with its interval. No projection at all is [`Error::Empty`].
+    pub fn project_curves(
+        &self,
+        face_point: [f64; 3],
+        pick_tolerance: f64,
+        curves: &[Curve],
+        direction: [f64; 3],
+        tolerance: f64,
+    ) -> Result<Vec<(Curve, [f64; 2])>> {
+        init()?;
+        let l = List::of(curves)?;
+        let out = ffi::sweeps::project_curves(&self.0, &face_point, pick_tolerance, &l.raw(), &direction, tolerance).map_err(|s| match s {
+            ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
+            ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
+            s => error(s),
+        })?;
+        nurbs_list(&out)
+    }
+
     /// A loft (skin) through `sections` (at least two closed loops), `degree` (1 ruled, 2 or 3)
     /// across them.
     pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Brep> {
@@ -236,6 +259,30 @@ impl Brep {
         let l = List::of(profile)?;
         ffi::sweeps::screw_sweep(&l.raw(), &origin, &direction, pitch, turns, tolerance).map(Brep).map_err(error)
     }
+}
+
+/// The NURBS curves of a curve list the C API made, each with its interval.
+fn nurbs_list(out: &ffi::sweeps::OutCurves) -> Result<Vec<(Curve, [f64; 2])>> {
+    let (mut k, mut r) = (0usize, 0usize);
+    let mut curves = Vec::new();
+    for ivl in out.intervals.as_chunks::<2>().0 {
+        let (Some(&ffi::sweeps::CURVE_NURBS), Some(&degree), Some(&count)) = (out.kinds.get(k), out.kinds.get(k + 1), out.kinds.get(k + 2)) else {
+            return Err(Error::Argument);
+        };
+        k += 3;
+        let degree = usize::try_from(degree).map_err(|_| Error::Argument)?;
+        let count = usize::try_from(count).map_err(|_| Error::Argument)?;
+        let pts = out.reals.get(r..r + 4 * count).ok_or(Error::Argument)?;
+        r += 4 * count;
+        let knots = out.reals.get(r..r + count + degree + 1).ok_or(Error::Argument)?.to_vec();
+        r += count + degree + 1;
+        let points = pts.as_chunks::<4>().0.to_vec();
+        curves.push((Curve::Nurbs { degree, points, knots }, [ivl[0], ivl[1]]));
+    }
+    if k != out.kinds.len() || r != out.reals.len() {
+        return Err(Error::Argument);
+    }
+    Ok(curves)
 }
 
 #[cfg(test)]
