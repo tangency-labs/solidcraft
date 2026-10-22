@@ -417,6 +417,19 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
     Ok(out)
 }
 
+/// A circle's frame turned (y reversed) where needed so that its angle grows along `form`, the
+/// NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads.
+fn along(f: b::Frame, form: &b::Curve, range: [f64; 2]) -> Res<b::Frame> {
+    let eval = b::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
+    let [t0, t1] = range;
+    let (p, q) = (eval.point(t0), eval.point(t0 + 1e-3 * (t1 - t0)));
+    let (Some(p), Some(q)) = (p, q) else { return Err(invalid("circle NURBS form")) };
+    let (o, x, y) = (Vec3::from(f.origin), Vec3::from(f.x_axis), Vec3::from(f.y_axis));
+    let angle = |s: Vec3| (s - o).dot(y).atan2((s - o).dot(x));
+    let step = (angle(q) - angle(p)).rem_euclid(TAU);
+    Ok(if step > std::f64::consts::PI { b::Frame { y_axis: [-f.y_axis[0], -f.y_axis[1], -f.y_axis[2]], ..f } } else { f })
+}
+
 /// A NURBS curve: full knots, cartesian control points and weights.
 struct Nurbs {
     knots: Vec<f64>,
@@ -559,7 +572,8 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 // A circle with its NURBS form is parameterised on it: its range and the trims
                 // on it are that NURBS's, so the trims carry over as they are.
                 if forms.get(e) == Some(&1) {
-                    (b::Curve::Circle { frame: f, radius }, Some(next_nurbs()?.record()), r, Some([1.0, 0.0]))
+                    let form = next_nurbs()?.record();
+                    (b::Curve::Circle { frame: along(f, &form, r)?, radius }, Some(form), r, Some([1.0, 0.0]))
                 } else {
                     (b::Curve::Circle { frame: f, radius }, None, r, None)
                 }

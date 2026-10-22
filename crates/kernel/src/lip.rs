@@ -149,7 +149,8 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
             let e = asm.edges.get(u.edge as usize).ok_or_else(|| fail("edge"))?;
             let (s, t) = asm.ends(u).ok_or_else(|| fail("edge"))?;
             let (a, b) = (asm.point(s).ok_or_else(|| fail("vertex"))?, asm.point(t).ok_or_else(|| fail("vertex"))?);
-            let [t0, t1] = e.interval;
+            // The arc's angles, on the circle itself (its NURBS form, if any, is parameterised otherwise).
+            let [t0, t1] = solidcraft_geom::brep::curve_interval(&e.curve, e.nurbs.as_ref(), e.interval).ok_or_else(|| fail("edge"))?;
             match &e.curve {
                 Curve::Line { .. } => Ok(Piece { a, b, arc: None }),
                 Curve::Circle { frame, .. } => {

@@ -31,7 +31,7 @@ impl<'a> Run<'a> {
         let e = record.edges.get(edge)?;
         let at = |v: u32| record.vertices.get(v as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]));
         let (start, end) = (at(e.vertices[0])?, at(e.vertices[1])?);
-        Some(Run { curve: &e.curve, interval: e.interval, forward, ends: if forward { [start, end] } else { [end, start] } })
+        Some(Run { curve: e.parameters(), interval: e.interval, forward, ends: if forward { [start, end] } else { [end, start] } })
     }
 
     /// The parameters it runs from and to.

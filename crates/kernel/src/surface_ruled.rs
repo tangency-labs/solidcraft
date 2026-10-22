@@ -351,7 +351,8 @@ fn normal_at(surface: &SurfaceEval, forward: bool, p: Vec3) -> Option<Vec3> {
 /// one span per quarter turn or less).
 fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
     let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
-    let [t0, t1] = edge.interval;
+    // On the curve itself: a conic's angles (its NURBS form, if any, is parameterised otherwise).
+    let [t0, t1] = edge.curve_interval().ok_or_else(|| KernelError::Invalid("an edge's NURBS form cannot be evaluated".into()))?;
     let c = match &edge.curve {
         b::Curve::Line { start, end } => {
             let at = |t: f64| [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t, 1.0];

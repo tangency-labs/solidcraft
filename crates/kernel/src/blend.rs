@@ -119,7 +119,7 @@ impl Faces {
     /// The edge's unit tangent along its interval (start to end vertex) at its start or end.
     pub(crate) fn tangent(&self, e: usize, at_end: bool) -> Option<Vec3> {
         let edge = self.rec.edges.get(e)?;
-        curve_tangent(&edge.curve, if at_end { edge.interval[1] } else { edge.interval[0] })
+        curve_tangent(edge.parameters(), if at_end { edge.interval[1] } else { edge.interval[0] })
     }
 }
 
