@@ -906,7 +906,7 @@ fn same_surface(data: &str, us: (f64, f64), vs: (f64, f64)) -> BSurface {
         .flat_map(|i| (0..=n).map(move |j| (us.0 + (us.1 - us.0) * i as f64 / n as f64, vs.0 + (vs.1 - vs.0) * j as f64 / n as f64)))
         .collect();
     let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new() };
-    let (record, reversed) = swept::map_surface(&s, &ext).unwrap();
+    let (record, reversed) = swept::map_surface(&s, &ext, DEFAULT_TOLERANCE).unwrap();
     record.natural();
     let eval = SurfaceEval::new(&record).unwrap();
     for &(u, v) in &grid {
@@ -1003,7 +1003,7 @@ fn swept_and_offset_surfaces_are_the_files_own() {
             "#1=CARTESIAN_POINT('',(0.,0.,0.));#2=DIRECTION('',(0.,0.,1.));#3=DIRECTION('',(1.,0.,0.));#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);{data}\n"
         ));
         let s = crate::read::Reader::new(&exch, crate::read::Units::default()).surface(10).unwrap();
-        let e = swept::map_surface(&s, &ext).unwrap_err();
+        let e = swept::map_surface(&s, &ext, DEFAULT_TOLERANCE).unwrap_err();
         assert!(e.contains(why), "{data}: {e}");
     }
 }

@@ -2699,29 +2699,22 @@ fn sheet_boolean_changes(body: &Body, tools: &[Body], op: Operation) -> Result<b
     Ok(false)
 }
 
-/// Selected profiles form one machining tool, including disconnected tool material.
-/// Balanced unions avoid repeatedly rebuilding a growing aggregate boundary.
+/// Selected profiles form one machining tool, including disconnected tool material: their
+/// union in one kernel call.
 fn intersection_tool_union(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     if tools.len() > 1000 || tools.iter().fold(0usize, |n, t| n.saturating_add(t.body.face_count())) > 16_384 {
         return Err(DocError::Invalid("intersection tools exceed the bounded geometry budget".into()));
     }
-    let mut groups = tools;
-    while groups.len() > 1 {
-        let mut next = Vec::new();
-        let mut iter = groups.into_iter();
-        while let Some(a) = iter.next() {
-            match iter.next() {
-                Some(b) => {
-                    let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?
-                        .ok_or_else(|| DocError::Invalid("intersection tool union is empty".into()))?;
-                    next.push(Traced::step(u, &[&a, &b]));
-                }
-                None => next.push(a),
-            }
-        }
-        groups = next;
+    if tools.len() < 2 {
+        return Ok(tools);
     }
-    Ok(groups)
+    Ok(vec![union_all(&tools.iter().collect::<Vec<_>>())?])
+}
+
+/// The union of `operands` (traced bodies) in one kernel call, keeping their lineage.
+fn union_all(operands: &[&Traced]) -> Result<Traced> {
+    let bodies: Vec<&Body> = operands.iter().map(|t| &t.body).collect();
+    Ok(Traced::step(kernel::union_all(&bodies)?, operands))
 }
 
 /// After a cut handled some sheet bodies as flat machining, apply it to the other targets.
@@ -2923,26 +2916,14 @@ fn apply_traced_with(
                 Ok(Traced::step(u, &[a, b]))
             };
             // One target takes every tool, whichever it meets: the result is the union of all of
-            // them, made in a balanced tree of unions so that each body is in about log2(n) of
-            // them, instead of the target growing by one tool at a time and taking part, ever
-            // larger, in every one (n tools cost n²).
+            // them in one kernel call, checked once.
             if let [keep] = live.as_slice()
                 && tools.len() > 1
             {
                 let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(()) };
-                let mut level: Vec<Traced> = std::iter::once(base).chain(tools).collect();
-                while level.len() > 1 {
-                    let mut next = Vec::with_capacity(level.len().div_ceil(2));
-                    let mut it = level.into_iter();
-                    while let Some(a) = it.next() {
-                        next.push(match it.next() {
-                            Some(b) => union(&a, &b)?,
-                            None => a,
-                        });
-                    }
-                    level = next;
-                }
-                if let (Some(acc), Some(mb)) = (level.pop(), state.bodies.iter_mut().find(|b| b.name == *keep)) {
+                let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
+                let acc = union_all(&operands)?;
+                if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
                     *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
                 }
                 return Ok(());

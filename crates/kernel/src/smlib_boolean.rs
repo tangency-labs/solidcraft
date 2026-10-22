@@ -4,7 +4,7 @@
 //! ([`crate::history::History`]'s contract). A result SMLib's own check or the record's geometry
 //! check refuses is an error, never a body.
 
-pub(crate) use smlib::boolean as smlib_boolean;
+pub(crate) use smlib::{boolean as smlib_boolean, union_all as smlib_union_all};
 
 mod smlib {
     use solidcraft_smlib::{BooleanOp, CheckLevel};
@@ -34,6 +34,54 @@ mod smlib {
             BoolOp::Intersect => BooleanOp::Intersect,
         };
         let Some(r) = ta.boolean(&tb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
+        checked(&r, &[&sa, &sb])?;
+        let (body, or) = body_from_smlib_ordered(&r)?;
+        let history = match (oa, ob, or) {
+            (Some(oa), Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[oa, ob], &or).map(Some).unwrap_or_else(|e| {
+                log::debug!(target: "smlib", "boolean history: {e}");
+                None
+            }),
+            _ => None,
+        };
+        Ok(Some(with_history(body, history, a, b)))
+    }
+
+    /// The union of `bodies` in one SMLib call, each tagged as its own operand, checked once:
+    /// the result's history is over `bodies` in order. At least one body.
+    pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
+        if bodies.len() > solidcraft_smlib::MAX_UNION_BREPS {
+            return Err(KernelError::Invalid(format!("a union takes at most {} bodies", solidcraft_smlib::MAX_UNION_BREPS)));
+        }
+        let mut operands = Vec::with_capacity(bodies.len());
+        let mut tagged = Vec::with_capacity(bodies.len());
+        let mut orders = Some(Vec::with_capacity(bodies.len()));
+        for (i, body) in bodies.iter().enumerate() {
+            body.require_brep("a union")?;
+            let (s, order) = smlib_body_ordered(body)?;
+            tagged.push(s.tagged(i).map_err(|e| failed("tag", e))?);
+            operands.push(s);
+            orders = orders.zip(order).map(|(mut v, o)| {
+                v.push(o);
+                v
+            });
+        }
+        let refs: Vec<&solidcraft_smlib::Brep> = tagged.iter().collect();
+        let r = solidcraft_smlib::Brep::union_all(&refs).map_err(|e| failed("operation", e))?;
+        let operand_refs: Vec<&solidcraft_smlib::Brep> = operands.iter().collect();
+        checked(&r, &operand_refs)?;
+        let (body, or) = body_from_smlib_ordered(&r)?;
+        let history = match (orders, or) {
+            (Some(orders), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&orders, &or).map(Some).unwrap_or_else(|e| {
+                log::debug!(target: "smlib", "union history: {e}");
+                None
+            }),
+            _ => None,
+        };
+        Ok(body.with_checked_history(history, &record::counts(bodies)))
+    }
+
+    /// An error unless SMLib's check accepts `r`, the result of combining `operands`.
+    fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<()> {
         // Solids touching each other along an edge or at a vertex come back as one non-manifold
         // body, which the export splits into separate solids: SMLib's check is of those, imported
         // as given (its check of the touching arrangement itself refuses the radial order of
@@ -46,29 +94,26 @@ mod smlib {
             let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids", e))?;
             split.check(CheckLevel::All).map_err(|e| failed("check", e))?
         };
-        if !check.is_valid() {
-            // Whether an operand failed it already says whose the fault is.
-            let operands: Vec<&str> = [("the first operand", &sa), ("the second operand", &sb)]
-                .into_iter()
-                .filter(|(_, s)| s.check(CheckLevel::All).is_ok_and(|c| !c.is_valid()))
-                .map(|(name, _)| name)
-                .collect();
-            let what = if operands.is_empty() {
-                "SMLib's check refuses the result".to_string()
-            } else {
-                format!("SMLib's check refuses the result ({} already fails it)", operands.join(" and "))
-            };
-            return Err(failed(&what, check));
+        if check.is_valid() {
+            return Ok(());
         }
-        let (body, or) = body_from_smlib_ordered(&r)?;
-        let history = match (oa, ob, or) {
-            (Some(oa), Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[oa, ob], &or).map(Some).unwrap_or_else(|e| {
-                log::debug!(target: "smlib", "boolean history: {e}");
-                None
-            }),
-            _ => None,
+        // Whether an operand failed it already says whose the fault is.
+        let failing: Vec<String> = operands
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.check(CheckLevel::All).is_ok_and(|c| !c.is_valid()))
+            .map(|(i, _)| match (operands.len(), i) {
+                (2, 0) => "the first operand".to_string(),
+                (2, _) => "the second operand".to_string(),
+                _ => format!("operand {i}"),
+            })
+            .collect();
+        let what = if failing.is_empty() {
+            "SMLib's check refuses the result".to_string()
+        } else {
+            format!("SMLib's check refuses the result ({} already fails it)", failing.join(" and "))
         };
-        Ok(Some(with_history(body, history, a, b)))
+        Err(failed(&what, check))
     }
 
     /// `body` with `history` where it describes `body` made from `a` and `b`.

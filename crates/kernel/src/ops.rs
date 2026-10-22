@@ -29,16 +29,31 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     })
 }
 
+/// The union of `bodies` (at least one) in one SMLib call, each body taking part in about
+/// log2(n) of its unions, the result checked once. A result SMLib's check refuses is an error.
+///
+/// The result carries its exact history over `bodies` in order, as [`boolean`]'s does, and
+/// what the operands' faces stood for (their regularization protection and the planar roles on
+/// supports it kept).
+pub fn union_all(bodies: &[&Body]) -> Result<Body> {
+    crate::profile::timed(crate::profile::Kind::Boolean, || {
+        if bodies.is_empty() {
+            return Err(KernelError::Invalid("a union of no bodies".into()));
+        }
+        guard("SMLib union", || crate::smlib_boolean::smlib_union_all(bodies))?.with_preserved_union_planar_sources(bodies)
+    })
+}
+
 /// A boolean's result with what its operands' faces stood for carried over: regularization
 /// protection and the planar construction and shell roles on supports it kept.
 fn with_operand_roles(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -> Result<Option<Body>> {
     let r = r.map(|result| result.map(|body| body.inherit_regularization_protection(a).inherit_regularization_protection(b)));
     match op {
         BoolOp::Cut => r.and_then(|result| result.map(|body| body.with_preserved_boolean_planar_sources(a, b, true)).transpose()),
-        BoolOp::Union => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+        BoolOp::Union => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(&[a, b])).transpose()),
         // Every face of an intersection lies on one operand's face, as a union's does: the same
         // roles carry over (#565).
-        BoolOp::Intersect => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(a, b)).transpose()),
+        BoolOp::Intersect => r.and_then(|result| result.map(|body| body.with_preserved_union_planar_sources(&[a, b])).transpose()),
     }
 }
 
