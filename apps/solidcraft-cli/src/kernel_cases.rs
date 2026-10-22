@@ -11,7 +11,16 @@ use crate::{read_json, recipe};
 
 /// The kernel this process runs on (`SOLIDCRAFT_KERNEL`, set by the caller).
 fn kernel() -> String {
-    std::env::var("SOLIDCRAFT_KERNEL").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| "default".into())
+    kernel_name(std::env::var("SOLIDCRAFT_KERNEL").ok().as_deref())
+}
+
+/// The rig's name for a `SOLIDCRAFT_KERNEL` setting: unset, empty or `truck` (all of which the
+/// kernel runs as truck) is `default`, the name `boolean_kernel` reports for truck.
+fn kernel_name(setting: Option<&str>) -> String {
+    match setting.map(str::trim) {
+        None | Some("") | Some("truck") => "default".into(),
+        Some(other) => other.into(),
+    }
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one
@@ -369,6 +378,15 @@ mod tests {
         // `$OUT` is the running case's scratch directory, in its bases too.
         assert_eq!(s["commands"][0]["params"]["file"], json!("/scratch/a.step"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn truck_named_explicitly_is_the_default_kernel() {
+        // `SOLIDCRAFT_KERNEL=truck` runs truck, so the rig must not call it a build mismatch.
+        for setting in [None, Some(""), Some(" "), Some("truck")] {
+            assert_eq!(kernel_name(setting), "default");
+        }
+        assert_eq!(kernel_name(Some("smlib")), "smlib");
     }
 
     #[test]

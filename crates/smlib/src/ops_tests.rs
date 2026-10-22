@@ -285,11 +285,15 @@ fn a_variable_round_follows_its_law() {
     let zero = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[4.0, 0.0]).unwrap();
     shot(&zero, "variable-to-zero");
     assert_close(volume(&zero), 8000.0 - q * 20.0 * 16.0 / 3.0, 1e-5, "down to zero");
-    // A law with a corner (4 → 2 → 4, straight on both halves): SMLib's section fit runs across
-    // the corner and misses it, so it is refused; the same points joined smoothly (C1 cubic
-    // pieces, as RadiusSpline::through makes them) are built.
-    let corner = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 2.0, 4.0]);
-    assert_eq!(corner.unwrap_err(), Error::Unsupported);
+    // A law with a corner (4 → 2 → 4, straight on both halves): the round turns at the corner,
+    // each half taking away (1 - pi/4) (L / 2) (16 + 8 + 4) / 3; the same points joined smoothly
+    // (C1 cubic pieces, as RadiusSpline::through makes them) are built too.
+    let corner = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 2.0, 4.0]).unwrap();
+    shot(&corner, "variable-corner-4-2-4");
+    assert_close(volume(&corner), 8000.0 - q * 20.0 * 28.0 / 3.0, 1e-6, "corner law");
+    // A law down to zero inside the edge would pinch the round to a point: refused.
+    let pinch = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 0.0, 4.0]);
+    assert!(pinch.is_err(), "a law pinching to zero inside the edge");
     let smooth_knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
     let smooth = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 3, &smooth_knots, &[4.0, 10.0 / 3.0, 2.0, 2.0, 2.0, 10.0 / 3.0, 4.0]);
     shot(&smooth.unwrap(), "variable-smooth-4-2-4");

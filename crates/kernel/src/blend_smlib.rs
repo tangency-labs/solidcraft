@@ -451,10 +451,9 @@ mod tests {
     fn options_smlib_cannot_build_are_refused() {
         assert!(unsupported("x").to_string().contains("not supported yet"));
         let b = cube();
-        // A radius law with a corner (4 → 2 → 4, straight on both halves).
-        let corner = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 0.5, 1.0, 1.0], radii: vec![4.0, 2.0, 4.0] };
-        let e = imp::variable(&b, Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 20.0, 20.0), &corner).unwrap_err();
-        assert!(e.to_string().contains("not supported yet"), "{e}");
+        // A radius law down to zero inside the edge would pinch the round to a point.
+        let pinch = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 0.5, 1.0, 1.0], radii: vec![4.0, 0.0, 4.0] };
+        assert!(imp::variable(&b, Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 20.0, 20.0), &pinch).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
