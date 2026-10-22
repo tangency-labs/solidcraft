@@ -2111,6 +2111,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 ray_fire: *ray,
                 distance_tolerance: *tol,
                 surface_cache: None,
+                face_cache: None,
                 kernel: &k,
             };
             let mut branch: Branch = Default::default();

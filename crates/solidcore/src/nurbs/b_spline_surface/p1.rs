@@ -16,7 +16,7 @@
 //! | [`BSplineSurface::copy`], `Clone`                 | copy constructor, `Copy`                         |
 //! | `Drop` (implicit)                                 | `~SmBSplineSurface`                              |
 //! | [`BSplineSurface::approx_eq`]                     | `operator==`                                     |
-//! | [`BSplineSurface::calculate_bounding_box`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
+//! | [`BSplineSurface::calculate_bounding_box`], [`BSplineSurface::calculate_bounding_box_of`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
 //! | [`BSplineSurface::create_bilinear_surface`]       | `CreateBilinearSurface`                          |
 //! | [`BSplineSurface::create_canonical`], [`CanonicalSurfaceData`] | `CreateCanonical`                   |
 //! | `create_cone_patch_dir` (private)                 | `sm_CreateConePatch` (static)                    |
@@ -112,7 +112,11 @@
 //!   types to `SmSurface::IsKindOf` ([`crate::surface::surface::p2::is_kind_of`]);
 //!   a plain B-spline is never one of the analytic types `CalculateBoundingBox` and
 //!   `IsParallelToVector` test for first. `CalculateBoundingBox` also calls
-//!   `SmSurface::EvaluateNormal` (`surface::surface::p7`); its zone tolerance expansion
+//!   `SmSurface::EvaluateNormal` (`surface::surface::p7`). The analytic surfaces that
+//!   inherit `CalculateBoundingBox` (`SmCone`, `SmSphere`, `SmTorus`, ...) run it as
+//!   [`BSplineSurface::calculate_bounding_box_of`] with themselves as `this`: their
+//!   `IsKindOf` makes the polar box the sampled "analytic" one and their virtual
+//!   `EvaluateNormal` gives the samples. Its zone tolerance expansion
 //!   reads `GetFace()`, and a bare B-spline has no owner (the owner is held by the
 //!   [`Surface`](crate::surface::surface::Surface) wrapper), so it uses
 //!   `SM_ZONE_TOL_3D` unless the wrapper passes its face's cached tolerance as
@@ -1187,6 +1191,40 @@ impl BSplineSurface {
         uv_domain: &Extent2d,
         req: &BoundingBoxRequest<'_>,
     ) -> Result<BoundingBoxes> {
+        self.calculate_bounding_box_of(k, uv_domain, req, None)
+    }
+
+    /// [`BSplineSurface::calculate_bounding_box`] run for `derived`, the surface this
+    /// B-spline is the base of (an `SmCone`, `SmSphere`, `SmTorus`, ... inheriting the
+    /// override): its `IsKindOf` answers the analytic type test and its virtual
+    /// `EvaluateNormal` gives the sampled normals. `None` is a plain B-spline.
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::calculate_bounding_box`], and those of `derived`'s normal
+    /// evaluation.
+    pub fn calculate_bounding_box_of(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        req: &BoundingBoxRequest<'_>,
+        derived: Option<&crate::surface::surface::Surface>,
+    ) -> Result<BoundingBoxes> {
+        // the virtual IsKindOf and EvaluateNormal of `this`
+        let kind_of = |t: i64| match derived {
+            Some(d) => d.is_kind_of(t),
+            None => self.is_kind_of(t),
+        };
+        let evaluate_normal = |k: &Kernel, _: &Self, uv: Point2| match derived {
+            Some(d) => d.evaluate_normal(
+                k,
+                uv,
+                crate::nurbs::knots::Side::Left,
+                crate::nurbs::knots::Side::Left,
+            ),
+            None => evaluate_normal(k, self, uv),
+        };
+
         // init output
         let mut normal_box = req.normal.then(Extent3d::new);
         let mut pseudo_box = req.pseudo.then(PseudoBox::new);
@@ -1220,10 +1258,10 @@ impl BSplineSurface {
             || (u_degree == 2 && v_degree == 2));
 
         // also check the derived type of the surface
-        if self.is_kind_of(PLANE_TYPE)?
-            || self.is_kind_of(CONE_TYPE)?
-            || self.is_kind_of(SPHERE_TYPE)?
-            || self.is_kind_of(TORUS_TYPE)?
+        if kind_of(PLANE_TYPE)?
+            || kind_of(CONE_TYPE)?
+            || kind_of(SPHERE_TYPE)?
+            || kind_of(TORUS_TYPE)?
         {
             analytic = true;
         }

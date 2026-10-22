@@ -296,12 +296,31 @@ pub(super) fn calculate_bounding_box(
 ) -> Result<BoundingBoxes> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => b.calculate_bounding_box(k, domain, req),
-        // inherited from SmBSplineSurface: none of its virtual calls is overridden
-        SurfaceKind::Cone(s) => s.rev().base().calculate_bounding_box(k, domain, req),
-        SurfaceKind::Sphere(s) => s.base().base().calculate_bounding_box(k, domain, req),
-        SurfaceKind::Torus(s) => s.base().base().calculate_bounding_box(k, domain, req),
-        SurfaceKind::SurfOfRevolution(s) => s.base().calculate_bounding_box(k, domain, req),
-        SurfaceKind::SurfOfExtrusion(s) => s.base().calculate_bounding_box(k, domain, req),
+        // inherited from SmBSplineSurface, run for the derived surface (its IsKindOf
+        // and virtual EvaluateNormal)
+        SurfaceKind::Cone(s) => {
+            s.rev()
+                .base()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
+        SurfaceKind::Sphere(s) => {
+            s.base()
+                .base()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
+        SurfaceKind::Torus(s) => {
+            s.base()
+                .base()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
+        SurfaceKind::SurfOfRevolution(s) => {
+            s.base()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
+        SurfaceKind::SurfOfExtrusion(s) => {
+            s.base()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
         SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(k, p, domain, req),
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
             // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the

@@ -910,6 +910,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                         ray_fire: false,
                         distance_tolerance: 0.0,
                         surface_cache: None,
+                        face_cache: None,
                         kernel: &k,
                     }
                     .identical_solutions(&sa, &sb),

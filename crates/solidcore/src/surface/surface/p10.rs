@@ -18,6 +18,10 @@
 //!   parent surface (`sm_GetOriginalSurface`) are the cache's surface, named in the
 //!   solutions by its handle. `GetPolarBox` builds a missing polar box without
 //!   storing it ([`SurfaceCache::polar_box_unstored`]; the values are the same).
+//!   `sm_IsPointValid` calls the virtual `PointTest` of the tree's cache: a face's
+//!   trimmed cache answers through the solver's `face_cache`
+//!   ([`crate::surface::surface::p8::FaceSolveCache::point_test`], a face
+//!   classification), any other cache with [`is_point_valid`] (its domain test).
 //! - **Ignored statuses.** The leaf solve ignores the status of
 //!   `SmExtent3d::IntersectLine` and `SmPseudoBox::IntersectLine` (a zero line vector,
 //!   an undefined box or a negative volume box leave the hit count at zero: no work)
@@ -43,7 +47,7 @@
 //! - **Bounds.** The leaf solve takes at most six guesses (upstream's fixed arrays). No
 //!   recursion.
 
-use super::p1::{is_node_valid, is_point_valid, surface_to_evaluate};
+use super::p1::{is_node_valid, is_point_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
 use super::p4;
 use super::p6::{CurveIntersection, RangeTangentPoint};
@@ -305,6 +309,31 @@ impl<O: SolutionObject> LsiLeaf<'_, O> {
 }
 
 impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
+    /// `sm_IsPointValid` of a leaf of `cache` (tree owner kind `owner`): the face's
+    /// trimmed cache answers with its point test (a face classification) when the
+    /// solve runs on one, else [`is_point_valid`]. A failed classification keeps the
+    /// point (`SE(SM_ERR)`, return TRUE); [`SolidError::Unported`] propagates.
+    fn is_point_valid(
+        &mut self,
+        k: &Kernel,
+        owner: Option<crate::geom::tree::TreeOwner>,
+        cache: &SurfaceCache<O>,
+        uv: Point2,
+    ) -> Result<bool> {
+        match self.face_cache.as_deref_mut() {
+            // keep all points when SurfaceNode has no trim boundaries
+            Some(face_cache) if is_surface_cache_owner(owner) => {
+                match face_cache.point_test(k, uv) {
+                    Ok(ok) => Ok(ok),
+                    Err(e) if e.is_unported() => Err(e),
+                    // signal errors from Face->PointClassify(), keep the point
+                    Err(_) => Ok(true),
+                }
+            }
+            _ => Ok(is_point_valid(owner, cache, uv)),
+        }
+    }
+
     /// Filters a single valued solution of `surface` over `domain` and adds it when
     /// kept and inside the trim boundary (upstream's repeated `sm_FilterSolution` /
     /// `sm_IsPointValid` / `AddSortedSolution` block).
@@ -328,7 +357,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if keep {
             let uv = Point2::new(p(&solution.start, 1)?, p(&solution.start, 2)?);
             // for points within the surface's trim boundary
-            if is_point_valid(leaf.owner, leaf.cache, uv) {
+            if self.is_point_valid(k, leaf.owner, leaf.cache, uv)? {
                 self.add_sorted_solution(solution, SortKey::ByAllParameters, true)?;
             }
         }
@@ -598,7 +627,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             }
 
             // for points within the surface's trim boundary
-            if is_point_valid(leaf.owner, cache, hit.uv) {
+            if self.is_point_valid(k, leaf.owner, cache, hit.uv)? {
                 self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
             }
 

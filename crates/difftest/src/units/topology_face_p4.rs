@@ -2,9 +2,11 @@
 //! Rust: `solidcore::topology::face::p4`.
 //!
 //! Every op runs on a B-rep of unit `topology.vertexuse` (upstream `.smb` files, faces of
-//! B-spline surfaces or real `SmPlane`s): the C++ side builds a real `SmBrep`, gives its
-//! faces and edges the plain B-spline copies of analytic geometry (what the Rust import
-//! rebuilds, keeping the owners) and runs the `SmFace` member on the selected face; the
+//! B-spline surfaces, real `SmPlane`s or the analytic surfaces the export sends exactly):
+//! the C++ side builds a real `SmBrep`, gives its faces and edges the plain B-spline
+//! copies of the analytic geometry the export does not send exactly (what the Rust
+//! import rebuilds, keeping the owners) and runs the `SmFace` member on the selected
+//! face; the
 //! Rust side imports the graph that unit's shim exports and runs the port. Both sides
 //! produce one flat record (`out`, laid out as in the ffi module): traversal indices,
 //! flags, statuses, line/face solutions and seam classification point classes.

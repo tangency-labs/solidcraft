@@ -36,9 +36,19 @@
 //!   [`Surface::global_line_intersect`] with the caller's `surface` handle as object
 //!   (upstream's surface pointer); [`global_line_intersect_held`] keeps the surface's
 //!   cache in the caller's [`HeldSolveCache`] across calls, as upstream keeps it on the
-//!   surface. `SmFace::PointClassify` gets the face's tolerance
-//!   options as `query.face_p2`'s callers pass them, without the trimmed surface cache
-//!   (the cache answers as the loop classification does); its status is ignored as
+//!   surface. [`global_line_intersect`] builds the surface's cache with the face
+//!   ([`crate::query::face::p2::face_surface_cache`], `GetFace()` of the trimmed
+//!   cache) when the solve fetches it, so the solve runs on the face's trimmed tree;
+//!   the trimmed cache names the surface `EntityRef::Face(f)` (upstream's
+//!   `m_cpSurface`, which every node's `mBA_pSurface` becomes after the build; the
+//!   leaf solves compute their polar boxes on it). The solve gets the cache with
+//!   every handle naming `surface` ([`SurfaceCache::map_handles`]: the line solve
+//!   reads only node classes, boxes and the cache surface), its `sm_IsPointValid`
+//!   runs the trimmed cache's `PointTest` (a face classification,
+//!   [`TrimSrfCache::point_test_in`]), and `SmFace::PointClassify` of the single values gets the trimmed cache
+//!   itself (upstream finds it on the surface). The held variant and
+//!   `sm_FaceClassifyUVLine` classify without it. `SmFace::PointClassify` gets the face's tolerance
+//!   options as `query.face_p2`'s callers pass them; its status is ignored as
 //!   upstream ignores it ([`SolidError::Unported`], `InvalidInput` and `NotFound`
 //!   propagate). A range whose `sm_FaceClassifyUVLine` returns no interval reads
 //!   `sCC[0]` of an empty array upstream (`plan/upstream-issues.md` UB-180); the port
@@ -110,11 +120,13 @@ use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::{
-    curve_on_classify, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
+    curve_on_classify, face_surface_cache, point_classify, BrepCacheFace, CurveOnClassifyObjects,
+    PointClassifyOptions,
 };
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
-use crate::surface::surface::p8::HeldSolveCache;
+use crate::surface::surface::p8::{FaceSolveCache, HeldSolveCache};
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_cache::SurfaceCache;
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::surface::volume::Volume;
 use crate::topology::edge;
@@ -411,12 +423,14 @@ fn classify_uv_point(
     f: FaceId,
     uv: Point2,
     tol: f64,
+    trim_cache: Option<&mut TrimSrfCache<EntityRef>>,
 ) -> Result<PointClassType> {
     let mut pc = PointClassification::new(tol);
     let opts = PointClassifyOptions {
         src_zone_tol_3d: tol,
         do_boundary_intersections: true,
         use_uv_classification: true,
+        trim_cache,
         ..PointClassifyOptions::default()
     };
     match point_classify(k, b, f, uv, &mut pc, opts) {
@@ -508,6 +522,57 @@ pub fn global_line_intersect_held<O: SolutionObject>(
     )
 }
 
+/// The face's trimmed surface cache as its surface's line solve fetches it
+/// (`smsurf_GetSurfaceCache(pSurface)`), named by `surface` in the solve.
+struct FaceLineCache<'b, O> {
+    b: &'b mut Brep,
+    f: FaceId,
+    surface: O,
+    /// The trimmed cache, once built.
+    trim: Option<TrimSrfCache<EntityRef>>,
+}
+
+impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
+    fn build(&mut self, k: &Kernel) -> Result<SurfaceCache<O>> {
+        // the face's trimmed cache, its tree built (GetTree); the surface needs a name
+        // in the cache's object space: after the build every node's `mBA_pSurface` is
+        // the cache surface (the polar boxes of the leaf solves are computed on it)
+        let mut c = face_surface_cache(k, self.b, self.f, Some(EntityRef::Face(self.f)))?;
+        if c.base().tree().is_none() {
+            c.build_tree_with_face(
+                k,
+                &mut BrepCacheFace {
+                    b: &mut *self.b,
+                    f: self.f,
+                },
+            )?;
+        }
+        let surface = self.surface;
+        let mut solve_cache = c.base().map_handles(|_| Ok(surface))?;
+        solve_cache.set_surface_handle(Some(surface));
+        self.trim = Some(c);
+        Ok(solve_cache)
+    }
+
+    fn point_test(&mut self, k: &Kernel, uv: Point2) -> Result<bool> {
+        let trim = self
+            .trim
+            .as_ref()
+            .ok_or_else(|| null("GlobalLineIntersect: point test without cache"))?;
+        // PointTest(uv, ok, NULL, NULL): the face's zone tolerance
+        let (ok, _) = trim.point_test_in(
+            k,
+            &mut BrepCacheFace {
+                b: &mut *self.b,
+                f: self.f,
+            },
+            uv,
+            None,
+        )?;
+        Ok(ok)
+    }
+}
+
 /// The body of [`global_line_intersect`] and [`global_line_intersect_held`].
 #[allow(clippy::too_many_arguments)]
 fn global_line_intersect_with<O: SolutionObject>(
@@ -534,9 +599,12 @@ fn global_line_intersect_with<O: SolutionObject>(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| null("GlobalLineIntersect: face without surface"))?;
-    let mut solutions = match held {
-        Some(held) => face_surface.global_line_intersect_held(
+        .ok_or_else(|| null("GlobalLineIntersect: face without surface"))?
+        .clone_for_evaluation()?;
+    // the face's trimmed surface cache, when the surface solve fetched it
+    let mut trim: Option<TrimSrfCache<EntityRef>> = None;
+    let mut solutions = if let Some(held) = held {
+        face_surface.global_line_intersect_held(
             k,
             surface,
             held,
@@ -546,17 +614,27 @@ fn global_line_intersect_with<O: SolutionObject>(
             line_interval,
             false,
             src_zone_tol_3d,
-        )?,
-        None => face_surface.global_line_intersect(
+        )?
+    } else {
+        let mut face_cache = FaceLineCache {
+            b: &mut *b,
+            f,
+            surface,
+            trim: None,
+        };
+        let solutions = face_surface.global_line_intersect_built(
             k,
             surface,
+            &mut face_cache,
             uv_domain,
             line_point,
             line_vector,
             line_interval,
             false,
             src_zone_tol_3d,
-        )?,
+        )?;
+        trim = face_cache.trim;
+        solutions
     };
 
     // If there are no solutions then return whatever the surface method returns.
@@ -580,7 +658,9 @@ fn global_line_intersect_with<O: SolutionObject>(
         if sol.solution_type == SolutionType::SingleValue {
             // Get uv on surface
             let uv = Point2::new(sol.start.parameters[1], sol.start.parameters[2]);
-            if classify_uv_point(k, b, f, uv, src_zone_tol_3d)? == PointClassType::Unknown {
+            if classify_uv_point(k, b, f, uv, src_zone_tol_3d, trim.as_mut())?
+                == PointClassType::Unknown
+            {
                 removal_indices.push(ii);
                 ii += 1;
                 continue;

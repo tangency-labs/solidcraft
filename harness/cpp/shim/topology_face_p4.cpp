@@ -42,9 +42,10 @@ struct Fp4EdgePeek : SmEdge
     static SmCurve* SmEdge::*curve() { return &Fp4EdgePeek::m_pCurve; }
 };
 
-// The Rust import rebuilds NURBs as plain B-splines (and lines, planes): give the C++
-// faces and edges the same geometry (as topology_face_p1.cpp's fp1_normalise). The
-// analytic originals are leaked (they may still be referenced elsewhere).
+// The Rust import rebuilds NURBs as plain B-splines (and lines, planes) and the analytic
+// surfaces the export sends exactly (sc_analytic_export.h) as their own kind: give every
+// other face and edge of the C++ B-rep the same geometry (as heal_gap.cpp's normalise).
+// The analytic originals are leaked (they may still be referenced elsewhere).
 void fp4_normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -52,6 +53,10 @@ void fp4_normalise(Graph& g)
         SmSurface* s = f->*FPeek::srf();
         if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
             s->GetType() == SmPlane_TYPE)
+            continue;
+        // exported exactly: the Rust side runs the same analytic surface
+        std::vector<double> head;
+        if (sc_analytic_export::put_exact_head(head, s, the_context()))
             continue;
         SmBSplineSurface* b = (SmBSplineSurface*)s;
         gw_SURFACE* nurb = b->GetGwNurbPointer();

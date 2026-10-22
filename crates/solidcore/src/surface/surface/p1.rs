@@ -1698,19 +1698,27 @@ impl Surface {
                 let r = match self.kind() {
                     SurfaceKind::BSpline(s) => s.calculate_bounding_box(k, uv_domain, &req)?,
                     SurfaceKind::Cone(s) => {
-                        s.rev().base().calculate_bounding_box(k, uv_domain, &req)?
+                        s.rev()
+                            .base()
+                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
                     }
                     SurfaceKind::Sphere(s) => {
-                        s.base().base().calculate_bounding_box(k, uv_domain, &req)?
+                        s.base()
+                            .base()
+                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
                     }
                     SurfaceKind::Torus(s) => {
-                        s.base().base().calculate_bounding_box(k, uv_domain, &req)?
+                        s.base()
+                            .base()
+                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
                     }
                     SurfaceKind::SurfOfRevolution(s) => {
-                        s.base().calculate_bounding_box(k, uv_domain, &req)?
+                        s.base()
+                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
                     }
                     SurfaceKind::SurfOfExtrusion(s) => {
-                        s.base().calculate_bounding_box(k, uv_domain, &req)?
+                        s.base()
+                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
                     }
                     SurfaceKind::Plane(p) => plane_bounding_box(k, p, uv_domain, &req)?,
                     _ => unreachable_kind()?,
@@ -2882,7 +2890,7 @@ pub fn surface_to_evaluate<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<
 
 /// Whether the tree of a surface cache owner kind `owner` is a surface cache's
 /// (`IsKindOf(SmSurfaceCache_TYPE)`: surface, trimmed and tessellation caches).
-const fn is_surface_cache_owner(owner: Option<TreeOwner>) -> bool {
+pub(crate) const fn is_surface_cache_owner(owner: Option<TreeOwner>) -> bool {
     matches!(
         owner,
         Some(TreeOwner::SurfaceCache | TreeOwner::TrimSrfCache | TreeOwner::TessSrfCache)
@@ -3329,6 +3337,7 @@ impl<'t, 's, O: SolutionObject> LsiGlobalSolver<'t, 's, O> {
             ray_fire,
             distance_tolerance,
             surface_cache: None,
+            face_cache: None,
         }
     }
 }

@@ -9,7 +9,7 @@
 //! | [`Surface::coincidence_check`], [`Surface::base_coincidence_check`] | `SmSurface::CoincidenceCheck` (virtual; `SmPlane` overrides it) |
 //! | [`Surface::create_blend_surface`] | `SmSurface::CreateBlendSurface` |
 //! | [`Surface::global_curve_intersect`], [`Surface::global_curve_intersect_in`] | `SmSurface::GlobalCurveIntersect` |
-//! | [`Surface::global_line_intersect`], [`Surface::global_line_intersect_in`], [`Surface::global_line_intersect_held`], [`Surface::base_global_line_intersect`], [`Surface::base_global_line_intersect_in`] | `SmSurface::GlobalLineIntersect` (virtual; `SmPlane` overrides it) |
+//! | [`Surface::global_line_intersect`], [`Surface::global_line_intersect_in`], [`Surface::global_line_intersect_held`], [`Surface::global_line_intersect_built`], [`Surface::base_global_line_intersect`], [`Surface::base_global_line_intersect_in`] | `SmSurface::GlobalLineIntersect` (virtual; `SmPlane` overrides it) |
 //! | [`SpGlobalSolver::local_solve_branch`] | `SmSPGlobalSolver::LocalSolve` |
 //! | [`Surface::invert_point_near_singularity`] | `SmSurface::InvertPointNearSingularity` |
 //! | [`Surface::local_line_intersect`] | `SmSurface::LocalLineIntersect` |
@@ -32,7 +32,11 @@
 //! upstream reuses the surface's cache (its coincident traces fetch their own, as
 //! without a cache); a failed build is kept as well and its error returned again
 //! (upstream retries the build, which fails the same way: the build is
-//! deterministic). The
+//! deterministic). A caller that can reach the face owning the surface gives
+//! [`Surface::global_line_intersect_built`] the build of upstream's cache (the trimmed
+//! cache of the face, [`crate::surface::surface::p1::get_surface_cache_with_face`]),
+//! run when the solve fetches its cache (`smsurf_GetSurfaceCache`), so the tree is
+//! the face's and the coincident traces share it. The
 //! optional `SmDerivSurfDefinition` of `CreateBlendSurface` is copied, so its caller
 //! does not see the fields upstream overwrites. `CreateBlendSurface` returns `SM_ERR`
 //! as soon as one of the sample evaluations fails (upstream ignores the status, goes
@@ -98,6 +102,32 @@ enum LineCacheSource<'c, O> {
     Caller(&'c mut SurfaceCache<O>),
     /// Built on the first call and kept by the caller.
     Held(&'c mut HeldSolveCache<O>),
+    /// Built by the caller, which can reach the surface's face.
+    Face(&'c mut (dyn FaceSolveCache<O> + 'c)),
+}
+
+/// The cache of a face's surface as a caller holding the face gives it to a solve:
+/// upstream's `smsurf_GetSurfaceCache` returns the face's trimmed cache
+/// (`SmTrimSrfCache`), whose virtual `PointTest` classifies a potential solution
+/// against the face.
+pub trait FaceSolveCache<O> {
+    /// `smsurf_GetSurfaceCache` of the face's surface, its tree built: the trimmed
+    /// cache with every handle naming the solve's surface object (the line solve
+    /// reads only node classes, boxes and patches).
+    ///
+    /// # Errors
+    ///
+    /// Those of the cache build.
+    fn build(&mut self, k: &Kernel) -> Result<SurfaceCache<O>>;
+
+    /// `SmTrimSrfCache::PointTest(uv, ok, NULL, NULL)` of the built cache: whether
+    /// `uv` classifies to the face, one of its edges or vertices (true when point
+    /// testing is off or the face was modified).
+    ///
+    /// # Errors
+    ///
+    /// Those of `SmFace::PointClassify`.
+    fn point_test(&mut self, k: &Kernel, uv: Point2) -> Result<bool>;
 }
 
 const OP_KNOTS: &str = "surface::surface::p8::Surface::find_knots_by_max_continuity";
@@ -1207,6 +1237,56 @@ impl Surface {
         }
     }
 
+    /// [`Surface::global_line_intersect`] whose surface cache, when the solve fetches
+    /// one (`smsurf_GetSurfaceCache`), is `face_cache`'s: the caller that holds the
+    /// face owning this surface builds the face's trimmed cache, and the solve's
+    /// `sm_IsPointValid` runs its point test. A plane builds its own cache (only its
+    /// coincident-line branch needs one), as in [`Surface::global_line_intersect_held`].
+    /// The cache is built at most once.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_line_intersect`]; a failed build is `SM_ERR_NULL_POINTER`
+    /// (upstream's `NER`), [`SolidError::Unported`] passes through.
+    #[allow(clippy::too_many_arguments)]
+    pub fn global_line_intersect_built<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: O,
+        face_cache: &mut dyn FaceSolveCache<O>,
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        fire_ray: bool,
+        distance_tolerance: f64,
+    ) -> Result<SolutionArray<O>> {
+        match self.kind() {
+            SurfaceKind::Plane(p) => p.global_line_intersect_in(
+                k,
+                Some(surface),
+                None,
+                uv_domain,
+                line_point,
+                line_vector,
+                line_interval,
+                fire_ray,
+                distance_tolerance,
+            ),
+            _ => self.base_global_line_intersect_from(
+                k,
+                Some(surface),
+                LineCacheSource::Face(face_cache),
+                uv_domain,
+                line_point,
+                line_vector,
+                line_interval,
+                fire_ray,
+                distance_tolerance,
+            ),
+        }
+    }
+
     /// The body of [`Surface::base_global_line_intersect_in`] with the cache from
     /// `source`.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1234,7 +1314,23 @@ impl Surface {
         // (`held`: the caller's cache, which the coincident traces below share)
         let mut held: Option<&mut SurfaceCache<O>> = None;
         let built;
+        let mut owned;
+        // the trimmed cache's point test (`sm_IsPointValid` -> `PointTest`)
+        let mut face_cache: Option<&mut (dyn FaceSolveCache<O> + '_)> = None;
         let cache = match source {
+            LineCacheSource::Face(source) => {
+                owned = match source.build(k) {
+                    Ok(c) => c,
+                    Err(e) if e.is_unported() => return Err(e),
+                    Err(_) => return Err(SolidError::null_pointer(OP_LINE)),
+                };
+                face_cache = Some(source);
+                held = Some(&mut owned);
+                match held.as_deref_mut() {
+                    Some(c) => Self::held_cache(k, c, OP_LINE)?,
+                    None => return Err(SolidError::null_pointer(OP_LINE)),
+                }
+            }
             LineCacheSource::Caller(c) => {
                 held = Some(c);
                 match held.as_deref_mut() {
@@ -1277,6 +1373,7 @@ impl Surface {
             distance_tolerance,
         );
         gs.surface_cache = Some(cache);
+        gs.face_cache = face_cache;
 
         // traverse curve and surface sub-division trees
         // for each sub-division leaf pair that has intersecting boundaries
