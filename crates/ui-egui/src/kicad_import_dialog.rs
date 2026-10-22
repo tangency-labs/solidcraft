@@ -213,6 +213,18 @@ mod tests {
         assert!(!h.app.file_load.busy());
     }
 
+    /// The Open command itself (the palette, a pinned button, `ui.start`) picks the file and
+    /// then shows the settings, like every other Open route.
+    #[test]
+    fn the_open_command_picks_the_file_and_shows_the_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+        h.app.start("doc.open");
+        h.frames(2);
+        assert!(h.app.kicad_import.is_some(), "the Open command skipped the import settings");
+        assert!(!h.app.file_load.busy(), "the Open command read the board before its settings");
+    }
+
     /// Every way of opening a file goes through the settings window: the app bar's File > Open
     /// and Ctrl+O too, not only Home, a drop and the command behind the Open button.
     #[test]
