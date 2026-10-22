@@ -58,10 +58,15 @@
 //!   signal `SM_ERR` (or nothing) for tangent faces and leave a solver without edge
 //!   uses or offset surfaces: the same half-built solver is returned (`Ok`). They take
 //!   the B-rep mutably (`SmEdgeuse::EvaluateBinormal` may create a UV trim curve).
-//!   `FinishConstruction` (copies of the offsets into each fillet geometry,
-//!   `SmFilletGeom::SetOffsetSurface` of `blend.fillet_geom_p1`) is not called: the
-//!   solver holds only [`FilletGeomRef`](crate::blend::fillet_solver::p1::FilletGeomRef)
-//!   handles, whose geometry data is not modelled (`plan/findings.md`).
+//!   Every constructor takes the executive's pseudo B-rep ([`FilletBrep`]) and the
+//!   solver's identity ([`FilletSolverId`]): the `SmFilletSolver` constructor's default
+//!   fillet geometry is stored there (`FilletSolver::new_in`, `CurveBasedFs::new_in`),
+//!   and `FinishConstruction` (`FilletSolver::finish_construction`) installs copies of
+//!   the offsets into it where upstream calls it: at the end of the
+//!   `SmConstantDistanceFS` and edge-use `SmVariableRadiusFS` constructors (not on their
+//!   tangent-face early returns), not in the surface `SmVariableRadiusFS` constructor.
+//!   A construction that fails after the base leaves that geometry in `pseudo` (the
+//!   arena does not delete; upstream's half-built solver holds it).
 //! - **`SmGuessSphereSolveENFO`.** [`GuessSphereEnfo`] holds the plane state and the
 //!   solver as the `SmConstantRadiusFS` its `Evaluate` casts `m_crFilletSolver` to
 //!   (`blend.fillet_standard_solver_p1`'s `GuessSphereSolve` holds it as a
@@ -89,7 +94,9 @@ use crate::blend::fillet_custom_solver::{
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
     OffsetSurface, SurfaceId,
 };
-use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletGeomId, FilletVertexType};
+use crate::blend::fillet_geom::p1::{
+    FilStatus, FilletBrep, FilletGeomId, FilletSolverId, FilletVertexType,
+};
 use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
@@ -1183,17 +1190,22 @@ impl ConstantDistanceFs {
     /// orientations from the binormals at the middle of the edge, and offset surfaces of
     /// both faces by `dDistance * sqrt(2) / 2` (extension allowed). For faces tangent at
     /// the middle of the edge upstream signals `SM_ERR` and returns a solver without edge
-    /// uses or surfaces (orientations as far as computed): so does this.
+    /// uses or surfaces (orientations as far as computed): so does this. The
+    /// constructor's fillet geometry is stored in `pseudo` for solver `id` and, unless
+    /// the faces are tangent, receives copies of the offsets (`FinishConstruction`).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for an edge use without radial, edge, face use or
-    /// face surface (upstream dereferences `NULL`); those of [`OffsetSurface::new`];
+    /// face surface (upstream dereferences `NULL`); those of [`OffsetSurface::new`],
+    /// [`FilletSolver::new_in`] and [`FilletSolver::finish_construction`];
     /// [`SolidError::Unported`] from `SmEdgeuse::EvaluateBinormal`.
     #[allow(clippy::too_many_arguments)]
     pub fn from_edgeuse(
         k: &Kernel,
         brep: &mut Brep,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -1201,7 +1213,14 @@ impl ConstantDistanceFs {
         edgeuse: EdgeuseId,
     ) -> Result<Self> {
         const OP: &str = OP_CD_CTOR;
-        let mut solver = FilletSolver::new(approx_tol_3d, ang_tol_rad, tangency_tolerance);
+        let mut solver = FilletSolver::new_in(
+            k,
+            pseudo,
+            id,
+            approx_tol_3d,
+            ang_tol_rad,
+            tangency_tolerance,
+        )?;
         solver.edgeuses = [Some(edgeuse), edgeuse::radial(brep, edgeuse)?];
 
         // Create offset surfaces of appropriate radius in appropriate
@@ -1242,8 +1261,7 @@ impl ConstantDistanceFs {
             extending_offset(k, approx_radius * o1, s1)?,
         );
 
-        // FinishConstruction(): copies of the offsets into each fillet geometry
-        // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::SetOffsetSurface -- justified: plan/findings.md blend.fillet_standard_solver_p2 (FinishConstruction)
+        cd.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
         Ok(cd)
     }
 }
@@ -1290,18 +1308,23 @@ impl VariableRadiusFs {
     /// both faces by the law's radius at the middle of the interval (extension
     /// allowed). For faces tangent at the middle of the edge upstream returns a solver
     /// without edge uses or surfaces (signalling `SM_ERR` only for the second test): so
-    /// does this. `dDistance` is not used.
+    /// does this. `dDistance` is not used. The constructor's fillet geometry is stored
+    /// in `pseudo` for solver `id` and, unless the faces are tangent, receives copies of
+    /// the offsets (`FinishConstruction`).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for an edge use without radial, edge, curve, face
     /// use or face surface (upstream dereferences `NULL`); [`SolidError::Unported`] from
     /// the fillet law (`SetEdgeArcLength`, `Evaluate`: `blend.fillet_executive_p1`) and
-    /// `SmEdgeuse::EvaluateBinormal`; those of [`OffsetSurface::new`].
+    /// `SmEdgeuse::EvaluateBinormal`; those of [`OffsetSurface::new`],
+    /// [`CurveBasedFs::new_in`] and [`FilletSolver::finish_construction`].
     #[allow(clippy::too_many_arguments)]
     pub fn from_edgeuse(
         k: &Kernel,
         brep: &mut Brep,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -1311,7 +1334,14 @@ impl VariableRadiusFs {
         law_orientation: bool,
     ) -> Result<Self> {
         const OP: &str = OP_VR_CTOR;
-        let mut curve_based = CurveBasedFs::new(approx_tol_3d, ang_tol_rad, tangency_tolerance);
+        let mut curve_based = CurveBasedFs::new_in(
+            k,
+            pseudo,
+            id,
+            approx_tol_3d,
+            ang_tol_rad,
+            tangency_tolerance,
+        )?;
         curve_based.solver.edgeuses = [Some(edgeuse), edgeuse::radial(brep, edgeuse)?];
         let e = edgeuse::edge(brep, edgeuse)?
             .ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
@@ -1371,8 +1401,7 @@ impl VariableRadiusFs {
             extending_offset(k, approx_radius * o1, s1)?,
         );
 
-        // FinishConstruction(): copies of the offsets into each fillet geometry
-        // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::SetOffsetSurface -- justified: plan/findings.md blend.fillet_standard_solver_p2 (FinishConstruction)
+        vr.curve_based.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
         Ok(vr)
     }
 
@@ -1382,14 +1411,20 @@ impl VariableRadiusFs {
     /// original curve and its natural interval as law interval (with the law's edge arc
     /// length for a curved centre), the given orientations and offset surfaces of both
     /// surfaces by the law's radius at the middle of the interval (extension allowed).
+    /// The constructor's fillet geometry is stored in `pseudo` for solver `id`; this
+    /// constructor does not call `FinishConstruction` upstream, so that geometry keeps
+    /// no offsets.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the fillet law (`SetEdgeArcLength`, `Evaluate`:
-    /// `blend.fillet_executive_p1`); those of [`OffsetSurface::new`].
+    /// `blend.fillet_executive_p1`); those of [`OffsetSurface::new`] and
+    /// [`CurveBasedFs::new_in`].
     #[allow(clippy::too_many_arguments)]
     pub fn from_surfaces(
         k: &Kernel,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -1400,7 +1435,14 @@ impl VariableRadiusFs {
         law_orientation: bool,
     ) -> Result<Self> {
         const OP: &str = OP_VR_CTOR;
-        let mut curve_based = CurveBasedFs::new(approx_tol_3d, ang_tol_rad, tangency_tolerance);
+        let mut curve_based = CurveBasedFs::new_in(
+            k,
+            pseudo,
+            id,
+            approx_tol_3d,
+            ang_tol_rad,
+            tangency_tolerance,
+        )?;
         curve_based.solver.edgeuses = [None, None];
         let law_interval = center_curve.natural_interval();
         set_law_arc_length(k, &center_curve, &law_interval, approx_tol_3d, &mut law)?;
@@ -1419,8 +1461,7 @@ impl VariableRadiusFs {
             extending_offset(k, approx_radius * o0, s0)?,
             extending_offset(k, approx_radius * o1, s1)?,
         );
-        // FinishConstruction(): copies of the offsets into each fillet geometry
-        // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::SetOffsetSurface -- justified: plan/findings.md blend.fillet_standard_solver_p2 (FinishConstruction)
+        // (no FinishConstruction() here upstream: the fillet geometry keeps no offsets)
         Ok(Self {
             curve_based,
             law,
@@ -2074,7 +2115,9 @@ impl SurfaceSurfaceFs {
     /// dTangencyTolerance, dOffsetRadiusSurface1, dOffsetRadiusSurface2, crSurface1,
     /// crSurface2, bOrientationSurface1, bOrientationSurface2, crUVGuessSurface1,
     /// crUVGuessSurface2)`: the constant-radius solver over the two surfaces, the UV
-    /// guesses and `SM_BT_MINIMAL` trimming.
+    /// guesses and `SM_BT_MINIMAL` trimming. The constructor's fillet geometry is
+    /// stored in `pseudo` for solver `id` and receives copies of the offsets
+    /// (`FinishConstruction`, in the `SmConstantRadiusFS` constructor).
     ///
     /// # Errors
     ///
@@ -2082,6 +2125,8 @@ impl SurfaceSurfaceFs {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         k: &Kernel,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -2092,6 +2137,8 @@ impl SurfaceSurfaceFs {
     ) -> Result<Self> {
         let base = ConstantRadiusAssistedFs::from_surfaces(
             k,
+            pseudo,
+            id,
             approx_tol_3d,
             ang_tol_rad,
             tangency_tolerance,
@@ -2436,6 +2483,8 @@ mod tests {
         let k = Kernel::default();
         let mut fs = SurfaceSurfaceFs::new(
             &k,
+            &mut FilletBrep::new(),
+            FilletSolverId(0),
             1e-6,
             0.5,
             0.03,
@@ -2508,6 +2557,8 @@ mod tests {
         let g = [Point2::new(0.5, 0.5), Point2::new(0.5, 0.5)];
         let mut fs = SurfaceSurfaceFs::new(
             &k,
+            &mut FilletBrep::new(),
+            FilletSolverId(0),
             1e-6,
             0.5,
             0.03,
@@ -2526,6 +2577,8 @@ mod tests {
         ));
         let mut fs = SurfaceSurfaceFs::new(
             &k,
+            &mut FilletBrep::new(),
+            FilletSolverId(0),
             1e-6,
             0.5,
             0.03,
@@ -2559,6 +2612,8 @@ mod tests {
         let centre = Curve::from(Line::from_points(p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), 3));
         let vr = VariableRadiusFs::from_surfaces(
             &k,
+            &mut FilletBrep::new(),
+            FilletSolverId(0),
             1e-6,
             0.5,
             0.03,

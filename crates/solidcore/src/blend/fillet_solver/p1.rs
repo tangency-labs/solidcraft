@@ -66,9 +66,11 @@
 //!   B-rep (`pseudo`); ids of the B-rep being filleted are ids of `b`. A geometry's
 //!   `GetOffsetSurface` falls back to the solver it is called from (its own geometries).
 //!   The constructor's `new SmFilletGeom(this)` needs the pseudo B-rep:
-//!   [`FilletSolver::new_in`] is the full constructor; [`FilletSolver::new`] leaves
-//!   it out (the derived solvers' constructors call it) and
-//!   [`FilletSolver::add_constructor_fillet_geom`] adds it later. `GetSurface` /
+//!   [`FilletSolver::new_in`] is the full constructor (the derived solvers'
+//!   constructors call it, then [`FilletSolver::finish_construction`] where upstream
+//!   calls `FinishConstruction`); [`FilletSolver::new`] leaves it out (bare solvers of
+//!   tests and harnesses) and [`FilletSolver::add_constructor_fillet_geom`] adds it
+//!   later. `GetSurface` /
 //!   `SetSurface` with a geometry set for the surfaces (`m_pFGForSurfaces`) do not take
 //!   the pseudo B-rep and stay stubs (`plan/findings.md`, "`blend.fillet_solver_p1`:
 //!   the geometry for the surfaces"). `SmFilletExecutive` and the fillet corners belong
@@ -454,8 +456,8 @@ impl FilletSolver {
     /// executive. The constructor's `new SmFilletGeom(this)` is stored in the pseudo
     /// B-rep, which this constructor does not take: [`FilletSolver::new_in`] is the
     /// full constructor, and [`FilletSolver::add_constructor_fillet_geom`] adds that
-    /// geometry to a solver made here (the derived solvers' constructors still call
-    /// this one). Members upstream leaves uninitialised (`m_pEdgeuses`, `m_pExecutive`,
+    /// geometry to a solver made here (the derived solvers' constructors use
+    /// [`FilletSolver::new_in`]). Members upstream leaves uninitialised (`m_pEdgeuses`, `m_pExecutive`,
     /// `m_dOrientations`, `m_dSavedOffsets`, the extension flags) start as `None`,
     /// `1.0`, `0.0` and `false`; every derived constructor sets them before use.
     #[must_use]

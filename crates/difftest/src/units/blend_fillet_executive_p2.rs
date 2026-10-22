@@ -28,6 +28,7 @@ use solidcore::blend::fillet_executive::p3::{
     ContextMark, CornerView, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
     StitchAttempt, StitchSettings, TopoEdgeView,
 };
+use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use solidcore::blend::fillet_standard_solver::p1::{
     constant_radius_from_edgeuse, FilletLaw, FilletLawKind, FilletSolverType,
@@ -273,6 +274,8 @@ impl SolutionObject for Handle {
 
 struct Access {
     breps: Vec<Brep>,
+    /// The executive's pseudo B-rep (`m_pPseudoBrep`): the solvers' fillet geometries.
+    pseudo: FilletBrep,
     generators: Vec<FilletSurfaceGenerator>,
     solvers: Vec<ConstantRadiusAssistedFs>,
     laws: Vec<FilletLaw>,
@@ -751,10 +754,15 @@ impl ExecutiveAccess<Handle> for Access {
         let Handle::Edgeuse(eu) = edgeuse else {
             return missing();
         };
-        let b = self.brep_mut(Handle::Brep(0))?;
+        let id = FilletSolverId(
+            u32::try_from(self.solvers.len()).map_err(|_| missing_error())?,
+        );
+        let b = self.breps.first_mut().ok_or_else(missing_error)?;
         let fs = constant_radius_from_edgeuse(
             k,
             b,
+            &mut self.pseudo,
+            id,
             approx_tol,
             ang_tol_rad,
             tan_tol_rad,
@@ -895,6 +903,7 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
     }
     Ok(Ok(Access {
         breps: vec![b],
+        pseudo: FilletBrep::new(),
         generators: Vec::new(),
         solvers: Vec::new(),
         laws: Vec::new(),

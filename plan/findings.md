@@ -11949,6 +11949,26 @@ deferred, max_rel_err 3.8e-16.)
   and to add the default geometry first; `blend.fillet_standard_solver_p1`'s
   `SmConstantRadiusFS` constructors, which these build on, do not take them yet either. The
   three sites keep `UNPORTED(blend.fillet_geom_p1)` comments pointing here.
+- **FinishConstruction (wired, follow-up to #439; supersedes "stub kept, justified" and
+  the Rust half of "Upstream solvers start with one fillet geometry" above).** Rust's
+  derived constructors now add the `SmFilletSolver` constructor's default geometry
+  (`FilletSolver::new_in` / `CurveBasedFs::new_in`; they take the pseudo B-rep and the
+  solver's `FilletSolverId`) and call `FilletSolver::finish_construction` where upstream
+  calls `FinishConstruction()`: both `SmConstantRadiusFS` constructors (so also
+  `SmSurfaceSurfaceFS` and the assisted / custom solvers' edge-use constructor),
+  `SmConstantDistanceFS` and the edge-use `SmVariableRadiusFS`
+  (`SmFilletStandardSolver.cpp:67, 153, 1315, 1972`), not on their tangent-face early
+  returns. The surface `SmVariableRadiusFS` constructor (`:1995`) never calls it upstream,
+  so its stub was wrong to name it; it gets the default geometry without copies. The three
+  `UNPORTED(blend.fillet_geom_p1)` sites are gone. `FilletSolver::new` and
+  `ConstantRadiusAssistedFs::from_parts` still leave the geometry out (bare solvers of tests
+  and harnesses). A Rust construction that fails after the base leaves its default geometry
+  in the pseudo B-rep (the arena does not delete; upstream's half-built solver holds it).
+  Harness: the `SmConstantRadiusFS` edge-use op (`blend.fillet_standard_solver_p1`), the
+  `SmConstantDistanceFS` edge-use op and the `Ss` op (`_p2`) also compare that geometry
+  (`GetFilletGeoms` size, its solver, and per rail whether it holds its own offset copy,
+  with that copy's distance, base identity and a point or its natural domain); case counts
+  unchanged, 0 failed.
 - **Stacked on #303 (2026-10-21).** PR #265 was closed unmerged and continued in PR #439,
   which merges PR #303 (tdamsma, `blend.fillet_solver_p1` glue: it carries #192 and
   replaces `FilletGeomRef` by `FilletGeomId` with the pseudo B-rep threaded through

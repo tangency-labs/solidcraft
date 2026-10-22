@@ -28,7 +28,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
-use solidcore::blend::fillet_solver::p1::OffsetSurfaceSlot;
+use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+use solidcore::blend::fillet_solver::p1::{FilletSolver, OffsetSurfaceSlot};
 use solidcore::curve::curve::Curve;
 use solidcore::blend::fillet_standard_solver::p1::{
     constant_radius_from_edgeuse, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs, FilletLaw,
@@ -59,6 +60,7 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_standard_solver_p2::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
+use super::blend_fillet_standard_solver_p1::put_default_geom;
 use super::blend_fillet_geom_p1::{
     curve_of, gen_curve, gen_surface as gp1_gen_surface, push_crv, push_model, push_srf as gp1_push_srf,
     scale_of as gp1_scale_of, surface_of as gp1_surface_of, Crv, EdgeIn, EuIn, GeomIn, Model,
@@ -257,6 +259,36 @@ impl Inputs {
             Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => return None,
         })
     }
+}
+
+/// The `Ss` op's `put_default_geom`: the constructor's default fillet geometry (in
+/// `pseudo`) as `count solver_is_fs` and per rail `own` (its own offset copy, installed
+/// by `FinishConstruction`) and with `own` `offset base_is_input umin vmin umax vmax`
+/// (rail `i`'s input surface is `SurfaceId::Free(i)`).
+fn put_default_geom_ss(
+    o: &mut Vec<f64>,
+    fs: &FilletSolver,
+    id: FilletSolverId,
+    pseudo: &FilletBrep,
+) -> Result<(), SolidError> {
+    o.push(fs.fillet_geoms.len() as f64);
+    let Some(&g) = fs.fillet_geoms.first() else {
+        return Ok(());
+    };
+    let fg = pseudo.geom(g)?;
+    o.push(flag(fg.fillet_solver() == Some(id)));
+    for (own, input) in fg.off_surfs.iter().zip([SurfaceId::Free(0), SurfaceId::Free(1)]) {
+        let Some(s) = own else {
+            o.push(0.0);
+            continue;
+        };
+        o.push(1.0);
+        o.push(s.offset_distance());
+        o.push(flag(s.base_id == input));
+        let d = s.surface.natural_uv_domain();
+        o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
+    }
+    Ok(())
 }
 
 fn flag(b: bool) -> f64 {
@@ -565,7 +597,9 @@ fn rust_edgeuse_body(
         return Ok(vec![-2.0]);
     }
     let mut v = Vec::new();
-    let fs = ConstantDistanceFs::from_edgeuse(&k, b, tol, ang, tan, dist, eu)?;
+    let mut pseudo = FilletBrep::new();
+    let id = FilletSolverId(0);
+    let fs = ConstantDistanceFs::from_edgeuse(&k, b, &mut pseudo, id, tol, ang, tan, dist, eu)?;
     v.push(0.0);
     let built = fs.solver.edgeuses[0].is_some();
     v.push(flag(built));
@@ -605,6 +639,12 @@ fn rust_edgeuse_body(
             }
         }
     }
+    let radial_face = match radial {
+        Some(r) => eu1::face(b, r)?,
+        None => None,
+    };
+    let faces = [eu1::face(b, eu)?, radial_face];
+    put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
     Ok(v)
@@ -724,7 +764,11 @@ fn rust_cr_eu_body(
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
         return Ok(vec![-2.0]);
     }
-    let mut fs = match constant_radius_from_edgeuse(&k, b, tol, ang, tan, r, eu, None) {
+    // (the constructor's fillet geometry is compared by blend.fillet_standard_solver_p1)
+    let mut pseudo = FilletBrep::new();
+    let id = FilletSolverId(0);
+    let mut fs = match constant_radius_from_edgeuse(&k, b, &mut pseudo, id, tol, ang, tan, r, eu, None)
+    {
         Ok(fs) => fs,
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
@@ -1004,10 +1048,15 @@ fn solver_of(k: &Kernel, s: &SolverIn) -> Result<BuiltSolver, HarnessError> {
         None => (a.clone(), SurfaceId::Free(0)),
     };
     let surfaces = [(a.clone(), SurfaceId::Free(0)), (b, b_id)];
+    // (the constructors' fillet geometry is compared by the `Ss` op)
+    let mut pseudo = FilletBrep::new();
+    let id = FilletSolverId(0);
     let solver = match s.cls {
         0 => {
             let mut c = ConstantRadiusFs::from_surfaces(
                 k,
+                &mut pseudo,
+                id,
                 1.0e-6,
                 30.0 * DEG,
                 2.0 * DEG,
@@ -1022,6 +1071,8 @@ fn solver_of(k: &Kernel, s: &SolverIn) -> Result<BuiltSolver, HarnessError> {
         1 => {
             let mut c = SurfaceSurfaceFs::new(
                 k,
+                &mut pseudo,
+                id,
                 1.0e-6,
                 30.0 * DEG,
                 2.0 * DEG,
@@ -1243,8 +1294,12 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 (surface_of(a)?, SurfaceId::Free(0)),
                 (surface_of(b)?, SurfaceId::Free(1)),
             ];
+            let mut pseudo = FilletBrep::new();
+            let id = FilletSolverId(0);
             let mut fs = SurfaceSurfaceFs::new(
                 &k,
+                &mut pseudo,
+                id,
                 1.0e-6,
                 30.0 * DEG,
                 2.0 * DEG,
@@ -1299,6 +1354,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             o.push(f64::from(fs.trim_type as i32));
             o.push(f64::from(fs.solver_type() as i32));
             push_types(&mut o, fs.type_code(), |t| fs.is_kind_of(t), kinds);
+            put_default_geom_ss(&mut o, &fs.base.solver, id, &pseudo).map_err(|e| he(&e))?;
         }
         Inputs::Types { kinds } => {
             let plane = |y: Vec3| {
@@ -1312,6 +1368,8 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             };
             let ss = SurfaceSurfaceFs::new(
                 &k,
+                &mut FilletBrep::new(),
+                FilletSolverId(0),
                 1.0e-6,
                 30.0 * DEG,
                 2.0 * DEG,

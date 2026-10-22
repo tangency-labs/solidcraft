@@ -94,8 +94,13 @@
 //! use or its radial is not a loop edge use with edge, curve, face use, face, surface,
 //! vertex uses and vertices), or the status (`SM_ERR` when the constructor signalled
 //! tangent surfaces and cleared its edge uses) and on success per rail `eu radius
-//! orientation offset face base_is_face_surface status P[3]`; then the edge use's and
-//! its radial's `put_eu_state` (`EvaluateBinormal` may attach a UV trim curve).
+//! orientation offset face base_is_face_surface status P[3]` and the default fillet
+//! geometry (the one the `SmFilletSolver` constructor adds, `m_vFilletGeoms[0]`):
+//! `count solver_is_fs` and per rail `own` (`FinishConstruction` installed a copy, so
+//! `GetOffsetSurface` does not fall back to the solver's) and with `own` `offset
+//! base_is_face_surface status P[3]` (at `fu fv` of the copy's natural domain); then
+//! the edge use's and its radial's `put_eu_state` (`EvaluateBinormal` may attach a UV
+//! trim curve).
 
 use crate::{call_with_buffer, FfiError};
 

@@ -17,6 +17,7 @@
 #include <SmExtent2d.h>
 #include <SmExtentNd.h>
 #include <SmFace.h>
+#include <SmFilletGeom.h>
 #include <SmFilletStandardSolver.h>
 #include <SmLoopuse.h>
 #include <SmOffsetSurface.h>
@@ -64,6 +65,40 @@ struct CdPeek : SmConstantDistanceFS
     SmOffsetSurface* surface(int i) const { return m_pSurfaces[i]; }
     double orientation(int i) const { return m_dOrientations[i]; }
 };
+
+// The constructor's default fillet geometry (`new SmFilletGeom(this)` in the SmFilletSolver
+// constructor, SmFilletSolver.cpp:65): `count`, then for the first geometry `solver_is_fs`
+// and per rail `own` (FinishConstruction installed a copy: GetOffsetSurface no longer falls
+// back to the solver's) and, for its own copy, `offset base_is_face status x y z` at the UV
+// fractions (u, v) of its natural domain. `faces[i]` is rail i's face surface (or NULL).
+void put_default_geom(std::vector<double>& o, SmFilletSolver& fs, SmSurface* const faces[2], double fu,
+                      double fv)
+{
+    SmTArray<SmFilletGeom*> geoms;
+    fs.GetFilletGeoms(geoms);
+    o.push_back((double)geoms.GetSize());
+    if (geoms.GetSize() == 0)
+        return;
+    SmFilletGeom* fg = geoms[0];
+    o.push_back(fg->GetFilletSolver() == &fs ? 1.0 : 0.0);
+    for (ULONG i = 0; i < 2; i++)
+    {
+        SmOffsetSurface* s = fg->GetOffsetSurface(i);
+        bool own = s != NULL && s != fs.GetSurface(i);
+        o.push_back(own ? 1.0 : 0.0);
+        if (!own)
+            continue;
+        o.push_back(s->GetOffsetDistance());
+        o.push_back(faces[i] != NULL && s->GetBaseSurface() == faces[i] ? 1.0 : 0.0);
+        SmExtent2d d = s->GetNaturalUVDomain();
+        SmPoint2d uv(d.GetMin().x + fu * (d.GetMax().x - d.GetMin().x),
+                     d.GetMin().y + fv * (d.GetMax().y - d.GetMin().y));
+        SmPoint3d pt(0, 0, 0);
+        SmStatus es = s->EvaluatePoint(uv, pt);
+        o.push_back(st(es));
+        put_vec(o, es == SM_SUCCESS ? pt : SmPoint3d(0, 0, 0));
+    }
+}
 
 struct CrInit : SmConstantRadiusFS
 {
@@ -219,6 +254,8 @@ void run(Rd& rd, const char* path, std::vector<double>& o)
             put_vec(o, es == SM_SUCCESS ? pt : SmPoint3d(0, 0, 0));
         }
     }
+    SmSurface* const faces[2] = {p->GetFace()->GetSurface(), radial->GetFace()->GetSurface()};
+    put_default_geom(o, fs, faces, fu, fv);
     put_eu_state(o, g, p);
     put_eu_state(o, g, radial);
 }

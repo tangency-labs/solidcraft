@@ -843,7 +843,9 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
 
     /// `new SmConstantRadiusFS(ctx, dApproxTol, dAngTolRad, dTanTolRad, dRadius, pEU)`:
     /// delegate to `fillet_standard_solver::p1::constant_radius_from_edgeuse` on the
-    /// B-rep of `edgeuse` (no second radius) and return the new solver's handle.
+    /// B-rep of `edgeuse` (no second radius), with the executive's pseudo B-rep
+    /// (`m_pPseudoBrep`, which receives the solver's fillet geometry) and the new
+    /// solver's identity, and return the new solver's handle.
     fn new_constant_radius_solver(
         &mut self,
         k: &mut Kernel,

@@ -27,6 +27,7 @@
 #include <SmExtent2d.h>
 #include <SmExtentNd.h>
 #include <SmFilletExecutive.h>
+#include <SmFilletGeom.h>
 #include <SmFilletSolver.h>
 #include <SmFilletStandardSolver.h>
 #include <SmLine.h>
@@ -297,6 +298,36 @@ void put_offsets(std::vector<double>& o, SmFilletSolver* fs)
     }
 }
 
+// The constructor's default fillet geometry (`new SmFilletGeom(this)` in the SmFilletSolver
+// constructor, SmFilletSolver.cpp:65): `count`, then for the first geometry `solver_is_fs`
+// and per rail `own` (FinishConstruction installed a copy: GetOffsetSurface no longer falls
+// back to the solver's) and, for its own copy, `offset base_is_input umin vmin umax vmax`.
+void put_default_geom(std::vector<double>& o, SmFilletSolver* fs, const SmSurface* const bases[2])
+{
+    SmTArray<SmFilletGeom*> geoms;
+    fs->GetFilletGeoms(geoms);
+    o.push_back((double)geoms.GetSize());
+    if (geoms.GetSize() == 0)
+        return;
+    SmFilletGeom* fg = geoms[0];
+    o.push_back(fg->GetFilletSolver() == fs ? 1.0 : 0.0);
+    for (ULONG i = 0; i < 2; i++)
+    {
+        SmOffsetSurface* s = fg->GetOffsetSurface(i);
+        bool own = s != NULL && s != fs->GetSurface(i);
+        o.push_back(own ? 1.0 : 0.0);
+        if (!own)
+            continue;
+        o.push_back(s->GetOffsetDistance());
+        o.push_back(s->GetBaseSurface() == bases[i] ? 1.0 : 0.0);
+        SmExtent2d d = s->GetNaturalUVDomain();
+        o.push_back(d.GetMin().x);
+        o.push_back(d.GetMin().y);
+        o.push_back(d.GetMax().x);
+        o.push_back(d.GetMax().y);
+    }
+}
+
 // `solver do2 rail sel1 s1_index dim` `dim` x `min max`, `np per[np] ng guess[ng]`.
 int32_t cr_init(Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
@@ -435,6 +466,8 @@ int32_t ss(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     o.push_back((double)fs->GetSolverType());
     o.push_back((double)fs->GetType());
     put_kinds(o, fs, rd);
+    const SmSurface* const bases[2] = {a, b};
+    put_default_geom(o, fs, bases);
     delete fs;
     delete a;
     delete b;

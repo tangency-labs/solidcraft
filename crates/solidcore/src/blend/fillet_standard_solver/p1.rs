@@ -31,7 +31,7 @@
 //! | [`ConstantDistanceFs::load_initial_values`]              | `SmConstantDistanceFS::LoadInitialValues`             |
 //! | [`InitialSurface`]                                       | the `crSurface1` argument of `LoadInitialValues`      |
 //! | [`ConstantDistanceFs::is_kind_of`], [`ConstantDistanceFs::type_code`], [`ConstantDistanceFs::type_string`] | `IsKindOf`, `GetType`, `GetTypeString` |
-//! | [`CurveBasedFs`], [`CurveBasedFs::new`]                  | `SmCurveBasedFS`, `SmCurveBasedFS::SmCurveBasedFS` (`Drop` is the destructor) |
+//! | [`CurveBasedFs`], [`CurveBasedFs::new`], [`CurveBasedFs::new_in`] | `SmCurveBasedFS`, `SmCurveBasedFS::SmCurveBasedFS` (`Drop` is the destructor) |
 //! | [`CurveBasedFs::original_curve`], [`CurveBasedFs::set_original_curve`] | `GetOriginalCurve`, `SetOriginalCurve`  |
 //! | [`CurveBasedFs::evaluate_base_curve`]                    | `SmCurveBasedFS::EvaluateBaseCurve`                   |
 //! | [`CurveBasedFs::is_kind_of`], [`CurveBasedFs::type_code`], [`CurveBasedFs::type_string`] | `IsKindOf`, `GetType`, `GetTypeString` |
@@ -67,7 +67,13 @@
 //!   mutably (`SmEdgeuse::EvaluateBinormal` may create a UV trim curve). Its offset
 //!   surfaces share the face surfaces (the copies keep their owner); the surface
 //!   constructor's take the caller's surfaces. Constructors are fallible: the offset
-//!   surface constructor (`SM_SS_UNKNOWN` singularities) evaluates its base.
+//!   surface constructor (`SM_SS_UNKNOWN` singularities) evaluates its base. The
+//!   constructors take the executive's pseudo B-rep ([`FilletBrep`]) and the solver's
+//!   identity ([`FilletSolverId`]): the `SmFilletSolver` constructor's default fillet
+//!   geometry ([`FilletSolver::new_in`]) is stored there, and `FinishConstruction`
+//!   ([`FilletSolver::finish_construction`]) installs copies of the offsets into it. A
+//!   construction that fails after the base leaves that geometry in `pseudo` (the
+//!   arena does not delete; upstream's half-built solver holds it).
 //! - **Offset surfaces.** The rails are the ported `SmOffsetSurface`
 //!   (`surface.offset_surface`) through [`OffsetSurface`]. Evaluations store the base
 //!   extension they make, so `crSurface1` of `LoadInitialValues` names the solver's own
@@ -115,6 +121,7 @@ use crate::blend::fillet_custom_solver::{
     offset_local_point_solve, offset_natural_uv_domain, surface_global_point_solve,
     ConstantRadiusAssistedFs, OffsetSurface, SurfaceId,
 };
+use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use crate::blend::fillet_solver::p1::{
     FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
 };
@@ -427,7 +434,8 @@ fn face_surface(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface
 /// dTangencyTolerance, dFilletRadius, pEdgeuse, pdOptSecondRadius)`: the offset
 /// surfaces (offset by the radius, extension allowed) of the faces at `edgeuse` and its
 /// radial, oriented by the binormals at the middle of the edge. The radius of rail 1
-/// is `second_radius` when given.
+/// is `second_radius` when given. The constructor's fillet geometry is stored in
+/// `pseudo` for solver `id` and receives copies of the offsets (`FinishConstruction`).
 ///
 /// # Errors
 ///
@@ -436,11 +444,14 @@ fn face_surface(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface
 /// [`SolidError::InvalidInput`] for an edge use without radial, edge, face use or face
 /// surface; those of [`OffsetSurface::new`]; [`SolidError::Unported`] from
 /// `SmEdgeuse::EvaluateBinormal` (whose other failures are only signalled upstream and
-/// end here as tangent surfaces).
+/// end here as tangent surfaces); those of [`FilletSolver::new_in`] and
+/// [`FilletSolver::finish_construction`].
 #[allow(clippy::too_many_arguments)]
 pub fn constant_radius_from_edgeuse(
     k: &Kernel,
     brep: &mut Brep,
+    pseudo: &mut FilletBrep,
+    id: FilletSolverId,
     approx_tol_3d: f64,
     ang_tol_rad: f64,
     tangency_tolerance: f64,
@@ -449,6 +460,14 @@ pub fn constant_radius_from_edgeuse(
     second_radius: Option<f64>,
 ) -> Result<ConstantRadiusFs> {
     const OP: &str = OP_CR_CTOR;
+    let solver = FilletSolver::new_in(
+        k,
+        pseudo,
+        id,
+        approx_tol_3d,
+        ang_tol_rad,
+        tangency_tolerance,
+    )?;
     let mut radii = [fillet_radius, fillet_radius];
     if let Some(r) = second_radius {
         radii[1] = r;
@@ -465,15 +484,15 @@ pub fn constant_radius_from_edgeuse(
     off0.set_allow_extension(true);
     off1.set_allow_extension(true);
 
-    Ok(ConstantRadiusAssistedFs::from_parts(
-        approx_tol_3d,
-        ang_tol_rad,
-        tangency_tolerance,
+    let cr = ConstantRadiusAssistedFs::from_solver_parts(
+        solver,
         radii,
         [Some(off0), Some(off1)],
         orientations,
         [Some(eu0), Some(eu1)],
-    ))
+    );
+    cr.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
+    Ok(cr)
 }
 
 impl ConstantRadiusAssistedFs {
@@ -482,13 +501,19 @@ impl ConstantRadiusAssistedFs {
     /// crSurface2, bOrientationSurface1, bOrientationSurface2)`: offset surfaces of the
     /// two surfaces (offset by radius times orientation, extension allowed); an
     /// orientation is `1.0`, or `-1.0` for `false`. No edge uses. The offsets take
-    /// upstream's default `lSingularities`, `SM_SS_UNKNOWN`.
+    /// upstream's default `lSingularities`, `SM_SS_UNKNOWN`. The constructor's fillet
+    /// geometry is stored in `pseudo` for solver `id` and receives copies of the
+    /// offsets (`FinishConstruction`).
     ///
     /// # Errors
     ///
-    /// Those of [`OffsetSurface::new`].
+    /// Those of [`OffsetSurface::new`], [`FilletSolver::new_in`] and
+    /// [`FilletSolver::finish_construction`].
+    #[allow(clippy::too_many_arguments)]
     pub fn from_surfaces(
         k: &Kernel,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -496,6 +521,14 @@ impl ConstantRadiusAssistedFs {
         surfaces: [(Surface, SurfaceId); 2],
         orientations: [bool; 2],
     ) -> Result<Self> {
+        let solver = FilletSolver::new_in(
+            k,
+            pseudo,
+            id,
+            approx_tol_3d,
+            ang_tol_rad,
+            tangency_tolerance,
+        )?;
         let o = orientations.map(|b| if b { 1.0 } else { -1.0 });
         let [(s0, id0), (s1, id1)] = surfaces;
         let [r0, r1] = offset_radii;
@@ -504,15 +537,15 @@ impl ConstantRadiusAssistedFs {
         let mut off1 = OffsetSurface::new(k, r1 * o1, s1, id1, SS_UNKNOWN)?;
         off0.set_allow_extension(true);
         off1.set_allow_extension(true);
-        Ok(Self::from_parts(
-            approx_tol_3d,
-            ang_tol_rad,
-            tangency_tolerance,
+        let cr = Self::from_solver_parts(
+            solver,
             offset_radii,
             [Some(off0), Some(off1)],
             o,
             [None, None],
-        ))
+        );
+        cr.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
+        Ok(cr)
     }
 
     /// `GetFilletRadius(lIndex)`.
@@ -1458,7 +1491,9 @@ impl CurveBasedFs {
     pub const TYPE: i64 = CURVE_BASED_FS_TYPE;
 
     /// `SmCurveBasedFS(crContext, dThisApproxTol3d, dAngleTolerance,
-    /// dTangencyTolerance)`: no original or extended curve.
+    /// dTangencyTolerance)`: no original or extended curve. The base is
+    /// [`FilletSolver::new`], without the constructor's fillet geometry
+    /// ([`CurveBasedFs::new_in`] adds it).
     #[must_use]
     pub fn new(approx_tol_3d: f64, ang_tol_rad: f64, tangency_tolerance: f64) -> Self {
         Self {
@@ -1466,6 +1501,35 @@ impl CurveBasedFs {
             original: None,
             extended: None,
         }
+    }
+
+    /// `SmCurveBasedFS(crContext, dThisApproxTol3d, dAngleTolerance,
+    /// dTangencyTolerance)` with the base's fillet geometry: [`FilletSolver::new_in`]
+    /// in `pseudo`, with `id` as the solver's identity.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::new_in`].
+    pub fn new_in(
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
+        approx_tol_3d: f64,
+        ang_tol_rad: f64,
+        tangency_tolerance: f64,
+    ) -> Result<Self> {
+        Ok(Self {
+            solver: FilletSolver::new_in(
+                k,
+                pseudo,
+                id,
+                approx_tol_3d,
+                ang_tol_rad,
+                tangency_tolerance,
+            )?,
+            original: None,
+            extended: None,
+        })
     }
 
     /// `GetOriginalCurve`.
@@ -3194,8 +3258,14 @@ mod tests {
     }
 
     fn cr() -> ConstantRadiusFs {
+        cr_in(&mut FilletBrep::new(), FilletSolverId(0))
+    }
+
+    fn cr_in(pseudo: &mut FilletBrep, id: FilletSolverId) -> ConstantRadiusFs {
         ConstantRadiusFs::from_surfaces(
             &Kernel::default(),
+            pseudo,
+            id,
             1e-6,
             0.5,
             0.03,
@@ -3207,6 +3277,24 @@ mod tests {
             [true, false],
         )
         .expect("constant radius solver")
+    }
+
+    #[test]
+    fn constant_radius_from_surfaces_finishes_construction() {
+        let mut pseudo = FilletBrep::new();
+        let fs = cr_in(&mut pseudo, FilletSolverId(3));
+        // the SmFilletSolver constructor's geometry, with copies of both offsets
+        assert_eq!(fs.solver.fillet_geoms.len(), 1);
+        let fg = pseudo.geom(fs.solver.fillet_geoms[0]).expect("geometry");
+        assert_eq!(fg.fillet_solver(), Some(FilletSolverId(3)));
+        for (rail, d) in [(0, 1.0), (1, -2.0)] {
+            let off = fg
+                .offset_surface(rail, None)
+                .expect("own offset")
+                .expect("offset copy");
+            assert_eq!(off.offset_distance(), d);
+            assert!(off.surface.allow_extension());
+        }
     }
 
     #[test]

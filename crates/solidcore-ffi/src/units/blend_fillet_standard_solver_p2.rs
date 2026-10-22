@@ -29,8 +29,9 @@
 //! `ng' guess[ng']` and the offset state; `Guess` on success `found` and with
 //! `found` both UV points, then the offset state; `Plane` as `Guess`, after the UV points
 //! per surface its point, derivatives and unit normal and then the curve point; `Ss` the
-//! radii, orientations, offset state, UV guesses, trim type, solver type, `GetType`
-//! and the kinds (its status is that of `CalcFilletGeom` with `calc`, `-3` when the
+//! radii, orientations, offset state, UV guesses, trim type, solver type, `GetType`,
+//! the kinds and the default fillet geometry `count solver_is_fs` and per rail `own`
+//! and with `own` `offset base_is_input umin vmin umax vmax` (its status is that of `CalcFilletGeom` with `calc`, `-3` when the
 //! shim did not run it, `0` without `calc`); `Types` per solver `GetType` and the kinds.
 //! The offset state is per rail `offset umin vmin umax vmax has_extension`: the offset
 //! distance, `GetNaturalUVDomain()` and `GetExtendedBaseSurface() != NULL` after the op.
@@ -87,8 +88,13 @@
 //! curve, face use, face, surface, vertex uses and vertices), or `0 built o0 o1 distance`
 //! (`built` `0` when the constructor signalled tangent surfaces and cleared its edge
 //! uses) and when built per rail `eu offset face base_is_face_surface status P[3]`; then
-//! the edge use's and its radial's `put_eu_state` (`EvaluateBinormal` may attach a UV
-//! trim curve).
+//! the default fillet geometry; then the edge use's and its radial's `put_eu_state`
+//! (`EvaluateBinormal` may attach a UV trim curve). The default fillet geometry is the
+//! one the `SmFilletSolver` constructor adds (`m_vFilletGeoms[0]`): `count solver_is_fs`
+//! (`GetFilletGeoms` size, its `GetFilletSolver()` is the solver) and per rail `own`
+//! (`FinishConstruction` installed a copy, so `GetOffsetSurface` does not fall back to
+//! the solver's) and with `own` `offset base_is_face_surface status P[3]` (`P` at the
+//! UV fractions `fu fv` of the copy's natural domain).
 
 use crate::{call_with_buffer, FfiError};
 

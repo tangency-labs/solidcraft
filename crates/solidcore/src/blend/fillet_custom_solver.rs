@@ -33,9 +33,11 @@
 //!   indexes past the two-element arrays) is [`SolidError::InvalidInput`]. The
 //!   base-class constructor from an edge use ([`ConstantRadiusAssistedFs::from_edgeuse`])
 //!   is `blend.fillet_standard_solver_p1`'s `constant_radius_from_edgeuse` (it takes the
-//!   B-rep mutably: `SmEdgeuse::EvaluateBinormal` may create UV trim curves);
-//!   [`ConstantRadiusAssistedFs::from_parts`] builds the
-//!   members directly with the base-class defaults.
+//!   B-rep mutably: `SmEdgeuse::EvaluateBinormal` may create UV trim curves, and the
+//!   pseudo B-rep that receives the base constructor's fillet geometry, which
+//!   `FinishConstruction` fills); [`ConstantRadiusAssistedFs::from_parts`] builds the
+//!   members directly with the base-class defaults, without that geometry
+//!   ([`ConstantRadiusAssistedFs::from_solver_parts`] on a constructed base).
 //! - **Offset surfaces.** A rail surface is an [`OffsetSurface`]: the ported
 //!   `SmOffsetSurface` ([`offset_surface::OffsetSurface`], which owns a copy of its
 //!   base) with a [`SurfaceId`] standing for the base `SmSurface*`: upstream compares
@@ -74,6 +76,7 @@
 //!   evaluations use the real offset port; point solvers and default singularity
 //!   construction propagate the errors of their surface dispatchers.
 
+use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use crate::blend::fillet_intersector::FilletSolverOps as IntersectorOps;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSolverType, OffsetSurfaceSlot,
@@ -319,7 +322,8 @@ impl ConstantRadiusAssistedFs {
     /// The base as the `SmFilletSolver` constructor initialises it
     /// (`m_dSurfaceExtensionFactor = 0.5`, `m_dConversionTol = SM_EFF_ZERO / 10`), with
     /// the edge uses, offset surfaces (keys 0 and 1), orientations and radii given (what
-    /// the `SmConstantRadiusFS` constructor computes from the edge use).
+    /// the `SmConstantRadiusFS` constructor computes from the edge use). The base is
+    /// [`FilletSolver::new`], without the constructor's fillet geometry.
     #[must_use]
     pub fn from_parts(
         approx_tol_3d: f64,
@@ -330,7 +334,26 @@ impl ConstantRadiusAssistedFs {
         orientations: [f64; 2],
         edgeuses: [Option<EdgeuseId>; 2],
     ) -> Self {
-        let mut solver = FilletSolver::new(approx_tol_3d, ang_tol_rad, tangency_tolerance);
+        Self::from_solver_parts(
+            FilletSolver::new(approx_tol_3d, ang_tol_rad, tangency_tolerance),
+            fillet_radii,
+            surfaces,
+            orientations,
+            edgeuses,
+        )
+    }
+
+    /// [`ConstantRadiusAssistedFs::from_parts`] on a constructed base (the
+    /// `SmConstantRadiusFS` constructors pass [`FilletSolver::new_in`]'s, which holds
+    /// the constructor's fillet geometry).
+    #[must_use]
+    pub fn from_solver_parts(
+        mut solver: FilletSolver,
+        fillet_radii: [f64; 2],
+        surfaces: [Option<OffsetSurface>; 2],
+        orientations: [f64; 2],
+        edgeuses: [Option<EdgeuseId>; 2],
+    ) -> Self {
         solver.edgeuses = edgeuses;
         let [s0, s1] = surfaces;
         solver.surfaces = [
@@ -346,7 +369,8 @@ impl ConstantRadiusAssistedFs {
 
     /// `SmConstantRadiusAssistedFS(crContext, dThisApproxTol3d, dAngleTolerance,
     /// dTangencyTolerance, dFilletRadius1, dFilletRadius2, pEdgeuse)`: the offset
-    /// surfaces and orientations of the faces at `edgeuse` and its radial.
+    /// surfaces and orientations of the faces at `edgeuse` and its radial, with the
+    /// constructor's fillet geometry in `pseudo` for solver `id`.
     ///
     /// # Errors
     ///
@@ -356,6 +380,8 @@ impl ConstantRadiusAssistedFs {
     pub fn from_edgeuse(
         k: &Kernel,
         brep: &mut Brep,
+        pseudo: &mut FilletBrep,
+        id: FilletSolverId,
         approx_tol_3d: f64,
         ang_tol_rad: f64,
         tangency_tolerance: f64,
@@ -366,6 +392,8 @@ impl ConstantRadiusAssistedFs {
         crate::blend::fillet_standard_solver::p1::constant_radius_from_edgeuse(
             k,
             brep,
+            pseudo,
+            id,
             approx_tol_3d,
             ang_tol_rad,
             tangency_tolerance,
