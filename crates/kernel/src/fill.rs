@@ -1,19 +1,24 @@
-//! Filling a closed loop of a body's edges that is not planar with one face, bounded by the
-//! body's own edges, whole: a B-spline height field over the loop's best-fit plane
-//! (`solidcraft_geom::fill::fill_loop`) when the patch only has to meet the edges (G0) and the
-//! loop bounds one; otherwise the general fill (`solidcraft_geom::fill_general`), developed from
-//! the loop itself, which also meets the faces beside the loop with G1 or G2 and passes through
-//! given points.
+//! Filling a closed loop of a body's edges with one face, bounded by the body's own edges,
+//! whole: the loop's plane when its edges certainly lie in one, otherwise a B-spline height field
+//! over the loop's best-fit plane (`solidcraft_geom::fill::fill_loop`). The face is assembled on
+//! the body's own edge records (`sew::assemble`) and built by SMLib. The height field's
+//! parameters are plane coordinates, so each edge's pcurve is its exact projection onto the
+//! plane.
+//!
+//! The general fill (`solidcraft_geom::fill_general`), which also meets the faces beside the loop
+//! with G1 or G2 and passes through given points, is not ported yet: its surface's parameters are
+//! developed from the loop, so the loop's edges have no exact pcurve on it, and the frames across
+//! each edge come from `bridge::frames_across`.
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::bspline::SplineError;
-use solidcraft_geom::fill_general::{Across, FillSpec, MAX_FILL_POINTS, Station};
-use truck_modeling as mt;
+use solidcraft_geom::brep::{self as b, Curve2, eval::CurveEval};
+use solidcraft_geom::bspline::{HPoint, SplineError};
+use solidcraft_geom::fill_general::MAX_FILL_POINTS;
 
-use crate::body::{Body, from_p3};
-use crate::bridge::{Continuity, frames_across};
-use crate::plane_fit::EdgeSampler;
-use crate::record::{Rebuild, rebuilt_body};
+use crate::body::Body;
+use crate::bridge::Continuity;
+use crate::history::{Change, EdgeOrigin, EdgeProv, FaceProv, History};
+use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
 use crate::{KernelError, Result};
 
 /// How far (degrees) a G1 or G2 patch's normal may turn from its neighbour's along the loop.
@@ -105,207 +110,23 @@ pub fn patch_edges_report(body: &Body, at: &[Vec3], spec: &PatchSpec) -> Result<
         return patch_edges_crowned(body, at, spec.crown).map(|b| (b, PatchReport::default()));
     }
     body.require_brep("patch")?;
-    crate::guard("patch", || {
-        let chain = crate::surfaces::picked_loop(body, at)?;
-        let mut orders = vec![spec.continuity; chain.len()];
-        for (p, g) in &spec.edges {
-            let e = crate::surfaces::edge_near(body, *p).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
-            let k = chain
-                .iter()
-                .position(|c| c.id() == e.id())
-                .ok_or_else(|| KernelError::Invalid("a continuity pick is not on an edge of the loop".into()))?;
-            if let Some(slot) = orders.get_mut(k) {
-                *slot = *g;
-            }
-        }
-        if spec.crown != 0.0 && orders.iter().all(|g| *g == Continuity::G0) {
-            return Err(KernelError::Invalid("not supported yet: a crown on a patch through points with no g1 or g2 edge".into()));
-        }
-        general_fill(body, &chain, &orders, &spec.points, spec.crown)
-    })
+    Err(general_fill_unported())
 }
 
-/// One edge of the loop as the general fill samples it.
-struct Side {
-    sampler: EdgeSampler,
-    start: Vec3,
-    /// The face beside the edge, and whether its boundary runs the edge the way the loop does.
-    face: mt::Face,
-    along: bool,
-    order: Continuity,
-    /// The loop has a corner at the edge's start, and the neighbours' tangent planes disagree
-    /// there.
-    corner: bool,
-    clash: bool,
-}
-
-impl Side {
-    fn point(&mut self, t: f64) -> Option<Vec3> {
-        // The loop's corners are its vertices (an imported edge's curve may end a little off).
-        if t <= 0.0 { Some(self.start) } else { self.sampler.at(t) }
-    }
-
-    /// The loop's unit tangent at `t`, by a central difference (one-sided at the ends).
-    fn tangent(&mut self, t: f64) -> Option<Vec3> {
-        const STEP: f64 = 1e-4;
-        let (a, b) = ((t - STEP).max(0.0), (t + STEP).min(1.0));
-        let (p, q) = (self.sampler.at(a)?, self.sampler.at(b)?);
-        (q - p).normalized()
-    }
-
-    /// The face's frames at points of this edge with the loop's tangents there.
-    fn frames(&self, stations: &[(Vec3, Vec3)], size: f64, shape: bool) -> Result<Vec<(crate::Frame, Vec3)>> {
-        let along: Vec<(Vec3, Vec3)> = stations.iter().map(|(p, t)| (*p, if self.along { *t } else { *t * -1.0 })).collect();
-        frames_across(&self.face, &along, size, shape)
-    }
-}
-
-/// The general fill of the closed loop `chain` of `body`'s edges, edge `k` meeting the face beside
-/// it with `orders[k]`, passing through `points`, its middle made fuller by `crown` (see
-/// [`PatchSpec::crown`]). Call it under [`crate::guard`].
-pub(crate) fn general_fill(body: &Body, chain: &[mt::Edge], orders: &[Continuity], points: &[Vec3], crown: f64) -> Result<(Body, PatchReport)> {
-    let tol = face_tolerance(body);
-    let size = body.size().max(solidcraft_geom::LINEAR_TOL);
-    let mut sides: Vec<Side> = Vec::with_capacity(chain.len());
-    for (e, order) in chain.iter().zip(orders) {
-        let faces: Vec<&mt::Face> = body.solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).collect();
-        let face = match faces.as_slice() {
-            [f] => (*f).clone(),
-            [f, ..] if *order == Continuity::G0 => (*f).clone(),
-            [] => return Err(KernelError::Failed("patch: an edge of the loop bounds no face".into())),
-            _ => return Err(KernelError::Invalid("an edge of the loop lies between two faces: g1 and g2 need the one face beside it".into())),
-        };
-        let along = face
-            .boundaries()
-            .iter()
-            .flat_map(|w| w.edge_iter())
-            .find(|x| x.id() == e.id())
-            .map(|x| x.orientation() == e.orientation())
-            .ok_or_else(|| KernelError::Failed("patch: the face beside an edge does not hold it".into()))?;
-        let sampler = EdgeSampler::new(e).ok_or_else(|| KernelError::Invalid("an edge has no parameter range".into()))?;
-        sides.push(Side { sampler, start: from_p3(e.front().point()), face, along, order: *order, corner: false, clash: false });
-    }
-    // The corners: where the loop's tangent turns, and where the faces beside it disagree.
-    let n = sides.len();
-    for k in 0..n {
-        let prev = (k + n - 1) % n;
-        let (Some(t_in), Some(t_out)) = (sides.get_mut(prev).and_then(|s| s.tangent(1.0)), sides.get_mut(k).and_then(|s| s.tangent(0.0))) else {
-            return Err(KernelError::Invalid("an edge of the loop has no tangent".into()));
-        };
-        let Some(vertex) = sides.get(k).map(|s| s.start) else { continue };
-        let corner = t_in.dot(t_out) < CORNER_DEG.to_radians().cos();
-        let normal = |s: Option<&Side>, t: Vec3| -> Result<Vec3> {
-            let s = s.ok_or_else(|| KernelError::Failed("patch: side".into()))?;
-            let f = s.frames(&[(vertex, t)], size, false)?;
-            f.first().map(|f| f.1).ok_or_else(|| KernelError::Failed("patch: frame".into()))
-        };
-        let g1 = |s: Option<&Side>| s.is_some_and(|s| s.order != Continuity::G0);
-        let clash = if g1(sides.get(prev)) || g1(sides.get(k)) {
-            let (a, b) = (normal(sides.get(prev), t_in)?, normal(sides.get(k), t_out)?);
-            a.dot(b).abs() < (2.0 * PATCH_ANGLE_TOL_DEG).to_radians().cos()
-        } else {
-            false
-        };
-        if let Some(s) = sides.get_mut(k) {
-            s.corner = corner;
-            s.clash = clash;
-        }
-    }
-    let mut stations = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Station>, String> {
-        let side = sides.get_mut(k).ok_or("no such side")?;
-        let mut at = Vec::with_capacity(ts.len());
-        for &t in ts {
-            let (Some(p), Some(tangent)) = (side.point(t), side.tangent(t)) else { return Err("an edge cannot be sampled".into()) };
-            at.push((p, tangent));
-        }
-        let frames = side.frames(&at, size, side.order == Continuity::G2).map_err(|e| e.to_string())?;
-        let mut out = Vec::with_capacity(ts.len());
-        for ((&t, (p, tangent)), (frame, normal)) in ts.iter().zip(&at).zip(&frames) {
-            let up = tangent.cross(frame.leave).normalized().ok_or("the loop runs across its neighbour")?;
-            let across = (side.order != Continuity::G0).then(|| Across {
-                leave: frame.leave,
-                normal: *normal,
-                bend: (side.order == Continuity::G2).then_some(frame.bend),
-            });
-            let first = t <= 0.0;
-            out.push(Station { p: *p, up, across, corner: first && side.corner, clash: first && side.clash });
-        }
-        Ok(out)
-    };
-    let spec = FillSpec { tol, angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, points };
-    let fill = solidcraft_geom::fill_general::fill_general(chain.len(), &mut stations, &spec).map_err(spline_error)?;
-    // The wire runs counter-clockwise about the surface's normal.
-    let wire: mt::Wire =
-        if fill.counter_clockwise { chain.to_vec().into() } else { chain.iter().rev().map(mt::Edge::inverse).collect::<Vec<_>>().into() };
-    let face = mt::Face::try_new(vec![wire], crate::spline_conv::surface(&fill.surface)?).map_err(|e| KernelError::Failed(format!("fill: {e}")))?;
-    let mut rec = Rebuild::default();
-    rec.made(&face, Vec::new());
-    let report = PatchReport {
-        general: true,
-        gap: fill.deviation,
-        normal_deviation_deg: fill.normal_deviation.to_degrees(),
-        normal_deviation_all_deg: fill.normal_deviation_all.to_degrees(),
-        curvature_mismatch: fill.curvature_mismatch,
-        point_gap: fill.point_deviation,
-    };
-    Ok((rebuilt_body(crate::surfaces::surface_body(vec![face]), &[&body.solid], &rec), report))
-}
-
-/// The loop turns by more than this (degrees) at a corner: its stations hold position only.
-const CORNER_DEG: f64 = 1.0;
-
-/// A surface body of one face filling the closed loop `chain` of `body`'s edges (each edge
-/// oriented along the loop, each ending where the next starts), within [`face_tolerance`] of
-/// every edge. Its history is over `[body]`: the face is new, its edges the body's own. Call it
-/// under [`crate::guard`].
-pub(crate) fn fill_loop(body: &Body, chain: &[mt::Edge]) -> Result<Body> {
-    fill_loop_crowned(body, chain, 0.0)
-}
-
-/// [`fill_loop`] with a crown: positive makes the fitted patch's middle fuller, negative flatter,
-/// by `crown` times the loop's size (see `solidcraft_geom::fill::fill_loop`). The bump vanishes on
-/// the loop, so the face still meets the body's own edges exactly as the plain fill does.
-pub(crate) fn fill_loop_crowned(body: &Body, chain: &[mt::Edge], crown: f64) -> Result<Body> {
-    let tol = face_tolerance(body);
-    let mut sides: Vec<(EdgeSampler, Vec3)> = Vec::with_capacity(chain.len());
-    for e in chain {
-        let sampler = EdgeSampler::new(e).ok_or_else(|| KernelError::Invalid("an edge has no parameter range".into()))?;
-        sides.push((sampler, from_p3(e.front().point())));
-    }
-    let mut point = |k: usize, t: f64| -> Option<Vec3> {
-        let (sampler, start) = sides.get_mut(k)?;
-        // The loop's corners are its vertices (an imported edge's curve may end a little off).
-        if t <= 0.0 { Some(*start) } else { sampler.at(t) }
-    };
-    let fill = match solidcraft_geom::fill::fill_loop(chain.len(), &mut point, tol, crown) {
-        Ok(fill) => fill,
-        // Not a height field over its plane (or too wavy for one): the general fill, developed
-        // from the loop itself, when no crown asks for the height field's bump.
-        Err(SplineError::Unsupported(_)) if crown == 0.0 => {
-            let orders = vec![Continuity::G0; chain.len()];
-            return general_fill(body, chain, &orders, &[], 0.0).map(|(b, _)| b);
-        }
-        Err(e) => return Err(spline_error(e)),
-    };
-    // The wire runs counter-clockwise about the surface's normal.
-    let wire: mt::Wire =
-        if fill.counter_clockwise { chain.to_vec().into() } else { chain.iter().rev().map(mt::Edge::inverse).collect::<Vec<_>>().into() };
-    let face = mt::Face::try_new(vec![wire], crate::spline_conv::surface(&fill.surface)?).map_err(|e| KernelError::Failed(format!("fill: {e}")))?;
-    let mut rec = Rebuild::default();
-    rec.made(&face, Vec::new());
-    Ok(rebuilt_body(crate::surfaces::surface_body(vec![face]), &[&body.solid], &rec))
+/// The general fill's refusal until it is ported (module docs).
+fn general_fill_unported() -> KernelError {
+    KernelError::Invalid(
+        "not supported yet: a patch meeting its neighbours with g1 or g2, through points, or on a loop that bounds no height field".into(),
+    )
 }
 
 /// [`crate::patch_edges`] with a crown on the fitted face: positive makes the patch's middle
 /// fuller, negative flatter, by `crown` times the loop's size (its projected box's diagonal), the
 /// bump vanishing along the loop, so the face still meets the body's own edges. `crown` 0 is
-/// exactly [`crate::patch_edges`], and a loop that is certainly planar ([`crate::plane_fit`])
-/// makes the same exact planar face whatever the crown. Its history is over `[body]`: the face is
-/// new, its edges the body's own.
+/// exactly [`crate::patch_edges`], and a loop that is certainly planar makes the same exact planar
+/// face whatever the crown. Its history is over `[body]`: the face is new, its edges the body's
+/// own.
 pub fn patch_edges_crowned(body: &Body, at: &[Vec3], crown: f64) -> Result<Body> {
-    if crown == 0.0 {
-        return crate::surfaces::patch_edges(body, at);
-    }
     body.require_brep("patch")?;
     if at.is_empty() || at.len() > 10_000 {
         return Err(KernelError::Invalid("pick the edges of a closed loop".into()));
@@ -314,17 +135,316 @@ pub fn patch_edges_crowned(body: &Body, at: &[Vec3], crown: f64) -> Result<Body>
     if !(solidcraft_geom::fill::MIN_CROWN..=solidcraft_geom::fill::MAX_CROWN).contains(&crown) {
         return Err(KernelError::Invalid("a patch's crown must be between -0.9 and 3".into()));
     }
-    crate::guard("patch", || {
-        let chain = crate::surfaces::picked_loop(body, at)?;
-        let Some(face) = crate::plane_fit::planar_face(&chain, planarity_tolerance(body))? else {
-            // Not certainly planar: a fitted surface, crowned.
-            return fill_loop_crowned(body, &chain, crown);
+    patch_loop(body, at, crown)
+}
+
+/// The patch on the closed loop of `body`'s edges picked by `at`: the loop's plane when it is
+/// certainly planar (within [`planarity_tolerance`]), else the height field crowned by `crown`.
+/// What `crate::patch_edges` makes with `crown` 0.
+pub(crate) fn patch_loop(body: &Body, at: &[Vec3], crown: f64) -> Result<Body> {
+    let record = crate::native::brep_record(body)?;
+    let reach = body.size() * 0.05 + 1e-6;
+    let chain = picked_loop(&record, at, reach)?;
+    let mut sides = Vec::with_capacity(chain.len());
+    for &(e, forward) in &chain {
+        sides.push(Side::new(&record, e, forward)?);
+    }
+    let (surface, ccw, pcurve): (b::Surface, bool, Option<Projection>) = match planar(&record, &chain, &mut sides, planarity_tolerance(body))? {
+        Some(plane) => (plane, true, None),
+        None => {
+            let tol = face_tolerance(body);
+            let mut point = |k: usize, t: f64| sides.get_mut(k).and_then(|s| s.point(t));
+            let fill = match solidcraft_geom::fill::fill_loop(chain.len(), &mut point, tol, crown) {
+                Ok(fill) => fill,
+                Err(SplineError::Unsupported(_)) if crown == 0.0 => return Err(general_fill_unported()),
+                Err(e) => return Err(spline_error(e)),
+            };
+            let projection = Projection { origin: fill.origin, axes: fill.axes };
+            (surface_record(&fill.surface)?, fill.counter_clockwise, Some(projection))
+        }
+    };
+    patch_body(body, &record, &chain, surface, ccw, pcurve.as_ref(), face_tolerance(body))
+}
+
+/// The closed loop of `record`'s edges picked by points on them (the edge nearest each, within
+/// `reach`), each with whether the loop runs along it: it starts with the last edge picked, run
+/// its own way. Edges that branch, or do not close one loop, are refused.
+fn picked_loop(record: &b::Brep, at: &[Vec3], reach: f64) -> Result<Vec<(usize, bool)>> {
+    let mut picked: Vec<usize> = Vec::new();
+    for p in at {
+        if !p.is_finite() {
+            return Err(KernelError::Invalid(format!("no edge at {p:?}")));
+        }
+        let e = nearest_edge(record, *p, reach).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
+        if !picked.contains(&e) {
+            picked.push(e);
+        }
+    }
+    let ends = |e: usize| record.edges.get(e).map(|x| x.vertices);
+    let mut uses: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for &e in &picked {
+        for v in ends(e).into_iter().flatten() {
+            *uses.entry(v).or_default() += 1;
+        }
+    }
+    if uses.values().any(|n| *n > 2) {
+        return Err(KernelError::Invalid("the edges branch: pick one chain".into()));
+    }
+    let open = || KernelError::Invalid("the edges do not form a closed loop".into());
+    if uses.values().any(|n| *n != 2) {
+        return Err(open());
+    }
+    let first = picked.pop().ok_or_else(open)?;
+    let [start, mut at_v] = ends(first).ok_or_else(open)?;
+    let mut chain = vec![(first, true)];
+    while at_v != start {
+        let k = picked.iter().position(|e| ends(*e).is_some_and(|[a, z]| a == at_v || z == at_v)).ok_or_else(open)?;
+        let e = picked.remove(k);
+        let [a, z] = ends(e).ok_or_else(open)?;
+        let forward = a == at_v;
+        at_v = if forward { z } else { a };
+        chain.push((e, forward));
+    }
+    if !picked.is_empty() {
+        return Err(open());
+    }
+    Ok(chain)
+}
+
+/// The record edge whose curve comes nearest `p` (by samples along each), within `reach`.
+fn nearest_edge(record: &b::Brep, p: Vec3, reach: f64) -> Option<usize> {
+    let mut best: Option<(f64, usize)> = None;
+    for (i, e) in record.edges.iter().enumerate() {
+        let Ok(c) = CurveEval::new(&e.curve) else { continue };
+        let [t0, t1] = e.interval;
+        for k in 0..=32 {
+            let Some(q) = c.point(t0 + (t1 - t0) * k as f64 / 32.0) else { continue };
+            let d = q.dist(p);
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, i));
+            }
+        }
+    }
+    best.filter(|(d, _)| *d <= reach).map(|(_, e)| e)
+}
+
+/// One edge of the loop as the fill samples it: `t` from 0 at the loop's start of the edge to 1 at
+/// its end, the start being the edge's own vertex (an imported edge's curve may end a little off
+/// it).
+struct Side {
+    curve: CurveEval,
+    interval: [f64; 2],
+    forward: bool,
+    start: Vec3,
+}
+
+impl Side {
+    fn new(record: &b::Brep, e: usize, forward: bool) -> Result<Side> {
+        let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
+        let curve = CurveEval::new(&edge.curve).map_err(|err| KernelError::Invalid(format!("edge {e} cannot be sampled: {err}")))?;
+        let v = edge.vertices[if forward { 0 } else { 1 }];
+        let start = record.vertices.get(v as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]));
+        let start = start.ok_or_else(|| KernelError::Failed("patch: vertex reference".into()))?;
+        Ok(Side { curve, interval: edge.interval, forward, start })
+    }
+
+    fn point(&mut self, t: f64) -> Option<Vec3> {
+        if t <= 0.0 {
+            return Some(self.start);
+        }
+        let [a, z] = self.interval;
+        let s = t.min(1.0);
+        self.curve.point(if self.forward { a + (z - a) * s } else { z - (z - a) * s })
+    }
+}
+
+/// The plane of the loop when its edges certainly lie in one within `tol`, `None` otherwise. The
+/// plane is fitted to points along the edges (through their mean, its normal the loop's area
+/// vector, so the loop runs counter-clockwise about it); each edge is then certified
+/// conservatively: a line by its ends, a polyline or spline by its control points (the curve lies
+/// in their convex hull, weights positive), a circle or ellipse by its centre and how far its
+/// axes tilt out of the plane, a traced intersection only when one of its two surfaces is a plane
+/// that the loop's points lie on. Samples alone are never trusted: a spline can bulge out of the
+/// plane between them.
+fn planar(record: &b::Brep, chain: &[(usize, bool)], sides: &mut [Side], tol: f64) -> Result<Option<b::Surface>> {
+    const SAMPLES: usize = 16;
+    let mut pts = Vec::with_capacity(sides.len() * SAMPLES);
+    for side in sides.iter_mut() {
+        for k in 0..SAMPLES {
+            let Some(p) = side.point(k as f64 / SAMPLES as f64) else { return Ok(None) };
+            pts.push(p);
+        }
+    }
+    let mean = pts.iter().fold(Vec3::ZERO, |s, p| s + *p) * (1.0 / pts.len().max(1) as f64);
+    let area = pts.iter().zip(pts.iter().cycle().skip(1)).fold(Vec3::ZERO, |n, (p, q)| n + (*p - mean).cross(*q - mean));
+    let Some(n) = area.normalized() else { return Ok(None) };
+    let off = |p: Vec3| (p - mean).dot(n).abs();
+    let on = |p: [f64; 3]| off(Vec3::new(p[0], p[1], p[2])) <= tol;
+    if !pts.iter().all(|p| off(*p) <= tol) {
+        return Ok(None);
+    }
+    let holds = |s: &b::Surface| -> bool {
+        let (o, normal) = match s {
+            b::Surface::Plane { origin, u_axis, v_axis } => {
+                let (u, v) = (Vec3::new(u_axis[0], u_axis[1], u_axis[2]), Vec3::new(v_axis[0], v_axis[1], v_axis[2]));
+                (Vec3::new(origin[0], origin[1], origin[2]), u.cross(v).normalized())
+            }
+            _ => return false,
         };
-        // A new face on the body's own edges (a plane has no middle to fill).
-        let mut rec = Rebuild::default();
-        rec.made(&face, Vec::new());
-        Ok(rebuilt_body(crate::surfaces::surface_body(vec![face]), &[&body.solid], &rec))
-    })
+        let Some(q) = normal else { return false };
+        pts.iter().all(|p| (*p - o).dot(q).abs() <= tol && (*p - n * (*p - mean).dot(n) - o).dot(q).abs() <= tol)
+    };
+    for &(e, _) in chain {
+        let Some(edge) = record.edges.get(e) else { return Ok(None) };
+        let certified = match &edge.curve {
+            b::Curve::Line { start, end } => on(*start) && on(*end),
+            b::Curve::Polyline { points } | b::Curve::Spline { points, .. } => points.iter().all(|p| on(*p)),
+            b::Curve::RationalSpline { homogeneous, .. } => homogeneous.iter().all(|h| h[3] > 0.0 && on([h[0] / h[3], h[1] / h[3], h[2] / h[3]])),
+            b::Curve::Circle { frame, radius } => conic_on(frame, [*radius; 2], &on, n, tol),
+            b::Curve::Ellipse { frame, radii } => conic_on(frame, *radii, &on, n, tol),
+            b::Curve::SurfaceIntersection { surfaces, .. } => surfaces.iter().any(|s| holds(s)),
+        };
+        if !certified {
+            return Ok(None);
+        }
+    }
+    let t = if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let Some(u) = (t - n * t.dot(n)).normalized() else { return Ok(None) };
+    let arr = |p: Vec3| [p.x, p.y, p.z];
+    Ok(Some(b::Surface::Plane { origin: arr(mean), u_axis: arr(u), v_axis: arr(n.cross(u)) }))
+}
+
+/// A conic lies within `tol` of the plane (normal `n`) when its centre does and its axes, scaled by
+/// its radii, tilt out of the plane by no more than that together.
+fn conic_on(frame: &b::Frame, radii: [f64; 2], on: &dyn Fn([f64; 3]) -> bool, n: Vec3, tol: f64) -> bool {
+    let axis = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]).dot(n).abs();
+    on(frame.origin) && radii[0] * axis(frame.x_axis) + radii[1] * axis(frame.y_axis) <= tol
+}
+
+/// The plane a height field stands on: its parameters are coordinates along `axes` from `origin`.
+struct Projection {
+    origin: Vec3,
+    axes: [Vec3; 2],
+}
+
+impl Projection {
+    /// The edge's exact pcurve on the height field: its curve projected onto the plane, which is
+    /// affine, so a line or spline stays one with its knots and weights. `None` for a conic or a
+    /// traced intersection, whose angle or trace parameter no B-spline in (u, v) reproduces.
+    fn pcurve(&self, curve: &b::Curve, [a, z]: [f64; 2]) -> Option<Curve2> {
+        let uv = |p: Vec3| [(p - self.origin).dot(self.axes[0]), (p - self.origin).dot(self.axes[1])];
+        let v = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
+        let (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>) = match curve {
+            b::Curve::Line { start, end } => {
+                let (s, e) = (v(start), v(end));
+                let (p, q) = (s + (e - s) * a, s + (e - s) * z);
+                return Some(Curve2::Spline { knots: vec![a, a, z, z], points: vec![uv(p), uv(q)] });
+            }
+            b::Curve::Polyline { points } => {
+                let mut knots = vec![0.0];
+                knots.extend((0..points.len()).map(|i| i as f64));
+                knots.push(points.len().saturating_sub(1) as f64);
+                (1, knots, points.iter().map(|p| HPoint::weighted(v(p), 1.0)).collect())
+            }
+            b::Curve::Spline { knots, points } => {
+                (knots.len().checked_sub(points.len() + 1)?, knots.clone(), points.iter().map(|p| HPoint::weighted(v(p), 1.0)).collect())
+            }
+            b::Curve::RationalSpline { knots, homogeneous } => (
+                knots.len().checked_sub(homogeneous.len() + 1)?,
+                knots.clone(),
+                homogeneous.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect(),
+            ),
+            b::Curve::Circle { .. } | b::Curve::Ellipse { .. } | b::Curve::SurfaceIntersection { .. } => return None,
+        };
+        // The piece on the edge's own interval (the same points at the same parameters).
+        let domain = [*knots.get(degree)?, *knots.get(knots.len() - degree - 1)?];
+        let (knots, ctrl) = if domain == [a, z] { (knots, ctrl) } else { solidcraft_geom::bspline::segment(degree, &knots, &ctrl, a, z).ok()? };
+        let homogeneous = ctrl
+            .iter()
+            .map(|h| {
+                let p = uv(Vec3::new(h.x / h.w, h.y / h.w, h.z / h.w));
+                [p[0] * h.w, p[1] * h.w, h.w]
+            })
+            .collect();
+        Some(Curve2::RationalSpline { knots, homogeneous })
+    }
+}
+
+/// A geom NURBS surface as a record: a plain spline where every weight is one.
+fn surface_record(s: &solidcraft_geom::bspline::NurbsSurface) -> Result<b::Surface> {
+    let [ku, kv] = s.knots().clone();
+    let rows = s.net().into_u_rows();
+    if rows.iter().flatten().all(|h| h.w == 1.0) {
+        Ok(b::Surface::Spline { u_knots: ku, v_knots: kv, points: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z]).collect()).collect() })
+    } else {
+        Ok(b::Surface::RationalSpline {
+            u_knots: ku,
+            v_knots: kv,
+            homogeneous: rows.iter().map(|r| r.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()).collect(),
+        })
+    }
+}
+
+/// The one-face sheet on `surface` bounded by the loop `chain` of `record`'s own edges, run
+/// counter-clockwise about the surface's natural normal (`ccw`: the chain already does), each
+/// edge's pcurve the exact projection where the surface is a height field. Its history is over
+/// `[body]`: the face is new, each edge the body's own.
+fn patch_body(
+    body: &Body,
+    record: &b::Brep,
+    chain: &[(usize, bool)],
+    surface: b::Surface,
+    ccw: bool,
+    projection: Option<&Projection>,
+    tol: f64,
+) -> Result<Body> {
+    let fail = |m: &str| KernelError::Failed(format!("patch: {m}"));
+    let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut vertex_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut edges = Vec::with_capacity(chain.len());
+    let mut uses = Vec::with_capacity(chain.len());
+    for (k, &(e, forward)) in chain.iter().enumerate() {
+        let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
+        let mut ends = [0u32; 2];
+        for (end, v) in ends.iter_mut().zip(edge.vertices) {
+            let next = u32::try_from(vertices.len()).map_err(|_| fail("vertex budget"))?;
+            *end = *vertex_of.entry(v).or_insert(next);
+            if *end == next {
+                vertices.push(record.vertices.get(v as usize).ok_or_else(|| fail("vertex reference"))?.point);
+            }
+        }
+        let given = match projection {
+            Some(p) => Some(p.pcurve(&edge.curve, edge.interval).ok_or_else(|| {
+                KernelError::Invalid(
+                    "not supported yet: a fitted patch on a circular, elliptic or traced edge (it has no exact pcurve on the fit)".into(),
+                )
+            })?),
+            None => None,
+        };
+        edges.push(PartEdge { curve: edge.curve.clone(), interval: edge.interval, vertices: ends });
+        uses.push(PartUse { edge: k as u32, forward, given });
+    }
+    if !ccw {
+        uses = uses.into_iter().rev().map(|u| PartUse { forward: !u.forward, ..u }).collect();
+    }
+    let made = assemble(Parts { vertices, edges, faces: vec![PartFace { surface, forward: true, loops: vec![uses] }], tolerance: tol }, false)?;
+    let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
+    let (patch, order) = crate::native::body_from_smlib_ordered(&smlib)?;
+    // The patch's edges in its own order, each from the loop edge it is.
+    let Some(order) = order else { return Ok(patch) };
+    let mut origins: Vec<Option<usize>> = vec![None; patch.edge_count()];
+    for (k, c) in made.edges.iter().enumerate() {
+        let (Some(c), Some(&(e, _))) = (c, chain.get(k)) else { continue };
+        let j = if order.edges.is_empty() { *c } else { *order.edges.get(*c).ok_or_else(|| fail("edge order"))? };
+        *origins.get_mut(j).ok_or_else(|| fail("edge order"))? = Some(e);
+    }
+    let Some(origins) = origins.into_iter().collect::<Option<Vec<usize>>>() else { return Ok(patch) };
+    let history = History {
+        operands: 1,
+        faces: vec![FaceProv { origins: Vec::new(), change: Change::Generated }],
+        edges: origins.into_iter().map(|edge| EdgeProv { faces: vec![0], origins: vec![EdgeOrigin::Edge { operand: 0, edge }] }).collect(),
+    };
+    patch.with_history(history, &[body])
 }
 
 /// How far a loop's edges may be from a plane for its patch to be that plane: `10⁻⁷` of the
@@ -336,29 +456,30 @@ pub(crate) fn planarity_tolerance(body: &Body) -> f64 {
 }
 
 /// How far the fill's surface may be from the loop's edges: `10⁻⁶` of the body's size, at least
-/// `10⁻⁵` mm — ten times [`planarity_tolerance`]. Truck meshes a face from its edges' own
-/// polylines (shared with the neighbouring faces), so the mesh stays watertight whatever the
-/// gap: measured on a five-sided rim, fills whose edges were up to `4.5·10⁻⁴` mm off the surface
-/// meshed cleanly and stitched back into closed solids. Ten times the linear tolerance because a
+/// `10⁻⁵` mm — ten times [`planarity_tolerance`]. Ten times the linear tolerance because a
 /// fitted surface approaches curved edges like a cubic spline, so each further factor of ten
 /// costs about twice the spans each way, and imported edges may already lie `10⁻⁵` mm or more off
-/// their vertices; two orders below what meshing tolerates. Later operations must take the face
-/// to contain its edges within this tolerance, not the linear one: the face's edges are the
-/// body's exact edges, the surface between them is the fit.
+/// their vertices. Later operations must take the face to contain its edges within this
+/// tolerance, not the linear one: the face's edges are the body's exact edges, the surface
+/// between them is the fit (the patch record gives its edges this tolerance).
 pub(crate) fn face_tolerance(body: &Body) -> f64 {
     (body.size() * 1e-6).max(1e-5)
 }
 
 #[cfg(test)]
 mod tests {
-    use mt::{BoundedCurve, InnerSpace, MetricSpace, ParametricCurve, ParametricSurface};
+    use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
     use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
-    use truck_modeling as mt;
 
-    use crate::body::{Body, from_p3, p3};
+    use crate::body::Body;
     use crate::boolean_record::tests::{Reach, checked};
     use crate::history::{Change, EdgeOrigin};
+    use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
     use crate::{BoolOp, boolean, copy_faces, cylinder, extrude, measure, patch_edges, patch_edges_crowned, stitch};
+
+    fn v3(p: [f64; 3]) -> Vec3 {
+        Vec3::new(p[0], p[1], p[2])
+    }
 
     /// The cutting cylinder: axis along y at x = 0, z = 50, radius 40, so the top of a prism
     /// within 20 of the axis and 20 high is cut away everywhere (to between 10 and 15.4 mm).
@@ -390,49 +511,47 @@ mod tests {
         (0..n).map(|k| Vec2::from_angle(phase + k as f64 * std::f64::consts::TAU / n as f64) * 20.0).collect()
     }
 
-    /// The distance from `p` to the surface: the nearest of a grid of samples, then Gauss–Newton
-    /// within the domain.
-    fn to_surface(s: &mt::Surface, p: mt::Point3) -> f64 {
-        let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { panic!("a bounded surface") };
-        let n = 80;
-        let mut best = (f64::MAX, u0, v0);
-        for i in 0..=n {
-            for j in 0..=n {
-                let (u, v) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                let d = s.subs(u, v).distance(p);
-                if d < best.0 {
-                    best = (d, u, v);
+    /// The body's record.
+    fn record(body: &Body) -> b::Brep {
+        crate::native::brep_record(body).unwrap()
+    }
+
+    /// The surface of the body's first face.
+    fn first_surface(body: &Body) -> b::Surface {
+        record(body).faces[0].surface.clone()
+    }
+
+    /// The distance from `p` to the surface (its nearest point).
+    fn to_surface(s: &b::Surface, p: Vec3) -> f64 {
+        let e = SurfaceEval::new(s).unwrap();
+        let uv = e.project(p, None, f64::INFINITY).expect("a nearest point");
+        e.point(uv).unwrap().dist(p)
+    }
+
+    /// The farthest point along the first face's edges from its surface.
+    fn edges_off_surface(body: &Body) -> f64 {
+        let r = record(body);
+        let face = &r.faces[0];
+        let mut worst = 0.0f64;
+        for l in &face.loops {
+            let b::Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let e = &r.edges[u.edge as usize];
+                let c = CurveEval::new(&e.curve).unwrap();
+                let [t0, t1] = e.interval;
+                for k in 0..=24 {
+                    worst = worst.max(to_surface(&face.surface, c.point(t0 + (t1 - t0) * k as f64 / 24.0).unwrap()));
                 }
             }
         }
-        let (_, mut u, mut v) = best;
-        for _ in 0..50 {
-            let (q, a, b) = (s.subs(u, v), s.uder(u, v), s.vder(u, v));
-            let r = q - p;
-            let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
-            let det = aa * bb - ab * ab;
-            if det.abs() < 1e-300 {
-                break;
-            }
-            let (ga, gb) = (a.dot(r), b.dot(r));
-            u = (u - (bb * ga - ab * gb) / det).clamp(u0, u1);
-            v = (v - (aa * gb - ab * ga) / det).clamp(v0, v1);
-        }
-        s.subs(u, v).distance(p)
+        worst
     }
 
-    /// The farthest point along the face's edges from its surface.
-    fn edges_off_surface(face: &mt::Face) -> f64 {
-        let s = face.surface();
-        let mut worst = 0.0f64;
-        for e in face.boundaries().iter().flat_map(|w| w.edge_iter()) {
-            let c = e.curve();
-            let (t0, t1) = c.range_tuple();
-            for k in 0..=24 {
-                worst = worst.max(to_surface(&s, c.subs(t0 + (t1 - t0) * k as f64 / 24.0)));
-            }
-        }
-        worst
+    /// Whether every edge of `made` is one of `of`'s own (the same curve record on the same
+    /// interval).
+    fn own_edges(made: &Body, of: &Body) -> bool {
+        let own = record(of).edges;
+        record(made).edges.iter().all(|e| own.iter().any(|o| o.curve == e.curve && o.interval == e.interval))
     }
 
     /// The fill's mesh: every normal finite, and no triangle folded over (all face the same way
@@ -463,15 +582,13 @@ mod tests {
         let fill = patch_edges(open, rim).unwrap();
         assert!(fill.is_surface());
         assert_eq!(fill.face_count(), 1, "one face");
-        let face = fill.solid.face_iter().next().unwrap().clone();
-        assert!(!matches!(face.surface(), mt::Surface::Plane(_)));
-        // Its edges are the open body's own, by identity, and nothing else.
-        let own: Vec<mt::EdgeID> = open.solid.edge_iter().map(|e| e.id()).collect();
-        assert!(fill.solid.edge_iter().all(|e| own.contains(&e.id())), "an edge that is not the body's");
+        assert!(!matches!(first_surface(&fill), b::Surface::Plane { .. }));
+        // Its edges are the open body's own, and nothing else.
+        assert!(own_edges(&fill, open), "an edge that is not the body's");
         let h = checked(&fill, &[open], 0.05, Reach { made: 0.0, moved: 0.0 }, &|_| true);
         assert!(h.faces.iter().all(|f| f.change == Change::Generated && f.origins.is_empty()));
         assert!(h.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { operand: 0, .. }])));
-        let off = edges_off_surface(&face);
+        let off = edges_off_surface(&fill);
         let tol = super::face_tolerance(open);
         assert!(off <= tol, "an edge is {off} off the face (tolerance {tol})");
         mesh_is_clean(&fill);
@@ -481,12 +598,15 @@ mod tests {
     }
 
     /// The fill's height over the point `(x, y)`: Newton's method on the surface's `x`, `y` from
-    /// the nearest of a grid of samples.
-    fn height_over(s: &mt::Surface, x: f64, y: f64, start: &mut Option<(f64, f64)>) -> Option<f64> {
-        let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { return None };
+    /// the middle of its face's domain (or the last answer).
+    fn height_over(body: &Body, x: f64, y: f64, start: &mut Option<(f64, f64)>) -> Option<f64> {
+        let r = record(body);
+        let face = &r.faces[0];
+        let s = SurfaceEval::new(&face.surface).ok()?;
+        let [[u0, u1], [v0, v1]] = face.domain;
         let (mut u, mut v) = start.unwrap_or(((u0 + u1) / 2.0, (v0 + v1) / 2.0));
         for _ in 0..30 {
-            let (q, a, b) = (s.subs(u, v), s.uder(u, v), s.vder(u, v));
+            let (q, a, b) = s.derivs(u, v)?;
             let (rx, ry) = (q.x - x, q.y - y);
             let det = a.x * b.y - a.y * b.x;
             if det.abs() < 1e-300 {
@@ -495,7 +615,7 @@ mod tests {
             u = (u - (b.y * rx - b.x * ry) / det).clamp(u0, u1);
             v = (v - (a.x * ry - a.y * rx) / det).clamp(v0, v1);
         }
-        let q = s.subs(u, v);
+        let q = s.point([u, v])?;
         *start = Some((u, v));
         ((q.x - x).hypot(q.y - y) < 1e-9).then_some(q.z)
     }
@@ -504,7 +624,6 @@ mod tests {
     /// cylinder integrated over the polygon (midpoint rule on a 300 × 300 grid; the integrand
     /// vanishes on the rim, so cells across it add little error).
     fn gained(fill: &Body, corners: &[Vec2]) -> f64 {
-        let s = fill.solid.face_iter().next().unwrap().surface();
         let polygon = solidcraft_geom::Ring::from(corners.to_vec());
         let solidcraft_geom::Aabb2 { min: lo, max: hi } = polygon.bounds();
         let n = 300;
@@ -517,7 +636,7 @@ mod tests {
             for j in 0..n {
                 let y = lo.y + (j as f64 + 0.5) * dy;
                 if inside(x, y) {
-                    let h = height_over(&s, x, y, &mut start).expect("the fill covers the polygon");
+                    let h = height_over(fill, x, y, &mut start).expect("the fill covers the polygon");
                     sum += (h - cut_height(x)) * dx * dy;
                 }
             }
@@ -536,6 +655,78 @@ mod tests {
         let bound = 1e-3 * extra.abs() + 5e-5 * want;
         eprintln!("{name}: closed volume {got:.4}, cut prism {prism:.4} + fill above the cylinder {extra:.4} = {want:.4} (bound ±{bound:.4})");
         assert!((got - want).abs() <= bound, "{name}: {got} vs {want}");
+    }
+
+    /// An open sheet of walls hanging from the closed loop `top` (each a curve record from one
+    /// corner to the next, `corners[k]` to `corners[k + 1]`), each wall swept straight along
+    /// `drop`: a plane under a line, a ruled B-spline under a spline (its pcurves its exact iso
+    /// lines and rulings).
+    fn walls(corners: &[Vec3], top: &[b::Curve], drop: Vec3) -> Body {
+        let n = corners.len();
+        let arr = |p: Vec3| [p.x, p.y, p.z];
+        // Vertices: the top corners, then the bottom ones.
+        let vertices: Vec<[f64; 3]> = corners.iter().map(|p| arr(*p)).chain(corners.iter().map(|p| arr(*p + drop))).collect();
+        let moved = |c: &b::Curve| match c {
+            b::Curve::Line { start, end } => b::Curve::Line { start: arr(v3(*start) + drop), end: arr(v3(*end) + drop) },
+            b::Curve::Spline { knots, points } => {
+                b::Curve::Spline { knots: knots.clone(), points: points.iter().map(|p| arr(v3(*p) + drop)).collect() }
+            }
+            _ => panic!("lines and splines"),
+        };
+        let interval = |c: &b::Curve| match c {
+            b::Curve::Spline { knots, points } => [knots[knots.len() - points.len() - 1], knots[points.len()]],
+            _ => [0.0, 1.0],
+        };
+        let mut edges = Vec::new();
+        for k in 0..n {
+            let c = &top[k];
+            edges.push(PartEdge { curve: c.clone(), interval: interval(c), vertices: [k as u32, ((k + 1) % n) as u32] });
+            edges.push(PartEdge { curve: moved(c), interval: interval(c), vertices: [(n + k) as u32, (n + (k + 1) % n) as u32] });
+            edges.push(PartEdge {
+                curve: b::Curve::Line { start: arr(corners[k]), end: arr(corners[k] + drop) },
+                interval: [0.0, 1.0],
+                vertices: [k as u32, (n + k) as u32],
+            });
+        }
+        let (top_edge, bottom_edge, down) = (|k: usize| 3 * k as u32, |k: usize| 3 * k as u32 + 1, |k: usize| 3 * (k % n) as u32 + 2);
+        let mut faces = Vec::new();
+        for k in 0..n {
+            let (surface, given) = match &top[k] {
+                b::Curve::Spline { knots, points } => {
+                    let rows: Vec<Vec<[f64; 3]>> = points.iter().map(|p| vec![*p, arr(v3(*p) + drop)]).collect();
+                    let [a, z] = interval(&top[k]);
+                    let degree = knots.len() - points.len() - 1;
+                    let greville = |v: f64| -> b::Curve2 {
+                        let pts = (0..points.len()).map(|i| [(1..=degree).map(|r| knots[i + r]).sum::<f64>() / degree as f64, v]).collect();
+                        b::Curve2::Spline { knots: knots.clone(), points: pts }
+                    };
+                    let ruling = |u: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, 0.0], [u, 1.0]] };
+                    let surface = b::Surface::Spline { u_knots: knots.clone(), v_knots: vec![0.0, 0.0, 1.0, 1.0], points: rows };
+                    (surface, Some([greville(0.0), ruling(z), greville(1.0), ruling(a)]))
+                }
+                _ => {
+                    let (p, q) = (corners[k], corners[(k + 1) % n]);
+                    let u = (q - p).normalized().unwrap();
+                    let w = (drop - u * drop.dot(u)).normalized().unwrap();
+                    (b::Surface::Plane { origin: arr(p), u_axis: arr(u), v_axis: arr(w) }, None)
+                }
+            };
+            // Round the wall: along the top, down its far side, back along the bottom, up.
+            let mut uses = vec![
+                PartUse { edge: top_edge(k), forward: true, given: None },
+                PartUse { edge: down(k + 1), forward: true, given: None },
+                PartUse { edge: bottom_edge(k), forward: false, given: None },
+                PartUse { edge: down(k), forward: false, given: None },
+            ];
+            if let Some(given) = given {
+                for (u, g) in uses.iter_mut().zip(given) {
+                    u.given = Some(g);
+                }
+            }
+            faces.push(PartFace { surface, forward: true, loops: vec![uses] });
+        }
+        let made = assemble(Parts { vertices, edges, faces, tolerance: 1e-6 }, false).unwrap();
+        crate::native::body_from_smlib(&solidcraft_smlib::Brep::from_record(&made.brep, true).unwrap()).unwrap()
     }
 
     #[test]
@@ -586,18 +777,15 @@ mod tests {
     fn a_flat_corner_between_two_edges_is_kept() {
         // A rim of five straight edges, two of them in line (a 180° corner between them), the
         // four true corners at different heights; walls hang below it.
-        let p = |x: f64, y: f64, z: f64| mt::Vertex::new(mt::Point3::new(x, y, z));
+        let p = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
         let v = [p(-14.0, -14.0, 12.0), p(0.0, -14.0, 12.0), p(14.0, -14.0, 12.0), p(14.0, 14.0, 15.0), p(-14.0, 14.0, 10.0)];
-        let line = |a: &mt::Vertex, b: &mt::Vertex| mt::Edge::new(a, b, mt::Curve::Line(mt::Line(a.point(), b.point())));
-        let wire: mt::Wire = (0..5).map(|k| line(&v[k], &v[(k + 1) % 5])).collect::<Vec<_>>().into();
-        let low = mt::builder::translated(&wire, mt::Vector3::new(0.0, 0.0, -10.0));
-        let walls = mt::builder::try_wire_homotopy(&wire, &low).unwrap();
-        let body = crate::surfaces::surface_body(walls.face_iter().cloned().collect());
-        let rim: Vec<Vec3> = (0..5).map(|k| from_p3(v[k].point()).lerp(from_p3(v[(k + 1) % 5].point()), 0.5)).collect();
+        let arr = |q: Vec3| [q.x, q.y, q.z];
+        let top: Vec<b::Curve> = (0..5).map(|k| b::Curve::Line { start: arr(v[k]), end: arr(v[(k + 1) % 5]) }).collect();
+        let body = walls(&v, &top, Vec3::new(0.0, 0.0, -10.0));
+        let rim: Vec<Vec3> = (0..5).map(|k| v[k].lerp(v[(k + 1) % 5], 0.5)).collect();
         let fill = patch_edges(&body, &rim).unwrap();
         assert_eq!((fill.face_count(), fill.edge_count()), (1, 5), "one face on all five edges");
-        let face = fill.solid.face_iter().next().unwrap().clone();
-        assert!(edges_off_surface(&face) <= super::face_tolerance(&body));
+        assert!(edges_off_surface(&fill) <= super::face_tolerance(&body));
         let area = mesh_is_clean(&fill);
         eprintln!("flat corner: one face of area {area}");
         assert!(area > 28.0 * 28.0 * 0.99 && area < 28.0 * 28.0 * 1.05, "{area}");
@@ -611,12 +799,13 @@ mod tests {
         shuffled.rotate_left(3);
         shuffled.swap(0, 1);
         let (b, _) = fill_rim(&open, &shuffled);
-        let (sa, sb) = (a.solid.face_iter().next().unwrap().surface(), b.solid.face_iter().next().unwrap().surface());
-        let (Some((u0, u1)), Some((v0, v1))) = sa.try_range_tuple() else { panic!() };
+        let (ra, rb) = (record(&a), record(&b));
+        let (sa, sb) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
+        let [[u0, u1], [v0, v1]] = ra.faces[0].domain;
         let mut gap = 0.0f64;
         for (x, y) in [(0.2, 0.3), (0.5, 0.5), (0.7, 0.9)] {
-            let (u, v) = (u0 + (u1 - u0) * x, v0 + (v1 - v0) * y);
-            gap = gap.max(sa.subs(u, v).distance(sb.subs(u, v)));
+            let uv = [u0 + (u1 - u0) * x, v0 + (v1 - v0) * y];
+            gap = gap.max(sa.point(uv).unwrap().dist(sb.point(uv).unwrap()));
         }
         assert!(gap < 1e-7, "pick order moved the surface by {gap}");
         let (area_a, area_b) = (mesh_is_clean(&a), mesh_is_clean(&b));
@@ -661,12 +850,12 @@ mod tests {
         // The cup's vertices moved 2·10⁻⁵ mm off their curves, as a file might give them.
         let corners = regular(5, 0.3);
         let (solid, open, rim) = cup(&corners, Vec2::ZERO);
-        let shell = open.solid.boundaries()[0].mapped(
-            |p: &mt::Point3| *p + mt::Vector3::new(2e-5, 0.0, 0.0),
-            |c: &mt::Curve| c.clone(),
-            |s: &mt::Surface| s.clone(),
-        );
-        let imported = crate::surfaces::surface_body(shell.face_iter().cloned().collect());
+        let mut moved = record(&open);
+        for v in &mut moved.vertices {
+            v.point[0] += 2e-5;
+            v.tolerance = v.tolerance.max(1e-4);
+        }
+        let imported = crate::native::body_from_smlib(&solidcraft_smlib::Brep::from_record(&moved, true).unwrap()).unwrap();
         let (fill, got) = fill_rim(&imported, &rim);
         check_volume("imported", &solid, &fill, &corners, got);
     }
@@ -679,26 +868,27 @@ mod tests {
         // a 32 × 32 grid, and then it is refused.
         for (spans, raised, must_fill) in [(1, 1, true), (64, 30, false)] {
             let count = spans + 3;
-            let pts: Vec<mt::Point3> =
-                (0..count).map(|i| mt::Point3::new(20.0 * i as f64 / (count - 1) as f64, 0.0, if i == raised { 1.5 } else { 0.0 })).collect();
-            let spline = mt::BSplineCurve::new(mt::KnotVec::uniform_knot(3, spans), pts);
-            let v: Vec<mt::Vertex> =
-                [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)].iter().map(|&(x, y)| mt::Vertex::new(mt::Point3::new(x, y, 0.0))).collect();
-            let line = |a: &mt::Vertex, b: &mt::Vertex| mt::Edge::new(a, b, mt::Curve::Line(mt::Line(a.point(), b.point())));
-            let bottom = mt::Edge::new(&v[0], &v[1], mt::Curve::BSplineCurve(spline.clone()));
-            let wire: mt::Wire = vec![bottom, line(&v[1], &v[2]), line(&v[2], &v[3]), line(&v[3], &v[0])].into();
-            let top = mt::builder::translated(&wire, mt::Vector3::new(0.0, 0.0, -5.0));
-            let walls = mt::builder::try_wire_homotopy(&wire, &top).unwrap();
-            let body = crate::surfaces::surface_body(walls.face_iter().cloned().collect());
-            let peak = from_p3(spline.subs((raised as f64 + 1.0) / (count + 1) as f64));
-            let rim = [from_p3(spline.subs(0.5)), Vec3::new(20.0, 5.0, 0.0), Vec3::new(10.0, 10.0, 0.0), Vec3::new(0.0, 5.0, 0.0)];
+            let points: Vec<[f64; 3]> =
+                (0..count).map(|i| [20.0 * i as f64 / (count - 1) as f64, 0.0, if i == raised { 1.5 } else { 0.0 }]).collect();
+            // Uniform knots over [0, 1], clamped.
+            let mut knots = vec![0.0; 4];
+            knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+            knots.extend([1.0; 4]);
+            let spline = b::Curve::Spline { knots, points };
+            let c = CurveEval::new(&spline).unwrap();
+            let corners: Vec<Vec3> = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)].iter().map(|&(x, y)| Vec3::new(x, y, 0.0)).collect();
+            let line = |a: Vec3, z: Vec3| b::Curve::Line { start: [a.x, a.y, a.z], end: [z.x, z.y, z.z] };
+            let top = vec![spline.clone(), line(corners[1], corners[2]), line(corners[2], corners[3]), line(corners[3], corners[0])];
+            let body = walls(&corners, &top, Vec3::new(0.0, 0.0, -5.0));
+            let peak = c.point((raised as f64 + 1.0) / (count + 1) as f64).unwrap();
+            let rim = [c.point(0.5).unwrap(), Vec3::new(20.0, 5.0, 0.0), Vec3::new(10.0, 10.0, 0.0), Vec3::new(0.0, 5.0, 0.0)];
             match patch_edges(&body, &rim) {
                 Ok(fill) => {
-                    let face = fill.solid.face_iter().next().unwrap().clone();
-                    assert!(!matches!(face.surface(), mt::Surface::Plane(_)), "a plane would miss the bulge");
-                    let (off, tol) = (edges_off_surface(&face), super::face_tolerance(&body));
+                    let surface = first_surface(&fill);
+                    assert!(!matches!(surface, b::Surface::Plane { .. }), "a plane would miss the bulge");
+                    let (off, tol) = (edges_off_surface(&fill), super::face_tolerance(&body));
                     eprintln!("{spans}-span bump: filled, edges within {off:e} of the face");
-                    assert!(off <= tol && to_surface(&face.surface(), p3(peak)) <= tol);
+                    assert!(off <= tol && to_surface(&surface, peak) <= tol);
                     mesh_is_clean(&fill);
                 }
                 Err(e) => {
@@ -711,18 +901,13 @@ mod tests {
 
     /// A point on each edge that bounds one face of `body` (its free edges).
     fn free_edge_points(body: &Body) -> Vec<Vec3> {
-        let mut uses: std::collections::HashMap<mt::EdgeID, (usize, mt::Edge)> = std::collections::HashMap::new();
-        for f in body.solid.face_iter() {
-            for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-                uses.entry(e.id()).or_insert((0, e.clone())).0 += 1;
-            }
-        }
-        uses.values()
-            .filter(|(n, _)| *n == 1)
-            .map(|(_, e)| {
-                let c = e.curve();
-                let (t0, t1) = c.range_tuple();
-                from_p3(c.subs(0.5 * (t0 + t1)))
+        let r = record(body);
+        r.edges
+            .iter()
+            .filter(|e| e.uses.len() == 1)
+            .map(|e| {
+                let [t0, t1] = e.interval;
+                CurveEval::new(&e.curve).unwrap().point(0.5 * (t0 + t1)).unwrap()
             })
             .collect()
     }
@@ -742,8 +927,7 @@ mod tests {
         let rim = free_edge_points(&side);
         let fill = patch_edges(&side, &rim).unwrap();
         assert_eq!(fill.face_count(), 1, "one face");
-        let face = fill.solid.face_iter().next().unwrap().clone();
-        let (off, tol) = (edges_off_surface(&face), super::face_tolerance(&side));
+        let (off, tol) = (edges_off_surface(&fill), super::face_tolerance(&side));
         assert!(off <= tol, "an edge is {off} off the face (tolerance {tol})");
         // Its area is at least its shadow on the plane x = 0 (the 20 × 20 square the loop bounds
         // there) and, a least-bending fill, no more than the half side it spans.
@@ -776,7 +960,7 @@ mod tests {
             let lid = patch_edges(&open, &rim).unwrap();
             assert_eq!(lid.face_count(), 1);
             let edges = lid.edge_count();
-            assert!(matches!(lid.solid.face_iter().next().unwrap().surface(), mt::Surface::Plane(_)), "tilt {tilt:?}");
+            assert!(matches!(first_surface(&lid), b::Surface::Plane { .. }), "tilt {tilt:?}");
             let closed = stitch(&[&open, &lid], 0.0).unwrap();
             assert!(!closed.is_surface());
             let (want, got) = (measure(&solid).unwrap().volume, measure(&closed).unwrap().volume);
@@ -796,7 +980,7 @@ mod tests {
         let rim = [Vec3::new(5.0, 0.0, 10.0), Vec3::new(10.0, 5.0, 10.0), Vec3::new(5.0, 10.0, 10.0), Vec3::new(0.0, 5.0, 10.0)];
         let lid = patch_edges(&open, &rim).unwrap();
         assert_eq!(lid.face_count(), 1);
-        assert!(matches!(lid.solid.face_iter().next().unwrap().surface(), mt::Surface::Plane(_)));
+        assert!(matches!(first_surface(&lid), b::Surface::Plane { .. }));
         let closed = stitch(&[&open, &lid], 0.0).unwrap();
         assert!((measure(&closed).unwrap().volume - 1000.0).abs() < 1e-9);
     }
@@ -824,21 +1008,19 @@ mod tests {
         for crown in [0.25, -0.25] {
             let full = patch_edges_crowned(&open, &rim, crown).unwrap();
             assert_eq!(full.face_count(), 1, "one face");
-            let face = full.solid.face_iter().next().unwrap().clone();
-            assert!(!matches!(face.surface(), mt::Surface::Plane(_)));
-            let own: Vec<mt::EdgeID> = open.solid.edge_iter().map(|e| e.id()).collect();
-            assert!(full.solid.edge_iter().all(|e| own.contains(&e.id())), "an edge that is not the body's");
+            assert!(!matches!(first_surface(&full), b::Surface::Plane { .. }));
+            assert!(own_edges(&full, &open), "an edge that is not the body's");
             // The loop's edges are within the fill's tolerance of the face, as for the plain fill.
-            let off = edges_off_surface(&face);
+            let off = edges_off_surface(&full);
             assert!(off <= super::face_tolerance(&open), "an edge is {off} off the crowned face");
             mesh_is_clean(&full);
             // The middle of the loop's box moved by crown × its diagonal (the bump is 1 there).
-            let a = plain.solid.face_iter().next().unwrap().surface();
-            let b = face.surface();
-            let (Some((bu0, bu1)), Some((bv0, bv1))) = a.try_range_tuple() else { panic!("a bounded surface") };
+            let (ra, rb) = (record(&plain), record(&full));
+            let (a, b) = (SurfaceEval::new(&ra.faces[0].surface).unwrap(), SurfaceEval::new(&rb.faces[0].surface).unwrap());
+            let [[bu0, bu1], [bv0, bv1]] = ra.faces[0].domain;
             let (uc, vc) = ((bu0 + bu1) / 2.0, (bv0 + bv1) / 2.0);
             let size = (bu1 - bu0).hypot(bv1 - bv0);
-            let bump = a.subs(uc, vc).distance(b.subs(uc, vc));
+            let bump = a.point([uc, vc]).unwrap().dist(b.point([uc, vc]).unwrap());
             let want = (crown * size).abs();
             eprintln!("crown {crown}: the middle moved {bump:.6}, wanted {want:.6}");
             assert!((bump - want).abs() < 1e-6 * size, "middle {bump} against {want}");
@@ -852,7 +1034,7 @@ mod tests {
         .unwrap();
         let rim = [Vec3::new(5.0, 0.0, 10.0), Vec3::new(10.0, 5.0, 10.0), Vec3::new(5.0, 10.0, 10.0), Vec3::new(0.0, 5.0, 10.0)];
         let lid = patch_edges_crowned(&open, &rim, 1.0).unwrap();
-        assert!(matches!(lid.solid.face_iter().next().unwrap().surface(), mt::Surface::Plane(_)), "a planar loop is a plane");
+        assert!(matches!(first_surface(&lid), b::Surface::Plane { .. }), "a planar loop is a plane");
         // Hostile crowns are refused before anything is built.
         for crown in [f64::NAN, f64::INFINITY, 3.01, -0.91, 1e300] {
             assert!(patch_edges_crowned(&open, &rim, crown).is_err(), "crown {crown}");
