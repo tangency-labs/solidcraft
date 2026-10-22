@@ -10359,6 +10359,110 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none(), "a moving gesture opens no menu");
     }
 
+    /// Three fingers down on the viewport, ready to orbit.
+    fn three_fingers(h: &mut crate::scenario::Harness, at: [Pos2; 3]) {
+        h.call("ui.move", json!({"x": at[0].x, "y": at[0].y}));
+        for (i, p) in at.iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::Start, *p));
+        }
+        h.frame();
+    }
+
+    #[test]
+    fn three_finger_gestures_orbit_the_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.zoom_to_cursor = false;
+        h.app.preferences.trackpad_pan = false;
+        three_fingers(&mut h, [pos2(700.0, 500.0), pos2(800.0, 500.0), pos2(900.0, 500.0)]);
+        assert!(h.app.viewport.touch.is_some(), "three fingers start a gesture");
+        assert!(h.app.session.selection.is_empty(), "the fingers land on the camera's behalf, not to select");
+        let start = h.app.cam;
+        // The three fingers slide together: the view turns with them.
+        for (i, x) in [740.0, 840.0, 940.0].into_iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::Move, pos2(x, 540.0)));
+        }
+        h.frame();
+        assert_ne!(h.app.cam.back(), start.back(), "a three-finger slide must orbit");
+        assert_eq!(h.app.cam.target, start.target, "orbiting around the view centre keeps the target");
+        assert_eq!(h.app.cam.half_height(), start.half_height(), "a three-finger slide must not zoom");
+        assert_eq!(h.app.cam.roll, start.roll, "a three-finger slide must not roll");
+        assert!(h.app.viewport.boxsel.is_none(), "the fingers do not box select");
+        assert!(h.app.viewport.hover.is_none(), "hover holds back while the fingers orbit");
+        // Squeezing them together does not zoom either: the pinch belongs to two fingers.
+        let squeezed = h.app.cam.half_height();
+        for (i, x) in [770.0, 840.0, 910.0].into_iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::Move, pos2(x, 540.0)));
+        }
+        h.frame();
+        assert_eq!(h.app.cam.half_height(), squeezed, "three fingers must not zoom");
+        // One lifts and the two left keep orbiting (not panning).
+        let turned = h.app.cam.back();
+        h.app.synthetic.push(finger(2, egui::TouchPhase::End, pos2(910.0, 540.0)));
+        h.frame();
+        for (i, x) in [800.0, 870.0].into_iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::Move, pos2(x, 560.0)));
+        }
+        h.frame();
+        assert_ne!(h.app.cam.back(), turned, "the two fingers left keep orbiting");
+        // They all leave: the gesture ends and the camera keeps what it has.
+        let done = h.app.cam;
+        h.app.synthetic.push(finger(0, egui::TouchPhase::End, pos2(800.0, 560.0)));
+        h.app.synthetic.push(finger(1, egui::TouchPhase::End, pos2(870.0, 560.0)));
+        h.frame();
+        assert!(h.app.viewport.touch.is_none(), "the gesture ends with the fingers");
+        h.frames(4);
+        assert_eq!(h.app.cam, done, "nothing moves after the fingers are gone");
+        assert!(h.app.viewport.context_menu.is_none(), "orbiting is no tap, so no menu");
+    }
+
+    #[test]
+    fn the_fingers_a_three_finger_orbit_leaves_behind_select_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.trackpad_pan = false;
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).ok();
+        h.app.ui.pick_bodies = true;
+        h.app.fit_view();
+        h.frames(2);
+        three_fingers(&mut h, [pos2(700.0, 500.0), pos2(800.0, 500.0), pos2(900.0, 500.0)]);
+        let before = h.app.cam;
+        for (i, x) in [740.0, 840.0, 940.0].into_iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::Move, pos2(x, 520.0)));
+        }
+        h.frame();
+        assert_ne!(h.app.cam.back(), before.back(), "three fingers orbit the view");
+        let cam = h.app.cam;
+        // Two lift: the one left is the orbit's leftover, not the beginning of a new press.
+        h.app.synthetic.push(finger(1, egui::TouchPhase::End, pos2(840.0, 520.0)));
+        h.app.synthetic.push(finger(2, egui::TouchPhase::End, pos2(940.0, 520.0)));
+        h.app.synthetic.push(finger(0, egui::TouchPhase::Move, pos2(800.0, 600.0)));
+        h.app.synthetic.push(egui::Event::PointerMoved(pos2(800.0, 600.0)));
+        h.frame();
+        assert!(h.app.viewport.touch_leftover, "the finger left behind is held back");
+        assert!(h.app.viewport.boxsel.is_none(), "the finger left behind must not start a box selection");
+        assert_eq!(h.app.cam, cam, "nor orbit on its own");
+        h.app.synthetic.push(finger(0, egui::TouchPhase::End, pos2(800.0, 600.0)));
+        h.app.synthetic.push(finger_press(pos2(800.0, 600.0), false));
+        h.app.synthetic.push(egui::Event::PointerGone);
+        h.frame();
+        h.frames(2);
+        assert!(h.app.session.selection.is_empty(), "the leftover finger selects nothing as it lifts");
+        assert!(h.app.viewport.context_menu.is_none(), "an orbit is no tap, so no menu");
+    }
+
+    #[test]
+    fn a_still_three_finger_touch_opens_no_menu() {
+        let mut h = crate::scenario::Harness::new();
+        three_fingers(&mut h, [pos2(700.0, 500.0), pos2(800.0, 500.0), pos2(900.0, 500.0)]);
+        // Fingers that come and go without moving are the two-finger tap's; three are not.
+        for (i, x) in [700.0, 800.0, 900.0].into_iter().enumerate() {
+            h.app.synthetic.push(finger(i as u64, egui::TouchPhase::End, pos2(x, 500.0)));
+        }
+        h.frame();
+        h.frames(4);
+        assert!(h.app.viewport.touch.is_none());
+        assert!(h.app.viewport.context_menu.is_none(), "three fingers are the camera's, not the menu's");
+    }
+
     #[test]
     fn one_finger_leaves_the_camera_alone() {
         let mut h = crate::scenario::Harness::new();

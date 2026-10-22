@@ -5,8 +5,10 @@
 //! One entry point, [`handle`], reads a frame's pointer, wheel, trackpad and modifier input over a
 //! view and moves `app.cam` the way Preferences › Navigation says: the navigation preset (Fusion,
 //! SolidWorks, Blender, Touchpad…), Orbit around, zoom to the cursor, the middle double-click and
-//! orbit snapping. The 3D mouse's motion goes through [`device`] too, with the page's
-//! [`NavCaps`], and so does a device app's over the navigation bridge. The view keys and the navigators act on `app.cam` independently of the page. New
+//! orbit snapping. On a touch screen two fingers pan, pinch and twist the view, and three orbit
+//! it. The 3D mouse's motion goes through [`device`] too, with the page's [`NavCaps`], and so does
+//! a device app's over the navigation bridge. The view keys and the navigators act on `app.cam`
+//! independently of the page. New
 //! canvases must call `navigation::handle` rather than reading drags or the wheel themselves;
 //! `hand_rolled_camera_input_is_rejected` fails when they do.
 
@@ -97,15 +99,21 @@ const TOUCH_TAP_SECS: f64 = 0.35;
 const TOUCH_TAP_ZOOM: f32 = 0.02;
 const TOUCH_TAP_TURN: f32 = 0.05;
 
-/// A two-finger gesture on a touch screen, tracked for the frames it lasts.
+/// A multi-finger gesture on a touch screen, tracked for the frames it lasts.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TouchGesture {
     /// The app time it began (for the tap's duration).
     pub at: f64,
     /// Its midpoint this frame: where a two-finger tap opens the menu.
     pub center: Pos2,
-    /// It panned, pinched or twisted: no longer a tap.
+    /// It panned, pinched, twisted or orbited: no longer a tap.
     pub moved: bool,
+    /// Three or more fingers took part: it is the camera's orbit gesture, never the two-finger
+    /// tap that opens the menu.
+    pub three_fingers: bool,
+    /// It orbits the view. Latched for the rest of the gesture: a finger lifted from the three
+    /// leaves the two behind turning the view, not panning it, until they all lift.
+    pub orbiting: bool,
 }
 
 /// Raw wheel/trackpad input for one frame, split by source.
@@ -662,20 +670,29 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // that land and leave without moving are a tap: the menu a mouse would open with its right
     // button, since a phone has none. The camera is *not* rolled twice: the page still gets the
     // pointer's own movement through the emulated drag, so this gesture's deltas are applied here
-    // only (see the `touch_mode` guard below).
+    // only (see the `touch_mode` guard below). Three fingers orbit, so the pick, drag and
+    // selection the first finger's emulated pointer would make stay away too.
     let mut touch_pan = egui::Vec2::ZERO;
     let mut touch_zoom = 1.0_f32;
     let mut touch_roll = 0.0_f64;
+    let mut touch_orbit = egui::Vec2::ZERO;
     let mut touch_mode = None;
     let touch_info = ui.input(|i| i.multi_touch()).filter(|_| inside && app.viewport.context_menu.is_none());
     if let Some(info) = touch_info {
+        // Three or more fingers are the phone's orbit gesture: two fingers already pan, pinch
+        // and twist, and a phone has no middle button to orbit with. Their midpoint's travel
+        // turns the view around the pivot Preferences › Orbit around chose, exactly as the
+        // mouse's orbit drag does; their spread and twist are not the camera's then (they are
+        // what two fingers are for, and a palm resting beside them must not zoom).
+        let orbit = info.num_touches >= 3 && caps.orbit;
         let moved = info.translation_delta.length() > options.max_click_dist
-            || (info.zoom_delta - 1.0).abs() > TOUCH_TAP_ZOOM
-            || info.rotation_delta.abs() > TOUCH_TAP_TURN;
+            || (!orbit && ((info.zoom_delta - 1.0).abs() > TOUCH_TAP_ZOOM || info.rotation_delta.abs() > TOUCH_TAP_TURN));
         match &mut app.viewport.touch {
             Some(gesture) => {
                 gesture.moved |= moved;
                 gesture.center = info.center_pos;
+                gesture.three_fingers |= info.num_touches >= 3;
+                gesture.orbiting |= orbit;
             }
             None => {
                 // The second finger of a drag that had already begun on the first (a sketch point
@@ -691,21 +708,29 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     crate::dim_view::drag_end();
                     crate::sketch3d::drag_end();
                 }
-                app.viewport.touch = Some(TouchGesture { at: app.now, center: info.center_pos, moved });
+                app.viewport.touch =
+                    Some(TouchGesture { at: app.now, center: info.center_pos, moved, three_fingers: info.num_touches >= 3, orbiting: orbit });
             }
         }
-        touch_pan = info.translation_delta;
-        if info.zoom_delta.is_finite() && info.zoom_delta > 0.0 {
-            touch_zoom = info.zoom_delta;
+        let orbit = orbit || app.viewport.touch.is_some_and(|g| g.orbiting);
+        if orbit {
+            touch_orbit = info.translation_delta;
+            touch_mode = Some(NavMode::Orbit);
+        } else {
+            touch_pan = info.translation_delta;
+            if info.zoom_delta.is_finite() && info.zoom_delta > 0.0 {
+                touch_zoom = info.zoom_delta;
+            }
+            if caps.orbit && info.rotation_delta.is_finite() {
+                touch_roll = f64::from(info.rotation_delta);
+            }
+            touch_mode = Some(NavMode::Pan);
         }
-        if caps.orbit && info.rotation_delta.is_finite() {
-            touch_roll = f64::from(info.rotation_delta);
-        }
-        touch_mode = Some(NavMode::Pan);
     } else if let Some(gesture) = app.viewport.touch.take() {
-        // The fingers have left (or only one is left). A short, still gesture is a tap.
+        // The fingers have left (or only one is left). A short, still two-finger gesture is a
+        // tap - the right-click a phone has none. Three fingers are the camera's alone.
         let cancelled = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Cancel, .. })));
-        if !cancelled && !gesture.moved && app.now - gesture.at <= TOUCH_TAP_SECS {
+        if !cancelled && !gesture.moved && !gesture.three_fingers && app.now - gesture.at <= TOUCH_TAP_SECS {
             crate::context_menu::request_open(app, gesture.center, crate::context_menu::Target::Viewport);
         }
     }
@@ -774,6 +799,15 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.viewport.orbit_free = None;
         app.cancel_view_animation();
         app.cam.roll_by(touch_roll);
+    }
+    // Three fingers turn the view with them, as the mouse's orbit drag does (around the point
+    // the gesture began on when Orbit around says cursor).
+    if touch_orbit != egui::Vec2::ZERO {
+        app.viewport.orbit_snap = None;
+        app.viewport.orbit_free = None;
+        app.cancel_view_animation();
+        let center = app.viewport.touch.map(|g| g.center);
+        orbit_drag(app, rect, f64::from(touch_orbit.x), f64::from(touch_orbit.y), center, false, true);
     }
     // A left press with the preset's keys (Alias: Shift+Alt) navigates until the button is let
     // go (kept through the release frame, so the end of the drag doesn't select either).
@@ -881,7 +915,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             }
             camera_motion(app, rect, params);
         }
-    } else if mode == Some(NavMode::Orbit) {
+    } else if mode == Some(NavMode::Orbit) && touch_mode.is_none() {
+        // A touch gesture already turned the view by its own deltas, as the pan below notes.
         let press = ui.input(|i| i.pointer.press_origin());
         app.cancel_view_animation();
         // Shift can be required to enter orbit (middle drag, Alias Shift+Alt),

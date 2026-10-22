@@ -59,6 +59,9 @@
   two fingers to orbit freely instead of panning. No click is needed. Releasing Shift returns
   to panning, even during the same gesture. Shift does not snap this gesture to standard views;
   orbit gestures do nothing on flat 2D pages. Other presets keep their existing scroll behaviour.
+  On a touch screen one finger taps to select, two drag as the trackpad does (pan, pinch to
+  zoom, twist to roll) and **three fingers orbit**; a still two-finger tap opens the context
+  menu.
   Shift+middle orbits freely
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
