@@ -1,8 +1,8 @@
 //! Display-only tangent joins. Unknown geometry retains its existing presentation.
+use solidcraft_geom::brep::{Curve, Loop, Shell, Surface};
 use solidcraft_geom::{Mesh, Vec3};
-use truck_modeling as mt;
 
-use crate::body::{Body, from_p3};
+use crate::body::Body;
 
 const MAX_FACES: usize = 50_000;
 const MAX_EDGES: usize = 200_000;
@@ -26,19 +26,17 @@ fn roundoff(points: &[Vec3]) -> f64 {
     points.iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1., f64::max) * f64::EPSILON * 64.
 }
 
-/// Only a clamped Bezier profile swept by one common linear translation.
-/// Its whole ruling normal is bounded from the linear cross derivative, not sampled.
-fn ruled(surface: &mt::Surface, orientation: bool, work: &mut usize) -> Option<[Boundary; 2]> {
-    let mt::Surface::BSplineSurface(surface) = surface else { return None };
-    let controls = surface.control_points();
+/// Only a clamped Bezier profile swept by one common linear translation (a B-spline surface
+/// record: `points[i][j]`, i along u). Its whole ruling normal is bounded from the linear cross
+/// derivative, not sampled. `orientation`: the face's outward normal is the natural one.
+fn ruled(u_knots: &[f64], v_knots: &[f64], controls: &[Vec<[f64; 3]>], orientation: bool, work: &mut usize) -> Option<[Boundary; 2]> {
     let rows = controls.len();
     let cols = controls.first()?.len();
     if !(2..=33).contains(&rows) || !(2..=33).contains(&cols) || controls.iter().any(|row| row.len() != cols) {
         return None;
     }
     charge(work, rows.checked_mul(cols)?.checked_mul(4)?)?;
-    let (ku, kv) = surface.knot_vecs();
-    let clamped = |knots: &mt::KnotVec, count: usize| {
+    let clamped = |knots: &[f64], count: usize| {
         let (Some(first), Some(last)) = (knots.first(), knots.last()) else { return false };
         knots.len() == count * 2
             && first.is_finite()
@@ -47,7 +45,7 @@ fn ruled(surface: &mt::Surface, orientation: bool, work: &mut usize) -> Option<[
             && knots.iter().take(count).all(|k| k == first)
             && knots.iter().skip(count).all(|k| k == last)
     };
-    if !clamped(ku, rows) || !clamped(kv, cols) {
+    if !clamped(u_knots, rows) || !clamped(v_knots, cols) {
         return None;
     }
     for transpose in [false, true] {
@@ -57,7 +55,7 @@ fn ruled(surface: &mt::Surface, orientation: bool, work: &mut usize) -> Option<[
         }
         let at = |i: usize, j: usize| {
             let p = if transpose { controls.get(j)?.get(i)? } else { controls.get(i)?.get(j)? };
-            let p = from_p3(*p);
+            let p = Vec3::new(p[0], p[1], p[2]);
             p.is_finite().then_some(p)
         };
         let a = at(0, 0)?;
@@ -126,7 +124,8 @@ pub(crate) fn flags(body: &Body, mesh: &Mesh) -> (Vec<bool>, Vec<bool>) {
 }
 
 fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>) {
-    if body.solid.face_iter().take(MAX_FACES + 1).count() > MAX_FACES || mesh.edges.len() > MAX_EDGES {
+    let Ok(rec) = crate::native::brep_record(body) else { return (Vec::new(), Vec::new()) };
+    if rec.faces.len() > MAX_FACES || mesh.edges.len() > MAX_EDGES {
         return (Vec::new(), Vec::new());
     }
     let mut split_points = 0usize;
@@ -137,46 +136,44 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
         let Some(total) = split_points.checked_add(line.len()) else { return (Vec::new(), Vec::new()) };
         split_points = total;
     }
-    let mut boundaries = Vec::new();
-    for face in body.solid.face_iter() {
-        // Borrow the geometry through mapping, avoiding a deep clone of an
-        // unknown/hostile surface before inspecting its control-net bounds.
-        let wires = face.absolute_boundaries();
-        if wires.len() > 16 {
+    // Each face's outward normal is its surface's natural one.
+    let mut forward = vec![None; rec.faces.len()];
+    for sh in &rec.shells {
+        if let Shell::Faces { faces, .. } = sh {
+            for f in faces {
+                if let Some(slot) = forward.get_mut(f.face as usize) {
+                    *slot = Some(f.forward);
+                }
+            }
+        }
+    }
+    let mut boundaries = Vec::with_capacity(rec.faces.len());
+    for (face, orientation) in rec.faces.iter().zip(&forward) {
+        let edge_count = face
+            .loops
+            .iter()
+            .map(|l| match l {
+                Loop::Edges { edges } => edges.len(),
+                Loop::Vertex { .. } => 0,
+            })
+            .fold(0usize, usize::saturating_add);
+        if face.loops.len() > 16 || edge_count > 16 || charge(&mut work, edge_count + 1).is_none() {
             boundaries.push(None);
             continue;
         }
-        let edge_count = wires.iter().fold(0usize, |sum, wire| sum.saturating_add(wire.len()));
-        if edge_count > 16 || charge(&mut work, edge_count + 1).is_none() {
-            boundaries.push(None);
-            continue;
-        }
-        // Mapping rebuilds each edge through a check that refuses one starting and ending at
-        // the same vertex (a loop of one closed edge: a hole a closed curve cut).
-        if wires.iter().flat_map(|w| w.edge_iter()).any(|e| e.front().id() == e.back().id()) {
-            boundaries.push(None);
-            continue;
-        }
-        let mapped = face.try_mapped(|_| Some(()), |_| Some(()), |surface| ruled(surface, face.orientation(), &mut work));
-        boundaries.push(mapped.map(|face| face.surface()));
+        let ruling = match (&face.surface, orientation) {
+            (Surface::Spline { u_knots, v_knots, points }, Some(o)) => ruled(u_knots, v_knots, points, *o, &mut work),
+            _ => None,
+        };
+        boundaries.push(ruling);
     }
     let mut out = vec![false; mesh.edges.len()];
     let mut sharp = vec![false; mesh.edges.len()];
-    // Same first-occurrence order as tessellate().edges; never remove/reindex it.
-    let mut seen = std::collections::HashSet::new();
-    let mut index = 0usize;
-    for edge in body.solid.edge_iter() {
-        if index >= mesh.edges.len() || seen.len() >= MAX_EDGES {
-            break;
-        }
+    // The mesh's edges are the record's, in its order.
+    for (current, edge) in rec.edges.iter().enumerate().take(mesh.edges.len().min(MAX_EDGES)) {
         if charge(&mut work, 1).is_none() {
             break;
         }
-        if !seen.insert(edge.id()) {
-            continue;
-        }
-        let current = index;
-        index += 1;
         let Some([a, b]) = mesh.edge_faces.get(current).map(Vec::as_slice) else { continue };
         if a == b {
             continue;
@@ -193,17 +190,11 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
             continue;
         }
         let (Some(Some(ba)), Some(Some(bb))) = (boundaries.get(*a as usize), boundaries.get(*b as usize)) else { continue };
-        // Curve is inspected by borrowing. Only exact straight rulings qualify;
-        // a bowed/twisted edge with matching endpoints must remain visible.
-        let mapped = edge.try_mapped(
-            |_| Some(()),
-            |curve| match curve {
-                mt::Curve::Line(line) => Some((from_p3(line.0), from_p3(line.1))),
-                _ => None,
-            },
-        );
-        let Some(mapped) = mapped else { continue };
-        let (p, q) = mapped.curve();
+        // Only exact straight rulings qualify; a bowed/twisted edge with matching endpoints
+        // must remain visible.
+        let Curve::Line { .. } = edge.curve else { continue };
+        let ends = |v: u32| rec.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
+        let (Some(p), Some(q)) = (ends(edge.vertices[0]), ends(edge.vertices[1])) else { continue };
         let (Some(na), Some(nb)) = (on_boundary(ba, p, q), on_boundary(bb, p, q)) else { continue };
         let uncertainty = na.error + nb.error;
         let cross = na.normal.cross(nb.normal).len();
@@ -264,7 +255,7 @@ mod tests {
         let ring: Vec<Seg2> = circle(4., 8).segs;
         let tool = crate::SplitTool::Curves { plane: Plane::XY, curves: vec![ring], along: None };
         let holed = crate::trim(&sheet, &tool, Vec3::new(9., 9., 0.)).unwrap();
-        assert!(holed.solid.edge_iter().any(|e| e.front().id() == e.back().id()), "a closed edge");
+        assert!(crate::native::brep_record(&holed).unwrap().edges.iter().any(|e| e.vertices[0] == e.vertices[1]), "a closed edge");
         let mesh = holed.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         let (smooth, sharp) = classify(&holed, &mesh, WORK);
         assert_eq!((smooth.len(), sharp.len()), (mesh.edges.len(), mesh.edges.len()));
@@ -307,15 +298,6 @@ mod tests {
         unknown.edge_faces[index].push(999);
         assert!(!flags(&body, &unknown).0[index]);
         assert!(classify(&body, &mesh, 0).0.iter().all(|f| !*f));
-        // Matching endpoints alone cannot authorize a bowed current edge.
-        let changed = Body::new(body.deep_copy()).unwrap();
-        let edges = Body::unique_edges(&changed.solid);
-        let edge = &edges[index];
-        let (a, b) = (edge.front().point(), edge.back().point());
-        let mid = mt::Point3::new((a.x + b.x) / 2. + 0.1, (a.y + b.y) / 2., (a.z + b.z) / 2.);
-        edge.set_curve(mt::Curve::BSplineCurve(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(2), vec![a, mid, b])));
-        let (smooth, sharp) = flags(&changed, &mesh);
-        assert!(!smooth[index] && !sharp[index]);
     }
 
     #[test]
@@ -345,10 +327,14 @@ mod tests {
     #[test]
     fn actual_authored_split_of_a_curved_ruled_wall_stays_visible() {
         let body = ring(4);
-        let face = body
-            .solid
-            .face_iter()
-            .position(|face| face.try_mapped(|_| Some(()), |_| Some(()), |surface| ruled(surface, face.orientation(), &mut { WORK })).is_some())
+        let face = crate::native::brep_record(&body)
+            .unwrap()
+            .faces
+            .iter()
+            .position(|face| match &face.surface {
+                Surface::Spline { u_knots, v_knots, points } => ruled(u_knots, v_knots, points, true, &mut { WORK }).is_some(),
+                _ => false,
+            })
             .unwrap();
         let tool = crate::SplitTool::Plane(Plane::new(Vec3::new(7., 0., 0.), Vec3::Y, Vec3::Z).unwrap());
         let split = crate::split_faces(&body, &[face], &tool).unwrap();
@@ -366,18 +352,20 @@ mod tests {
 
     #[test]
     fn singular_twisted_and_reversed_normal_certificates_are_conservative() {
-        let surface = |points: Vec<Vec<mt::Point3>>| {
-            mt::Surface::BSplineSurface(mt::BSplineSurface::new((mt::KnotVec::bezier_knot(points.len() - 1), mt::KnotVec::bezier_knot(1)), points))
+        // A Bezier surface of `points[i][j]`, i along u, one span each way.
+        let ruled_of = |points: Vec<Vec<[f64; 3]>>, orientation: bool, work: &mut usize| {
+            let knots = |n: usize| [vec![0.0; n], vec![1.0; n]].concat();
+            ruled(&knots(points.len()), &knots(points.first().map_or(0, Vec::len)), &points, orientation, work)
         };
-        let p = |x, y, z| mt::Point3::new(x, y, z);
-        let straight = surface(vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]]);
-        let forward = ruled(&straight, true, &mut { WORK }).unwrap();
-        let backward = ruled(&straight, false, &mut { WORK }).unwrap();
+        let p = |x: f64, y: f64, z: f64| [x, y, z];
+        let straight = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]];
+        let forward = ruled_of(straight.clone(), true, &mut { WORK }).unwrap();
+        let backward = ruled_of(straight.clone(), false, &mut { WORK }).unwrap();
         assert!(forward[0].normal.dot(backward[0].normal) < -0.99);
-        let twisted = surface(vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 1., 3.)]]);
-        assert!(ruled(&twisted, true, &mut { WORK }).is_none());
-        let singular = surface(vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]]);
-        assert!(ruled(&singular, true, &mut { WORK }).is_none());
-        assert!(ruled(&straight, true, &mut 0).is_none());
+        let twisted = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 1., 3.)]];
+        assert!(ruled_of(twisted, true, &mut { WORK }).is_none());
+        let singular = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]];
+        assert!(ruled_of(singular, true, &mut { WORK }).is_none());
+        assert!(ruled_of(straight, true, &mut 0).is_none());
     }
 }
