@@ -361,7 +361,7 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
         .edges
         .get(e)
         .filter(|edge| !matches!(edge.curve, solidcraft_geom::brep::Curve::SurfaceIntersection { .. }))
-        .map(|edge| vec![WireCurve { curve: edge.curve.clone(), interval: edge.interval }])
+        .map(|edge| vec![WireCurve { curve: edge.parameters().clone(), interval: edge.interval }])
         .unwrap_or_default()
 }
 

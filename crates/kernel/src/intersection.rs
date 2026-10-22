@@ -56,7 +56,7 @@ pub fn meeting_edges(a: &Body, a_face: Option<usize>, b: &Body, b_face: Option<u
         let (Some(e), Some(points)) = (at.and_then(|k| record.edges.get(k)), at.and_then(|k| mesh.edges.get(k))) else {
             return Err(failed("history", format!("edge {i} is not in the imprinted body")));
         };
-        out.push(MeetingEdge { curve: e.curve.clone(), interval: e.interval, points: points.clone() });
+        out.push(MeetingEdge { curve: e.parameters().clone(), interval: e.interval, points: points.clone() });
     }
     Ok(out)
 }

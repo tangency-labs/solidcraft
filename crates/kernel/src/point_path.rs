@@ -152,7 +152,7 @@ const MAX_EDGE_SEGS: usize = 1000;
 pub fn edge_path(body: &Body, edge: usize) -> Result<Vec<PathSeg>> {
     let record = crate::native::brep_record(body)?;
     let e = record.edges.get(edge).ok_or_else(|| KernelError::Invalid(format!("the body has no edge {edge}")))?;
-    curve_path(&e.curve, e.interval)
+    curve_path(e.parameters(), e.interval)
 }
 
 /// The sketch segments `segs` on `plane` projected along `direction` (pointing from them toward

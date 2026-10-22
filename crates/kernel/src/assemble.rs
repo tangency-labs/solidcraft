@@ -26,6 +26,8 @@ fn invalid(m: impl std::fmt::Display) -> KernelError {
 #[derive(Clone, Debug)]
 pub(crate) struct AEdge {
     pub curve: Curve,
+    /// The NURBS form the edge's parameter is on, as the record's `Edge::nurbs`.
+    pub nurbs: Option<Curve>,
     pub interval: [f64; 2],
     pub vertices: [u32; 2],
     pub tolerance: f64,
@@ -118,6 +120,7 @@ impl Assembly {
             .enumerate()
             .map(|(i, e)| AEdge {
                 curve: e.curve.clone(),
+                nurbs: e.nurbs.clone(),
                 interval: e.interval,
                 vertices: e.vertices,
                 tolerance: e.tolerance,
@@ -144,7 +147,7 @@ impl Assembly {
 
     /// A new edge on `curve` over `interval`, from `a` to `b`.
     pub(crate) fn edge(&mut self, curve: Curve, interval: [f64; 2], a: u32, b: u32) -> Result<u32> {
-        self.edges.push(AEdge { curve, interval, vertices: [a, b], tolerance: self.tolerance, source: None, of: Vec::new() });
+        self.edges.push(AEdge { curve, nurbs: None, interval, vertices: [a, b], tolerance: self.tolerance, source: None, of: Vec::new() });
         index(self.edges.len() - 1)
     }
 
@@ -218,7 +221,7 @@ impl Assembly {
             }
         }
         let edges = self.edges.iter().map(|a| Edge {
-            nurbs: None,
+            nurbs: a.nurbs.clone(),
             curve: a.curve.clone(),
             interval: a.interval,
             vertices: a.vertices,
@@ -260,7 +263,7 @@ impl Assembly {
                         let e = self.edges.get(u.edge as usize).ok_or_else(|| invalid("edge reference"))?;
                         Ok(EdgeUse {
                             edge: u.edge,
-                            curve: &e.curve,
+                            curve: e.nurbs.as_ref().unwrap_or(&e.curve),
                             interval: e.interval,
                             forward: u.forward,
                             tolerance: e.tolerance,

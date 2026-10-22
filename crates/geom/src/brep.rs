@@ -488,10 +488,39 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
 
 impl Edge {
     /// The curve the edge's parameter is on: its NURBS form when it has one, else its curve.
-    /// Everything that evaluates the edge at a parameter goes through this.
+    /// Everything that evaluates the edge at a parameter goes through this, with `interval`.
     pub fn parameters(&self) -> &Curve {
         self.nurbs.as_ref().unwrap_or(&self.curve)
     }
+
+    /// The edge's interval on `curve` itself, for code that reads what the edge is (a circle's
+    /// angles): `interval` when the edge has no NURBS form; otherwise the angles of its ends on the
+    /// NURBS, unwrapped forward along the edge (a whole turn for a closed edge). A form's
+    /// circle or ellipse has its frame turned so its angle grows along the NURBS (the SMLib
+    /// conversion makes it so). `None` where the NURBS can't be evaluated.
+    pub fn curve_interval(&self) -> Option<[f64; 2]> {
+        curve_interval(&self.curve, self.nurbs.as_ref(), self.interval)
+    }
+}
+
+/// [`Edge::curve_interval`] of an edge given by its parts: its `curve`, its NURBS form and its
+/// interval on that form.
+pub fn curve_interval(curve: &Curve, nurbs: Option<&Curve>, interval: [f64; 2]) -> Option<[f64; 2]> {
+    use std::f64::consts::TAU;
+    let Some(n) = nurbs else { return Some(interval) };
+    let (frame, radii) = match curve {
+        Curve::Circle { frame, radius } => (frame, [*radius, *radius]),
+        Curve::Ellipse { frame, radii } => (frame, *radii),
+        _ => return Some(interval),
+    };
+    let eval = eval::CurveEval::new(n).ok()?;
+    let [t0, t1] = interval;
+    let o = crate::Vec3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
+    let (x, y) = (crate::Vec3::from(frame.x_axis), crate::Vec3::from(frame.y_axis));
+    let angle = |t: f64| eval.point(t).map(|p| ((p - o).dot(y) / radii[1]).atan2((p - o).dot(x) / radii[0]).rem_euclid(TAU));
+    let (a0, a1) = (angle(t0)?, angle(t1)?);
+    let sweep = (a1 - a0).rem_euclid(TAU);
+    Some([a0, a0 + if sweep <= 1e-12 { TAU } else { sweep }])
 }
 
 impl Face {

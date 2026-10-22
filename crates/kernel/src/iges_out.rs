@@ -345,7 +345,7 @@ fn shell(w: &mut W, b: &Brep, si: u32, paint: &HashMap<usize, [f32; 3]>) -> Resu
     let mut ep = vec![edges.len().to_string()];
     for &e in &edges {
         let edge = b.edges.get(e as usize).ok_or_else(|| failed(format!("edge {e}: no such edge")))?;
-        let c = topology::curve(&edge.curve).map_err(|m| failed(format!("edge {e}: {m}")))?;
+        let c = topology::curve(edge.parameters()).map_err(|m| failed(format!("edge {e}: {m}")))?;
         let [sv, tv] = edge.vertices.map(|v| vidx.get(&v).copied().unwrap_or(0));
         let (pa, pb) = (verts.get(sv).copied().unwrap_or([0.0; 3]), verts.get(tv).copied().unwrap_or([0.0; 3]));
         let cd = curve(w, &c, edge.interval, pa, pb, sv == tv)?;

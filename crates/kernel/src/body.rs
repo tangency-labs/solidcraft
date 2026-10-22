@@ -870,7 +870,7 @@ impl Body {
             b.add(v3(v.point));
         }
         for e in &self.record.edges {
-            curve_hull(&e.curve, e.interval, &mut b);
+            curve_hull(e.parameters(), e.interval, &mut b);
         }
         b
     }

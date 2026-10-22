@@ -625,14 +625,14 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
             }
         }
         let given = match pcurves {
-            Pcurves::Projected(p) => Some(p.pcurve(&edge.curve, edge.interval).ok_or_else(|| {
+            Pcurves::Projected(p) => Some(p.pcurve(edge.parameters(), edge.interval).ok_or_else(|| {
                 KernelError::Invalid(
                     "not supported yet: a fitted patch on a circular, elliptic or traced edge (it has no exact pcurve on the fit)".into(),
                 )
             })?),
             Pcurves::Computed => None,
         };
-        edges.push(PartEdge { curve: edge.curve.clone(), interval: edge.interval, vertices: ends });
+        edges.push(PartEdge { curve: edge.parameters().clone(), interval: edge.interval, vertices: ends });
         uses.push(PartUse { edge: k as u32, forward, given });
     }
     if !ccw {
