@@ -521,6 +521,34 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
+            SurfaceKind::Sphere(s) => {
+                let r = s.create_iso_parametric_curve(
+                    k,
+                    param,
+                    iso_parameter,
+                    domain,
+                    want_uv_iso_curve,
+                )?;
+                return Ok(IsoParametricCurve {
+                    curve: r.curve,
+                    max_gap_3d: r.max_gap_3d,
+                    uv_iso_curve: r.uv_iso_curve,
+                });
+            }
+            SurfaceKind::Torus(s) => {
+                let r = s.create_iso_parametric_curve(
+                    k,
+                    param,
+                    iso_parameter,
+                    domain,
+                    want_uv_iso_curve,
+                )?;
+                return Ok(IsoParametricCurve {
+                    curve: r.curve,
+                    max_gap_3d: r.max_gap_3d,
+                    uv_iso_curve: r.uv_iso_curve,
+                });
+            }
             SurfaceKind::SurfOfRevolution(s) => {
                 // (the Rust override has no UV iso line option: `uv_iso_curve` is `None`)
                 let r = s.create_iso_parametric_curve(k, param, iso_parameter, domain)?;

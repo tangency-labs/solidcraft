@@ -17,9 +17,10 @@
 //! The classified 3D point is computed from the imported B-rep, identically for both
 //! sides: the face surface at a fraction of the face's UV domain plus an offset. A case
 //! touching a face surface or edge curve the import holds only as its B-spline part
-//! (cones, spheres, tori, extrusions, revolutions, circles, ...) is deferred: to the
-//! surface unit whose Rust kind is missing, otherwise as the shared export's harness
-//! limitation (`harness:analytic-geometry-export`, as in `topology.brep_p1`).
+//! (cones, spheres, tori, extrusions, circles, ...; an `SmSurfOfRevolution` face is
+//! imported exactly) is deferred: to the surface unit whose Rust kind is missing,
+//! otherwise as the shared export's harness limitation
+//! (`harness:analytic-geometry-export`, as in `topology.brep_p1`).
 //!
 //! **Outputs.** Boxes: status and the box (seeded with a sentinel box, so what a failing
 //! call leaves is compared). `Point3DClassify`: status and the classification (class,
@@ -250,12 +251,7 @@ const HARNESS_ANALYTIC_IMPORT: &str = "harness:analytic-geometry-export";
 /// as its B-spline part (see the module docs).
 pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<Output> {
     for f in faces {
-        let st = m
-            .types
-            .face_surface_types
-            .get(f.index() as usize)
-            .copied()
-            .unwrap_or(-1);
+        let st = m.types.inexact_surface(f.index() as usize).unwrap_or(-1);
         if st >= 0 && !EXACT_SURFACES.contains(&st) {
             let (unit, symbol) = match st {
                 15012 | 15013 => ("surface.cone_p1", "SmCone (no SurfaceKind)"),

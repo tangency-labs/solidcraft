@@ -206,12 +206,17 @@ const fn is_b_spline(c: &Curve) -> bool {
     )
 }
 
-/// `SM_CAST_PTR(SmBSplineSurface, pSurf) != NULL`: a B-spline surface, a plane or a
-/// surface of revolution (as `blend.fillet_geom_p4`'s cast).
+/// `SM_CAST_PTR(SmBSplineSurface, pSurf) != NULL`: a B-spline surface, a plane, a
+/// surface of revolution, a cone, a sphere or a torus (as `blend.fillet_geom_p4`'s cast).
 fn is_b_spline_surface(s: &Surface) -> bool {
     matches!(
         s.kind(),
-        SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_)
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
     )
 }
 

@@ -1202,6 +1202,8 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
         // an SmSurfOfRevolution is an SmBSplineSurface: its NURB
         Some(sp2::SurfaceKind::SurfOfRevolution(r)) => dump_bss(o, r.base()),
         Some(sp2::SurfaceKind::Cone(c)) => dump_bss(o, c.rev().base()),
+        Some(sp2::SurfaceKind::Sphere(s)) => dump_bss(o, s.base().base()),
+        Some(sp2::SurfaceKind::Torus(s)) => dump_bss(o, s.base().base()),
         // `put_state` of a surface that is not a B-spline
         Some(
             sp2::SurfaceKind::CurveBounded(_)

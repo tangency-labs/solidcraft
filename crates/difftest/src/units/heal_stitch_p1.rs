@@ -18,7 +18,8 @@
 //! imported B-rep (identically for both sides).
 //!
 //! **Inexact geometry.** The export carries B-spline curves, `SmLine`s, B-spline
-//! surfaces and `SmPlane`s exactly; other analytic kinds arrive as their B-spline part,
+//! surfaces, `SmPlane`s and `SmSurfOfRevolution`s exactly; other analytic kinds arrive
+//! as their B-spline part,
 //! so the ops evaluating geometry defer on B-reps holding them (as `topology.brep_p1`).
 
 use serde::{Deserialize, Serialize};
@@ -572,14 +573,16 @@ fn args(op: &Resolved) -> (Op, Vec<f64>) {
 
 /// The deferral of an op evaluating geometry on a B-rep with inexact geometry.
 pub(crate) fn inexact(types: &ImportTypes) -> Option<Output> {
-    if types
-        .face_surface_types
-        .iter()
-        .any(|&t| t >= 0 && !EXACT_SURFACES.contains(&t))
+    if let Some(t) = (0..types.face_surface_types.len())
+        .filter_map(|f| types.inexact_surface(f))
+        .find(|t| !EXACT_SURFACES.contains(t))
     {
         return Some(Output::deferred(
             HARNESS_ANALYTIC_IMPORT,
-            "analytic face surface exported as its B-spline part",
+            format!(
+                "{} face surface exported as its B-spline part",
+                super::topology_edgeuse_p1::surface_class_name(t)
+            ),
         ));
     }
     if types

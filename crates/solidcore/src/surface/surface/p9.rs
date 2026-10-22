@@ -60,6 +60,22 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
                 "surface.surface_p9",
             ))
         }
+        SurfaceKind::Sphere(_) => {
+            // DISPATCH GAP: as the cone, a sphere needs its own iso-curve overrides.
+            // UNPORTED(surface.surface_p9): SmSphere iso/tessellation callbacks
+            Err(SolidError::unported(
+                "SurfaceKind::Sphere iso/tessellation callbacks",
+                "surface.surface_p9",
+            ))
+        }
+        SurfaceKind::Torus(_) => {
+            // DISPATCH GAP: as the cone, a torus needs its own iso-curve overrides.
+            // UNPORTED(surface.surface_p9): SmTorus iso/tessellation callbacks
+            Err(SolidError::unported(
+                "SurfaceKind::Torus iso/tessellation callbacks",
+                "surface.surface_p9",
+            ))
+        }
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)

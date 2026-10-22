@@ -819,7 +819,7 @@ fn inexact_geometry(s: &Setup) -> Option<Output> {
             .ok()
             .flatten()
             .and_then(|fu| b.faceuse(fu).ok().and_then(|r| r.face))?;
-        let t = s.types.face_surface_types.get(f.index() as usize).copied().unwrap_or(-1);
+        let t = s.types.inexact_surface(f.index() as usize).unwrap_or(-1);
         if t >= 0 && !EXACT_SURFACES.contains(&t) {
             let (unit, symbol) = match t {
                 // the DISPATCH GAP of `Surface::read_from_db` (issue #76) belongs to

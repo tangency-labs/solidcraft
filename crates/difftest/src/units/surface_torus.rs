@@ -440,7 +440,7 @@ fn rust_op(
                     Ok(())
                 }
                 Ok(_) => t
-                    .create_iso_parametric_curve(k, param_of(*param), *iso, dom.as_ref())
+                    .create_iso_parametric_curve(k, param_of(*param), *iso, dom.as_ref(), false)
                     .map(|c| {
                         o.extend([0.0, c.max_gap_3d]);
                         put_curve(o, Some(&c.curve));

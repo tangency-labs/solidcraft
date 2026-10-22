@@ -2301,11 +2301,16 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
     let surface =
         face2::surface(brep, face)?.ok_or_else(|| SolidError::null_pointer(OP_EVALUATE_MATE))?;
     // SM_CAST_PTR(SmBSplineSurface, ..) and NER before the domain test: B-spline surfaces
-    // and the kinds deriving from them (planes, surfaces of revolution); the other kinds
-    // fail the cast
+    // and the kinds deriving from them (planes, surfaces of revolution, cones, spheres,
+    // tori); the other kinds fail the cast
     if !matches!(
         surface.kind(),
-        SurfaceKind::BSpline(_) | SurfaceKind::Plane(_) | SurfaceKind::SurfOfRevolution(_)
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
     ) {
         return Err(SolidError::null_pointer(OP_EVALUATE_MATE));
     }
@@ -2317,6 +2322,9 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
             SurfaceKind::BSpline(s) => s.evaluate_point_on_extended_surface(uv),
             SurfaceKind::Plane(p) => p.base_for_query().evaluate_point_on_extended_surface(uv),
             SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_point_on_extended_surface(uv),
+            SurfaceKind::Cone(c) => c.rev().base().evaluate_point_on_extended_surface(uv),
+            SurfaceKind::Sphere(s) => s.base().base().evaluate_point_on_extended_surface(uv),
+            SurfaceKind::Torus(s) => s.base().base().evaluate_point_on_extended_surface(uv),
             _ => Err(SolidError::null_pointer(OP_EVALUATE_MATE)),
         }
     }

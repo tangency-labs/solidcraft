@@ -1000,6 +1000,15 @@ impl UnitDiff for Runner {
         })
         .map_err(|e| harness(e.to_string()))?;
         let (mut b, exact) = import(&raw)?;
+        // the B-rep cache solves of op 5's point classification (`BrepQuery::default`)
+        // find the faces and edges by their arena identities, as upstream's by pointer
+        crate::util::own_arena_geometry(&mut b);
+        // the new owners drop the face tolerances the import cached on the surfaces
+        let faces: Vec<_> = b.faces().ids().collect();
+        for f in faces {
+            b.sync_face_surface_tolerance(f)
+                .map_err(|e| harness(e.to_string()))?;
+        }
         // Op 5 without mates classifies points against `b` (SmBrep::Point3DClassify;
         // with mates every edge is mated, so the radial sectors decide): a face surface
         // the export carries only as its B-spline part would be classified against other

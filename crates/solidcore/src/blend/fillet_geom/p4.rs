@@ -254,12 +254,16 @@ const fn as_b_spline(c: &Curve) -> Option<&BSplineCurve> {
 }
 
 /// The B-spline net of a surface that is an `SmBSplineSurface` (a B-spline surface, a
-/// plane or a surface of revolution): `SM_CAST_PTR(SmBSplineSurface, ..)`.
+/// plane, a surface of revolution, a cone, a sphere or a torus):
+/// `SM_CAST_PTR(SmBSplineSurface, ..)`.
 fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
     match s.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
+        SurfaceKind::Cone(c) => Some(c.rev().base()),
+        SurfaceKind::Sphere(s) => Some(s.base().base()),
+        SurfaceKind::Torus(t) => Some(t.base().base()),
         _ => None,
     }
 }

@@ -9,6 +9,7 @@
 #define SC_EDGEUSE_GRAPH_H
 
 #include "sc_shim.h"
+#include "sc_analytic_export.h"
 #include "support/topology_fixture.h"
 #include <algorithm>
 #include <memory>
@@ -562,6 +563,9 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     }
     for (SmFace* p : g.faces)
     {
+        // an exactly exportable analytic surface first (sc_analytic_export.h), then the
+        // regular block, which the importer falls back to
+        sc_analytic_export::put_exact_head(o, p->GetSurface(), the_context());
         put_surface(o, p->GetSurface());
         SmExtent2d d = p->GetUVDomain();
         o.push_back(d.GetMin().x);

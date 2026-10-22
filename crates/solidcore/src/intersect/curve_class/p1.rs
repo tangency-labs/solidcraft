@@ -1193,6 +1193,18 @@ fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
             *c.rev.base_mut().out_of_bounds_enabled_mut() = true;
             Cow::Owned(Surface::from(c))
         }
+        SurfaceKind::Sphere(s) => {
+            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
+            let mut c = s.as_ref().clone();
+            *c.base.base_mut().out_of_bounds_enabled_mut() = true;
+            Cow::Owned(Surface::from(c))
+        }
+        SurfaceKind::Torus(s) => {
+            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
+            let mut c = s.as_ref().clone();
+            *c.base.base_mut().out_of_bounds_enabled_mut() = true;
+            Cow::Owned(Surface::from(c))
+        }
         SurfaceKind::SurfOfRevolution(s) => {
             // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
             let mut s = s.as_ref().clone();

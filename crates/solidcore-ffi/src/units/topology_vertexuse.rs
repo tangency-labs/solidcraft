@@ -20,7 +20,10 @@
 //! starts with `0`, or with `-1 status` when the B-rep could not be built (nothing else
 //! follows). `-2` in an output is "upstream would dereference null" (the shim did not
 //! call it). "gap states" are the vertex/edge and vertex/face cache states of every
-//! vertex use, in order.
+//! vertex use, in order. A face's surface in the graph export may start with an exact
+//! analytic head, `2 type version surf_oob gen_oob nbytes byte*nbytes` (an
+//! `SmSurfOfRevolution`: its binary `WriteToDB` record,
+//! `harness/cpp/shim/sc_analytic_export.h`), followed by the regular surface block.
 //!
 //! | [`Op`]         | parameters after the block | outputs |
 //! |----------------|----------------------------|---------|

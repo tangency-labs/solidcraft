@@ -544,6 +544,53 @@ impl SurfOfRevolution {
         requested: SolutionRequested,
         this: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        self.drop_point_fast_using(
+            k,
+            uv_domain,
+            operation,
+            test_point,
+            in_pointing_vector,
+            distance_tolerance,
+            target_distance,
+            requested,
+            this,
+            &|k, uv| self.evaluate_step_point(k, uv),
+            &|k, domain, operation, point, guess| {
+                surface_local_point_solve(k, self, domain, operation, point, guess)
+            },
+        )
+    }
+
+    /// [`Self::drop_point_fast`] with upstream's virtual calls on `this` supplied by
+    /// the derived class (`SmSphere`, `SmTorus`): `step_point` is its
+    /// `EvaluateSTEPPoint` and `local_solve` its `LocalPointSolve` (`found` and the
+    /// solution).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::drop_point_fast`] and of the callbacks.
+    #[allow(clippy::too_many_arguments)] // upstream's argument list plus the virtuals
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn drop_point_fast_using<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        operation: SolverOperation,
+        test_point: Point3,
+        in_pointing_vector: Option<Vec3>,
+        distance_tolerance: f64,
+        target_distance: Option<f64>,
+        requested: SolutionRequested,
+        this: Option<O>,
+        step_point: &dyn Fn(&Kernel, Point2) -> Result<Point3>,
+        local_solve: &dyn Fn(
+            &Kernel,
+            &Extent2d,
+            SolverOperation,
+            Point3,
+            Point2,
+        ) -> Result<(bool, Solution<O>)>,
+    ) -> Result<SolutionArray<O>> {
         // no work - can't convert to polar coordinates - does not have a planar generator
         if !self.have_polar_conversion() {
             return Err(SolidError::sm_err(OP_DROP));
@@ -669,7 +716,7 @@ impl SurfOfRevolution {
                         u_parameter = nurb_ivl.min();
                     } else {
                         // get the 3dDropPoint
-                        let pnt = self.evaluate_step_point(k, Point2::new(angle, t))?;
+                        let pnt = step_point(k, Point2::new(angle, t))?;
 
                         // transform the DropPoint coordinates
                         let (r, sol3) = iso_point_inversion(k, &iso, &nurb_ivl, u_parameter, pnt)?;
@@ -720,8 +767,7 @@ impl SurfOfRevolution {
                 // get the surface UVpoint
                 let mut uv = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);
                 if !exact_conversion {
-                    let (found, s) =
-                        surface_local_point_solve(k, self, uv_domain, operation, test_point, uv)?;
+                    let (found, s) = local_solve(k, uv_domain, operation, test_point, uv)?;
                     sol = s;
                     if found {
                         uv = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);

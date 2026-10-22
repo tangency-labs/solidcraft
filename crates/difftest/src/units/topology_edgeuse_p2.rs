@@ -221,7 +221,7 @@ pub(super) fn inexact_geometry(s: &Setup) -> Option<Output> {
     let surface_type = eu1::face(b, s.eu)
         .ok()
         .flatten()
-        .and_then(|f| s.types.face_surface_types.get(f.index() as usize).copied())
+        .and_then(|f| s.types.inexact_surface(f.index() as usize))
         .unwrap_or(-1);
     let curve_type = eu1::edge(b, s.eu)
         .ok()
@@ -263,13 +263,14 @@ fn surface_kind_gap(surface_type: i64) -> Option<&'static str> {
 }
 
 /// The deferral of a case whose face surface overrides the NURB-parameter evaluators
-/// (`SmCone`, `SmCylinder`, `SmSphere`): the Rust `Surface` has no kind for it.
+/// (`SmCone`, `SmCylinder`, `SmSphere`) and is imported only as its B-spline part (not
+/// exported exactly).
 /// `SmTorus` overrides only the STEP evaluators, so its B-spline part evaluates alike.
 fn analytic_evaluators(s: &Setup) -> Option<Output> {
     let surface_type = eu1::face(&s.brep, s.eu)
         .ok()
         .flatten()
-        .and_then(|f| s.types.face_surface_types.get(f.index() as usize).copied())?;
+        .and_then(|f| s.types.inexact_surface(f.index() as usize))?;
     if surface_type == 15015 {
         return None;
     }

@@ -45,6 +45,12 @@
 //! ten entity counts remain unchanged. This supplies shell state independently
 //! of the shell operations being compared.
 //!
+//! A face's surface in the graph export may start with an exact analytic head,
+//! `2 type version surf_oob gen_oob nbytes byte*nbytes` (an `SmSurfOfRevolution`: its
+//! binary `WriteToDB` record, `harness/cpp/shim/sc_analytic_export.h`), followed by the
+//! regular surface block (its B-spline part); other face surfaces have the regular
+//! block only.
+//!
 //! Geometry ops: `StepOff` (`surface dist P[3] N[3] u v jac` -> `status found F0 F1
 //! J00 J01 J10 J11`), `DistDev` (`surface P[3] u v value obj want_dev` -> `dist dev`;
 //! `obj` 0 null, 1 the surface, 2 a line), `Seam` (`n curve*n a b called` -> `seam`).

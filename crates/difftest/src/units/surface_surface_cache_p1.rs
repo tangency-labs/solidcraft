@@ -1115,6 +1115,8 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                             SurfaceKind::CurveBounded(_)
                             | SurfaceKind::Plane(_)
                             | SurfaceKind::Cone(_)
+                            | SurfaceKind::Sphere(_)
+                            | SurfaceKind::Torus(_)
                             | SurfaceKind::SurfOfRevolution(_)
                             | SurfaceKind::Step(_)
                             | SurfaceKind::OffsetSurface(_)

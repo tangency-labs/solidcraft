@@ -48,6 +48,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BoundingBoxRequest, LocationType};
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
+use crate::surface::sphere::Sphere;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::Revolved;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
@@ -65,6 +66,8 @@ pub enum IntersectTarget<'a> {
     Plane(&'a Plane),
     /// A general surface of revolution.
     Revolution(&'a SurfOfRevolution),
+    /// A sphere.
+    Sphere(&'a Sphere),
     /// A surface of extrusion.
     Extrusion(&'a SurfOfExtrusion),
     /// A surface already represented by the shared enum.
@@ -912,6 +915,7 @@ impl Cone {
                 SurfaceKind::Plane(p) => IntersectTarget::Plane(p),
                 SurfaceKind::SurfOfRevolution(r) => IntersectTarget::Revolution(r),
                 SurfaceKind::Cone(c) => IntersectTarget::Cone(c.as_ref()),
+                SurfaceKind::Sphere(s) => IntersectTarget::Sphere(s.as_ref()),
                 _ => other,
             },
             _ => other,
@@ -926,6 +930,12 @@ impl Cone {
             IntersectTarget::Revolution(r) => {
                 let (more, mut out) =
                     r.intersect_with_cone(k, other_domain, self, domain, approx_tol_3d)?;
+                core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
+                (more, out)
+            }
+            IntersectTarget::Sphere(s) => {
+                let (more, mut out) =
+                    s.intersect_with_cone(k, other_domain, self, domain, approx_tol_3d)?;
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
                 (more, out)
             }

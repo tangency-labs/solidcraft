@@ -1154,12 +1154,24 @@ impl Surface {
                 .chunks(highest_v_deriv + 1)
                 .map(<[Vec3]>::to_vec)
                 .collect()),
+            // the SmSphere override (the side and half flags are not used)
+            SurfaceKind::Sphere(s) => Ok(s
+                .evaluate_step(uv, highest_u_deriv, highest_v_deriv)?
+                .chunks(highest_v_deriv + 1)
+                .map(<[Vec3]>::to_vec)
+                .collect()),
             SurfaceKind::SurfOfRevolution(s) => {
                 let d = s.evaluate_step_at(k, uv, highest_u_deriv, highest_v_deriv)?;
                 Ok(d.chunks(highest_v_deriv + 1)
                     .map(<[Vec3]>::to_vec)
                     .collect())
             }
+            // the SmTorus override (the side and half flags are not used)
+            SurfaceKind::Torus(s) => Ok(s
+                .evaluate_step(uv, highest_u_deriv, highest_v_deriv)?
+                .chunks(highest_v_deriv + 1)
+                .map(<[Vec3]>::to_vec)
+                .collect()),
             SurfaceKind::BSpline(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::Step(_)
@@ -1205,7 +1217,10 @@ impl Surface {
                 highest_v_deriv,
                 flags,
             ),
-            SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Cone(_) => {
+            SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => {
                 ignored(self.evaluate_step(k, uv, highest_u_deriv, highest_v_deriv, flags))
             }
             SurfaceKind::BSpline(_)
@@ -1236,6 +1251,8 @@ impl Surface {
         match self.kind() {
             SurfaceKind::CurveBounded(s) => s.basis().evaluate_step_point(k, uv),
             SurfaceKind::Cone(s) => s.evaluate_step_point(uv),
+            SurfaceKind::Sphere(s) => s.evaluate_step_point(uv),
+            SurfaceKind::Torus(s) => s.evaluate_step_point(uv),
             SurfaceKind::SurfOfRevolution(s) => s.evaluate_step_point_at(k, uv),
             SurfaceKind::BSpline(_)
             | SurfaceKind::Plane(_)
@@ -1280,6 +1297,22 @@ impl Surface {
                 flags.only_upper_half,
             ),
             SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_simple(
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags.u_side == Side::Left,
+                flags.v_side == Side::Left,
+                flags.only_upper_half,
+            ),
+            SurfaceKind::Sphere(s) => s.base().base().evaluate_simple(
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags.u_side == Side::Left,
+                flags.v_side == Side::Left,
+                flags.only_upper_half,
+            ),
+            SurfaceKind::Torus(s) => s.base().base().evaluate_simple(
                 uv,
                 highest_u_deriv,
                 highest_v_deriv,
@@ -1560,6 +1593,8 @@ impl Surface {
         match self.kind() {
             // (SmSurfOfRevolution inherits the B-spline override)
             SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_) => {
@@ -1585,6 +1620,12 @@ impl Surface {
                     SurfaceKind::BSpline(s) => s.calculate_bounding_box(k, uv_domain, &req)?,
                     SurfaceKind::Cone(s) => {
                         s.rev().base().calculate_bounding_box(k, uv_domain, &req)?
+                    }
+                    SurfaceKind::Sphere(s) => {
+                        s.base().base().calculate_bounding_box(k, uv_domain, &req)?
+                    }
+                    SurfaceKind::Torus(s) => {
+                        s.base().base().calculate_bounding_box(k, uv_domain, &req)?
                     }
                     SurfaceKind::SurfOfRevolution(s) => {
                         s.base().calculate_bounding_box(k, uv_domain, &req)?
@@ -1780,9 +1821,15 @@ impl Surface {
             SurfaceKind::Cone(s) => Ok(s
                 .create_offset_surface(k, signed_offset_distance, approx_tol_3d)?
                 .map(Self::from)),
+            SurfaceKind::Sphere(s) => Ok(s
+                .create_offset_surface(k, signed_offset_distance, approx_tol_3d)?
+                .map(Self::from)),
             SurfaceKind::OffsetSurface(s) => {
                 s.create_offset_surface(k, signed_offset_distance).map(Some)
             }
+            SurfaceKind::Torus(s) => Ok(s
+                .create_offset_surface(k, signed_offset_distance, approx_tol_3d)?
+                .map(Self::from)),
             SurfaceKind::BSpline(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
@@ -2011,6 +2058,8 @@ impl Surface {
                 }
             }
             SurfaceKind::SurfOfRevolution(s) => s.base().is_degenerate_point(k, tol_3d, uv_domain),
+            SurfaceKind::Sphere(s) => s.base().base().is_degenerate_point(k, tol_3d, uv_domain),
+            SurfaceKind::Torus(s) => s.base().base().is_degenerate_point(k, tol_3d, uv_domain),
             SurfaceKind::Plane(p) => p.base_for_query().is_degenerate_point(k, tol_3d, uv_domain),
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
@@ -2040,6 +2089,16 @@ impl Surface {
             // inherited from SmBSplineSurface
             SurfaceKind::SurfOfRevolution(s) => {
                 s.base()
+                    .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
+            }
+            SurfaceKind::Sphere(s) => {
+                s.base()
+                    .base()
+                    .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
+            }
+            SurfaceKind::Torus(s) => {
+                s.base()
+                    .base()
                     .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
             }
             SurfaceKind::Plane(p) => {
@@ -2685,6 +2744,18 @@ pub fn crossed_seam_or_pole(
         }
         SurfaceKind::SurfOfRevolution(s) => {
             let b = s.base();
+            if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
+                return false;
+            }
+        }
+        SurfaceKind::Sphere(s) => {
+            let b = s.base().base();
+            if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
+                return false;
+            }
+        }
+        SurfaceKind::Torus(s) => {
+            let b = s.base().base();
             if b.degree(SurfParamType::U) == 1 && b.degree(SurfParamType::V) == 1 {
                 return false;
             }

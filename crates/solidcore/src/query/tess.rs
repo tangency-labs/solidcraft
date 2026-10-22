@@ -611,6 +611,24 @@ impl TessSrfCache {
                         None => s.rev().base().clone(),
                     }
                 }),
+                SurfaceKind::Sphere(s) => Some(if s.base().base().gw_nurb().is_some() {
+                    s.base().base().clone()
+                } else {
+                    let mut c = s.as_ref().clone();
+                    match ignore(c.make_nurb(k))? {
+                        Some(()) => c.base().base().clone(),
+                        None => s.base().base().clone(),
+                    }
+                }),
+                SurfaceKind::Torus(s) => Some(if s.base().base().gw_nurb().is_some() {
+                    s.base().base().clone()
+                } else {
+                    let mut c = s.as_ref().clone();
+                    match ignore(c.make_nurb(k))? {
+                        Some(()) => c.base().base().clone(),
+                        None => s.base().base().clone(),
+                    }
+                }),
                 SurfaceKind::SurfOfRevolution(s) => Some(if s.base().gw_nurb().is_some() {
                     s.base().clone()
                 } else {

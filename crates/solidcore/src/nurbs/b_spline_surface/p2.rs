@@ -217,12 +217,8 @@ fn recognise_analytic(k: &Kernel, srf: &BSplineSurface) -> Result<Option<Surface
     if let Some(cone) = crate::surface::cone::Cone::is_nurb_surface_cone(k, srf, 1.0)? {
         return Ok(Some(Surface::from(cone)));
     }
-    if crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, srf, 1.0)?.is_some() {
-        // DISPATCH GAP: the sphere is not a SurfaceKind yet (issue #76).
-        return Err(SolidError::Unported {
-            upstream: "SmSphere as SmSurface",
-            unit: "surface.surface_p2",
-        });
+    if let Some(sphere) = crate::surface::sphere::Sphere::is_nurb_surface_sphere(k, srf, 1.0)? {
+        return Ok(Some(Surface::from(sphere)));
     }
     let test = Surface::from(srf.copy());
     if let Some(rev) = SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0)? {

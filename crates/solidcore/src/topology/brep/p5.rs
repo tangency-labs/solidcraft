@@ -2206,6 +2206,18 @@ fn transformed_surface_base(
             }
             Some(cone.rev().base().clone())
         }
+        SurfaceKind::Sphere(sphere) => {
+            if sphere.base().base().gw_nurb().is_none() {
+                crate::error::ignore_status(sphere.make_nurb(k))?;
+            }
+            Some(sphere.base().base().clone())
+        }
+        SurfaceKind::Torus(torus) => {
+            if torus.base().base().gw_nurb().is_none() {
+                crate::error::ignore_status(torus.make_nurb(k))?;
+            }
+            Some(torus.base().base().clone())
+        }
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

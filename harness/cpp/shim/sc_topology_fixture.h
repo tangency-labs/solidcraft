@@ -28,6 +28,7 @@
 // pointer-to-member access), never the functions under test. Ops whose upstream path
 // would dereference null output -2 instead of calling it.
 #include "sc_shim.h"
+#include "sc_analytic_export.h"
 #include "support/topology_fixture.h"
 
 
@@ -592,6 +593,9 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     for (SmFace* p : g.faces)
     {
         SmSurface* s = p->*FPeek::srf();
+        // an exactly exportable analytic surface first (sc_analytic_export.h), then the
+        // regular block, which the importer falls back to
+        sc_analytic_export::put_exact_head(o, s, the_context());
         put_surface(o, s);
         o.push_back((double)g.find(2, p->*FPeek::fu()));
         SmExtent2d d = p->*FPeek::dom();
