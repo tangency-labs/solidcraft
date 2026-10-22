@@ -302,7 +302,7 @@ pub(crate) fn surface_body(r: &Brep) -> Result<Body> {
 pub(crate) fn all_new(body: Body, operands: &[&Body]) -> Result<Body> {
     let r = body.record();
     let faces = vec![record::generated(Vec::new()); r.faces.len()];
-    let h = record_history(&r, operands.len(), faces, |_, _, _| Vec::new());
+    let h = record_history(r, operands.len(), faces, |_, _, _| Vec::new());
     body.with_history_counts(h, &record::counts(operands))
 }
 
@@ -469,15 +469,6 @@ pub fn patch_edges(body: &Body, at: &[Vec3]) -> Result<Body> {
     crate::fill::patch_loop(body, at, 0.0)
 }
 
-/// The edges of `body` picked by points on them, chained into one closed loop (each turned to run
-/// along it).
-pub(crate) fn picked_loop(body: &Body, at: &[Vec3]) -> Result<Chain> {
-    match picked_chain(body, at)? {
-        (chain, true) => Ok(chain),
-        (_, false) => Err(invalid("the edges do not form a closed loop")),
-    }
-}
-
 /// The edges of `body` picked by points on them, chained end to end (each turned to run along the
 /// chain), and whether the chain closes: a closed loop starts with the last edge picked; an open
 /// chain runs from the free end met first in pick order. Edges that branch, or form more than one
@@ -574,7 +565,7 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     }
     let chosen = picked_faces(body, at)?;
     let r = body.record();
-    taken(body, &r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
+    taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
 /// A body's faces taken apart: each picked face (by points on it; every face when none are given)
@@ -587,9 +578,9 @@ pub fn unstitch(body: &Body, at: &[Vec3]) -> Result<(Vec<Body>, Option<Body>)> {
         return Err(invalid("the body has one face: nothing to unstitch"));
     }
     let chosen = picked_faces(body, at)?;
-    let pieces = chosen.iter().map(|f| taken(body, &r, &[(*f, false)])).collect::<Result<Vec<_>>>()?;
+    let pieces = chosen.iter().map(|f| taken(body, r, &[(*f, false)])).collect::<Result<Vec<_>>>()?;
     let rest: Vec<(usize, bool)> = (0..r.faces.len()).filter(|f| !chosen.contains(f)).map(|f| (f, false)).collect();
-    let rest = if rest.is_empty() { None } else { Some(taken(body, &r, &rest)?) };
+    let rest = if rest.is_empty() { None } else { Some(taken(body, r, &rest)?) };
     Ok((pieces, rest))
 }
 
@@ -603,7 +594,7 @@ pub fn reverse_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     }
     let chosen = picked_faces(body, at)?;
     let r = body.record();
-    taken(body, &r, &(0..r.faces.len()).map(|f| (f, chosen.contains(&f))).collect::<Vec<_>>())
+    taken(body, r, &(0..r.faces.len()).map(|f| (f, chosen.contains(&f))).collect::<Vec<_>>())
 }
 
 /// A body with some of its faces (indices in its face order) taken away and the gap left open: a
@@ -619,7 +610,7 @@ pub fn remove_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     if left.is_empty() {
         return Err(invalid("that would delete every face of the body"));
     }
-    taken(body, &r, &left)
+    taken(body, r, &left)
 }
 
 /// `h`, a history over one record whose faces and edges came from the parts `c` numbers, carried
@@ -763,9 +754,9 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, tolerance: f64) -> Result<Body> {
     let r = body.record();
     if distance == 0.0 {
-        return taken(body, &r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
+        return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    let moved = picked.iter().map(|f| imp::offset_face(&r, *f, distance)).collect::<Result<Vec<_>>>()?;
+    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
     let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
@@ -774,7 +765,7 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
         .and_then(|h| carried(&h, &c, &offsets, 1, offset))
         .map(|h| h.faces.into_iter().map(|f| FaceProv { change: Change::Generated, ..f }).collect::<Vec<_>>());
     let rec = result.record();
-    let h = faces.map(|faces| record_history(&rec, 1, faces, |_, between, faces| record::meeting(between, faces)));
+    let h = faces.map(|faces| record_history(rec, 1, faces, |_, between, faces| record::meeting(between, faces)));
     Ok(result.with_checked_history(h, &record::counts(&[body])))
 }
 
@@ -850,7 +841,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .collect::<Result<Vec<_>>>()?;
     let loops = vec![b::Loop::Edges { edges }];
     let domain = uv_box(&loops).ok_or_else(|| invalid("the extended face has no area"))?;
-    let forward = face_sides(&r).first().copied().unwrap_or(true);
+    let forward = face_sides(r).first().copied().unwrap_or(true);
     parts.faces.push((b::Face { surface, domain, loops }, forward));
     let c = parts.canonical()?;
     let h = record_history(&c.brep, 1, vec![record::from_face(0, 0, Change::Modified)], |e, _, _| {

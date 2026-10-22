@@ -36,7 +36,7 @@ impl Section {
     /// The sketch segments `segs` on `plane` as a section (their exact record curves), segment i
     /// standing for the profile segments `numbers[i]`.
     pub(crate) fn of(plane: &Plane, segs: &[Seg2], numbers: Vec<Vec<usize>>) -> Result<Section> {
-        let curves = segs.iter().map(|s| Ok(nurbs(&crate::freeform::segment(plane, s)?.0)?)).collect::<Result<Vec<_>>>()?;
+        let curves = segs.iter().map(|s| nurbs(&crate::freeform::segment(plane, s)?.0)).collect::<Result<Vec<_>>>()?;
         Ok(Section { plane: *plane, curves, numbers })
     }
 }

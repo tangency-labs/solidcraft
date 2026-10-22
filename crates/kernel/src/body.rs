@@ -940,7 +940,10 @@ impl Body {
             }
         }
         match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, &self.record)) {
-            Some(memo) => Ok(Mesh::clone(&remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?)),
+            Some(memo) => {
+                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
+                Ok(Mesh::clone(&kept))
+            }
             None => self.mesh_of(&self.mesh_plan_untimed(t)?),
         }
     }
