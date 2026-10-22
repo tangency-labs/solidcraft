@@ -217,7 +217,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
-pub use validity::{SmlibCheck, Validity, smlib_built, validity};
+pub use validity::{SmlibCheck, Validity, smlib_built, smlib_dump_dir, validity};
 pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
