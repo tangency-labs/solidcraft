@@ -497,19 +497,14 @@ impl Loop2 {
     pub fn inradius(&self, tol: f64) -> f64 {
         max_clearance(&[self.polyline(tol)])
     }
-    /// Full circle as two half arcs (counter-clockwise).
+    /// Full circle as one arc from angle 0 (counter-clockwise): one closed curve, so a solid
+    /// swept from it has one wall, and an edge round it is one edge.
     pub fn circle(center: Vec2, radius: f64) -> Loop2 {
-        Loop2 {
-            segs: vec![
-                Seg2::Arc { center, radius, start: 0.0, sweep: std::f64::consts::PI },
-                Seg2::Arc { center, radius, start: std::f64::consts::PI, sweep: std::f64::consts::PI },
-            ],
-        }
+        Loop2::circle_from(center, radius, 0.0)
     }
-    /// Full circle starting (and split) at angle `start`.
+    /// Full circle as one arc starting (and ending) at angle `start`, counter-clockwise.
     pub fn circle_from(center: Vec2, radius: f64, start: f64) -> Loop2 {
-        use std::f64::consts::PI;
-        Loop2 { segs: vec![Seg2::Arc { center, radius, start, sweep: PI }, Seg2::Arc { center, radius, start: start + PI, sweep: PI }] }
+        Loop2 { segs: vec![Seg2::Arc { center, radius, start, sweep: TAU }] }
     }
     pub fn polygon(pts: &[Vec2]) -> Loop2 {
         let n = pts.len();
