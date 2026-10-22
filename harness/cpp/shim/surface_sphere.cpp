@@ -68,6 +68,7 @@ enum : int32_t
     OP_ISECT_CONE = 16,
     OP_GLOBAL = 17,
     OP_IS_NURB = 18,
+    OP_TRIM_DOMAIN = 19,
 };
 
 // Reads the protected members through pointers to members named in a derived class.
@@ -632,6 +633,18 @@ void sphere_op(int32_t op, Rd& rd, const SmContext& ctx, SmSphere* s, std::vecto
             put_state(o, r);
         delete r;
         delete test;
+        break;
+    }
+    case OP_TRIM_DOMAIN:
+    {
+        SmExtent2d dom = rd.domain();
+        SmStatus stt = s->TrimWithDomain(dom);
+        o.push_back(st(stt));
+        o.push_back(dom.GetMin().x);
+        o.push_back(dom.GetMin().y);
+        o.push_back(dom.GetMax().x);
+        o.push_back(dom.GetMax().y);
+        put_state(o, s);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

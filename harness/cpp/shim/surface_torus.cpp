@@ -4,7 +4,7 @@
 // (the constructor and MakeNurb), operator==, Copy, CreateOffsetSurface,
 // ConvertUVFromSTEPToNURBS, ConvertUVFromNURBSToSTEP, EvaluateSTEP, EvaluateSTEPPoint,
 // CreateIsoParametricCurve, RebuildSTEPFromNURBParameters, Transform, GetMaxAnalyticDomain,
-// GetInsideOut and IsKindOf.
+// GetInsideOut and IsKindOf; and the inherited SmSurfOfRevolution::TrimWithDomain.
 //
 // One entry point, sc_surface_torus_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_torus.rs, which validates every input
@@ -53,6 +53,7 @@ enum : int32_t
     OP_TRANSFORM = 7,
     OP_EQ = 8,
     OP_COPY = 9,
+    OP_TRIM_DOMAIN = 10,
 };
 
 // Reads the protected members through pointers to members named in a derived class.
@@ -380,6 +381,18 @@ void torus_op(int32_t op, Rd& rd, const SmContext& ctx, SmTorus* s, std::vector<
             o.push_back(flg(*s == *c));
         }
         delete c;
+        break;
+    }
+    case OP_TRIM_DOMAIN:
+    {
+        SmExtent2d dom = rd.domain();
+        SmStatus stt = s->TrimWithDomain(dom);
+        o.push_back(st(stt));
+        o.push_back(dom.GetMin().x);
+        o.push_back(dom.GetMin().y);
+        o.push_back(dom.GetMax().x);
+        o.push_back(dom.GetMax().y);
+        put_state(o, s);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

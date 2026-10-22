@@ -190,6 +190,30 @@ impl SurfOfRevolution {
     /// `SM_ERR_OUTSIDE_OF_DOMAIN` (1020) when the domain is not inside the current NURB
     /// domain (within `SM_EFF_ZERO_PARAM`); those of [`Self::make_nurb`].
     pub fn trim_with_domain(&mut self, k: &Kernel, new_nurb_uv_domain: &Extent2d) -> Result<()> {
+        self.trim_with_domain_using(
+            k,
+            new_nurb_uv_domain,
+            &|s, k, uv| s.convert_uv_from_nurbs_to_step_or_written(k, uv),
+            &Self::own_sweep_iso,
+        )
+    }
+
+    /// [`Self::trim_with_domain`] with upstream's virtual calls taken from a derived
+    /// class (`SmSphere`, `SmTorus`): `convert` is its `ConvertUVFromNURBSToSTEP` (in
+    /// `UpdateAnalyticalDomain`) and `iso` its `CreateIsoParametricCurve` (in
+    /// `MakeNurb`, `Reparameterize` and `RebuildPolarConverter`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::trim_with_domain`]; those of `convert` (upstream ignores the
+    /// status and reads the corner it may not have written).
+    pub(crate) fn trim_with_domain_using(
+        &mut self,
+        k: &Kernel,
+        new_nurb_uv_domain: &Extent2d,
+        convert: &dyn Fn(&Self, &Kernel, Point2) -> Result<Point2>,
+        iso: SweepIsoFn<'_>,
+    ) -> Result<()> {
         // locals
         let current = self.base.natural_uv_domain();
 
@@ -208,17 +232,28 @@ impl SurfOfRevolution {
         }
 
         // Update just the analytic domain and the GenCurve (both analytic and NURB)
-        ignore_status(self.update_analytical_domain(k, new_nurb_uv_domain))?;
+        let min_anal_uv = convert(self, k, new_nurb_uv_domain.min())?;
+        let max_anal_uv = convert(self, k, new_nurb_uv_domain.max())?;
+        ignore_status(self.update_analytical_domain_from_step(
+            k,
+            new_nurb_uv_domain,
+            min_anal_uv,
+            max_anal_uv,
+        ))?;
 
         // rebuild Nurbs surface from updated analytic domain. (right shape - wrong
         // UVDomain)
-        self.make_nurb(k)?;
+        self.make_nurb_with_sweep_params_using(k, None, iso)?;
 
-        // adjust Nurb Surface UVDomain
-        ignore_status(self.reparameterize(k, new_nurb_uv_domain))?;
+        // adjust Nurb Surface UVDomain (GetOrCreateGwNurbPointer: the virtual MakeNurb
+        // when missing, status ignored)
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb_with_sweep_params_using(k, None, iso))?;
+        }
+        ignore_status(self.reparameterize_using(k, new_nurb_uv_domain, iso))?;
 
         // rebuild the sweep polar converter
-        ignore_status(self.rebuild_polar_converter(k, &Self::own_sweep_iso))?;
+        ignore_status(self.rebuild_polar_converter(k, iso))?;
         Ok(())
     }
 

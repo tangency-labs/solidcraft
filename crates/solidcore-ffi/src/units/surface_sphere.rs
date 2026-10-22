@@ -22,7 +22,9 @@
 //!   (also after a failure). `Eq`: the other sphere's construction status, then
 //!   `this == other`, `other == this`. `Copy`: status, `state copy == this`. `Closed`:
 //!   `closed continuity closed_u closed_v`. `StepInv`: status (also `SM_ERR` for a point
-//!   off the surface), `u v location`. `Trim`: status, `n curves`.
+//!   off the surface), `u v location`. `Trim`: status, `n curves`. `TrimDomain`:
+//!   status, the domain after the call (`TrimWithDomain` writes it back), the state
+//!   (also after a failure).
 //! * the intersections: the other surface's construction status, then (on success) the
 //!   status and `more ncurves curves ntypes types ndevs devs nuv1 nuv2 nnull1 nnull2`.
 //! * `IsNurb`: `found has_sphere [state]` (the sphere's NURB as a plain B-spline surface,
@@ -318,6 +320,12 @@ pub enum Op {
         /// Control point changes.
         perturb: Vec<Perturb>,
     },
+    /// `TrimWithDomain(SmExtent2d(u0, v0, u1, v1))` (inherited from
+    /// `SmSurfOfRevolution`).
+    TrimDomain {
+        /// The new NURB domain `[u0, v0, u1, v1]`.
+        dom: [f64; 4],
+    },
 }
 
 impl Op {
@@ -342,6 +350,7 @@ impl Op {
             Op::IsectCone { .. } => 16,
             Op::Global { .. } => 17,
             Op::IsNurb { .. } => 18,
+            Op::TrimDomain { .. } => 19,
         }
     }
 }
@@ -652,6 +661,10 @@ fn push_op(o: &mut Vec<f64>, op: &Op) -> Result<(), FfiError> {
                 o.extend([p.i as f64, p.j as f64]);
                 o.extend_from_slice(&p.d);
             }
+        }
+        Op::TrimDomain { dom } => {
+            domain(*dom, "trim domain")?;
+            o.extend_from_slice(dom);
         }
     }
     Ok(())

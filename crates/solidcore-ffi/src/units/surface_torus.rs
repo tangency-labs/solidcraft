@@ -19,7 +19,8 @@
 //!   `has [rebuild_status] state`; `Rebuild`: the state (also after a failure);
 //!   `Transform`: the state (also after a failure); `Eq`: the other torus's
 //!   construction status, then on success `this == other`, `other == this`; `Copy`:
-//!   `state copy == this`.
+//!   `state copy == this`; `TrimDomain`: the domain after the call (`TrimWithDomain`
+//!   writes it back), then the state (also after a failure).
 //!
 //! The wrappers accept only what upstream handles without undefined behaviour: finite
 //! values, unit and independent placement axes (the base constructor passes the Y axis
@@ -151,6 +152,12 @@ pub enum Op {
     },
     /// `Copy`.
     Copy,
+    /// `TrimWithDomain(SmExtent2d(u0, v0, u1, v1))` (inherited from
+    /// `SmSurfOfRevolution`).
+    TrimDomain {
+        /// The new NURB domain `[u0, v0, u1, v1]`.
+        dom: [f64; 4],
+    },
 }
 
 impl Op {
@@ -166,6 +173,7 @@ impl Op {
             Op::Transform { .. } => 7,
             Op::Eq { .. } => 8,
             Op::Copy => 9,
+            Op::TrimDomain { .. } => 10,
         }
     }
 }
@@ -321,6 +329,10 @@ fn push_op(o: &mut Vec<f64>, op: &Op) -> Result<(), FfiError> {
             o.extend_from_slice(&s);
         }
         Op::Eq { other } => push_torus(o, other)?,
+        Op::TrimDomain { dom } => {
+            domain(*dom, "trim domain")?;
+            o.extend_from_slice(dom);
+        }
     }
     Ok(())
 }

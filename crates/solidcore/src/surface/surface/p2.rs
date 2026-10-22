@@ -1639,22 +1639,8 @@ impl Surface {
                     "surface.surface_p2",
                 ))
             }
-            SurfaceKind::Sphere(_) => {
-                // DISPATCH GAP (#76): the inherited SmSurfOfRevolution::TrimWithDomain
-                // needs the sphere's Copy/ConvertUV/iso-curve overrides during the trim.
-                Err(SolidError::unported(
-                    "SurfaceKind::Sphere::TrimWithDomain callbacks",
-                    "surface.surface_p2",
-                ))
-            }
-            SurfaceKind::Torus(_) => {
-                // DISPATCH GAP (#76): the inherited SmSurfOfRevolution::TrimWithDomain
-                // needs the torus's Copy/ConvertUV/iso-curve overrides during the trim.
-                Err(SolidError::unported(
-                    "SurfaceKind::Torus::TrimWithDomain callbacks",
-                    "surface.surface_p2",
-                ))
-            }
+            SurfaceKind::Sphere(s) => s.trim_with_domain(k, trim_domain),
+            SurfaceKind::Torus(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::SurfOfRevolution(s) => s.trim_with_domain(k, trim_domain),
         }
     }

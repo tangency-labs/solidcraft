@@ -19,6 +19,7 @@
 //! | [`Sphere::make_nurb`]                        | `SmSurfOfRevolution::MakeNurb` on a sphere (virtual iso curves) |
 //! | [`Sphere::reparameterize`]                   | `SmSurfOfRevolution::Reparameterize` on a sphere (virtual iso curves) |
 //! | [`Sphere::adjust_step_uv_domain`]            | `SmSurfOfRevolution::AdjustSTEPUVDomain` on a sphere (virtual iso curves) |
+//! | [`Sphere::trim_with_domain`]                | `SmSurfOfRevolution::TrimWithDomain` on a sphere (virtual conversion and iso curves) |
 //! | [`Sphere::global_surface_intersect_with`]     | `GlobalSurfaceIntersect` with the holding `SmSurface` |
 //! | [`Sphere::create_offset_surface`]            | `CreateOffsetSurface`                        |
 //! | [`Sphere::create_iso_parametric_curve`]      | `CreateIsoParametricCurve`                   |
@@ -83,8 +84,10 @@
 //!   ([`Sphere::global_surface_intersect_with`] takes it from the caller;
 //!   [`Sphere::global_surface_intersect`] wraps an unowned copy). `DropPointFast`
 //!   through [`SurfaceKind::Sphere`] runs the inherited body with the sphere's
-//!   `EvaluateSTEPPoint`; `TrimWithDomain` still returns [`SolidError::Unported`] (the
-//!   inherited body needs the sphere's virtual overrides, as for the cone).
+//!   `EvaluateSTEPPoint`; [`Sphere::trim_with_domain`] runs the inherited body with
+//!   the sphere's `ConvertUVFromNURBSToSTEP` and iso circles, and returns a failed
+//!   corner conversion (upstream ignores it and reads the corner it may not have
+//!   written).
 //! - **Cone intersection.** The cone's iso circle through a point
 //!   (`SmCone::CreateIsoCircleFromPoint`) is [`Cone::create_iso_circle_from_point`];
 //!   the cone is taken without owner (its zone tolerance finds no face).
@@ -394,6 +397,25 @@ impl Sphere {
             })
     }
 
+    /// Trims to the NURB domain `new_nurb_uv_domain` (`SmSurfOfRevolution::TrimWithDomain`
+    /// on a sphere): the inherited body with the sphere's `ConvertUVFromNURBSToSTEP` and iso
+    /// circles as its virtual calls.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::trim_with_domain`] and of
+    /// [`Self::convert_uv_from_nurbs_to_step`] (upstream ignores that status and
+    /// reads the corner it may not have written).
+    pub fn trim_with_domain(&mut self, k: &Kernel, new_nurb_uv_domain: &Extent2d) -> Result<()> {
+        let shape = self.shape();
+        self.base.trim_with_domain_using(
+            k,
+            new_nurb_uv_domain,
+            &|s, k, uv| convert_uv_from_nurbs_to_step(s, k, uv),
+            &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+        )
+    }
+
     /// `RebuildPolarConverter` with the sphere's iso circles.
     fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();
@@ -637,31 +659,7 @@ impl Sphere {
     /// `InvalidInput` without converter circle or for a generator that is not a
     /// circle; those of the conversions.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
-        // m_bSwapUV - Nurb and STEP parameters are swapped
-        let nurb_uv = if self.base.swap_uv {
-            Point2::new(nurbs_uv.y, nurbs_uv.x)
-        } else {
-            nurbs_uv
-        };
-
-        // convert sweep coordinate
-        let polar_curve = self
-            .base
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::invalid_input(
-                OP_CONVERT,
-                "polar converter has no curve",
-            ))?;
-        let (step_x, _exact) =
-            self.base
-                .polar
-                .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
-
-        // convert genCurve NurbParam to PolarParam
-        let circle = gen_circle(self.base.gen_curve.as_ref(), OP_CONVERT)?;
-        let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-        Ok(Point2::new(step_x, polar_param))
+        convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
     }
 
     // ---- STEP evaluation ------------------------------------------------------------
@@ -2685,6 +2683,35 @@ fn iso_curve(
     })
 }
 
+/// The body of `ConvertUVFromNURBSToSTEP` on the surface of revolution `base` of a
+/// sphere (the trim's `UpdateAnalyticalDomain` reaches it through its base).
+fn convert_uv_from_nurbs_to_step(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<Point2> {
+    // m_bSwapUV - Nurb and STEP parameters are swapped
+    let nurb_uv = if base.swap_uv {
+        Point2::new(nurbs_uv.y, nurbs_uv.x)
+    } else {
+        nurbs_uv
+    };
+
+    // convert sweep coordinate
+    let polar_curve = base.polar_curve.as_ref().ok_or(SolidError::invalid_input(
+        OP_CONVERT,
+        "polar converter has no curve",
+    ))?;
+    let (step_x, _exact) = base
+        .polar
+        .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
+
+    // convert genCurve NurbParam to PolarParam
+    let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
+    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
+    Ok(Point2::new(step_x, polar_param))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2699,6 +2726,30 @@ mod tests {
 
     fn canonical(k: &Kernel, radius: f64) -> Sphere {
         Sphere::create_canonical(k, &frame(), radius).expect("sphere")
+    }
+
+    #[test]
+    fn trim_with_domain_keeps_the_shape() {
+        let k = Kernel::default();
+        let mut sphere = canonical(&k, 2.0);
+        let d = sphere.base.base.natural_uv_domain();
+        let (lo, hi) = (d.min(), d.max());
+        let trim = Extent2d::from_bounds(
+            lo.x + 0.25 * (hi.x - lo.x),
+            lo.y + 0.125 * (hi.y - lo.y),
+            lo.x + 0.75 * (hi.x - lo.x),
+            lo.y + 0.5 * (hi.y - lo.y),
+        );
+        sphere.trim_with_domain(&k, &trim).expect("trim");
+        let nd = sphere.base.base.natural_uv_domain();
+        assert!(nd.is_contained_by(&trim, 1e-12) && trim.is_contained_by(&nd, 1e-12));
+        let p = sphere.base.base.evaluate_point(trim.max()).expect("eval");
+        assert!(((p - frame().origin()).length() - 2.0).abs() < 1e-9);
+        let back = sphere
+            .convert_uv_from_nurbs_to_step(&k, trim.max())
+            .expect("to step");
+        let q = sphere.evaluate_step_point(back).expect("eval step");
+        assert!((p - q).length() < 1e-9);
     }
 
     #[test]

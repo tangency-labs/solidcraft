@@ -397,7 +397,20 @@ impl SurfOfRevolution {
             self.convert_uv_from_nurbs_to_step_or_written(k, new_nurbs_domain.min())?;
         let max_anal_uv =
             self.convert_uv_from_nurbs_to_step_or_written(k, new_nurbs_domain.max())?;
+        self.update_analytical_domain_from_step(k, new_nurbs_domain, min_anal_uv, max_anal_uv)
+    }
 
+    /// The rest of [`Self::update_analytical_domain`] once the corners of
+    /// `new_nurbs_domain` are converted to the STEP parameters `min_anal_uv` and
+    /// `max_anal_uv` (upstream's virtual `ConvertUVFromNURBSToSTEP`: a derived class
+    /// such as `SmSphere` or `SmTorus` converts with its override).
+    pub(crate) fn update_analytical_domain_from_step(
+        &mut self,
+        k: &Kernel,
+        new_nurbs_domain: &Extent2d,
+        min_anal_uv: Point2,
+        max_anal_uv: Point2,
+    ) -> Result<()> {
         // Build desired new STEP UVDomain (min might not be smaller, if swapped)
         self.anal_uv_domain.init();
         self.anal_uv_domain.add_point(min_anal_uv);

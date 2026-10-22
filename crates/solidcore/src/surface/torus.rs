@@ -16,6 +16,7 @@
 //! | [`Torus::create_canonical`]                  | `CreateCanonical`                            |
 //! | [`Torus::make_nurb`]                         | `SmSurfOfRevolution::MakeNurb` on a torus (virtual iso curves) |
 //! | [`Torus::reparameterize`], [`Torus::adjust_step_uv_domain`] | `SmSurfOfRevolution::Reparameterize`, `AdjustSTEPUVDomain` on a torus (virtual iso curves) |
+//! | [`Torus::trim_with_domain`]                 | `SmSurfOfRevolution::TrimWithDomain` on a torus (virtual conversion and iso curves) |
 //! | [`Torus::create_offset_surface`]             | `CreateOffsetSurface`                        |
 //! | [`Torus::convert_uv_from_step_to_nurbs`]     | `ConvertUVFromSTEPToNURBS`                   |
 //! | [`Torus::convert_uv_from_nurbs_to_step`]     | `ConvertUVFromNURBSToSTEP`                   |
@@ -37,7 +38,9 @@
 //!   its base. Upstream's virtual `CreateIsoParametricCurve`, called by the base
 //!   class's NURB and polar-converter rebuilds, reaches the torus override through
 //!   [`Torus::make_nurb`], [`Torus::reparameterize`], [`Torus::adjust_step_uv_domain`]
-//!   and the private `rebuild_polar_converter`.
+//!   and the private `rebuild_polar_converter`. [`Torus::trim_with_domain`] also takes
+//!   the torus's `ConvertUVFromNURBSToSTEP`, and returns a failed corner conversion
+//!   (upstream ignores it and reads the corner it may not have written).
 //! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
 //!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
 //!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
@@ -360,6 +363,25 @@ impl Torus {
         &mut self.base
     }
 
+    /// Trims to the NURB domain `new_nurb_uv_domain` (`SmSurfOfRevolution::TrimWithDomain`
+    /// on a torus): the inherited body with the torus's `ConvertUVFromNURBSToSTEP` and iso
+    /// circles as its virtual calls.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::trim_with_domain`] and of
+    /// [`Self::convert_uv_from_nurbs_to_step`] (upstream ignores that status and
+    /// reads the corner it may not have written).
+    pub fn trim_with_domain(&mut self, k: &Kernel, new_nurb_uv_domain: &Extent2d) -> Result<()> {
+        let shape = self.shape();
+        self.base.trim_with_domain_using(
+            k,
+            new_nurb_uv_domain,
+            &|s, k, uv| convert_uv_from_nurbs_to_step(s, k, uv),
+            &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+        )
+    }
+
     /// `RebuildPolarConverter` with the torus's iso circles.
     fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();
@@ -618,31 +640,7 @@ impl Torus {
     /// `InvalidInput` without converter circle or for a generator that is not a
     /// circle; those of the conversions.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
-        // m_bSwapUV - Nurb and STEP parameters are swapped
-        let nurb_uv = if self.base.swap_uv {
-            Point2::new(nurbs_uv.y, nurbs_uv.x)
-        } else {
-            nurbs_uv
-        };
-
-        // convert sweep coordinate
-        let polar_curve = self
-            .base
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::invalid_input(
-                OP_CONVERT,
-                "polar converter has no curve",
-            ))?;
-        let (step_x, _exact) =
-            self.base
-                .polar
-                .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
-
-        // convert genCurve NurbParam to PolarParam
-        let circle = gen_circle(self.base.gen_curve.as_ref(), OP_CONVERT)?;
-        let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-        Ok(Point2::new(step_x, polar_param))
+        convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
     }
 
     // ---- STEP evaluation ------------------------------------------------------------
@@ -1237,6 +1235,35 @@ fn iso_curve(
     })
 }
 
+/// The body of `ConvertUVFromNURBSToSTEP` on the surface of revolution `base` of a
+/// torus (the trim's `UpdateAnalyticalDomain` reaches it through its base).
+fn convert_uv_from_nurbs_to_step(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<Point2> {
+    // m_bSwapUV - Nurb and STEP parameters are swapped
+    let nurb_uv = if base.swap_uv {
+        Point2::new(nurbs_uv.y, nurbs_uv.x)
+    } else {
+        nurbs_uv
+    };
+
+    // convert sweep coordinate
+    let polar_curve = base.polar_curve.as_ref().ok_or(SolidError::invalid_input(
+        OP_CONVERT,
+        "polar converter has no curve",
+    ))?;
+    let (step_x, _exact) = base
+        .polar
+        .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
+
+    // convert genCurve NurbParam to PolarParam
+    let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
+    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
+    Ok(Point2::new(step_x, polar_param))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1307,33 @@ mod tests {
                     assert!((p - r).length() < 1e-9);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn trim_with_domain_keeps_the_shape() {
+        let k = Kernel::default();
+        for swap in [false, true] {
+            let mut t = canonical(&k, swap, false);
+            let d = t.base.base.natural_uv_domain();
+            let (lo, hi) = (d.min(), d.max());
+            let trim = Extent2d::from_bounds(
+                lo.x + 0.25 * (hi.x - lo.x),
+                lo.y + 0.125 * (hi.y - lo.y),
+                lo.x + 0.75 * (hi.x - lo.x),
+                lo.y + 0.5 * (hi.y - lo.y),
+            );
+            t.trim_with_domain(&k, &trim).expect("trim");
+            let nd = t.base.base.natural_uv_domain();
+            assert!(nd.is_contained_by(&trim, 1e-12) && trim.is_contained_by(&nd, 1e-12));
+            let p = t.base.base.evaluate_point(trim.min()).expect("eval");
+            let back = t
+                .convert_uv_from_nurbs_to_step(&k, trim.min())
+                .expect("to step");
+            let q = t.evaluate_step_point(back).expect("eval step");
+            assert!((p - q).length() < 1e-9, "{swap}");
+            let big = Extent2d::from_bounds(lo.x - 1.0, lo.y, hi.x, hi.y);
+            assert!(t.trim_with_domain(&k, &big).is_err());
         }
     }
 

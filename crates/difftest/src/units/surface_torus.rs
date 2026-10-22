@@ -1,6 +1,7 @@
 //! Runner for unit `surface.torus`: `SmTorus` (construction through `CreateCanonical`,
 //! `operator==`, `Copy`, `CreateOffsetSurface`, the STEP/NURB conversions, STEP
-//! evaluation, iso curves, `RebuildSTEPFromNURBParameters`, `Transform`).
+//! evaluation, iso curves, `RebuildSTEPFromNURBParameters`, `Transform`, and the
+//! inherited `SmSurfOfRevolution::TrimWithDomain`).
 //!
 //! C++: `solidcore_ffi::units::surface_torus` (upstream `source/SMLib/src/SmTorus.cpp`).
 //! Rust: `solidcore::surface::torus`.
@@ -119,6 +120,9 @@ enum OpIn {
         other: TorusIn,
     },
     Copy {},
+    TrimDomain {
+        dom: [f64; 4],
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +191,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             other: Box::new(ffi_torus(other)),
         },
         OpIn::Copy {} => ffi::Op::Copy,
+        OpIn::TrimDomain { dom } => ffi::Op::TrimDomain { dom: *dom },
     };
     let flat = ffi::torus_op(&ffi_torus(&i.torus), &op).map_err(|e| harness(e.to_string()))?;
     to_output(i, &flat)
@@ -502,6 +507,18 @@ fn rust_op(
             o.push(0.0);
             put_state(o, &c).map(|()| o.push(flag(t.approx_eq(&c))))
         }
+        OpIn::TrimDomain { dom } => {
+            let [a, b, c, d] = *dom;
+            // (upstream writes the domain back; the inherited body never changes it)
+            match t.trim_with_domain(k, &Extent2d::from_bounds(a, b, c, d)) {
+                Err(e) if e.is_unported() => Err(e),
+                r => {
+                    o.push(r.map_or_else(|e| status(&e), |()| 0.0));
+                    o.extend_from_slice(dom);
+                    put_state(o, t)
+                }
+            }
+        }
     };
     Ok(r)
 }
@@ -647,6 +664,45 @@ fn gen_torus(rng: &mut Rng) -> TorusIn {
     }
 }
 
+/// A `TrimWithDomain` domain for the NURB domain `nd`: the whole domain, one sticking
+/// out of it, one direction trimmed, a thin strip, one within `SM_EFF_ZERO_PARAM` of
+/// the edge, or a sub-domain.
+fn gen_trim_domain(rng: &mut Rng, nd: Extent2d) -> Option<[f64; 4]> {
+    let (lo, hi) = (nd.min(), nd.max());
+    let (du, dv) = (hi.x - lo.x, hi.y - lo.y);
+    Some(match rng.below(8) {
+        0 => [lo.x, lo.y, hi.x, hi.y],
+        1 => {
+            let e = rng.uniform(1e-6, 0.3);
+            if rng.chance(0.5) {
+                [lo.x - e * du, lo.y, hi.x, hi.y]
+            } else {
+                [lo.x, lo.y, hi.x, hi.y + e * dv]
+            }
+        }
+        2 => {
+            let a = rng.uniform(0.0, 0.45);
+            let b = rng.uniform(0.55, 1.0);
+            if rng.chance(0.5) {
+                [lo.x + a * du, lo.y, lo.x + b * du, hi.y]
+            } else {
+                [lo.x, lo.y + a * dv, hi.x, lo.y + b * dv]
+            }
+        }
+        3 => {
+            let a = rng.uniform(0.0, 0.9);
+            let w = *rng.choose(&[1e-3, 1e-2, 0.05])?;
+            [lo.x + a * du, lo.y, lo.x + (a + w) * du, hi.y]
+        }
+        4 => [lo.x - 1e-13, lo.y, hi.x, hi.y - 0.25 * dv],
+        _ => {
+            let a = nd.evaluate(rng.uniform(0.0, 0.45), rng.uniform(0.0, 0.45));
+            let b = nd.evaluate(rng.uniform(0.55, 1.0), rng.uniform(0.55, 1.0));
+            [a.x, a.y, b.x, b.y]
+        }
+    })
+}
+
 fn gen_case(rng: &mut Rng) -> Option<Inputs> {
     let k = Kernel::default();
     let torus = gen_torus(rng);
@@ -752,7 +808,16 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             }
             OpIn::Eq { other }
         }
-        _ => OpIn::Copy {},
+        // (a sub-draw keeps the other ops' generated cases unchanged)
+        _ => {
+            if rng.below(4) == 0 {
+                OpIn::Copy {}
+            } else {
+                OpIn::TrimDomain {
+                    dom: gen_trim_domain(rng, nd)?,
+                }
+            }
+        }
     };
     Some(Inputs { torus, op })
 }
@@ -805,6 +870,7 @@ mod tests {
             OpIn::Transform { .. } => "transform",
             OpIn::Eq { .. } => "eq",
             OpIn::Copy {} => "copy",
+            OpIn::TrimDomain { .. } => "trim_domain",
         }
     }
 
@@ -842,6 +908,7 @@ mod tests {
             "transform",
             "eq",
             "copy",
+            "trim_domain",
         ] {
             let ok = tally.iter().any(|((o, k), _)| {
                 o == op
