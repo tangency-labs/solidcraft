@@ -960,6 +960,28 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    #[test]
+    fn coincidence_splits_stop_at_the_call_bound() {
+        // fuzz01456 (`tests/fuzz_corpus/curve.curve_p8.json`): the FFI refuses its
+        // `1e300` control points, so the runner never hands it to the port; run
+        // directly, `GlobalCoincidenceChecker` split in three about 17 levels deep and
+        // ran for minutes (issue #504). It now fails past `MAX_COINCIDENCE_CALLS`.
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_corpus/curve.curve_p8.json"
+        ))
+        .unwrap();
+        let case = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "fuzz01456_rust_hang")
+            .unwrap();
+        let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
+        let out = rust(&op).unwrap();
+        assert_eq!(out.ints["status"], vec![1007], "{out:?}");
+    }
+
+
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {

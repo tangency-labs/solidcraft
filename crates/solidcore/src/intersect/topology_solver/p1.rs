@@ -676,6 +676,9 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
             s.best_answer_so_far_sq = 0.0;
         }
 
+        // (not upstream) a new solve: restart the work bound of solve_branch
+        s.branches_visited = 0;
+
         // locals
         let start_branch: Branch = [tree1.top_node(), tree2.top_node(), None];
 
@@ -765,6 +768,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
             at_distance_sq,
             opt_vectors,
             solutions,
+            branches_visited,
         } = s;
         self.base = GlobalSolver {
             operation,
@@ -780,6 +784,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
             at_distance_sq,
             opt_vectors,
             solutions,
+            branches_visited,
         };
     }
 }

@@ -36,7 +36,13 @@
 //! - `N_ApproxNurbsWithNonRatCrv` takes the parametrisation flag `par`
 //!   (`NL_UNIFORM`, `NL_CHORDLENGTH`, `NL_CENTRIPETAL`, `NL_INHERITED`) as a
 //!   [`ParamSource`]. Every array access is bounds checked; where upstream would
-//!   index outside its arrays the port returns [`SolidError::InvalidInput`].
+//!   index outside its arrays the port returns [`SolidError::InvalidInput`]. More
+//!   than [`MAX_APPROX_SAMPLES`] sampling points (from the second derivatives of the
+//!   Bezier segments) are [`SolidError::InvalidInput`] too: upstream interpolates
+//!   them all and its knot removal then takes time quadratic in their number (a
+//!   weight of `-1` asked for ten million and ran for minutes, fuzz `nlib.crv_approx`
+//!   fuzz05147; upstream fixtures and the committed difftest cases need at most
+//!   11,104).
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::{max2, Vec3};
@@ -62,6 +68,11 @@ const OP_NUM: &str = "nurbs::crv_approx::calc_num_cpts_to_approx_arc";
 const OP_TABLE: &str = "nurbs::crv_approx::arc_cpts_function";
 const OP_ARC: &str = "nurbs::crv_approx::approx_circ_arc_with_crv_data";
 const OP_NONRAT: &str = "nurbs::crv_approx::approx_nurbs_with_non_rat_crv";
+
+/// Most sampling points [`approx_nurbs_with_non_rat_crv`] interpolates (not upstream;
+/// see the module deviations): `2^17`, 11 times the most any upstream fixture or
+/// committed difftest case needs (11,104).
+pub const MAX_APPROX_SAMPLES: i64 = 1 << 17;
 
 // ---- number of control points for a circle --------------------------------------------
 
@@ -463,7 +474,7 @@ pub fn approx_circ_arc_with_crv_data(arc: &CircArcData, deg: usize, nc: usize) -
 /// decomposition, the second derivative bound, evaluation, parametrisation, knot
 /// vectors, interpolation, arc length, normalisation, knot removal and
 /// reparametrisation; `InvalidInput` where upstream would index outside its
-/// arrays.
+/// arrays and for more than [`MAX_APPROX_SAMPLES`] sampling points.
 pub fn approx_nurbs_with_non_rat_crv(
     cur: &Curve,
     tol: f64,
@@ -508,6 +519,11 @@ pub fn approx_nurbs_with_non_rat_crv(
         mu = mu
             .checked_add(n)
             .ok_or_else(|| invalid(op, "sample count overflow"))?;
+    }
+
+    // (not upstream) bound the interpolation and knot removal: see MAX_APPROX_SAMPLES
+    if mu > MAX_APPROX_SAMPLES {
+        return Err(invalid(op, "more than MAX_APPROX_SAMPLES sampling points"));
     }
 
     // Compute parameters.

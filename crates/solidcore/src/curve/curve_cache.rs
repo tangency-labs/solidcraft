@@ -77,6 +77,13 @@
 //! - **Undefined behaviour.** Where upstream would index past an array (a
 //!   continuity array shorter than the span list, a non-cubic span in
 //!   `sm_SplitSegment`) the port returns [`SolidError::InvalidInput`].
+//! - **Split bound.** `Tessellate` halves a span until it passes the tests, is
+//!   shorter than `SM_EFF_ZERO_SQRT` in parameter or (when set, as by default) below
+//!   the minimum parametric ratio of the interval. Without that ratio, a long
+//!   parameter range of geometry that never passes splits into up to
+//!   `length / SM_EFF_ZERO_SQRT` leaves. The port stops after [`MAX_TESS_SPLITS`]
+//!   halves in one tessellation with [`SolidError::InvalidInput`] (upstream fixtures
+//!   and the committed difftest cases examine at most 4,024).
 //! - **Not ported.** `GetTessellation`, `GetStart`, `GetEnd`, `GetDegree`,
 //!   `GetBrep`, `GetBSplineCurve`, `GetMemoryUsed`, `SetComputeAuxTreeData`, `Dump`
 //!   and `Draw` belong to other units or are debug output.
@@ -121,6 +128,11 @@ const OP_BLOCK: &str = "curve::curve_cache::create_bezier_segment_block";
 const OP_BUILD: &str = "curve::curve_cache::build_bezier_spans";
 const OP_SPLIT: &str = "curve::curve_cache::split_segment";
 const OP_SPAN: &str = "curve::curve_cache::CurveCache::span";
+
+/// Most split halves one [`CurveCache::tessellate`] examines (not upstream; see the
+/// module deviations): `2^16`, 16 times the most any upstream fixture or committed
+/// difftest case examines (4,024).
+pub const MAX_TESS_SPLITS: u64 = 1 << 16;
 const OP_PARENT: &str = "curve::curve_cache::CurveCache::parent";
 
 /// True for `SmCurveCache_TYPE` and its base `SmObject_TYPE`
@@ -525,9 +537,10 @@ impl<O: Copy + PartialEq> CurveCache<O> {
     /// # Errors
     ///
     /// `InvalidInput` when neither the chord height nor the angle tolerance is set
-    /// (`SM_ERR_INVALID_INPUT`); `SM_ERR` for a B-spline without NURB, a curve
-    /// without spans, failing NLib splits and trims or an empty decomposition;
-    /// those of the control polygon, continuity and evaluation queries;
+    /// (`SM_ERR_INVALID_INPUT`) and past [`MAX_TESS_SPLITS`] split halves; `SM_ERR`
+    /// for a B-spline without NURB, a curve without spans, failing NLib splits and
+    /// trims or an empty decomposition; those of the control polygon, continuity and
+    /// evaluation queries;
     /// [`SolidError::Unported`] for unported callees.
     pub fn tessellate(&mut self, k: &Kernel) -> Result<()> {
         // check state: need at least one stored tessellation parameter
@@ -622,6 +635,8 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         let dim = self.curve.dim();
         let num_beziers = beziers.len();
 
+        // split halves examined (bounded: see MAX_TESS_SPLITS)
+        let mut splits: u64 = 0;
         // 2. for every unique curve parameter span
         for (i, seg) in beziers.iter().enumerate() {
             let mut bez = seg.clone();
@@ -718,6 +733,13 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
             let mut first_in_seg = true;
             while let Some(top) = stack.pop() {
+                splits += 1;
+                if splits > MAX_TESS_SPLITS {
+                    return Err(invalid(
+                        OP_TESS,
+                        "tessellation needs more than MAX_TESS_SPLITS splits",
+                    ));
+                }
                 let bsp = Curve::from(BSplineCurve::from_nurb(top.clone(), dim, true));
                 let ivl = bsp.natural_interval();
 
@@ -1564,6 +1586,29 @@ mod tests {
         assert!(!c.is_kind_of(14000));
         assert_eq!(c.span_count(), 0);
         assert!(c.tree().is_none());
+    }
+
+    #[test]
+    fn splits_stop_at_the_bound() {
+        // a longest span no span passes and no minimum parametric ratio: the halving
+        // would only stop at `SM_EFF_ZERO_SQRT` spans (millions of them); it stops at
+        // MAX_TESS_SPLITS
+        let k = Kernel::default();
+        let opts = CurveCacheOptions {
+            chord_height_tolerance: 0.01,
+            max_3d_distance: 1e-9,
+            min_parametric_ratio: 0.0,
+            ..CurveCacheOptions::default()
+        };
+        let mut c: CurveCache<u32> =
+            CurveCache::new(cubic(), Extent1d::from_min_max(0.0, 1.0), opts);
+        assert!(matches!(
+            c.tessellate(&k),
+            Err(SolidError::InvalidInput {
+                reason: "tessellation needs more than MAX_TESS_SPLITS splits",
+                ..
+            })
+        ));
     }
 
     #[test]

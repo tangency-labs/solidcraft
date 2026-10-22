@@ -1488,6 +1488,48 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// The corpus case `name` of `tests/fuzz_corpus/curve.curve_p9.json`, run on the
+    /// Rust side only (as the library would be called; the runner refuses it first).
+    fn corpus_rust(name: &str) -> Output {
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_corpus/curve.curve_p9.json"
+        ))
+        .unwrap();
+        let case = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap();
+        let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
+        rust(&op).unwrap()
+    }
+
+    #[test]
+    fn infinite_tangents_stop_scaling() {
+        // fuzz00144 / fuzz01222: the FFI refuses their `-1.8e308` weights; run
+        // directly, `FindPcExtremaEfo::evaluate` divided an infinite tangent by ten
+        // forever (issue #504). It now fails past `MAX_PC_SCALE_STEPS`, and the end
+        // solve treats that as no answer.
+        for name in ["fuzz00144_rust_hang", "fuzz01222_rust_hang"] {
+            let out = corpus_rust(name);
+            assert_eq!(out.ints["status"], vec![0], "{name}: {out:?}");
+            assert_eq!(out.values["out"], vec![0.0], "{name}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn unculled_solves_stop_at_the_branch_bound() {
+        // fuzz01043: boxes of `-1.8e308` weights cull nothing, so the global solve
+        // visited branches for minutes (issue #504). It now stops past
+        // `MAX_SOLVE_BRANCHES`; `GlobalCurveSolve` ignores the solve's status (as
+        // upstream) and keeps the 20 solutions found by then.
+        let out = corpus_rust("fuzz01043_rust_hang");
+        assert_eq!(out.ints["status"], vec![0], "{out:?}");
+        assert_eq!(out.values["out"].first(), Some(&20.0), "{out:?}");
+    }
+
+
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {

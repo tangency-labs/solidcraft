@@ -63,6 +63,13 @@
 //!   recursion upstream) or trees whose heights add up to more than
 //!   [`MAX_SOLVE_DEPTH`] (1000 levels) return [`SolidError::InvalidInput`], so
 //!   the `SolveBranch` recursion depth is bounded.
+//! - **Work bound.** Upstream visits every branch whose boxes cannot be culled;
+//!   boxes of overflowing geometry (`1e300` control points or weights) cull
+//!   nothing, so the visits grow with the product of the tree sizes (fuzz
+//!   `curve.curve_p9` fuzz01043 ran for minutes). [`solve_branch`] counts its
+//!   visits since the solve started ([`GlobalSolver::branches_visited`]) and returns [`SolidError::InvalidInput`]
+//!   past [`MAX_SOLVE_BRANCHES`] (upstream fixtures and the committed difftest
+//!   cases visit at most 56,753 branches in one solve).
 //! - The `ERR(SM_ERR)` of `BranchMayContainAnswers` for operations it does not
 //!   handle only prints a message upstream and falls through to `TRUE`; here
 //!   it is silently `true`. `SM_ASSERT`s, `Dump` and the `SM_DEBUG_CODE`
@@ -91,6 +98,11 @@ pub const MAX_SOLVER_TREES: usize = 3;
 /// `SolveBranch` recurses once per level (each subdivision descends one tree by
 /// one level), so this bounds the recursion; upstream trees are far shallower.
 pub const MAX_SOLVE_DEPTH: usize = 1_000;
+
+/// Most branches [`solve_branch`] visits in one solve (not upstream; see the module
+/// deviations): `2^20`, 18 times the most any upstream fixture or committed difftest
+/// case visits (56,753).
+pub const MAX_SOLVE_BRANCHES: u64 = 1 << 20;
 
 /// One node per traversed tree (`SmTreeNode* apBranch[SM_GS_MAX_TREES]`);
 /// `None` is a null pointer. Slots past the solver's tree count are `None`.
@@ -388,6 +400,10 @@ pub struct GlobalSolver<'t, O> {
     pub opt_vectors: Vec<Vec3>,
     /// `*m_pSolutions`: the sorted solutions.
     pub solutions: SolutionArray<O>,
+    /// Branches [`solve_branch`] visited since the solve started (not upstream;
+    /// reset by [`GlobalSolve::solve_it`] and the topology solver's `SolveTrees`):
+    /// bounded by [`MAX_SOLVE_BRANCHES`].
+    pub branches_visited: u64,
 }
 
 /// Height of the subtree of `tree` below `top` along the child links (a leaf
@@ -478,6 +494,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             at_distance_sq: 0.0,
             opt_vectors: Vec::new(),
             solutions: SolutionArray::new(),
+            branches_visited: 0,
         }
     }
 
@@ -1486,6 +1503,16 @@ where
     O: SolutionObject + 't,
     S: GlobalSolve<'t, O> + ?Sized,
 {
+    // (not upstream) bound the work: see MAX_SOLVE_BRANCHES
+    let s = solver.solver_mut();
+    s.branches_visited += 1;
+    if s.branches_visited > MAX_SOLVE_BRANCHES {
+        return Err(SolidError::invalid_input(
+            "geom::global_solver::solve_branch",
+            "solve visits more than MAX_SOLVE_BRANCHES branches",
+        ));
+    }
+
     // no more work - these nodes no longer contain possible answer
     if !solver.branch_may_contain_answers(branch)? {
         return Ok(());
@@ -1651,6 +1678,7 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
 
         // store the output array, execute the solver tree/tree iteration
         std::mem::swap(&mut s.solutions, solutions);
+        s.branches_visited = 0;
         let result = self.solve_branch(&start_branch);
         std::mem::swap(&mut self.solver_mut().solutions, solutions);
         result

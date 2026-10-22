@@ -2390,6 +2390,33 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** hang (unbounded memory).
 - **Rust port:** Returns `InvalidInput` past `MAX_APPROX_SPANS = 2^20` appended spans and when a failing span cannot be split (`curve/curve/p1.rs`).
 
+#### HANG-47. `SmFindPCExtremaEFO::Evaluate` loops forever on an infinite tangent
+- **Location:** `SmCurve.cpp:18304` (`SmFindPCExtremaEFO::Evaluate`, def. `:18258`): `while (sPV[1].LengthSquared() > 1.0e4)` divides the derivatives by ten.
+- **What happens:** an infinite tangent stays infinite, so the loop never ends.
+- **Trigger:** `GlobalCurveSolve` of a rational B-spline with `-1.8e308` weights (`fuzz-out/n2000/curve.curve_p9/fuzz00144.json`, `fuzz01222.json`).
+- **How found:** fuzz-corpus replay of the Rust side alone (issue #504), located with gdb in the port.
+- **Confirmed:** no (the `curve.curve_p9` FFI refuses mixed rationality, so the reference build never runs it; the port's loop is a line-by-line port).
+- **Severity:** hang.
+- **Rust port:** `InvalidInput` after `MAX_PC_SCALE_STEPS = 400` divisions (a finite tangent needs at most 310; `curve/curve/p3.rs`).
+
+#### HANG-48. `SmCurve::GlobalCoincidenceChecker` makes `3^depth` calls on overflowing curves
+- **Location:** `SmCurve.cpp:19950` (`SmCurve::GlobalCoincidenceChecker`): a closed or half closed interval is split in three and each piece checked recursively, with four end-point drops (global solves) per call.
+- **What happens:** with `1e300` control points the split test keeps answering yes 15 to 30 levels deep, so the call count grows as `3^depth` (hundreds of thousands after 10 s in the port).
+- **Trigger:** `fuzz-out/n2000/curve.curve_p8/fuzz01456.json`, `fuzz01856.json`, `surface.surface_p8/fuzz01603.json`, `curve.composite_curve_p2/fuzz00430.json`, `fuzz01007.json`.
+- **How found:** fuzz-corpus replay of the Rust side alone (issue #504).
+- **Confirmed:** no (the FFIs refuse the `1e300` values).
+- **Severity:** hang (exponential time).
+- **Rust port:** `InvalidInput` past `MAX_COINCIDENCE_CALLS = 2^18` calls per check (`curve/curve/p6.rs`); the global solves under it stop past `MAX_SOLVE_BRANCHES = 2^20` visits (`geom/global_solver.rs`).
+
+#### HANG-49. `N_ApproxNurbsWithNonRatCrv` samples without bound and removes knots in quadratic time
+- **Location:** `NL_CrvApprox.cpp:2780` (`N_ApproxNurbsWithNonRatCrv`, def. `:2698`): the sample count `mu` is the sum of the per-segment counts from the second-derivative bound.
+- **What happens:** a weight of `-1` (a pole) asks for about ten million samples; all are interpolated and `N_CrvRemoveKnotsDerivConstraints` then shifts its arrays once per removed knot, quadratic in the count.
+- **Trigger:** `fuzz-out/nlib-fit10k/nlib.crv_approx/fuzz05147.json`.
+- **How found:** fuzz-corpus replay of the Rust side alone (issue #504).
+- **Confirmed:** no (the FFI refuses non-positive weights).
+- **Severity:** hang (quadratic time in an input-derived count).
+- **Rust port:** `InvalidInput` past `MAX_APPROX_SAMPLES = 2^17` samples (`nurbs/crv_approx.rs`).
+
 ## Nondeterminism
 
 #### ND-1. `srand(time(NULL))` in face sampling and shell classification

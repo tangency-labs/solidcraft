@@ -719,6 +719,28 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[test]
+    fn oversampled_approximation_fails_softly() {
+        // fuzz05147 (`tests/fuzz_corpus/nlib.crv_approx.json`): the FFI refuses its
+        // mixed-sign weights, so the runner never hands it to the port; run directly,
+        // the approximation sampled ten million points and its knot removal ran for
+        // minutes (issue #504). It now fails past `MAX_APPROX_SAMPLES`.
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_corpus/nlib.crv_approx.json"
+        ))
+        .unwrap();
+        let case = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "fuzz05147_rust_hang")
+            .unwrap();
+        let input: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+        let out = rust(&input).unwrap();
+        assert_eq!(out.values["status"], vec![-1.0], "{out:?}");
+    }
+
+
     /// The generator reaches success of every routine and no Rust-only error.
     #[test]
     fn generated_cases_cover_statuses() {
