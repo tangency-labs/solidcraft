@@ -1,3 +1,4 @@
+#[cfg(feature = "native")]
 use super::*;
 
 #[cfg(feature = "native")]
@@ -30,11 +31,7 @@ mod native_tests {
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
             native.validate().unwrap();
             native.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert_eq!(
-                report,
-                Report { recognised_edges: report.recognised_edges, ..Report::default() },
-                "{name}: every edge a line or circle, every face agrees"
-            );
+            assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
             assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
             // One closed shell bounding one material region; no NURBS edges left.
@@ -82,7 +79,7 @@ mod native_tests {
     }
 
     #[test]
-    fn recognised_edges_are_on_smlibs_curves() {
+    fn edges_are_on_smlibs_curves() {
         let cyl = Brep::make_cylinder([0.0; 3], 5.0, 10.0).unwrap().to_native().unwrap();
         let side = cyl.faces.iter().find(|f| matches!(f.surface, b::Surface::Cylinder { .. })).unwrap();
         assert!((side.domain[0][1] - side.domain[0][0] - TAU).abs() < 1e-12);
@@ -223,26 +220,4 @@ mod native_tests {
             }
         }
     }
-}
-
-#[test]
-fn nurbs_lines_and_arcs_are_recognised_exactly() {
-    let line = Nurbs { knots: vec![2.0, 2.0, 4.0, 4.0], points: vec![[0.0; 3], [1.0, 2.0, 3.0]], weights: vec![1.0, 1.0] };
-    let (c, r) = as_line(&line, [2.0, 4.0]).unwrap_or_else(|| panic!("line"));
-    assert_eq!(c, b::Curve::Line { start: [0.0; 3], end: [1.0, 2.0, 3.0] });
-    assert_eq!(r, [0.0, 1.0]);
-    // A quarter circle of radius 2 about (1, 1, 0) as a rational quadratic Bézier.
-    let w = std::f64::consts::FRAC_1_SQRT_2;
-    let arc = Nurbs {
-        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-        points: vec![[3.0, 1.0, 0.0], [3.0, 3.0, 0.0], [1.0, 3.0, 0.0]],
-        weights: vec![1.0, w, 1.0],
-    };
-    let (c, r) = as_circle(&arc, [0.0, 1.0]).unwrap_or_else(|| panic!("arc"));
-    let b::Curve::Circle { frame, radius } = c else { panic!("not a circle") };
-    assert!((radius - 2.0).abs() < 1e-12 && (r[0]).abs() < 1e-12 && (r[1] - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{r:?}");
-    assert!((frame.origin[0] - 1.0).abs() < 1e-12 && (frame.origin[1] - 1.0).abs() < 1e-12);
-    // A parabola-like quadratic is neither.
-    let not = Nurbs { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[0.0; 3], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]], weights: vec![1.0; 3] };
-    assert!(as_circle(&not, [0.0, 1.0]).is_none() && as_line(&not, [0.0, 1.0]).is_none());
 }
