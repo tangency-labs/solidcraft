@@ -90,7 +90,7 @@ impl std::fmt::Display for Error {
                     sweeps::CornerRefusal::Apart => write!(f, "the draft's continued curves do not meet at the corner at {at}"),
                     sweeps::CornerRefusal::WallCloses => write!(f, "the draft closes the wall at {at} before the far end"),
                     sweeps::CornerRefusal::NotExact => {
-                        write!(f, "the draft cannot continue the walls at the corner at {at} exactly (only a line's or an arc's wall continues)")
+                        write!(f, "the draft cannot continue the walls exactly: the curve from {at} is neither a line nor an arc")
                     }
                 }
             }
