@@ -24,6 +24,10 @@
 //! `Remove` / `PostInsert` statuses that `FaceuseShellReplacement` ignores cannot
 //! fail on a consistent B-rep, so an inconsistent one is an error). The ray/face
 //! intersections (`SmFace::GlobalLineIntersect`) classify on a copy of the B-rep.
+//! `IsInnerShell` keeps each target face surface's solve cache for the whole call
+//! (upstream's surface keeps its cache across the rays); the port otherwise builds one
+//! per intersection, and a failed build is kept too instead of being retried on every
+//! ray (the build is deterministic, so a retry fails the same way).
 //! Existing co-ported accessors are reused.
 
 use std::collections::BTreeMap;
@@ -34,6 +38,7 @@ use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::edge::edge_faces;
+use crate::surface::surface::p8::HeldSolveCache;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face;
 use crate::topology::topology::Topology;
@@ -479,11 +484,13 @@ impl crate::geom::solution_array::SolutionObject for RaySurface {
 }
 
 /// `pTargetFace->GlobalLineIntersect(GetUVDomain(), origin, direction, NULL, FALSE,
-/// GetTolerance(), sols)`: the line parameter of each solution.
+/// GetTolerance(), sols)`: the line parameter of each solution. `held` is the face
+/// surface's cache, kept across the rays as upstream keeps it on the surface.
 fn line_parameters(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
+    held: &mut HeldSolveCache<RaySurface>,
     origin: Vec3,
     direction: Vec3,
 ) -> Result<Vec<f64>> {
@@ -495,8 +502,8 @@ fn line_parameters(
             .ok_or_else(|| SolidError::invalid_input(OP, "ray target face without surface"))?
             .natural_uv_domain(),
     );
-    let solutions = crate::topology::face::p4::global_line_intersect(
-        k, b, f, surface, &uv_domain, origin, direction, None, false, tol,
+    let solutions = crate::topology::face::p4::global_line_intersect_held(
+        k, b, f, surface, held, &uv_domain, origin, direction, None, false, tol,
     )?;
     Ok(solutions
         .as_slice()
@@ -528,6 +535,9 @@ pub fn is_inner_shell(k: &mut Kernel, b: &Brep, faceuses: &[FaceuseId]) -> Resul
     }
     let mut forward = 0_u64;
     let mut backward = 0_u64;
+    // each target face surface's cache, built on its first ray (upstream's
+    // smsurf_GetSurfaceCache keeps one per surface; the rays do not change surfaces)
+    let mut caches: BTreeMap<FaceId, HeldSolveCache<RaySurface>> = BTreeMap::new();
     for &source in faceuses {
         let source = b.faceuse(source)?;
         let f = required(source.face)?;
@@ -548,7 +558,8 @@ pub fn is_inner_shell(k: &mut Kernel, b: &Brep, faceuses: &[FaceuseId]) -> Resul
             for &target in faceuses {
                 let f = required(b.faceuse(target)?.face)?;
                 let tol = b.face(f)?.tolerance;
-                match line_parameters(k, b, f, origin, direction) {
+                let held = caches.entry(f).or_default();
+                match line_parameters(k, b, f, held, origin, direction) {
                     Ok(parameters) => {
                         for t in parameters {
                             if t < -tol {

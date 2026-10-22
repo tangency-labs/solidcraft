@@ -14,7 +14,7 @@
 //! | [`upward_vertexuses`]                        | `SmFace::GetUpwardVertexuses`                |
 //! | [`upward_edgeuses`]                          | `SmFace::GetUpwardEdgeuses`                  |
 //! | [`is_connected_to`]                          | `SmFace::IsConnectedTo`                      |
-//! | [`global_line_intersect`]                    | `SmFace::GlobalLineIntersect`                |
+//! | [`global_line_intersect`], [`global_line_intersect_held`] | `SmFace::GlobalLineIntersect`  |
 //! | [`find_vertex_sector`], [`VertexSector`], [`FindVertexSectorArgs`] | `SmFace::FindVertexSector` |
 //! | [`has_seam_problem`], [`SeamCheck`], [`HasSeamProblemOptions`] | `SmFace::HasSeamProblem`  |
 //! | [`ClassifyProblem`]                          | `SmClassifyProblem` (`SmCurveClass.h`)       |
@@ -34,7 +34,9 @@
 //!   region on the B-rep's region list, as [`crate::topology::shell::shell_brep`].
 //! - **`GlobalLineIntersect`.** The surface's solutions are those of
 //!   [`Surface::global_line_intersect`] with the caller's `surface` handle as object
-//!   (upstream's surface pointer). `SmFace::PointClassify` gets the face's tolerance
+//!   (upstream's surface pointer); [`global_line_intersect_held`] keeps the surface's
+//!   cache in the caller's [`HeldSolveCache`] across calls, as upstream keeps it on the
+//!   surface. `SmFace::PointClassify` gets the face's tolerance
 //!   options as `query.face_p2`'s callers pass them, without the trimmed surface cache
 //!   (the cache answers as the loop classification does); its status is ignored as
 //!   upstream ignores it ([`SolidError::Unported`], `InvalidInput` and `NotFound`
@@ -111,6 +113,7 @@ use crate::query::face::p2::{
     curve_on_classify, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+use crate::surface::surface::p8::HeldSolveCache;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::surface::volume::Volume;
@@ -450,6 +453,76 @@ pub fn global_line_intersect<O: SolutionObject>(
     fire_ray: bool,
     src_zone_tol_3d: f64,
 ) -> Result<SolutionArray<O>> {
+    global_line_intersect_with(
+        k,
+        b,
+        f,
+        surface,
+        None,
+        uv_domain,
+        line_point,
+        line_vector,
+        line_interval,
+        fire_ray,
+        src_zone_tol_3d,
+    )
+}
+
+/// [`global_line_intersect`] with the face surface's cache kept by the caller in
+/// `held` across calls, as upstream keeps it on the surface (see
+/// [`Surface::global_line_intersect_held`]). `held` must only be used with this face,
+/// whose surface the caller does not change between the calls, and the same `surface`
+/// handle.
+///
+/// # Errors
+///
+/// As [`global_line_intersect`].
+///
+/// [`Surface::global_line_intersect_held`]: crate::surface::surface::Surface::global_line_intersect_held
+#[allow(clippy::too_many_arguments)]
+pub fn global_line_intersect_held<O: SolutionObject>(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: O,
+    held: &mut HeldSolveCache<O>,
+    uv_domain: &Extent2d,
+    line_point: Point3,
+    line_vector: Vec3,
+    line_interval: Option<&Extent1d>,
+    fire_ray: bool,
+    src_zone_tol_3d: f64,
+) -> Result<SolutionArray<O>> {
+    global_line_intersect_with(
+        k,
+        b,
+        f,
+        surface,
+        Some(held),
+        uv_domain,
+        line_point,
+        line_vector,
+        line_interval,
+        fire_ray,
+        src_zone_tol_3d,
+    )
+}
+
+/// The body of [`global_line_intersect`] and [`global_line_intersect_held`].
+#[allow(clippy::too_many_arguments)]
+fn global_line_intersect_with<O: SolutionObject>(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: O,
+    held: Option<&mut HeldSolveCache<O>>,
+    uv_domain: &Extent2d,
+    line_point: Point3,
+    line_vector: Vec3,
+    line_interval: Option<&Extent1d>,
+    fire_ray: bool,
+    src_zone_tol_3d: f64,
+) -> Result<SolutionArray<O>> {
     // the double becomes the `SmZoneTol3d` parameter: `fabs`, and `SM_USE_DEFAULT` -> the
     // system zone tolerance
     let src_zone_tol_3d = tol::zone_tol3d(k, src_zone_tol_3d);
@@ -457,12 +530,24 @@ pub fn global_line_intersect<O: SolutionObject>(
     // First find the solutions with the underlying surface
     // Note: pass False as the bFireRay argument, otherwise it will return
     // only the first hit in the surface, and that might not be in this Face.
-    let mut solutions = b
+    let face_surface = b
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| null("GlobalLineIntersect: face without surface"))?
-        .global_line_intersect(
+        .ok_or_else(|| null("GlobalLineIntersect: face without surface"))?;
+    let mut solutions = match held {
+        Some(held) => face_surface.global_line_intersect_held(
+            k,
+            surface,
+            held,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            false,
+            src_zone_tol_3d,
+        )?,
+        None => face_surface.global_line_intersect(
             k,
             surface,
             uv_domain,
@@ -471,7 +556,8 @@ pub fn global_line_intersect<O: SolutionObject>(
             line_interval,
             false,
             src_zone_tol_3d,
-        )?;
+        )?,
+    };
 
     // If there are no solutions then return whatever the surface method returns.
     if solutions.is_empty() {
