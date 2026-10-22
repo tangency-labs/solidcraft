@@ -146,7 +146,9 @@ mod tests {
                 &mut Kernel,
                 &mut Brep,
                 &mut Brep,
+                &dyn Fn(crate::EntityRef) -> ObjectRef,
                 &dyn Fn(FaceId) -> ObjectRef,
+                Option<&mut crate::geom::context::Context>,
                 &mut NotifyEnv<'_>,
             ) -> Result<T>,
         ) -> Result<T> {
@@ -173,6 +175,41 @@ mod tests {
         }
         fn delete_brep(&mut self, id: BrepId) {
             self.deleted.push(id);
+        }
+        fn new_merge(
+            &mut self,
+            _: BrepId,
+            _: BrepId,
+            _: BrepId,
+            _: f64,
+            _: f64,
+        ) -> Result<SweepMergeId> {
+            none()
+        }
+        fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> {
+            none()
+        }
+        fn merge_relations(
+            &mut self,
+            _: SweepMergeId,
+        ) -> Result<&mut crate::boolean::topology_intersector::p1::Relations> {
+            none()
+        }
+        fn copy_faces(
+            &mut self,
+            _: BrepId,
+            _: &[FaceId],
+            _: BrepId,
+            _: SweepMergeId,
+            _: &mut crate::sweep::topology_sweep::access::BTreeEdgeMap,
+        ) -> Result<()> {
+            none()
+        }
+        fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> {
+            none()
+        }
+        fn union(&mut self, _: SweepMergeId) -> Result<BrepId> {
+            none()
         }
         fn delete_merge(&mut self, _: SweepMergeId) {}
         fn tag(&self, _: SweepEntity) -> Result<Option<TagData>> {

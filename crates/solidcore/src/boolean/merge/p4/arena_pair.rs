@@ -176,7 +176,7 @@ pub(super) struct ArenaPair<'a> {
     primary_context: &'a mut Context,
     other_context: Option<&'a mut Context>,
     keys: NotificationKeys<'a>,
-    cache_kernels: Option<[Kernel; 2]>,
+    cache_kernels: [Kernel; 2],
     caches: [std::cell::OnceCell<BrepCache<H>>; 2],
 }
 fn invalid(reason: &'static str) -> SolidError {
@@ -199,7 +199,7 @@ impl ArenaPair<'_> {
         extra: &'a mut Vec<SmCurve>,
         records: &'a mut BTreeMap<ObjectKey, Topology>,
         attributes: &'a mut AttributeStore,
-        cache_kernels: Option<[Kernel; 2]>,
+        cache_kernels: [Kernel; 2],
         primary_context: &'a mut Context,
         other_context: Option<&'a mut Context>,
         keys: NotificationKeys<'a>,
@@ -617,12 +617,12 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             }),
             key_of: &|e| self.keys.object(brep.b == 1, e),
         };
-        let out = crate::topology::brep::p9::make_vertex_split_edge(
+        let out = crate::topology::brep::p9::make_vertex_split_edge_with_identity(
             k,
             b,
             eid(edge),
             parameter,
-            &mut env,
+            &mut crate::topology::edge::NotifyState::from_env(&mut env),
             &|e, kind| self.keys.curve(brep.b == 1, e, kind),
         )?;
         if !out.split {
@@ -1098,10 +1098,8 @@ impl ArenaPair<'_> {
 }
 
 impl TopologyObjects<H> for ArenaPair<'_> {
-    /// The B-rep's cache (`SmBrep::GetBrepCache`), built from the B-rep on first use (the
-    /// C++ topology solver builds it on demand) with this adapter's handles and the
-    /// arena identities. Under caller notification keys it is not built yet (a dispatch
-    /// gap of this adapter: no kernel, caller identities).
+    /// Build the cache using the operand's actual kernel settings and geometry
+    /// owner identities. Cache handles remain local to this pair and operation.
     fn brep_cache(&self, brep: H) -> crate::Result<&BrepCache<H>> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
         let cell = self.caches.get(slot).ok_or_else(|| invalid("bad B-rep"))?;
@@ -1117,19 +1115,6 @@ impl TopologyObjects<H> for ArenaPair<'_> {
         let mut cache = BrepCache::new(BREP_TYPE)?;
         cache.build_trees(
             self.cache_kernels
-                .as_ref()
-                .ok_or_else(|| {
-                    // DISPATCH GAP: SmBrep::CalculateBoundingBox (BuildTrees' first
-                    // call) is ported (`query::brep::calculate_bounding_box`, query.brep
-                    // partial), but under caller notification keys this adapter has no
-                    // kernel to evaluate it with, and the cache would need the caller's
-                    // geometry identities instead of `arena_identity` (the tree indexes
-                    // only owned geometry).
-                    SolidError::unported(
-                        "SmBrep::GetBrepCache under caller notification keys",
-                        "boolean.merge_p4",
-                    )
-                })?
                 .get(slot)
                 .ok_or_else(|| invalid("bad B-rep cache context"))?,
             CacheSource::Brep(b),
@@ -1148,7 +1133,34 @@ impl TopologyObjects<H> for ArenaPair<'_> {
                 CacheObject::Brep => brep_h(bi),
                 _ => hd(bi, K_NULL, 0),
             },
-            &arena_identity,
+            &|owner| {
+                let candidate = match owner {
+                    CacheObject::Edge(edge) => Some((
+                        self.keys.object(bi == 1, EntityRef::Edge(edge)),
+                        b.edge(edge)
+                            .ok()
+                            .and_then(|e| e.curve.as_ref())
+                            .and_then(SmCurve::owner),
+                    )),
+                    CacheObject::Face(face) => Some((
+                        self.keys.object(bi == 1, EntityRef::Face(face)),
+                        b.face(face)
+                            .ok()
+                            .and_then(|f| f.surface.as_ref())
+                            .and_then(Surface::owner),
+                    )),
+                    _ => None,
+                };
+                match candidate {
+                    Some((expected, actual))
+                        if matches!(self.keys, NotificationKeys::Caller(_))
+                            || actual == Some(expected) =>
+                    {
+                        expected
+                    }
+                    _ => arena_identity(owner),
+                }
+            },
         )?;
         let _ = cell.set(cache);
         cell.get().ok_or_else(|| invalid("B-rep cache not stored"))

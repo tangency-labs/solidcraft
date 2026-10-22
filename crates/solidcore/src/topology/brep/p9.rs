@@ -925,6 +925,22 @@ pub(crate) fn make_vertex_split_edge_with_state(
     state: &mut edge::NotifyState<'_>,
     curve_ref: &dyn Fn(EdgeId, i64) -> crate::geom::object::ObjectRef,
 ) -> Result<SplitEdgeOutput> {
+    make_vertex_split_edge_with_identity(k, b, edge_id, parameter, state, &|e, kind| {
+        Ok(curve_ref(e, kind))
+    })
+}
+
+/// The same native split with a caller identity resolver that can refuse an
+/// unregistered newly allocated curve. Partial topology and notifications remain
+/// visible on an identity error, just as on downstream constructor errors.
+pub(crate) fn make_vertex_split_edge_with_identity(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edge_id: EdgeId,
+    parameter: f64,
+    state: &mut edge::NotifyState<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> Result<crate::geom::object::ObjectRef>,
+) -> Result<SplitEdgeOutput> {
     let out = SplitEdgeOutput::default();
     if !b.editing_enabled() {
         return Ok(out);
@@ -1025,8 +1041,8 @@ pub(crate) fn make_vertex_split_edge_with_state(
         let old_curve_type =
             required(b.edge(edge_id)?.curve.as_ref(), "split edge without curve")?.type_code();
         let new_curve_type = copied.type_code();
-        let old_curve_ref = curve_ref(edge_id, old_curve_type);
-        let new_curve_ref = curve_ref(new_edge, new_curve_type);
+        let old_curve_ref = curve_ref(edge_id, old_curve_type)?;
+        let new_curve_ref = curve_ref(new_edge, new_curve_type)?;
         state.with_env(k, |env| {
             ignore_status(edge::set_curve(
                 b,

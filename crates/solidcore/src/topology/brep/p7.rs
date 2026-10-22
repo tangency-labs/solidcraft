@@ -10,7 +10,7 @@
 //! | [`make_face`], [`MakeFaceOptions`], [`NewFace`] | `SmBrep::MakeFace`                        |
 //! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
-//! | [`copy_faces`]                               | `SmBrep::CopyFaces`                          |
+//! | [`copy_faces`], [`copy_faces_with_merge`]    | `SmBrep::CopyFaces`                          |
 //! | [`merge_self_intersection_curves`], [`SelfIntersectionCurve`] | `SmBrep::MergeSelfIntersectionCurves` |
 //!
 //! Deviations:
@@ -99,7 +99,7 @@
 //! - **Bounds.** No recursion; every loop is over input arrays or B-rep lists.
 
 use crate::boolean::merge::p1::{MergeState, VertexCopy};
-use crate::boolean::merge::p2::{make_faceuse, MergeOperand, TopologyCopy};
+use crate::boolean::merge::p2::{make_faceuse_with, MergeContext, MergeOperand, TopologyCopy};
 use crate::boolean::topology_intersector::p1::{Relations, TopologyIntersector};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
@@ -380,39 +380,13 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 /// space of `env` (`this_face` for the new faces): entities whose arena ids coincide share
 /// an identity.
 fn merge_copy_faces(
-    k: &mut Kernel,
+    mut context: MergeContext<'_>,
     src: &mut Brep,
     dest: &mut Brep,
     faces: &[FaceId],
-    this_face: &dyn Fn(FaceId) -> ObjectRef,
-    env: &mut ed::NotifyEnv<'_>,
+    relations: &mut Relations,
+    copy: &mut TopologyCopy<'_>,
 ) -> Result<Vec<FaceId>> {
-    let _merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
-        k,
-        (&*dest, MergeOperand::Primary),
-        Some((&*src, MergeOperand::Other)),
-        dest.tolerance(),
-        20.0 * PI / 180.0,
-        None,
-    )?;
-    // The new merge's mate maps start empty.
-    let mut relations = Relations::default();
-    let key_of = env.key_of;
-    let vertex_key = |v: VertexId| key_of(EntityRef::Vertex(v));
-    let edge_key = |e: EdgeId| key_of(EntityRef::Edge(e));
-    let face_key = |f: FaceId| key_of(EntityRef::Face(f));
-    let mut copy = TopologyCopy {
-        vertices: VertexCopy {
-            records: &mut *env.records,
-            attributes: &mut *env.attributes,
-            source_key: &vertex_key,
-            destination_key: key_of,
-        },
-        edge_source_key: &edge_key,
-        edge_destination_key: &edge_key,
-        face_source_key: &face_key,
-        face_destination_key: this_face,
-    };
     let mut new_faces = Vec::new();
     for &f in faces {
         if !face_in_brep(src, f)? {
@@ -420,21 +394,23 @@ fn merge_copy_faces(
         }
         let faceuse = fp2::upward_faceuse(src, f)?
             .ok_or(SolidError::invalid_input(OP, "face without face use"))?;
-        let doing_boolean = k.context.doing_boolean();
-        k.context.set_doing_boolean(true);
+        let doing_boolean = context.kernel().context.doing_boolean();
+        context.kernel_mut().context.set_doing_boolean(true);
         let mut list = Vec::new();
-        let made = make_faceuse(
-            k,
+        let made = make_faceuse_with(
+            context.reborrow(),
             dest,
             src,
             faceuse,
             None,
-            &mut relations,
-            &mut copy,
-            env.context.as_deref_mut(),
+            relations,
+            copy,
             Some(&mut list),
         );
-        k.context.set_doing_boolean(doing_boolean);
+        context
+            .kernel_mut()
+            .context
+            .set_doing_boolean(doing_boolean);
         ignored(made)?;
         new_faces.extend(list);
     }
@@ -1671,7 +1647,39 @@ pub fn copy_faces(
     if use_merge {
         // (the merge object is made before the face loop; MakeFaceuse's status is
         // ignored)
-        if let Some(made) = ignored(merge_copy_faces(k, src, dest, faces, this_face, env))? {
+        let _merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+            k,
+            (&*dest, MergeOperand::Primary),
+            Some((&*src, MergeOperand::Other)),
+            dest.tolerance(),
+            20.0 * PI / 180.0,
+            None,
+        )?;
+        let source_key = env.key_of;
+        let mut copy = TopologyCopy {
+            vertices: VertexCopy {
+                records: env.records,
+                attributes: env.attributes,
+                source_key: &|v| source_key(EntityRef::Vertex(v)),
+                destination_key: source_key,
+            },
+            edge_source_key: &|e| source_key(EntityRef::Edge(e)),
+            edge_destination_key: &|e| source_key(EntityRef::Edge(e)),
+            face_source_key: &|f| source_key(EntityRef::Face(f)),
+            face_destination_key: this_face,
+        };
+        let context = match env.context.as_deref_mut() {
+            Some(context) => MergeContext::Lent(k, context),
+            None => MergeContext::Split(k, None),
+        };
+        if let Some(made) = ignored(merge_copy_faces(
+            context,
+            src,
+            dest,
+            faces,
+            &mut Relations::default(),
+            &mut copy,
+        ))? {
             new_faces = made;
         }
         return Ok((new_faces, all_ok));
@@ -1738,6 +1746,31 @@ pub fn copy_faces(
         }
     }
     Ok((new_faces, all_ok))
+}
+
+/// `CopyFaces` with a caller-retained merge's relationships and distinct source
+/// identities. It uses the same face-copy loop as [`copy_faces`]; mate records are
+/// retained even when a later face fails. Ordinary `MakeFaceuse` errors are ignored,
+/// as in C++; dependency and invalid-input errors propagate.
+pub fn copy_faces_with_merge(
+    context: MergeContext<'_>,
+    src: &mut Brep,
+    faces: &[FaceId],
+    dest: &mut Brep,
+    relations: &mut Relations,
+    copy: &mut TopologyCopy<'_>,
+) -> Result<Vec<FaceId>> {
+    brep_set_tolerance(context.kernel(), dest, src.tolerance(), true, true)?;
+    // C++ constructs this local even when the caller supplies a merge object.
+    let _local_merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+        context.kernel(),
+        (&*dest, MergeOperand::Primary),
+        Some((&*src, MergeOperand::Other)),
+        dest.tolerance(),
+        20.0 * PI / 180.0,
+        None,
+    )?;
+    merge_copy_faces(context, src, dest, faces, relations, copy)
 }
 
 // ---- MergeSelfIntersectionCurves ------------------------------------------------------------

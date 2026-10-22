@@ -8,13 +8,14 @@
 //! | Rust                            | Upstream                                         |
 //! |---------------------------------|--------------------------------------------------|
 //! | [`new_brep`]                    | `SmBrep::SmBrep(double, double, SmContext*)`     |
+//! | `new_brep_for_caller` (crate)   | the same constructor under a reserved caller identity |
 //! | [`copy_brep`]                   | `SmBrep::SmBrep(const SmBrep&, SmCopyBrepMap*, SmCopyBrepMap*, SmBoolean, SmBoolean)` |
 //! | [`api_brep_copy`]               | `SmApiBrepCopy`                                  |
-//! | [`copy_vertices`]               | `SmBrep::CopyVertices`                           |
+//! | [`copy_vertices`], [`copy_vertices_with_context`], [`CopySource`] | `SmBrep::CopyVertices`                           |
 //! | [`delete_face`], [`DeleteFaceOptions`] | `SmBrep::DeleteFace`                      |
 //! | [`make_wire_edge`]              | `SmBrep::MakeWireEdge`                           |
 //! | [`make_wire_edge_vertex`]       | `SmBrep::MakeWireEdgeVertex`                     |
-//! | [`merge_brep`]                  | `SmBrep::MergeBrep`                              |
+//! | [`merge_brep`], [`merge_brep_with_context`] | `SmBrep::MergeBrep`                              |
 //! | [`orient_trimmed_surfaces`]     | `SmBrep::OrientTrimmedSurfaces`                  |
 //! | [`squeeze_edge`]                | `SmBrep::SqueezeEdge`                            |
 //! | [`turn_to_nurbs`]               | `SmBrep::TurnToNURBS`                            |
@@ -79,20 +80,11 @@
 //!   changes anything ([`check_keys`]), unless it is the object's own kernel identity.
 //!   The lending adapters are not nestable: one inside another (whose kernel context
 //!   then holds no callbacks) is refused before anything changes
-//!   (`Context::lend_notify`). Boundary: a kernel identity is unique and stable only
-//!   within one domain (a context's, moved with its callbacks by
-//!   `Context::take_notify_lease`), so every store keyed by identities (the
-//!   environment's records and attributes, a tracker, a callback's own state) belongs
-//!   to one domain: shared across two contexts, two curves (or two kernel-named B-reps'
-//!   objects) may share a key there, and a lease that is not given back
-//!   (`Context::restore_notify_lease`) leaves its context a new domain. An object that
-//!   leaves a domain and returns is renamed (two identities for one object, never one
-//!   for two). Closing this would need one address space across contexts (a
-//!   process-wide counter, which the crate's no-global-state rule excludes). Every edit
-//!   that issues identities fails (`InvalidInput`) once its domain has issued
-//!   `MAX_BREP_SERIAL` serials or every geometry key, rather than reuse one.
-//!   `MakeWireEdge(Vertex)` take the caller's unowned curve by value, as upstream binds
-//!   that object (so it cannot be bound twice), and copy an edge-owned one.
+//!   (`Context::lend_notify`). Independent contexts can issue equal keys by default.
+//!   A shared attribute store must supply disjoint topology keys and coordinate its
+//!   geometry sequences. `SweepStore` does this with store-owned allocation state;
+//!   the identity domains and callbacks stay distinct. A lease that is not returned
+//!   leaves its context a new domain; an object re-entering a domain is renamed.
 //! - **Copied shell lists.** `MergeBrep`'s second pass copies `pS->m_pList` through the
 //!   copy map and `m_lListSize` verbatim; the arena's size is recomputed from the
 //!   members ([`shell::shell_list_size`]), and a face-use list's other members are the
@@ -503,6 +495,29 @@ pub fn new_brep(
     model_size_estimate: f64,
     large_small_size_ratio: f64,
 ) -> Result<Brep> {
+    new_brep_in(k, model_size_estimate, large_small_size_ratio, None)
+}
+
+/// Construct under an already reserved caller identity, including the first
+/// Construction notification. The native constructor body is shared with `new_brep`.
+pub(crate) fn new_brep_for_caller(
+    k: &mut Kernel,
+    model_size_estimate: f64,
+    large_small_size_ratio: f64,
+    key: ObjectKey,
+) -> Result<Brep> {
+    if is_reserved_key(key) {
+        return Err(RESERVED_KEY);
+    }
+    new_brep_in(k, model_size_estimate, large_small_size_ratio, Some(key))
+}
+
+fn new_brep_in(
+    k: &mut Kernel,
+    model_size_estimate: f64,
+    large_small_size_ratio: f64,
+    caller_key: Option<ObjectKey>,
+) -> Result<Brep> {
     let mut b = Brep::new();
 
     // When asked (should be extremly rare) set SystemTolerance sizes
@@ -517,10 +532,15 @@ pub fn new_brep(
     b.pre_insert_region(r)?;
 
     // report construction at SmObject::Notify level - skip other levels
-    let serial = notify_serial(&mut k.context, &mut b)?;
-    let this = ObjectRef {
-        key: topology_ref(serial, brep_entity()).key,
-        ..p2::brep_ref(&b)
+    let this = if let Some(key) = caller_key {
+        b.set_key(key);
+        p2::brep_ref(&b)
+    } else {
+        let serial = notify_serial(&mut k.context, &mut b)?;
+        ObjectRef {
+            key: topology_ref(serial, brep_entity()).key,
+            ..p2::brep_ref(&b)
+        }
     };
     object::notify(
         Some(&mut k.context),
@@ -585,7 +605,10 @@ pub fn copy_brep(
             env,
             b,
             src,
-            source_key,
+            CopySource {
+                key_of: source_key,
+                context: None,
+            },
             copy_map,
             reverse_map,
             add_analytics,
@@ -617,7 +640,7 @@ pub fn copy_brep(
 /// notification names (e.g. both vertices of `SqueezeEdge`'s `SM_NO_MERGE_IN_BREP`).
 /// Every edit seeds them ([`with_caller_identities`]), as a B-rep built upstream
 /// already has them; a record the caller keeps is left as it is.
-fn seed_records(
+pub(crate) fn seed_records(
     records: &mut BTreeMap<ObjectKey, topo::Topology>,
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
@@ -952,6 +975,15 @@ pub fn api_brep_copy(
     copy_brep(k, env, brep, source_key, None, None, true, false)
 }
 
+/// Identities and optional separate notification context of a copy's source.
+/// `None` means the source shares the destination's notification context.
+pub struct CopySource<'a> {
+    /// Source topology identities; arena ids alone are not object identities.
+    pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+    /// Source callbacks when the bodies belong to distinct contexts.
+    pub context: Option<&'a mut Context>,
+}
+
 /// `CopyVertices`: copies each vertex of `src` into `dest` as a shell vertex of its
 /// infinite region at the same point, reporting each copy (`SM_NO_COPY`, which carries
 /// the flags, user values and attributes to the copy). Returns the new vertices
@@ -971,21 +1003,43 @@ pub fn copy_vertices(
     env: &mut NotifyEnv<'_>,
     source_key: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<Vec<VertexId>> {
+    copy_vertices_with_context(
+        k,
+        src,
+        vertices,
+        dest,
+        env,
+        CopySource {
+            key_of: source_key,
+            context: None,
+        },
+    )
+}
+
+/// [`copy_vertices`] with the source's own callbacks when its context differs.
+pub fn copy_vertices_with_context(
+    k: &mut Kernel,
+    src: &Brep,
+    vertices: &[VertexId],
+    dest: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    source: CopySource<'_>,
+) -> Result<Vec<VertexId>> {
     let inputs = vertices.len();
     with_caller_identities_for(
         k,
         dest,
         env,
-        Some((src, source_key)),
+        Some((src, source.key_of)),
         inputs,
-        |_, dest, env| copy_vertices_in(src, source_key, vertices, dest, env),
+        |_, dest, env| copy_vertices_in(src, source, vertices, dest, env),
     )
 }
 
 /// [`copy_vertices`] once the identities are checked and seeded.
 fn copy_vertices_in(
     src: &Brep,
-    source_key: &dyn Fn(EntityRef) -> ObjectRef,
+    mut source: CopySource<'_>,
     vertices: &[VertexId],
     dest: &mut Brep,
     env: &mut NotifyEnv<'_>,
@@ -1000,10 +1054,11 @@ fn copy_vertices_in(
         let (_, new_v) = make_shell_vertex(dest, inf, coords, env)?;
 
         // inform the public - propogate attributes and report copy
-        let this = source_key(EntityRef::Vertex(v));
+        let this = (source.key_of)(EntityRef::Vertex(v));
         let to = (env.key_of)(EntityRef::Vertex(new_v));
-        notify_copy(
+        notify_copy_with_context(
             env,
+            source.context.as_deref_mut(),
             this,
             Some(to),
             Some(p2::brep_ref(dest)),
@@ -1021,8 +1076,9 @@ fn copy_vertices_in(
 /// `SmTopology::Notify`, which carries the flags and user values of `this` to `to`
 /// (resetting its marks) and then the attributes and callbacks (`SmAObject`).
 /// `Notify` is `void`: only the errors of [`ignore_soft`] propagate.
-fn notify_copy(
+fn notify_copy_with_context(
     env: &mut NotifyEnv<'_>,
+    source_context: Option<&mut Context>,
     this: ObjectRef,
     to: Option<ObjectRef>,
     data2: Option<ObjectRef>,
@@ -1036,7 +1092,10 @@ fn notify_copy(
     ignore_soft(topo::notify(
         &mut *env.records,
         &mut *env.attributes,
-        env.context.as_deref_mut(),
+        match source_context {
+            Some(context) => Some(context),
+            None => env.context.as_deref_mut(),
+        },
         NotifyOperation::Copy,
         this,
         to,
@@ -1125,13 +1184,40 @@ pub fn merge_brep(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
-    with_caller_identities(k, b, env, Some((other, source_key)), |k, b, env| {
+    merge_brep_with_context(
+        k,
+        env,
+        b,
+        other,
+        CopySource {
+            key_of: source_key,
+            context: None,
+        },
+        copy_map,
+        reverse_map,
+        add_analytics,
+    )
+}
+
+/// [`merge_brep`] with source callbacks resolved independently of the destination.
+#[allow(clippy::too_many_arguments)]
+pub fn merge_brep_with_context(
+    k: &mut Kernel,
+    env: &mut NotifyEnv<'_>,
+    b: &mut Brep,
+    other: &Brep,
+    source: CopySource<'_>,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
+) -> Result<()> {
+    with_caller_identities(k, b, env, Some((other, source.key_of)), |k, b, env| {
         merge_brep_in(
             k,
             env,
             b,
             other,
-            source_key,
+            source,
             copy_map,
             reverse_map,
             add_analytics,
@@ -1146,11 +1232,12 @@ fn merge_brep_in(
     env: &mut NotifyEnv<'_>,
     b: &mut Brep,
     other: &Brep,
-    source_key: &dyn Fn(EntityRef) -> ObjectRef,
+    mut source: CopySource<'_>,
     mut copy_map: Option<&mut CopyBrepMap<EntityRef>>,
     mut reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
+    let source_key = source.key_of;
     let mut map = p1::ObjectMap::new();
     let set = |orig: EntityRef,
                copy: EntityRef,
@@ -1269,7 +1356,7 @@ fn merge_brep_in(
         } else {
             face_surf.copy(k)?
         };
-        *new_surface.owner_mut() = Some(arena_identity(CacheObject::Face(new_f)));
+        *new_surface.owner_mut() = Some((env.key_of)(EntityRef::Face(new_f)));
         let (rect, dom, ftol) = (
             src_face.rectangular_trim,
             src_face.uv_domain,
@@ -1409,7 +1496,7 @@ fn merge_brep_in(
             tolerance: etol,
             curve: None,
         })?;
-        let _ = new_c.set_owner(Some(arena_identity(CacheObject::Edge(new_e))), None);
+        let _ = new_c.set_owner(Some((env.key_of)(EntityRef::Edge(new_e))), None);
         b.edge_mut(new_e)?.curve = Some(new_c);
 
         // Relate the Edges.
@@ -1671,9 +1758,16 @@ fn merge_brep_in(
 
     // Third pass of copying: Notify on all new topology.
     // (SM_NO_GET_BREP(..) is ((SmObject*)(0)) in the pinned SmTypes.h)
-    let copy_notify = |env: &mut NotifyEnv<'_>, from: EntityRef, to: Option<EntityRef>| {
+    let mut copy_notify = |env: &mut NotifyEnv<'_>, from: EntityRef, to: Option<EntityRef>| {
         let to = to.map(|t| (env.key_of)(t));
-        notify_copy(env, source_key(from), to, None, None)
+        notify_copy_with_context(
+            env,
+            source.context.as_deref_mut(),
+            source_key(from),
+            to,
+            None,
+            None,
+        )
     };
     for &r in &regions {
         for s in region_shells(other, r)? {
@@ -2330,7 +2424,7 @@ fn bind_wire_curve(
         [Some(new_ref), None],
     )?;
     // connect Curve to Edge
-    let edge_ref = arena_identity(CacheObject::Edge(e));
+    let edge_ref = (env.key_of)(EntityRef::Edge(e));
     if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
         let _ = c.set_owner(Some(edge_ref), None);
     }
@@ -2829,11 +2923,37 @@ const fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
 /// `InvalidInput` for a caller key in the kernel's reserved range or an exhausted
 /// identity domain.
 pub fn turn_to_nurbs(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Result<()> {
-    with_caller_identities(k, b, env, None, turn_to_nurbs_in)
+    with_caller_identities(k, b, env, None, |k, b, env| {
+        turn_to_nurbs_in(k, b, env, &|f| arena_identity(CacheObject::Face(f)), &|e| {
+            arena_identity(CacheObject::Edge(e))
+        })
+    })
+}
+
+/// The same conversion with the actual geometry owners of a caller-key edit.
+/// The arena entrypoint retains its legacy owner convention; native construction
+/// and production stores supply the identities held by their geometry objects.
+pub(crate) fn turn_to_nurbs_with_geometry_owners(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
+    let key_of = env.key_of;
+    with_caller_identities(k, b, env, None, |k, b, env| {
+        turn_to_nurbs_in(k, b, env, &|f| key_of(EntityRef::Face(f)), &|e| {
+            key_of(EntityRef::Edge(e))
+        })
+    })
 }
 
 /// [`turn_to_nurbs`] once the identities are checked and seeded ([`with_caller_identities`]).
-fn turn_to_nurbs_in(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Result<()> {
+fn turn_to_nurbs_in(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    face_owner: &dyn Fn(FaceId) -> ObjectRef,
+    edge_owner: &dyn Fn(EdgeId) -> ObjectRef,
+) -> Result<()> {
     ignore_soft(brep_notify(
         b,
         env,
@@ -2842,17 +2962,7 @@ fn turn_to_nurbs_in(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Re
     ))?;
 
     // for every Brep->Surface (GetSurfaces, then the surface's face)
-    let faces: Vec<FaceId> = p1::faces(b, None)?
-        .into_iter()
-        .filter(|&f| {
-            b.face(f)
-                .ok()
-                .and_then(|x| x.surface.as_ref())
-                .is_some_and(|s| s.owner() == Some(arena_identity(CacheObject::Face(f))))
-        })
-        .collect();
-    // (GetSurfaces dereferences every face's surface)
-    p1::surfaces(b, None)?;
+    let faces = p1::surface_owners(b, None, face_owner)?;
     for f in faces {
         let surface = b
             .face(f)?
@@ -2933,17 +3043,7 @@ fn turn_to_nurbs_in(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Re
     }
 
     // for every Brep->Curve
-    let edges: Vec<EdgeId> = p1::edges(b, None)?
-        .into_iter()
-        .filter(|&e| {
-            b.edge(e)
-                .ok()
-                .and_then(|x| x.curve.as_ref())
-                .is_some_and(|c| c.owner() == Some(arena_identity(CacheObject::Edge(e))))
-        })
-        .collect();
-    // (GetCurves dereferences every edge's curve)
-    p1::curves(b, None)?;
+    let edges = p1::curve_owners(b, None, edge_owner)?;
     for e in edges {
         let curve = b.edge(e)?.curve.as_ref().ok_or_else(ner)?;
         if curve.type_code() == BSplineCurve::TYPE {
@@ -4072,7 +4172,7 @@ mod tests {
             context: None,
             key_of: &key_of,
         };
-        notify_copy(&mut env, from, Some(to), None, None).unwrap();
+        notify_copy_with_context(&mut env, None, from, Some(to), None, None).unwrap();
         let copy = records[&to.key];
         assert_eq!(copy.all_flags(), 5);
     }

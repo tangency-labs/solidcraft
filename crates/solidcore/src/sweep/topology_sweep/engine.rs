@@ -285,7 +285,7 @@ impl TopologySweep {
                 continue;
             };
             let interval = curve.natural_interval();
-            let point = curve.evaluate_point(a.kernel(region.0)?, interval.max())?;
+            let point = curve.evaluate_point(a.kernel(original.0)?, interval.max())?;
             // bNewVtxNeeded is unconditionally TRUE in the active upstream code.
             let point0 = vertex::point(a.brep(original.0)?, original.1)?;
             let (_, start) = a.make_shell_vertex(region, point0)?;
@@ -836,7 +836,7 @@ impl TopologySweep {
                 } else if self.do_stitching {
                     let tolerance = a.brep(original)?.tolerance();
                     a.stitch(original, self, tolerance, false)?;
-                    ignore_status(a.orient(original, true, false, true))?;
+                    ignore_status(a.orient(original, true, true))?;
                 }
                 if let WireSweep::Brep(wire_brep) = wire {
                     let geometry_copy = required(g.copy_for_sweep())?;
@@ -1052,7 +1052,6 @@ impl TopologySweep {
                             scene.brep,
                             &scene_faces,
                             original,
-                            true,
                             merge,
                             &mut mates,
                         ))?;
@@ -1178,9 +1177,7 @@ impl TopologySweep {
                     |a, merge| {
                         a.set_editing(back, true)?;
                         let mut mates = super::access::BTreeEdgeMap::new();
-                        ignore_status(
-                            a.copy_faces(original, &backs, back, true, merge, &mut mates),
-                        )?;
+                        ignore_status(a.copy_faces(original, &backs, back, merge, &mut mates))?;
                         let mut remove = Vec::new();
                         for face in backs {
                             if !a.has_lamina_edge((original, face))? {
@@ -1333,7 +1330,9 @@ mod tests {
                 &mut Kernel,
                 &mut Brep,
                 &mut Brep,
+                &dyn Fn(crate::EntityRef) -> crate::geom::object::ObjectRef,
                 &dyn Fn(FaceId) -> crate::geom::object::ObjectRef,
+                Option<&mut crate::geom::context::Context>,
                 &mut edge::NotifyEnv<'_>,
             ) -> Result<T>,
         ) -> Result<T> {
@@ -1365,7 +1364,15 @@ mod tests {
                 context: None,
                 key_of: &key_of,
             };
-            body(&mut self.kernel, src, dst, &face_objects, &mut env)
+            body(
+                &mut self.kernel,
+                src,
+                dst,
+                &|e| service_object(source, e),
+                &face_objects,
+                None,
+                &mut env,
+            )
         }
         fn with_brep_notifications<T>(
             &mut self,
@@ -1436,6 +1443,27 @@ mod tests {
         ) -> Result<SweepMergeId> {
             self.merge_source = Some(source);
             Ok(SweepMergeId(0))
+        }
+        fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> {
+            Err(SolidError::invalid_input(
+                OP,
+                "fixture has no retained merge",
+            ))
+        }
+        fn merge_relations(
+            &mut self,
+            _: SweepMergeId,
+        ) -> Result<&mut crate::boolean::topology_intersector::p1::Relations> {
+            Err(SolidError::invalid_input(
+                OP,
+                "fixture has no retained merge",
+            ))
+        }
+        fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> {
+            Err(SolidError::invalid_input(
+                OP,
+                "fixture has no piecewise service",
+            ))
         }
         fn lock_mark(&mut self, _: BrepId, _: i32) -> Result<MarkType> {
             Ok(MarkType::Mark)
@@ -1527,7 +1555,6 @@ mod tests {
             _: BrepId,
             _: &[FaceId],
             _: BrepId,
-            _: bool,
             _: SweepMergeId,
             mates: &mut crate::sweep::topology_sweep::access::BTreeEdgeMap,
         ) -> Result<()> {

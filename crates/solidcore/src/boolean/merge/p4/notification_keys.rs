@@ -29,11 +29,11 @@ pub struct ManifoldNotificationKeys<'a> {
     /// Other topology identities.
     pub other: &'a dyn Fn(EntityRef) -> ObjectRef,
     /// Primary edge-curve identities (edge id, curve type).
-    pub primary_curve: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+    pub primary_curve: &'a dyn Fn(EdgeId, i64) -> crate::Result<ObjectRef>,
     /// Other edge-curve identities (edge id, curve type).
-    pub other_curve: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+    pub other_curve: &'a dyn Fn(EdgeId, i64) -> crate::Result<ObjectRef>,
     /// Reserved primary-region source-list handles, in primary/other order.
-    pub source_lists: &'a dyn Fn(RegionId) -> [ObjectRef; 2],
+    pub source_lists: &'a dyn Fn(RegionId) -> crate::Result<[ObjectRef; 2]>,
 }
 
 impl core::fmt::Debug for ManifoldNotificationKeys<'_> {
@@ -59,12 +59,17 @@ impl NotificationKeys<'_> {
         }
     }
 
-    pub(super) fn curve(self, other: bool, edge: EdgeId, type_code: i64) -> ObjectRef {
+    pub(super) fn curve(
+        self,
+        other: bool,
+        edge: EdgeId,
+        type_code: i64,
+    ) -> crate::Result<ObjectRef> {
         match self {
-            Self::Namespace(_) => ObjectRef {
+            Self::Namespace(_) => Ok(ObjectRef {
                 type_code,
                 ..self.object(other, EntityRef::Edge(edge))
-            },
+            }),
             Self::Caller(keys) => (if other {
                 keys.other_curve
             } else {

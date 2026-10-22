@@ -13,6 +13,7 @@
 //! | [`Context::new`], [`Context::default`]    | `SmContext::SmContext(double, double)` (no `SM_USE_GLOBAL_CACHE`) |
 //! | [`Context::doing_boolean`]                | `SmContext::GetDoingBoolean`                    |
 //! | [`IdentitySlot`], [`NotifyLease`], [`Context::take_notify_lease`], [`Context::restore_notify_lease`], [`KERNEL_KEY_BASE`], [`TOPOLOGY_KEY_BASE`], [`GEOMETRY_KEY_BASE`], [`MAX_BREP_SERIAL`], [`is_reserved_key`] | (none: kernel-issued notification identities; CO-PORTED by `topology.brep_p3`) |
+//! | `Context::share_geometry_sequence` (crate) | store-owned allocation of geometry notification keys |
 //! | [`Context::doing_boolean_mut`]            | `SmContext::GetDoingBooleanRef`                 |
 //! | [`Context::set_doing_boolean`]            | `SmContext::SetDoingBoolean`                    |
 //! | [`Context::user_notify_callback`]         | `SmContext::GetUserNotifyCallback`              |
@@ -69,10 +70,15 @@
 //!   [`Context::sys_notify_callback_mut`] by [`object::notify`].
 //! - `SmApiGeneral.cpp` keeps one process-global `SmContext*`; the port takes the slot
 //!   (`&mut Option<Context>`) from the caller.
+//! - Store-owned contexts can share a geometry-key sequence without sharing their
+//!   identity domains. The counter is owned, bounded and has no process-global state.
 //! - The attribute-callback list, global user data (`void*`), `operator new/delete`,
 //!   `Dump`, `GetTypeString` and `IsLockedMark` are unused upstream and not ported.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::ObjectKey;
@@ -237,7 +243,7 @@ struct DomainToken(());
 #[derive(Debug)]
 struct IdentityDomain {
     token: Arc<DomainToken>,
-    geometry_issued: u64,
+    geometry_issued: Arc<AtomicU64>,
     breps_issued: u64,
     /// The stand-in a crate edit left while it lends the context's callbacks
     /// ([`Context::lend_notify`]): the context issues nothing and lends nothing until
@@ -249,7 +255,7 @@ impl IdentityDomain {
     fn new() -> Self {
         Self {
             token: Arc::new(DomainToken(())),
-            geometry_issued: 0,
+            geometry_issued: Arc::new(AtomicU64::new(0)),
             breps_issued: 0,
             lent: false,
         }
@@ -304,6 +310,19 @@ pub struct NotifyLease {
     identities: IdentityDomain,
 }
 
+/// Return the callbacks and identity domain even when the caller unwinds.
+struct NotificationScope<'a> {
+    kernel: &'a mut Kernel,
+    notifications: Context,
+}
+impl Drop for NotificationScope<'_> {
+    fn drop(&mut self) {
+        self.kernel
+            .context
+            .install_lease(self.notifications.take_lease());
+    }
+}
+
 /// The refusal of a context whose callbacks a crate edit has lent out
 /// ([`Context::lend_notify`]): a nested edit through it would notify no callback, in
 /// another domain.
@@ -342,17 +361,36 @@ impl Context {
                 return Ok(ObjectKey(i.value));
             }
         }
-        let n = self.identities.geometry_issued + 1;
-        if n > !GEOMETRY_KEY_BASE {
-            return Err(IDENTITIES_EXHAUSTED);
-        }
-        self.identities.geometry_issued = n;
+        // Only key uniqueness is shared, not model data.
+        let n = self
+            .identities
+            .geometry_issued
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |issued| {
+                issued
+                    .checked_add(1)
+                    .filter(|next| *next <= !GEOMETRY_KEY_BASE)
+            })
+            .map_err(|_| IDENTITIES_EXHAUSTED)?
+            + 1;
         let key = GEOMETRY_KEY_BASE | n;
         slot.0 = Some(Issued {
             domain: Arc::clone(&self.identities.token),
             value: key,
         });
         Ok(ObjectKey(key))
+    }
+
+    /// Join a store-owned geometry sequence without changing this context's domain
+    /// or previously issued identities. New keys are unique across the store's
+    /// kernels; callbacks and identity leases retain their original domains.
+    pub(crate) fn share_geometry_sequence(&mut self, sequence: Arc<AtomicU64>) -> Result<()> {
+        self.check_not_lent()?;
+        sequence.fetch_max(
+            self.identities.geometry_issued.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.identities.geometry_issued = sequence;
+        Ok(())
     }
 
     /// The serial the B-rep owning `slot` is notified under in this context (its
@@ -398,7 +436,7 @@ impl Context {
     /// the kernel's traversal marks or tolerances. Notification APIs use mutable
     /// Context while geometry APIs borrow Kernel; both refer to one upstream
     /// context. The callbacks travel with their identity domain
-    /// ([`Context::lend_notify`]), and are restored on every returned error as well.
+    /// ([`Context::lend_notify`]), and are restored on returned errors and unwinding callbacks as well.
     /// The snapshot `Context` is read-only apart from its callbacks: mark, mark-lock
     /// and doing-Boolean changes the action makes to it are dropped on return.
     ///
@@ -412,9 +450,11 @@ impl Context {
     ) -> Result<T> {
         let mut notifications = k.context.metadata_copy();
         notifications.install_lease(k.context.lend_notify()?);
-        let result = action(k, &mut notifications);
-        k.context.install_lease(notifications.take_lease());
-        Ok(result)
+        let mut scope = NotificationScope {
+            kernel: k,
+            notifications,
+        };
+        Ok(action(scope.kernel, &mut scope.notifications))
     }
 
     /// An immutable metadata snapshot, without copying callback ownership.

@@ -741,7 +741,7 @@ mod tests {
             Some(TransformObject::Brep(&mut Brep::new())),
             Vec3::new(1.0, 0.0, 0.0)
         )
-        .is_err_and(|e| e.is_unported()));
+        .is_ok());
     }
 
     /// The B-rep walks on a wire edge from (0,0,0) to (1,0,0) of one B-rep.

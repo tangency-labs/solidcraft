@@ -71,13 +71,14 @@
 //!   intersectors return, as upstream; `FaceFaceIntersect`'s non-null vertex list
 //!   drops them, which changes nothing because `FindCommonElements` never matches a
 //!   null against a face's vertices.
-//! - Callees not ported yet return [`SolidError::Unported`] at the call site,
-//!   tagged `UNPORTED(<unit>)`: `SmBrep::MakeWireEdge` (`topology.brep_p3`, an
-//!   integration gap: the ported callee needs `&mut Kernel`, which
-//!   `MergeContext::Split` lacks, and a `NotifyEnv` from `TopologyCopy`'s keys).
-//!   `OrientTrimmedSurfaces` is a required [`MergeBrep`] method (`topology::brep::p3`);
-//!   `SmFace::GetEdges` / `GetVertices` / `GetBrep` are the intersector backend's
-//!   ([`IntersectorBrep::face_edges`] and siblings).
+//! - `MergeEdge` calls `topology::brep::p3::make_wire_edge` with the primary's
+//!   mutable kernel and destination identities. `MergeContext::Lent` carries its
+//!   existing notification lease; otherwise construction borrows the primary's
+//!   callbacks. Copy events use the source context.
+//!   The
+//!   [`MergeBrep`] defaults do the same for `SmFace::GetEdges` / `GetVertices` /
+//!   `GetBrep` (`topology.face_p4`). `OrientTrimmedSurfaces` is a required
+//!   [`MergeBrep`] method (`topology::brep::p3`).
 //!   The code after each stub is ported in full. `SmBrep::GetMinEdgeBBoxSize` is
 //!   `topology::brep::p2::min_edge_bbox_size`. The callees ported on arena B-reps are
 //!   required [`MergeBrep`] methods (`SmEdge::GetVertices`, `SmFace::GetFaceuses`,
@@ -123,10 +124,6 @@ const OP_FACEUSE: &str = "boolean::merge::p2::make_faceuse";
 /// A dereference of a null pointer upstream (undefined behaviour).
 const fn dangling(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
-}
-
-fn unavailable<T>(symbol: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(symbol, unit))
 }
 
 /// `SM_REVERSE_ORIENTATION(a)`: `SM_OT_SAME` becomes `SM_OT_OPPOSITE`, anything
@@ -270,21 +267,48 @@ impl TopologyCopy<'_> {
 }
 
 fn make_wire_edge(
+    ctx: &mut MergeContext<'_>,
     brep: &mut Brep,
     region: Option<RegionId>,
-    start: VertexId,
-    end: VertexId,
+    vertices: [VertexId; 2],
     curve: Curve,
     interval: Extent1d,
-    orientation: OrientType,
+    copy: &mut TopologyCopy<'_>,
 ) -> Result<EdgeId> {
-    let _ = (brep, region, start, end, curve, interval, orientation);
-    // Integration gap, not a missing callee: topology::brep::p3::make_wire_edge is
-    // ported, but it needs `&mut Kernel` (p2::make_edge_topology transfers shells),
-    // which MergeContext::Split does not carry, and a NotifyEnv naming the new
-    // topology from TopologyCopy's keys. Wiring it is a follow-up to PR #204.
-    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdge
-    unavailable("SmBrep::MakeWireEdge", "topology.brep_p3")
+    let [start, end] = vertices;
+    let vertex_key = copy.vertices.destination_key;
+    let edge_key = copy.edge_destination_key;
+    let face_key = copy.face_destination_key;
+    let key_of = |entity| match entity {
+        crate::EntityRef::Edge(edge) => edge_key(edge),
+        crate::EntityRef::Face(face) => face_key(face),
+        other => vertex_key(other),
+    };
+    let construct = |k: &mut Kernel, context: &mut Context| {
+        let mut env = edge::NotifyEnv {
+            records: &mut *copy.vertices.records,
+            attributes: &mut *copy.vertices.attributes,
+            context: Some(context),
+            key_of: &key_of,
+        };
+        crate::topology::brep::p3::make_wire_edge(
+            k,
+            brep,
+            &mut env,
+            region,
+            start,
+            end,
+            curve,
+            &interval,
+            OrientType::Same,
+        )
+    };
+    match ctx {
+        MergeContext::Lent(k, context) => construct(k, context),
+        MergeContext::Split(k, _) | MergeContext::Shared(k) => {
+            Context::with_notification_context(k, construct)?
+        }
+    }
 }
 
 /// Merge an edge of the other operand into the primary B-rep (`MergeEdge`). An edge
@@ -301,7 +325,7 @@ fn make_wire_edge(
 /// edge use (upstream dereferences them); those of the curve copy, `Relate` and
 /// [`p1::merge_vertex`]; [`SolidError::Unported`] (module docs).
 pub fn merge_edge(
-    k: &Kernel,
+    k: &mut Kernel,
     brep: &mut Brep,
     other: &mut Brep,
     edgeuse: Option<EdgeuseId>,
@@ -325,43 +349,38 @@ pub fn merge_edge(
 /// context the source edge and vertices are notified through.
 pub enum MergeContext<'a> {
     /// A kernel and a separate notification context (or none).
-    Split(&'a Kernel, Option<&'a mut Context>),
-    /// [`MergeContext::Split`] with a mutable kernel (`MakeFace` claims a mark).
-    SplitMut(&'a mut Kernel, Option<&'a mut Context>),
+    Split(&'a mut Kernel, Option<&'a mut Context>),
+    /// A kernel whose notification context is already lent to its caller.
+    Lent(&'a mut Kernel, &'a mut Context),
     /// One kernel whose own context is notified (both B-reps share it).
     Shared(&'a mut Kernel),
 }
 
 impl MergeContext<'_> {
-    fn kernel(&self) -> &Kernel {
+    pub(crate) fn kernel(&self) -> &Kernel {
         match self {
-            Self::Split(k, _) => k,
-            Self::SplitMut(k, _) | Self::Shared(k) => k,
+            Self::Split(k, _) | Self::Lent(k, _) | Self::Shared(k) => k,
         }
     }
 
-    /// The kernel `MakeFace` claims its mark from; a read-only kernel cannot.
-    fn kernel_mut(&mut self) -> Result<&mut Kernel> {
+    pub(crate) fn kernel_mut(&mut self) -> &mut Kernel {
         match self {
-            Self::Split(..) => Err(SolidError::invalid_input(
-                OP_FACEUSE,
-                "MakeFace needs a mutable kernel (MergeContext::SplitMut)",
-            )),
-            Self::SplitMut(k, _) | Self::Shared(k) => Ok(k),
+            Self::Split(k, _) | Self::Shared(k) | Self::Lent(k, _) => k,
         }
     }
 
     fn context(&mut self) -> Option<&mut Context> {
         match self {
-            Self::Split(_, context) | Self::SplitMut(_, context) => context.as_deref_mut(),
+            Self::Split(_, context) => context.as_deref_mut(),
+            Self::Lent(_, context) => Some(context),
             Self::Shared(k) => Some(&mut k.context),
         }
     }
 
-    fn reborrow(&mut self) -> MergeContext<'_> {
+    pub(crate) fn reborrow(&mut self) -> MergeContext<'_> {
         match self {
             Self::Split(k, context) => MergeContext::Split(k, context.as_deref_mut()),
-            Self::SplitMut(k, context) => MergeContext::SplitMut(k, context.as_deref_mut()),
+            Self::Lent(k, context) => MergeContext::Lent(k, context),
             Self::Shared(k) => MergeContext::Shared(k),
         }
     }
@@ -438,7 +457,7 @@ pub fn merge_edge_with(
 
         // make the new Brep wire edge
         let brep_edge =
-            make_wire_edge(brep, region, bv, bv2, new_curve, interval, OrientType::Same)?;
+            make_wire_edge(&mut ctx, brep, region, [bv, bv2], new_curve, interval, copy)?;
 
         // mate new edge with input otherBrep edge
         relations.relate_edges(brep, brep_edge, other, other_edge)?;
@@ -563,7 +582,7 @@ pub fn make_faceuse(
     new_faces: Option<&mut Vec<FaceId>>,
 ) -> Result<MadeFaceuse> {
     make_faceuse_with(
-        MergeContext::SplitMut(k, context),
+        MergeContext::Split(k, context),
         brep,
         other,
         faceuse,
@@ -772,7 +791,7 @@ pub fn make_faceuse_with(
         key_of: &key_of,
     };
     let made = brep_p7::make_face(
-        ctx.kernel_mut()?,
+        ctx.kernel_mut(),
         brep,
         Some(region),
         &edge_loops,
@@ -1916,6 +1935,76 @@ mod tests {
     }
 
     #[test]
+    fn wire_construction_uses_the_edge_copy_identity() {
+        use crate::curve::line::Line;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::math::Vec3;
+        use crate::topology::topology::Topology;
+        use crate::topology::vertex;
+
+        let mut k = Kernel::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let (_, start) =
+            crate::topology::brep::p2::make_shell_vertex_topology(&mut b, None).unwrap();
+        let (_, end) = crate::topology::brep::p2::make_shell_vertex_topology(&mut b, None).unwrap();
+        b.vertex_mut(end).unwrap().point = Vec3::X;
+        let vertex_key = |e| ObjectRef {
+            key: ObjectKey(match e {
+                crate::EntityRef::Vertex(v) => u64::from(v.index()),
+                crate::EntityRef::Vertexuse(v) => 6_000_000 + u64::from(v.index()),
+                _ => 9_000_000,
+            }),
+            type_code: crate::topology::topology::TYPE,
+        };
+        let source_key = |_: VertexId| ObjectRef {
+            key: ObjectKey(1_000_000),
+            type_code: vertex::TYPE,
+        };
+        let edge_key = |e: EdgeId| ObjectRef {
+            key: ObjectKey(2_000_000 + u64::from(e.index())),
+            type_code: edge::TYPE,
+        };
+        let face_key = |_: FaceId| ObjectRef {
+            key: ObjectKey(4_000_000),
+            type_code: crate::topology::face::p2::TYPE,
+        };
+        let mut records = std::collections::BTreeMap::new();
+        let source = ObjectRef {
+            key: ObjectKey(3_000_000),
+            type_code: edge::TYPE,
+        };
+        let mut state = Topology::new();
+        state.set_all_flags(17);
+        records.insert(source.key, state);
+        let mut attributes = AttributeStore::new();
+        let mut copy = TopologyCopy {
+            vertices: VertexCopy {
+                records: &mut records,
+                attributes: &mut attributes,
+                source_key: &source_key,
+                destination_key: &vertex_key,
+            },
+            edge_source_key: &edge_key,
+            edge_destination_key: &edge_key,
+            face_source_key: &face_key,
+            face_destination_key: &face_key,
+        };
+        let curve = Line::create_line_segment(3, Vec3::ZERO, Vec3::X, None).unwrap();
+        let edge = make_wire_edge(
+            &mut MergeContext::Shared(&mut k),
+            &mut b,
+            None,
+            [start, end],
+            Curve::from(curve),
+            Extent1d::from_min_max(0.0, 1.0),
+            &mut copy,
+        )
+        .unwrap();
+        copy.notify(None, source, edge_key(edge)).unwrap();
+        assert_eq!(copy.vertices.records[&edge_key(edge).key].all_flags(), 17);
+    }
+
+    #[test]
     fn null_edgeuse_merges_nothing() {
         let mut brep = Brep::new();
         let mut other = Brep::new();
@@ -1949,7 +2038,7 @@ mod tests {
             face_destination_key: &face_key,
         };
         let r = merge_edge(
-            &Kernel::default(),
+            &mut Kernel::default(),
             &mut brep,
             &mut other,
             None,

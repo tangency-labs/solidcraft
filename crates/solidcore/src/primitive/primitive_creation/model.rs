@@ -20,10 +20,14 @@
 //! axis (`SmFace::CurveOnClassify`), the topology intersector's face deletion
 //! (`SmTopologyIntersector::DeleteFaces`) and `SmBrep::ProjectAndTrim`. Their units are partial: the model, not the unit,
 //! lacks the bridge; each error names the unit that owns the call. No recursion.
+//! Retained merge services remain the responsibility of
+//! [`crate::sweep::topology_sweep::store::SweepStore`]; this adapter preserves its
+//! existing merge-constructor deferral.
 
 use std::collections::BTreeMap;
 
 use crate::blend::hcr::Hcr;
+use crate::boolean::topology_intersector::p1::Relations;
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
@@ -39,7 +43,7 @@ use crate::primitive::primitive_creation::p2::PrimitiveCreationAccess;
 use crate::primitive::primitive_creation::p3::PrimitiveAccess;
 use crate::surface::surface::Surface;
 use crate::sweep::topology_sweep::access::{
-    EdgeRef, FaceRef, RegionRef, SweepAccess, SweepMergeId,
+    BTreeEdgeMap, EdgeRef, FaceRef, RegionRef, SweepAccess, SweepMergeId,
 };
 use crate::sweep::topology_sweep::SweepEntity;
 use crate::topology::brep::p10::TrimType;
@@ -242,7 +246,9 @@ impl SweepAccess for PrimitiveModel<'_> {
             &mut Kernel,
             &mut Brep,
             &mut Brep,
+            &dyn Fn(EntityRef) -> ObjectRef,
             &dyn Fn(FaceId) -> ObjectRef,
+            Option<&mut crate::geom::context::Context>,
             &mut NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
@@ -269,7 +275,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         let mut state = ArenaNotifyState::new(dst);
         state.seed(src);
         let mut env = state.env(None);
-        body(self.k, src, dst, &face_ref, &mut env)
+        body(self.k, src, dst, &notify_ref, &face_ref, None, &mut env)
     }
     fn with_brep_notifications<T>(
         &mut self,
@@ -307,6 +313,40 @@ impl SweepAccess for PrimitiveModel<'_> {
         }
     }
     fn delete_merge(&mut self, _: SweepMergeId) {}
+    fn new_merge(
+        &mut self,
+        _: BrepId,
+        _: BrepId,
+        _: BrepId,
+        _: f64,
+        _: f64,
+    ) -> Result<SweepMergeId> {
+        // Preserve the inherited boundary of main's standalone SM_API adapter.
+        // UNPORTED(boolean.merge_p2): SmMerge::SmMerge (retained model binding)
+        Err(SolidError::unported("SmMerge::SmMerge", "boolean.merge_p2"))
+    }
+    fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> {
+        Err(SolidError::invalid_input(OP, "unknown merge"))
+    }
+    fn merge_relations(&mut self, _: SweepMergeId) -> Result<&mut Relations> {
+        Err(SolidError::invalid_input(OP, "unknown merge"))
+    }
+    fn copy_faces(
+        &mut self,
+        _: BrepId,
+        _: &[FaceId],
+        _: BrepId,
+        _: SweepMergeId,
+        _: &mut BTreeEdgeMap,
+    ) -> Result<()> {
+        Err(SolidError::invalid_input(OP, "unknown merge"))
+    }
+    fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> {
+        Err(SolidError::invalid_input(OP, "unknown merge"))
+    }
+    fn union(&mut self, _: SweepMergeId) -> Result<BrepId> {
+        Err(SolidError::invalid_input(OP, "unknown merge"))
+    }
     fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
         Ok(self.tags.get(&e).copied())
     }
@@ -494,7 +534,7 @@ impl PrimitiveCreationAccess for PrimitiveModel<'_> {
         destination: BrepId,
     ) -> Result<()> {
         // `SmBrep::CopyFaces(faces, destination, NULL, FALSE)`; its result is unused.
-        self.with_breps_mut(source, destination, |k, src, dst, this_face, env| {
+        self.with_breps_mut(source, destination, |k, src, dst, _, this_face, _, env| {
             crate::topology::brep::p7::copy_faces(k, src, faces, dst, false, this_face, env)
                 .map(drop)
         })

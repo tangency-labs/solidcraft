@@ -2318,6 +2318,7 @@ pub fn transform_with_notifications(
             transform_with_notifications(k, b, placement, scale, scale_tolerances, Some(env))
         });
     };
+    let owner_keys = env.key_of;
     let mut notifications = Some(env);
     if placement.is_identity(crate::math::EFF_ZERO)
         && scale.is_none_or(|s| s.approx_eq(Vec3::new(1.0, 1.0, 1.0)))
@@ -2351,7 +2352,9 @@ pub fn transform_with_notifications(
         set_vertex_point(k, b, vertex, point, notifications.as_deref_mut())?;
         bbox.add_point(point);
     }
-    for edge in brep_curve_owners(b)? {
+    for edge in crate::topology::brep::p1::curve_owners(b, None, &|e| {
+        owner_keys(crate::EntityRef::Edge(e))
+    })? {
         crate::error::ignore_status(notify_edge_pre_edit(
             k,
             b,
@@ -2373,7 +2376,9 @@ pub fn transform_with_notifications(
             }
         }
     }
-    for face in brep_surface_owners(b)? {
+    for face in crate::topology::brep::p1::surface_owners(b, None, &|f| {
+        owner_keys(crate::EntityRef::Face(f))
+    })? {
         crate::error::ignore_status(notify_face_pre_edit(
             k,
             b,
@@ -2449,16 +2454,8 @@ fn turn_to_nurbs(
         k,
         b,
         notifications,
-        crate::topology::brep::p3::turn_to_nurbs,
+        crate::topology::brep::p3::turn_to_nurbs_with_geometry_owners,
     )
-}
-fn brep_curve_owners(_b: &Brep) -> Result<Vec<EdgeId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetCurves
-    missing("SmBrep::GetCurves", "topology.brep_p1")
-}
-fn brep_surface_owners(_b: &Brep) -> Result<Vec<FaceId>> {
-    // UNPORTED(topology.brep_p1): SmBrep::GetSurfaces
-    missing("SmBrep::GetSurfaces", "topology.brep_p1")
 }
 fn notify_edge_pre_edit(
     k: &mut Kernel,

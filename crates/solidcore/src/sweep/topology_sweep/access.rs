@@ -12,6 +12,7 @@
 
 use super::{SweepEntity, TopologySweep};
 use crate::blend::hcr::{Hcr, HcrOptions};
+use crate::boolean::topology_intersector::p1::Relations;
 use crate::curve::curve::Curve;
 use crate::error::EntityRef;
 use crate::error::{Result, SolidError};
@@ -100,6 +101,8 @@ macro_rules! deferred {
 /// Implementations must resolve contexts and attribute keys using the caller's
 /// object identities. Available defaults call the existing ports; unavailable
 /// dependencies return explicit `Unported` errors without reproducing open PRs.
+/// Merge lifecycle and face copying are required bindings: an implementation must
+/// retain the canonical engine rather than substitute a missing-port error.
 pub trait SweepAccess {
     /// Resolve a B-rep without changing its topology.
     fn brep(&self, id: BrepId) -> Result<&Brep>;
@@ -136,7 +139,9 @@ pub trait SweepAccess {
             &mut Kernel,
             &mut Brep,
             &mut Brep,
+            &dyn Fn(EntityRef) -> ObjectRef,
             &dyn Fn(FaceId) -> ObjectRef,
+            Option<&mut crate::geom::context::Context>,
             &mut NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T>;
@@ -170,19 +175,20 @@ pub trait SweepAccess {
     /// Release a scoped merge object and its notification registrations.
     fn delete_merge(&mut self, merge: SweepMergeId);
 
-    // UNPORTED(boolean.merge_p2): SmMerge::SmMerge
-    deferred!(
-        /// Construct the merge notifier with both operands and caller context.
-        fn new_merge(
-            context_of: BrepId,
-            destination: BrepId,
-            source: BrepId,
-            tolerance: f64,
-            angle: f64,
-        ) -> SweepMergeId;,
-        "boolean.merge_p2",
-        "SmMerge::SmMerge"
-    );
+    /// Construct and retain the merge engine for these two caller-owned operands.
+    fn new_merge(
+        &mut self,
+        context_of: BrepId,
+        destination: BrepId,
+        source: BrepId,
+        tolerance: f64,
+        angle: f64,
+    ) -> Result<SweepMergeId>;
+
+    /// Operands currently bound to a live merge, destination first.
+    fn merge_operands(&self, merge: SweepMergeId) -> Result<(BrepId, BrepId)>;
+    /// The canonical mate store, shared by copying and subsequent Boolean stages.
+    fn merge_relations(&mut self, merge: SweepMergeId) -> Result<&mut Relations>;
 
     /// Keep a merge notifier alive for the complete upstream scope, releasing it
     /// after success or an early error.
@@ -199,9 +205,11 @@ pub trait SweepAccess {
         Self: Sized,
     {
         let merge = self.new_merge(context_of, destination, source, tolerance, angle)?;
-        let result = body(self, merge);
-        self.delete_merge(merge);
-        result
+        let guard = MergeScope {
+            access: self,
+            merge,
+        };
+        body(guard.access, merge)
     }
 
     /// `SmBrep::GetInfiniteRegion`; a null region retains the upstream NER error.
@@ -246,34 +254,68 @@ pub trait SweepAccess {
             Ok(((region.0, shell), (region.0, vertex)))
         })
     }
-    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdgeVertex
-    deferred!(
-        /// `SmBrep::MakeWireEdgeVertex`.
-        fn make_wire_edge_vertex(
-            region: RegionRef,
-            start: VertexRef,
-            curve: Curve,
-            interval: Extent1d,
-            orientation: OrientType,
-            end: Point3,
-        ) -> (EdgeRef, VertexRef);,
-        "topology.brep_p3",
-        "SmBrep::MakeWireEdgeVertex"
-    );
-    // UNPORTED(topology.brep_p3): SmBrep::MakeWireEdge
-    deferred!(
-        /// `SmBrep::MakeWireEdge`.
-        fn make_wire_edge(
-            region: RegionRef,
-            start: VertexRef,
-            end: VertexRef,
-            curve: Curve,
-            interval: Extent1d,
-            orientation: OrientType,
-        ) -> EdgeRef;,
-        "topology.brep_p3",
-        "SmBrep::MakeWireEdge"
-    );
+    /// Native wire construction with one new endpoint, under caller identities.
+    fn make_wire_edge_vertex(
+        &mut self,
+        region: RegionRef,
+        start: VertexRef,
+        curve: Curve,
+        interval: Extent1d,
+        orientation: OrientType,
+        end: Point3,
+    ) -> Result<(EdgeRef, VertexRef)> {
+        if region.0 != start.0 {
+            return Err(SolidError::invalid_input(
+                super::OP,
+                "wire start vertex belongs to another B-rep",
+            ));
+        }
+        self.with_brep_mut(region.0, |k, b, _, env| {
+            let (edge, vertex) = crate::topology::brep::p3::make_wire_edge_vertex(
+                k,
+                b,
+                env,
+                Some(region.1),
+                start.1,
+                curve,
+                &interval,
+                orientation,
+                end,
+            )?;
+            Ok(((region.0, edge), (region.0, vertex)))
+        })
+    }
+    /// Native wire construction between two existing vertices of the target body.
+    fn make_wire_edge(
+        &mut self,
+        region: RegionRef,
+        start: VertexRef,
+        end: VertexRef,
+        curve: Curve,
+        interval: Extent1d,
+        orientation: OrientType,
+    ) -> Result<EdgeRef> {
+        if region.0 != start.0 || region.0 != end.0 {
+            return Err(SolidError::invalid_input(
+                super::OP,
+                "wire vertices belong to another B-rep",
+            ));
+        }
+        self.with_brep_mut(region.0, |k, b, _, env| {
+            let edge = crate::topology::brep::p3::make_wire_edge(
+                k,
+                b,
+                env,
+                Some(region.1),
+                start.1,
+                end.1,
+                curve,
+                &interval,
+                orientation,
+            )?;
+            Ok((region.0, edge))
+        })
+    }
     /// `SmBrep::MakeFaceWithCurves`, retaining owners of the original curve slots.
     fn make_face(&mut self, input: FaceInput) -> Result<FaceBuild> {
         let FaceInput {
@@ -481,88 +523,75 @@ pub trait SweepAccess {
         edges: &[EdgeId],
         destination: BrepId,
     ) -> Result<Vec<EdgeId>> {
-        self.with_breps_mut(source, destination, |kernel, source, destination, _, _| {
-            crate::topology::brep::p6::copy_edges(kernel, source, edges, destination)
-        })
+        self.with_breps_mut(
+            source,
+            destination,
+            |kernel, source, destination, _, _, _, _| {
+                crate::topology::brep::p6::copy_edges(kernel, source, edges, destination)
+            },
+        )
     }
-    // UNPORTED(topology.brep_p3): SmBrep::CopyVertices
-    deferred!(
-        /// `SmBrep::CopyVertices` with its output list supplied.
-        fn copy_vertices(
-            source: BrepId,
-            vertices: &[VertexId],
-            destination: BrepId,
-        ) -> Vec<VertexId>;,
-        "topology.brep_p3",
-        "SmBrep::CopyVertices"
-    );
+    /// `SmBrep::CopyVertices`, preserving source identities and copy notifications.
+    fn copy_vertices(
+        &mut self,
+        source: BrepId,
+        vertices: &[VertexId],
+        destination: BrepId,
+    ) -> Result<Vec<VertexId>> {
+        self.with_breps_mut(
+            source,
+            destination,
+            |k, src, dst, source_key, _, source_context, env| {
+                crate::topology::brep::p3::copy_vertices_with_context(
+                    k,
+                    src,
+                    vertices,
+                    dst,
+                    env,
+                    crate::topology::brep::p3::CopySource {
+                        key_of: source_key,
+                        context: source_context,
+                    },
+                )
+            },
+        )
+    }
     /// `SmBrep::RemoveAllTopology`, using its actual mutable caller context.
     fn remove_all_topology(&mut self, brep: BrepId) -> Result<()> {
         self.with_brep_mut(brep, |kernel, brep, _, _| {
             crate::topology::brep::p10::remove_all_topology(kernel, brep)
         })
     }
-    /// `SmBrep::CopyFaces` with the scoped merge notifier's edge mates.
+    /// `SmBrep::CopyFaces(..., TRUE, merge)` with its retained edge mates.
     fn copy_faces(
         &mut self,
         source: BrepId,
         faces: &[FaceId],
         destination: BrepId,
-        use_merge: bool,
+        merge: SweepMergeId,
+        edge_mates: &mut BTreeEdgeMap,
+    ) -> Result<()>;
+
+    /// Copy the other-to-primary edge mates produced by this merge's copy calls.
+    fn merge_edge_mates(
+        &mut self,
         merge: SweepMergeId,
         edge_mates: &mut BTreeEdgeMap,
     ) -> Result<()> {
-        let status = self.with_breps_mut(
-            source,
-            destination,
-            |kernel, source, destination, face_objects, env| {
-                // Keep resolver errors outside the native copy status: a
-                // declined borrow must not become a deferred notifier lookup.
-                Ok(crate::topology::brep::p7::copy_faces(
-                    kernel,
-                    source,
-                    faces,
-                    destination,
-                    use_merge,
-                    face_objects,
-                    env,
-                )
-                .and_then(|(_, all_ok)| {
-                    if all_ok {
-                        Ok(())
-                    } else {
-                        Err(SolidError::sm_err(super::OP))
-                    }
-                }))
-            },
-        )?;
-        if status.as_ref().is_err_and(|error| {
-            error.is_unported()
-                || matches!(
-                    error,
-                    SolidError::InvalidInput { .. } | SolidError::NotFound { .. }
-                )
-        }) {
-            return status;
-        }
-        // Keep notifications from completed copies even when a later copy fails.
-        self.merge_edge_mates(merge, edge_mates)?;
-        status
+        edge_mates.extend(self.merge_relations(merge)?.edges.other_to_primary());
+        Ok(())
     }
-
-    // UNPORTED(boolean.merge_p2): SmMerge::SmMerge (copy-notification registration)
-    deferred!(
-        /// Resolve edge mates recorded by the live merge notifier after copying.
-        /// Override with `new_merge` once its constructor installs copy registrations;
-        /// the intersector's `GetThisMate` map lookup itself is already ported.
-        fn merge_edge_mates(merge: SweepMergeId, edge_mates: &mut BTreeEdgeMap) -> ();,
-        "boolean.merge_p2",
-        "SmMerge::SmMerge"
-    );
     /// `SmBrep::Transform` with default scale and tolerance-scaling arguments.
     fn transform(&mut self, brep: BrepId, frame: Axis2Placement) -> Result<()> {
-        self.with_brep_mut(brep, |kernel, brep, _, _| {
-            crate::topology::brep::p5::transform(kernel, brep, &frame, None, true)
+        self.with_brep_mut(brep, |kernel, brep, _, env| {
+            crate::topology::brep::p5::transform_with_notifications(
+                kernel,
+                brep,
+                &frame,
+                None,
+                true,
+                Some(env),
+            )
         })
     }
     // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
@@ -600,24 +629,35 @@ pub trait SweepAccess {
     fn has_lamina_edge(&mut self, face: FaceRef) -> Result<bool> {
         crate::topology::topology_traverser::has_lamina_edge(self.brep(face.0)?, face.1)
     }
-    // UNPORTED(topology.brep_p3): SmBrep::MergeBrep
-    deferred!(
-        /// `SmBrep::MergeBrep`.
-        fn merge_brep(destination: BrepId, source: BrepId) -> ();,
-        "topology.brep_p3",
-        "SmBrep::MergeBrep"
-    );
-    // UNPORTED(boolean.merge_p3): SmMerge::PiecewiseMerge
-    deferred!(
-        /// `SmMerge::PiecewiseMerge(NULL, TRUE, TRUE, ...)`.
-        fn piecewise_merge(
-            merge: SweepMergeId,
-            use_existing_topology: bool,
-            create_new_breps_for_faces: bool,
-        ) -> BrepId;,
-        "boolean.merge_p3",
-        "SmMerge::PiecewiseMerge"
-    );
+    /// `SmBrep::MergeBrep` with the native analytics and map defaults.
+    fn merge_brep(&mut self, destination: BrepId, source: BrepId) -> Result<()> {
+        self.with_breps_mut(
+            source,
+            destination,
+            |k, src, dst, source_key, _, source_context, env| {
+                crate::topology::brep::p3::merge_brep_with_context(
+                    k,
+                    env,
+                    dst,
+                    src,
+                    crate::topology::brep::p3::CopySource {
+                        key_of: source_key,
+                        context: source_context,
+                    },
+                    None,
+                    None,
+                    true,
+                )
+            },
+        )
+    }
+    /// `SmMerge::PiecewiseMerge(NULL, use_existing_topology, create_new_breps_for_faces, ...)`.
+    fn piecewise_merge(
+        &mut self,
+        merge: SweepMergeId,
+        use_existing_topology: bool,
+        create_new_breps_for_faces: bool,
+    ) -> Result<BrepId>;
     /// Sweep callback, default targets and caller-selected manifold mode.
     fn stitch(
         &mut self,
@@ -642,21 +682,24 @@ pub trait SweepAccess {
                 .map(|_| ())
         })
     }
-    // UNPORTED(topology.brep_p3): SmBrep::OrientTrimmedSurfaces
-    deferred!(
-        /// `SmBrep::OrientTrimmedSurfaces`.
-        fn orient(brep: BrepId, outward: bool, maybe_open: bool, unify_only: bool) -> ();,
-        "topology.brep_p3",
-        "SmBrep::OrientTrimmedSurfaces"
-    );
-    // UNPORTED(boolean.merge_p4): SmMerge::ManifoldBoolean
-    deferred!(
-        /// `SmMerge::ManifoldBoolean(SM_BO_UNION, ...)`. Success consumes and
-        /// unregisters the source B-rep; an error leaves it owned by the caller.
-        fn union(merge: SweepMergeId) -> BrepId;,
-        "boolean.merge_p4",
-        "SmMerge::ManifoldBoolean"
-    );
+    /// Orient the trimmed surfaces, returning the native maybe-not-closed result.
+    fn orient(&mut self, brep: BrepId, outward: bool, unify_only: bool) -> Result<bool> {
+        self.with_brep_mut(brep, |k, b, _, env| {
+            crate::topology::brep::p3::orient_trimmed_surfaces(
+                k,
+                b,
+                env,
+                &mut crate::topology::topology_traverser::Marks::default(),
+                outward,
+                unify_only,
+                None,
+            )
+            .map(|result| result.maybe_not_closed_solid)
+        })
+    }
+    /// `SmMerge::ManifoldBoolean(SM_BO_UNION, ...)`, retaining native operand
+    /// ownership changes on both success and failure.
+    fn union(&mut self, merge: SweepMergeId) -> Result<BrepId>;
 }
 
 /// Correspondence from source to copied edges, filled by the merge notifier.
@@ -705,6 +748,16 @@ impl crate::heal::stitch::p1::StitchCallback for SweepStitchCallback<'_> {
             &mut choice.keep_first,
         )?;
         Ok(choice)
+    }
+}
+
+struct MergeScope<'a, A: SweepAccess> {
+    access: &'a mut A,
+    merge: SweepMergeId,
+}
+impl<A: SweepAccess> Drop for MergeScope<'_, A> {
+    fn drop(&mut self) {
+        self.access.delete_merge(self.merge);
     }
 }
 

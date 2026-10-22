@@ -1083,8 +1083,8 @@ pub(crate) fn snapshot(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
     let mut uv = Vec::new();
     let mut links = Vec::new();
     for id in &g.faceuses.items {
-        let f = b.faceuse(*id).map_err(|e| harness(e.to_string()))?;
-        let (next, last) = f.sibling_links.unwrap_or((None, None));
+        let (next, last) = solidcore::topology::shell::faceuse_sibling_links(b, *id)
+            .map_err(|e| harness(e.to_string()))?;
         links.extend([
             g.faceuses.find(next, FaceuseId::index),
             g.faceuses.find(last, FaceuseId::index),

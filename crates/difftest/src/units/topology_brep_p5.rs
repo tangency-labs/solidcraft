@@ -489,6 +489,31 @@ fn notification_values(lists: &solidcore::topology::topology::TopologyChangeList
     out
 }
 
+// The native fixture's geometry retains its actual edge/face owners. The import
+// uses arena labels; a plain kernel edit notifies under kernel-issued topology
+// identities. Bind owned geometry into that same context before transforming it.
+fn bind_transform_owners(k: &mut Kernel, b: &mut Brep) -> SolidResult<()> {
+    use solidcore::topology::brep::p3::{notify_serial, topology_ref};
+    use solidcore::EntityRef;
+    let serial = notify_serial(&mut k.context, b)?;
+    let edges: Vec<_> = b.edges().ids().collect();
+    for edge in edges {
+        if let Some(curve) = b.edge_mut(edge)?.curve.as_mut() {
+            // Every fixture edge owns the distinct curve constructed for it.
+            curve.set_owner(Some(topology_ref(serial, EntityRef::Edge(edge))), None);
+        }
+    }
+    let faces: Vec<_> = b.faces().ids().collect();
+    for face in faces {
+        if let Some(surface) = b.face_mut(face)?.surface.as_mut() {
+            if surface.owner().is_some() {
+                surface.set_owner(Some(topology_ref(serial, EntityRef::Face(face))));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.brep_p5"
@@ -536,7 +561,11 @@ impl UnitDiff for Runner {
                 notification_record(&b, &i).map_err(|e| HarnessError::new(e.to_string()))?,
             ));
         }
-        match rust_record(&mut Kernel::default(), &mut b, &i) {
+        let mut kernel = Kernel::default();
+        if i.op == 12 {
+            bind_transform_owners(&mut kernel, &mut b).map_err(|e| HarnessError::new(e.to_string()))?;
+        }
+        match rust_record(&mut kernel, &mut b, &i) {
             Ok(record) if i.op == 2 => Ok(Output::new().values("target_stage", record)),
             // a use or shell the edit unlinked stays in its arena (append-only records)
             // where upstream deletes it, and [`graph`] lists unreachable records too: the

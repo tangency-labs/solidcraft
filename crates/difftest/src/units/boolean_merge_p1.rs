@@ -183,10 +183,9 @@ impl Canon {
         Self::walk(b, false, false)
     }
 
-    /// [`Canon::of`] after seeding the edge and vertex lists in list order, as
-    /// `sc_merge_fixture.h`'s `native_graph` (`GetEdges`, `GetVertices`, then `walk`).
-    pub(crate) fn of_native(b: &Brep) -> Self {
-        Self::walk(b, true, true)
+    /// Native list order, excluding detached arena records that C++ deleted.
+    pub(crate) fn native_reachable(b: &Brep) -> Self {
+        Self::walk(b, false, true)
     }
 
     #[allow(clippy::too_many_lines)]

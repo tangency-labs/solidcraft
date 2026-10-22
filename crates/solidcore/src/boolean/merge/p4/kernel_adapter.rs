@@ -10,9 +10,9 @@
 //! Deviations: the existing typed `Relations` is the sole mate store. Object
 //! keys either encode a caller-reserved namespace, operand, class and arena id,
 //! or use caller identity callbacks and the caller's actual stores.
-//! The namespace-backed API is retained unchanged. Borrowed-store cache access
-//! stops at `BuildTrees`' unavailable `CalculateBoundingBox` rather than constructing
-//! a substitute kernel; that back-edge also needs live-kernel cache plumbing.
+//! Cache evaluation preserves the actual operand kernel settings; owner checks
+//! use the same identity callbacks as notifications. Retained merge state and
+//! caller records return to their owners on errors and unwinding callbacks.
 //! Source-list notification handles resolve back into that same attribute store.
 //! Surface identity follows the canonical B-rep cache convention: its owner,
 //! or its containing face when the owned surface has no explicit owner.
@@ -71,20 +71,8 @@ fn cache_kernels(k: &Kernel, other: Option<&Kernel>, context: &Context) -> [Kern
     ]
 }
 
-fn adapter_cache_kernels(
-    keys: NotificationKeys<'_>,
-    k: &Kernel,
-    other: Option<&Kernel>,
-    context: &Context,
-) -> Option<[Kernel; 2]> {
-    match keys {
-        NotificationKeys::Namespace(_) => Some(cache_kernels(k, other, context)),
-        NotificationKeys::Caller(_) => None,
-    }
-}
-
 // Every topology class has its own slot in the caller-reserved namespace.
-pub(super) fn notification_key(namespace: u32, other: bool, entity: EntityRef) -> ObjectRef {
+pub(crate) fn notification_key(namespace: u32, other: bool, entity: EntityRef) -> ObjectRef {
     let (kind, type_code, index) = match entity {
         EntityRef::Region(v) => (1, 16012, v.index()),
         EntityRef::Face(v) => (2, 16002, v.index()),
@@ -104,6 +92,70 @@ pub(super) fn notification_key(namespace: u32, other: bool, entity: EntityRef) -
     }
 }
 
+// The original namespace adapter imports geometry with arena owner labels.
+// Temporarily bind those owned objects to the same identities as its notifications
+// while a native edit runs. Caller-key stores already use their actual identities.
+struct GeometryOwnerScope<'a, 'keys> {
+    body: &'a mut Brep,
+    keys: NotificationKeys<'keys>,
+    other: bool,
+    edges: Vec<EdgeId>,
+    faces: Vec<FaceId>,
+}
+impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
+    fn new(body: &'a mut Brep, keys: NotificationKeys<'keys>, other: bool) -> Result<Self> {
+        let mut scope = Self {
+            body,
+            keys,
+            other,
+            edges: Vec::new(),
+            faces: Vec::new(),
+        };
+        if matches!(keys, NotificationKeys::Namespace(_)) {
+            for edge in crate::topology::brep::p1::edges(scope.body, None)? {
+                if let Some(curve) = scope.body.edge_mut(edge)?.curve.as_mut() {
+                    if curve.owner() == Some(arena_identity(CacheObject::Edge(edge))) {
+                        scope.edges.push(edge);
+                        curve.set_owner(Some(keys.object(other, EntityRef::Edge(edge))), None);
+                    }
+                }
+            }
+            for face in crate::topology::brep::p1::faces(scope.body, None)? {
+                if let Some(surface) = scope.body.face_mut(face)?.surface.as_mut() {
+                    if surface.owner() == Some(arena_identity(CacheObject::Face(face))) {
+                        scope.faces.push(face);
+                        surface.set_owner(Some(keys.object(other, EntityRef::Face(face))));
+                    }
+                }
+            }
+        }
+        Ok(scope)
+    }
+}
+impl Drop for GeometryOwnerScope<'_, '_> {
+    fn drop(&mut self) {
+        for &edge in &self.edges {
+            if let Ok(record) = self.body.edge_mut(edge) {
+                if let Some(curve) = record.curve.as_mut() {
+                    if curve.owner() == Some(self.keys.object(self.other, EntityRef::Edge(edge))) {
+                        curve.set_owner(Some(arena_identity(CacheObject::Edge(edge))), None);
+                    }
+                }
+            }
+        }
+        for &face in &self.faces {
+            if let Ok(record) = self.body.face_mut(face) {
+                if let Some(surface) = record.surface.as_mut() {
+                    if surface.owner() == Some(self.keys.object(self.other, EntityRef::Face(face)))
+                    {
+                        surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The kernel adapter for the ported merge and topology-intersector stages.
 /// The canonical merge state owns the single shared face/edge/vertex mate store;
 /// notifications use `records` and the attributes supplied to each operation.
@@ -120,6 +172,7 @@ pub struct ManifoldKernelAdapter<'a> {
     curves: Vec<crate::curve::curve::Curve>,
     extra_curves: Vec<crate::curve::curve::Curve>,
     keys: NotificationKeys<'a>,
+    body_ids: (BrepId, BrepId),
     source_handles: BTreeMap<ObjectRef, (ObjectKey, bool)>,
     subset: Option<BTreeSet<ObjectRef>>,
 }
@@ -177,13 +230,67 @@ impl KernelManifoldIntersector {
     }
 }
 
+/// Restores the retained algorithm state and caller records even when a callback
+/// unwinds. Borrowed key callbacks never escape the operation.
+struct RetainedNotificationScope<'state, 'records, 'keys> {
+    retained: &'state mut KernelManifoldIntersector,
+    caller: &'records mut BTreeMap<ObjectKey, Topology>,
+    adapter: ManifoldKernelAdapter<'keys>,
+}
+impl Drop for RetainedNotificationScope<'_, '_, '_> {
+    fn drop(&mut self) {
+        self.adapter.swap_state(self.retained);
+        std::mem::swap(&mut self.adapter.records, self.caller);
+    }
+}
+impl KernelManifoldIntersector {
+    /// Bind caller identity callbacks and records to this retained merge engine.
+    /// Canonical relationships, intersection lists and configuration survive the
+    /// operation; key callbacks remain borrowed only for its duration.
+    pub fn with_caller_notifications<T>(
+        &mut self,
+        keys: ManifoldNotificationKeys<'_>,
+        body_ids: (BrepId, BrepId),
+        records: &mut BTreeMap<ObjectKey, Topology>,
+        action: impl FnOnce(&mut ManifoldKernelAdapter<'_>) -> T,
+    ) -> T {
+        let mut adapter = ManifoldKernelAdapter::from_keys(NotificationKeys::Caller(keys));
+        adapter.swap_state(self);
+        adapter.body_ids = body_ids;
+        std::mem::swap(&mut adapter.records, records);
+        let mut scope = RetainedNotificationScope {
+            retained: self,
+            caller: records,
+            adapter,
+        };
+        action(&mut scope.adapter)
+    }
+}
+
 impl<'keys> ManifoldKernelAdapter<'keys> {
+    fn swap_state(&mut self, other: &mut ManifoldKernelAdapter<'_>) {
+        std::mem::swap(&mut self.merge, &mut other.merge);
+        std::mem::swap(&mut self.topology_deleted, &mut other.topology_deleted);
+        std::mem::swap(&mut self.intersector, &mut other.intersector);
+        std::mem::swap(&mut self.curves, &mut other.curves);
+        std::mem::swap(&mut self.extra_curves, &mut other.extra_curves);
+        std::mem::swap(&mut self.source_handles, &mut other.source_handles);
+        std::mem::swap(&mut self.subset, &mut other.subset);
+        std::mem::swap(&mut self.body_ids, &mut other.body_ids);
+    }
+
     fn from_keys(keys: NotificationKeys<'keys>) -> Self {
         Self {
             merge: MergeState::new(Relations::default()),
             records: BTreeMap::new(),
             topology_deleted: false,
             keys,
+            body_ids: match keys {
+                NotificationKeys::Namespace(n) => {
+                    (BrepId::from_index(n * 2), BrepId::from_index(n * 2 + 1))
+                }
+                NotificationKeys::Caller(_) => (BrepId::from_index(0), BrepId::from_index(1)),
+            },
             source_handles: BTreeMap::new(),
             subset: None,
             intersector: TopologyIntersector::new(
@@ -221,6 +328,76 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         Ok(())
     }
 
+    /// Clear the two canonical mate maps between piecewise stages.
+    pub(crate) fn clear_relationships(&mut self) -> Result<()> {
+        self.merge.intersector.with_intersector(
+            &mut self.intersector,
+            arena_pair::encode,
+            arena_pair::decode,
+            TopologyIntersector::clear_relationships,
+        )
+    }
+
+    /// `m_vTI.m_bIntersectWireEdges`.
+    pub(crate) fn set_intersect_wire_edges(&mut self, enabled: bool) {
+        self.intersector.intersect_wire_edges = enabled;
+    }
+
+    /// The empty-array `RegisterExistingSSI` call used by `PiecewiseMerge`.
+    pub(crate) fn register_empty_ssi(&mut self, primary: FaceId, other: FaceId) {
+        self.intersector.register_empty_ssi(
+            Some(arena_pair::surface_handle(false, primary)),
+            Some(arena_pair::surface_handle(true, other)),
+        );
+    }
+
+    /// Clear the piecewise stage's registered surface pairs.
+    pub(crate) fn clear_existing_ssi(&mut self) {
+        let _ = self.intersector.clear_existing_ssi();
+    }
+
+    fn with_topology_copy<T>(
+        &mut self,
+        attributes: &mut AttributeStore,
+        action: impl FnOnce(&mut Relations, &mut TopologyCopy<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let keys = self.keys;
+        let mut copy = TopologyCopy {
+            vertices: p1::VertexCopy {
+                records: &mut self.records,
+                attributes,
+                source_key: &|v| keys.object(true, EntityRef::Vertex(v)),
+                destination_key: &|e| keys.object(false, e),
+            },
+            edge_source_key: &|e| keys.object(true, EntityRef::Edge(e)),
+            edge_destination_key: &|e| keys.object(false, EntityRef::Edge(e)),
+            face_source_key: &|f| keys.object(true, EntityRef::Face(f)),
+            face_destination_key: &|f| keys.object(false, EntityRef::Face(f)),
+        };
+        action(&mut self.merge.intersector, &mut copy)
+    }
+
+    /// Copy through the retained merge rather than constructing a disposable mate store.
+    pub(crate) fn copy_faces(
+        &mut self,
+        kernels: &mut BooleanKernels<'_>,
+        primary: &mut Brep,
+        other: &mut Brep,
+        faces: &[FaceId],
+        attributes: &mut AttributeStore,
+    ) -> Result<()> {
+        self.with_topology_copy(attributes, |relations, copy| {
+            let context = match kernels.other.as_deref_mut() {
+                Some(other) => MergeContext::Split(kernels.primary, Some(&mut other.context)),
+                None => MergeContext::Shared(kernels.primary),
+            };
+            crate::topology::brep::p7::copy_faces_with_merge(
+                context, other, faces, primary, relations, copy,
+            )
+            .map(|_| ())
+        })
+    }
+
     /// The distance and angular tolerances held by the production intersector.
     pub fn intersection_tolerances(&self) -> (f64, f64) {
         (
@@ -255,6 +432,62 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
                 "object namespace exceeds 26 bits",
             ));
         }
+        Self::delete_faces_for_keys(
+            kernel,
+            brep,
+            faces,
+            records,
+            attributes,
+            NotificationKeys::Namespace(namespace),
+        )
+    }
+
+    /// Delete faces using the caller's actual topology identities and stores.
+    /// This operation does not construct or split curves or propagate regions.
+    pub fn delete_faces_with_keys(
+        kernel: &mut Kernel,
+        brep: &mut Brep,
+        faces: &[FaceId],
+        records: &mut BTreeMap<ObjectKey, Topology>,
+        attributes: &mut AttributeStore,
+        key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    ) -> Result<()> {
+        let no_curve = |_, _| {
+            Err(SolidError::invalid_input(
+                OP,
+                "face deletion cannot allocate curves",
+            ))
+        };
+        let no_sources = |_| {
+            Err(SolidError::invalid_input(
+                OP,
+                "face deletion cannot propagate regions",
+            ))
+        };
+        Self::delete_faces_for_keys(
+            kernel,
+            brep,
+            faces,
+            records,
+            attributes,
+            NotificationKeys::Caller(ManifoldNotificationKeys {
+                primary: key_of,
+                other: key_of,
+                primary_curve: &no_curve,
+                other_curve: &no_curve,
+                source_lists: &no_sources,
+            }),
+        )
+    }
+
+    fn delete_faces_for_keys(
+        kernel: &mut Kernel,
+        brep: &mut Brep,
+        faces: &[FaceId],
+        records: &mut BTreeMap<ObjectKey, Topology>,
+        attributes: &mut AttributeStore,
+        keys: NotificationKeys<'_>,
+    ) -> Result<()> {
         let mut intersector: TopologyIntersector<H> = TopologyIntersector::new(
             Some(arena_pair::brep_h(0)),
             Some(arena_pair::brep_h(0)),
@@ -275,10 +508,10 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
                 &mut extra_curves,
                 records,
                 attributes,
-                Some(cache_kernels(k, None, context)),
+                cache_kernels(k, None, context),
                 context,
                 None,
-                NotificationKeys::Namespace(namespace),
+                keys,
             );
             intersector.delete_faces(k, &mut pair, &handles, None)
         })?
@@ -316,6 +549,16 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         operation: BooleanOperation,
         lock: Option<&mut MarkLock>,
     ) -> Result<bool> {
+        if let Some(body) = primary.as_ref() {
+            crate::topology::brep::p3::seed_records(&mut self.records, body, &|e| {
+                self.keys.object(false, e)
+            });
+        }
+        if let Some(body) = other.as_ref() {
+            crate::topology::brep::p3::seed_records(&mut self.records, body, &|e| {
+                self.keys.object(true, e)
+            });
+        }
         let options = self.merge.options;
         manifold_boolean(
             kernels, primary, other, self, state, attributes, options, manifold, operation, lock,
@@ -383,6 +626,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
 }
 
 struct Regions<'a> {
+    body_ids: (BrepId, BrepId),
     keys: NotificationKeys<'a>,
     primary: &'a Brep,
     other: &'a Brep,
@@ -398,7 +642,11 @@ impl RegionLookup for Regions<'_> {
                     if key_of(EntityRef::Region(region_id)).key == object {
                         return Ok(RegionRef {
                             brep,
-                            brep_id: BrepId::from_index(ordinal),
+                            brep_id: if ordinal == 0 {
+                                self.body_ids.0
+                            } else {
+                                self.body_ids.1
+                            },
                             region_id,
                         });
                     }
@@ -451,6 +699,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         } else {
             &mut *kernels.primary
         };
+        let scope = GeometryOwnerScope::new(brep, keys, other)?;
         Context::with_notification_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
                 records: &mut self.records,
@@ -460,7 +709,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             };
             crate::topology::brep::p5::transform_with_notifications(
                 k,
-                brep,
+                scope.body,
                 placement,
                 scale,
                 scale_tolerance,
@@ -497,7 +746,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &mut self.extra_curves,
                 &mut self.records,
                 attributes,
-                adapter_cache_kernels(self.keys, k, kernels.other.as_deref(), context),
+                cache_kernels(k, kernels.other.as_deref(), context),
                 context,
                 kernels.other.as_deref_mut().map(|k| &mut k.context),
                 self.keys,
@@ -549,7 +798,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &mut self.extra_curves,
                 &mut self.records,
                 attributes,
-                adapter_cache_kernels(self.keys, k, kernels.other.as_deref(), context),
+                cache_kernels(k, kernels.other.as_deref(), context),
                 context,
                 kernels.other.as_deref_mut().map(|k| &mut k.context),
                 self.keys,
@@ -586,7 +835,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &mut self.extra_curves,
                 &mut self.records,
                 attributes,
-                adapter_cache_kernels(self.keys, k, kernels.other.as_deref(), context),
+                cache_kernels(k, kernels.other.as_deref(), context),
                 context,
                 kernels.other.as_deref_mut().map(|k| &mut k.context),
                 self.keys,
@@ -644,7 +893,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &mut self.extra_curves,
                 &mut self.records,
                 attributes,
-                adapter_cache_kernels(self.keys, k, kernels.other.as_deref(), context),
+                cache_kernels(k, kernels.other.as_deref(), context),
                 context,
                 None,
                 self.keys,
@@ -668,29 +917,43 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         attributes: &mut AttributeStore,
     ) -> Result<()> {
         let keys = self.keys;
-        let face_key = |face| keys.object(other, EntityRef::Face(face));
-        let key_of = |e| keys.object(other, e);
         let k = if other {
             kernels.other.as_deref_mut().unwrap_or(kernels.primary)
         } else {
             &mut *kernels.primary
         };
         Context::with_notification_context(k, |k, context| {
-            let mut env = crate::topology::edge::NotifyEnv {
-                records: &mut self.records,
-                attributes,
-                context: Some(context),
-                key_of: &key_of,
+            // A newly extracted component is a distinct native B-rep, including
+            // when all its arena indices coincide with the source's indices.
+            let serial = crate::topology::brep::p3::notify_serial(context, destination)?;
+            let destination_key = |entity| crate::topology::brep::p3::topology_ref(serial, entity);
+            let source_key = |entity| keys.object(other, entity);
+            destination.set_key(destination_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            crate::topology::brep::p3::seed_records(&mut self.records, source, &source_key);
+            crate::topology::brep::p3::seed_records(
+                &mut self.records,
+                destination,
+                &destination_key,
+            );
+            let mut copy = TopologyCopy {
+                vertices: p1::VertexCopy {
+                    records: &mut self.records,
+                    attributes,
+                    source_key: &|v| source_key(EntityRef::Vertex(v)),
+                    destination_key: &destination_key,
+                },
+                edge_source_key: &|e| source_key(EntityRef::Edge(e)),
+                edge_destination_key: &|e| destination_key(EntityRef::Edge(e)),
+                face_source_key: &|f| source_key(EntityRef::Face(f)),
+                face_destination_key: &|f| destination_key(EntityRef::Face(f)),
             };
-            // Native defaults: use_merge=TRUE, no supplied merge object.
-            crate::topology::brep::p7::copy_faces(
-                k,
+            crate::topology::brep::p7::copy_faces_with_merge(
+                MergeContext::Lent(k, context),
                 source,
                 faces,
                 destination,
-                true,
-                &face_key,
-                &mut env,
+                &mut Relations::default(),
+                &mut copy,
             )
             .map(|_| ())
         })?
@@ -840,7 +1103,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         // New topology is made with the primary context; copies notify through the
         // other operand's (or the shared) context.
         let ctx = match kernels.other.as_deref_mut() {
-            Some(o) => MergeContext::SplitMut(kernels.primary, Some(&mut o.context)),
+            Some(o) => MergeContext::Split(kernels.primary, Some(&mut o.context)),
             None => MergeContext::Shared(kernels.primary),
         };
         let mut faces = Vec::new();
@@ -892,7 +1155,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                     key: key(namespace, false, kind, id.index()),
                     type_code: 0,
                 }),
-                NotificationKeys::Caller(keys) => (keys.source_lists)(id),
+                NotificationKeys::Caller(keys) => (keys.source_lists)(id)?,
             };
             let owner = self.object_key(false, MergeEntity::Region(id));
             for (handle, other_list) in source_lists.into_iter().zip([false, true]) {
@@ -924,6 +1187,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             });
         }
         let lookup = Regions {
+            body_ids: self.body_ids,
             keys: self.keys,
             primary,
             other,
@@ -1277,6 +1541,7 @@ mod tests {
         let rk = adapter.object_key(false, MergeEntity::Region(r));
         let ok = adapter.object_key(true, MergeEntity::Region(o));
         let lookup = Regions {
+            body_ids: (BrepId::from_index(20), BrepId::from_index(21)),
             keys: NotificationKeys::Namespace(10),
             primary: &a,
             other: &b,
@@ -1451,7 +1716,7 @@ mod tests {
                 &mut extra,
                 &mut records,
                 &mut attrs,
-                Some(settings),
+                settings,
                 context,
                 Some(&mut other_k.context),
                 NotificationKeys::Namespace(4),
@@ -1509,9 +1774,9 @@ mod tests {
         let keys = ManifoldNotificationKeys {
             primary: &primary_key,
             other: &other_key,
-            primary_curve: &primary_curve,
-            other_curve: &other_curve,
-            source_lists: &source_lists,
+            primary_curve: &|edge, kind| Ok(primary_curve(edge, kind)),
+            other_curve: &|edge, kind| Ok(other_curve(edge, kind)),
+            source_lists: &|region| Ok(source_lists(region)),
         };
         for fail in [false, true] {
             let mut a = Brep::new();
@@ -1550,15 +1815,15 @@ mod tests {
                     assert_eq!(adapter.object_key(true, MergeEntity::Vertex(bv)), bk);
                     let edge = EdgeId::from_index(0);
                     assert_eq!(
-                        adapter.keys.curve(false, edge, 314),
+                        adapter.keys.curve(false, edge, 314).unwrap(),
                         primary_curve(edge, 314)
                     );
-                    assert_eq!(adapter.keys.curve(true, edge, 315), other_curve(edge, 315));
+                    assert_eq!(
+                        adapter.keys.curve(true, edge, 315).unwrap(),
+                        other_curve(edge, 315)
+                    );
                     Context::with_notification_context(&mut k, |k, context| {
-                        assert!(
-                            adapter_cache_kernels(adapter.keys, k, Some(&other_k), context)
-                                .is_none()
-                        );
+                        let settings = cache_kernels(k, Some(&other_k), context);
                         let mut pair = ArenaPair::new(
                             &mut a,
                             Some(&mut b),
@@ -1566,7 +1831,7 @@ mod tests {
                             &mut adapter.extra_curves,
                             &mut adapter.records,
                             &mut attributes,
-                            None,
+                            settings,
                             context,
                             Some(&mut other_k.context),
                             adapter.keys,
@@ -1576,13 +1841,8 @@ mod tests {
                                 &pair,
                                 arena_pair::brep_h(0),
                             );
-                        assert!(matches!(
-                            cache,
-                            Err(SolidError::Unported {
-                                upstream: "SmBrep::GetBrepCache under caller notification keys",
-                                unit: "boolean.merge_p4",
-                            })
-                        ));
+                        let mut cache = cache.unwrap().clone();
+                        assert!(cache.vertex_tree_mut().is_some());
                         pair.set_vertex_point(
                             k,
                             arena_pair::encode(EntityRef::Vertex(av), false),
@@ -1634,9 +1894,9 @@ mod tests {
         let keys = ManifoldNotificationKeys {
             primary: &primary,
             other: &other,
-            primary_curve: &curve,
-            other_curve: &curve,
-            source_lists: &source_lists,
+            primary_curve: &|edge, kind| Ok(curve(edge, kind)),
+            other_curve: &|edge, kind| Ok(curve(edge, kind)),
+            source_lists: &|region| Ok(source_lists(region)),
         };
         let old = primary(EntityRef::Vertex(VertexId::from_index(0))).key;
         let added = primary(EntityRef::Vertex(VertexId::from_index(1))).key;
@@ -1685,28 +1945,17 @@ mod tests {
             .unwrap();
         let mut placement = Axis2Placement::default();
         placement.translate(Vec3::X);
-        // SmBrep::Notify is topology.brep_p2's (#149) and now runs through the adapter's
-        // environment; the vertex walk (GetVertices) is wired, so the transform then
-        // stops at its curve walk
-        let r = adapter.transform_brep(
-            &mut kernels,
-            &mut b,
-            false,
-            &mut attrs,
-            &placement,
-            None,
-            true,
-        );
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Unported {
-                    unit: "topology.brep_p1",
-                    upstream: "SmBrep::GetCurves"
-                })
-            ),
-            "transform: {r:?}"
-        );
+        adapter
+            .transform_brep(
+                &mut kernels,
+                &mut b,
+                false,
+                &mut attrs,
+                &placement,
+                None,
+                true,
+            )
+            .unwrap();
         let id = 17;
         let entities = [
             EntityRef::Region(RegionId::from_index(id)),

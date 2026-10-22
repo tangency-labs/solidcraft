@@ -14,7 +14,7 @@ use solidcore::geom::{
 };
 use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
-use solidcore::sweep::topology_sweep::access::{EdgeRef, FaceRef, SweepAccess};
+use solidcore::sweep::topology_sweep::access::{SweepMergeId,EdgeRef, FaceRef, SweepAccess};
 use solidcore::sweep::topology_sweep::geometry::SweepGeometry;
 use solidcore::sweep::topology_sweep::{SweepEntity as E, SweepGeometryCreation, TopologySweep};
 use solidcore::sweep::{
@@ -248,7 +248,9 @@ impl SweepAccess for Model {
             &mut Kernel,
             &mut Brep,
             &mut Brep,
+            &dyn Fn(solidcore::EntityRef) -> solidcore::geom::object::ObjectRef,
             &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
+            Option<&mut solidcore::geom::context::Context>,
             &mut solidcore::topology::edge::NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
@@ -280,7 +282,7 @@ impl SweepAccess for Model {
             context: None,
             key_of: &key_of,
         };
-        body(&mut self.k, src, dst, &face_objects, &mut env)
+        body(&mut self.k, src, dst, &|e| service_object(source, e), &face_objects, None, &mut env)
     }
     fn with_brep_notifications<T>(
         &mut self,
@@ -315,7 +317,16 @@ impl SweepAccess for Model {
     fn new_brep(&mut self, _id: BrepId) -> Result<BrepId> {
         unsupported()
     }
-    fn delete_merge(&mut self, _id: solidcore::sweep::topology_sweep::access::SweepMergeId) {}
+    fn new_merge(&mut self, _: BrepId, _: BrepId, _: BrepId, _: f64, _: f64) -> Result<SweepMergeId> { Err(SolidError::invalid_input("sweep fixture", "no merge engine")) }
+    fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> { Err(SolidError::invalid_input("sweep fixture", "no merge engine")) }
+    fn merge_relations(&mut self, _: SweepMergeId) -> Result<&mut solidcore::boolean::topology_intersector::p1::Relations> { Err(SolidError::invalid_input("sweep fixture", "no merge engine")) }
+    fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> { Err(SolidError::invalid_input("sweep fixture", "no merge engine")) }
+    fn union(&mut self, _: SweepMergeId) -> Result<BrepId> { Err(SolidError::invalid_input("sweep fixture", "no merge engine")) }
+    fn copy_faces(&mut self, source: BrepId, _: &[FaceId], destination: BrepId, _: SweepMergeId, _: &mut solidcore::sweep::topology_sweep::access::BTreeEdgeMap) -> Result<()> {
+        self.brep(source)?; self.brep(destination)?;
+        Err(SolidError::invalid_input("fixture", "no merge engine"))
+    }
+    fn delete_merge(&mut self, _id: SweepMergeId) {}
     fn delete_brep(&mut self, _id: BrepId) {}
     fn tag(&self, e: E) -> Result<Option<TagData>> {
         let key = self
@@ -620,19 +631,9 @@ mod tests {
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use solidcore::surface::{plane::Plane, surface::Surface};
-    use solidcore::sweep::topology_sweep::access::{FaceInput, SweepMergeId};
+    use solidcore::sweep::topology_sweep::access::{FaceInput};
     use solidcore::topology::shell::{ShellMembers, ShellType};
     use solidcore::topology::{Edgeuse, Face, Faceuse, Shell, ShellId};
-
-    fn assert_unported<T>(result: Result<T>, expected_unit: &str) {
-        let error = result.err().expect("expected an unavailable dependency");
-        let actual_unit = if let SolidError::Unported { unit, .. } = &error {
-            Some(*unit)
-        } else {
-            None
-        };
-        assert_eq!(actual_unit, Some(expected_unit), "{error:?}");
-    }
 
     #[test]
     fn default_queries_reach_the_live_lists_and_missing_infinite_region_is_null() -> Result<()> {
@@ -690,32 +691,29 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn copying_defaults_reach_the_next_unavailable_callees() -> Result<()> {
+    fn copying_defaults_reject_incomplete_topology_and_keep_the_merge_boundary() -> Result<()> {
         let mut model = Model::new([1., 0., 0.])?;
         let source = BrepId::from_index(0);
         let destination = BrepId::from_index(1);
         assert!(model.copy_edges(source, &[], destination)?.is_empty());
-        // The wire-edge constructor (topology.brep_p3) is ported: the fixture's bare
-        // edge (no edge use) is rejected as upstream's missing primary edge use.
+        // This fixture edge deliberately has no primary edgeuse. The now-ported
+        // constructor reaches its native topology validation rather than deferring.
         let copied = model.copy_edges(source, &[EdgeId::from_index(0)], destination);
         assert!(
             matches!(
                 copied,
                 Err(SolidError::InvalidInput {
                     operation: "topology::edge",
-                    ..
+                    reason: "edge without primary edge use",
                 })
             ),
             "{copied:?}"
         );
         let mut mates = BTreeMap::new();
-        assert_unported(
-            model.copy_faces(source, &[], destination, true, SweepMergeId(0), &mut mates),
-            "boolean.merge_p2",
-        );
+        assert!(matches!(model.copy_faces(source, &[], destination, SweepMergeId(0), &mut mates), Err(SolidError::InvalidInput { .. })));
         assert!(mates.is_empty());
         assert!(matches!(
-            model.copy_faces(source, &[], source, true, SweepMergeId(0), &mut mates),
+            model.copy_faces(source, &[], source, SweepMergeId(0), &mut mates),
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(matches!(
@@ -723,7 +721,6 @@ mod tests {
                 source,
                 &[],
                 BrepId::from_index(99),
-                true,
                 SweepMergeId(0),
                 &mut mates
             ),
@@ -850,14 +847,14 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // the scene copy (topology.brep_p3) is ported: HCR stops at its transform
+        // This fixture reaches HCR's separate, still-unavailable transform adapter.
+        let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
         assert!(matches!(
-            model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true),
+            hcr,
             Err(SolidError::Unported {
-                upstream: "SmBrep::Transform",
-                unit: "topology.brep_p5"
+                upstream: "SmBrep::Transform", unit: "topology.brep_p5"
             })
-        ));
+        ), "{hcr:?}");
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
         // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,

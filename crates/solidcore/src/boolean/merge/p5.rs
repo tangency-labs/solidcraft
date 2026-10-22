@@ -161,7 +161,7 @@ fn keep_other(operation: BooleanOperation, is_void: bool) -> bool {
 /// smaller of the two vertex tolerances, in whichever operand holds it.
 #[allow(clippy::too_many_arguments)]
 pub fn process_wires_and_shell_vertices(
-    k: &Kernel,
+    k: &mut Kernel,
     brep: &mut Brep,
     other: &mut Brep,
     brep_marks: &mut Marks,
@@ -271,7 +271,7 @@ trait StageKernels {
 
 /// One kernel for both operands and a separate notification context.
 struct SharedStage<'a, 'c> {
-    k: &'a Kernel,
+    k: &'a mut Kernel,
     context: Option<&'a mut Context>,
     copy: &'a mut TopologyCopy<'c>,
 }
@@ -613,7 +613,7 @@ mod tests {
         let mut attrs = AttributeStore::new();
         let mut keep = vec![EdgeId::from_index(u32::MAX)];
         let result = process_wires_and_shell_vertices(
-            &k,
+            &mut k,
             &mut a,
             &mut b,
             &mut am,
@@ -665,7 +665,7 @@ mod tests {
             ] {
                 let mut keep = vec![ae];
                 assert!(process_wires_and_shell_vertices(
-                    &k,
+                    &mut k,
                     &mut a,
                     &mut b,
                     &mut am,
@@ -692,7 +692,7 @@ mod tests {
             ] {
                 let mut keep = vec![ae];
                 process_wires_and_shell_vertices(
-                    &k,
+                    &mut k,
                     &mut a,
                     &mut b,
                     &mut am,

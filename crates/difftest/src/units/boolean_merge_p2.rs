@@ -652,7 +652,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
             match &i.op {
                 Op::MergeEdge { edgeuse, region } => {
                     match merge_edge(
-                        &k,
+                        &mut k,
                         &mut a,
                         b,
                         opt_id::<EdgeuseId>(*edgeuse),

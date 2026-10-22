@@ -146,10 +146,8 @@ fn seed(
         }
     }
 }
-/// The B-rep's topology in the shim's numbering ([`Canon::of_native`]: the edge and
-/// vertex lists, then the walk from the regions), so records an operation creates
-/// compare by their place in the topology rather than by arena allocation order.
-#[allow(clippy::too_many_lines)]
+/// Live native topology: excludes detached records retained by append-only arenas
+/// after `MakeEdgeTopology` deletes shells and vertex uses in C++.
 pub(crate) fn snapshot(
     k: &Kernel,
     b: &Brep,
@@ -158,23 +156,34 @@ pub(crate) fn snapshot(
     ids: &mut Vec<i64>,
     values: &mut Vec<f64>,
 ) -> Result<(), HarnessError> {
+    let c = Canon::native_reachable(b);
+    let counts = [
+        c.regions.items.len(),
+        c.shells.items.len(),
+        c.faceuses.items.len(),
+        c.faces.items.len(),
+        c.loopuses.items.len(),
+        c.loops.items.len(),
+        c.edgeuses.items.len(),
+        c.edges.items.len(),
+        c.vertexuses.items.len(),
+        c.vertices.items.len(),
+    ];
+    snapshot_ordered(k, b, marks, mt, &c, counts, ids, values)
+}
+
+fn snapshot_ordered(
+    k: &Kernel,
+    b: &Brep,
+    marks: &Marks,
+    mt: solidcore::geom::context::MarkType,
+    c: &Canon,
+    counts: [usize; 10],
+    ids: &mut Vec<i64>,
+    values: &mut Vec<f64>,
+) -> Result<(), HarnessError> {
     use solidcore::topology::{EdgeuseOwner, LoopuseStart, VertexuseOwner};
-    let c = Canon::of_native(b);
-    ids.extend(
-        [
-            b.regions().len(),
-            b.shells().len(),
-            b.faceuses().len(),
-            b.faces().len(),
-            b.loopuses().len(),
-            b.loops().len(),
-            b.edgeuses().len(),
-            b.edges().len(),
-            b.vertexuses().len(),
-            b.vertices().len(),
-        ]
-        .map(|n| n as i64),
-    );
+    ids.extend(counts.map(|n| n as i64));
     for &e in &c.edges.items {
         let r = b.edge(e).map_err(|e| err(&e))?;
         let v = edge::vertex(b, e).map_err(|e| err(&e))?;
@@ -444,7 +453,7 @@ impl UnitDiff for Runner {
                 keep.push(EdgeId::from_index(0));
             }
             match process_wires_and_shell_vertices(
-                &k,
+                &mut k,
                 &mut a,
                 &mut b,
                 &mut am,

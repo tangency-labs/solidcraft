@@ -927,17 +927,21 @@ fn shell_difference_with(
         } else {
             notifications.original_key_of
         },
-        primary_curve: if inset {
-            notifications.original_curve_ref
-        } else {
-            notifications.result_curve_ref
+        primary_curve: &|e, kind| {
+            Ok((if inset {
+                notifications.original_curve_ref
+            } else {
+                notifications.result_curve_ref
+            })(e, kind))
         },
-        other_curve: if inset {
-            notifications.result_curve_ref
-        } else {
-            notifications.original_curve_ref
+        other_curve: &|e, kind| {
+            Ok((if inset {
+                notifications.result_curve_ref
+            } else {
+                notifications.original_curve_ref
+            })(e, kind))
         },
-        source_lists: &source_lists,
+        source_lists: &|region| Ok(source_lists(region)),
     };
     let mut shell = Some(shell);
     let (primary, other) = if inset {

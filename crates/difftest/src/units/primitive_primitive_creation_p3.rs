@@ -247,7 +247,9 @@ impl SweepAccess for EmptyModel {
             &mut Kernel,
             &mut Brep,
             &mut Brep,
+            &dyn Fn(solidcore::EntityRef) -> solidcore::geom::object::ObjectRef,
             &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
+            Option<&mut solidcore::geom::context::Context>,
             &mut solidcore::topology::edge::NotifyEnv<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
@@ -292,6 +294,15 @@ impl SweepAccess for EmptyModel {
         unavailable()
     }
     fn delete_brep(&mut self, _: BrepId) {}
+    fn new_merge(&mut self, _: BrepId, _: BrepId, _: BrepId, _: f64, _: f64) -> Result<SweepMergeId> { Err(SolidError::invalid_input("primitive fixture", "no merge engine")) }
+    fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> { Err(SolidError::invalid_input("primitive fixture", "no merge engine")) }
+    fn merge_relations(&mut self, _: SweepMergeId) -> Result<&mut solidcore::boolean::topology_intersector::p1::Relations> { Err(SolidError::invalid_input("primitive fixture", "no merge engine")) }
+    fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> { Err(SolidError::invalid_input("primitive fixture", "no merge engine")) }
+    fn union(&mut self, _: SweepMergeId) -> Result<BrepId> { Err(SolidError::invalid_input("primitive fixture", "no merge engine")) }
+    fn copy_faces(&mut self, source: BrepId, _: &[FaceId], destination: BrepId, _: SweepMergeId, _: &mut solidcore::sweep::topology_sweep::access::BTreeEdgeMap) -> Result<()> {
+        self.brep(source)?; self.brep(destination)?;
+        Err(SolidError::invalid_input("fixture", "no merge engine"))
+    }
     fn delete_merge(&mut self, _: SweepMergeId) {}
     fn tag(&self, _: SweepEntity) -> Result<Option<TagData>> {
         unavailable()

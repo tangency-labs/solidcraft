@@ -70,6 +70,24 @@ pub enum Entity {
 #[derive(Debug, Clone, Default)]
 pub struct Marks(BTreeMap<Entity, Topology>);
 
+/// Mark access shared by face traversal and a production topology record store.
+/// Implementations must retain marks across calls under the same kernel context.
+pub trait FaceTraversalMarks {
+    /// Query the current context's mark on an entity.
+    fn is_marked(&self, k: &Kernel, entity: Entity, mark: MarkType) -> bool;
+    /// Set the current context's mark on an entity.
+    fn mark(&mut self, k: &Kernel, entity: Entity, mark: MarkType);
+}
+
+impl FaceTraversalMarks for Marks {
+    fn is_marked(&self, k: &Kernel, entity: Entity, mark: MarkType) -> bool {
+        Self::is_marked(self, k, entity, mark)
+    }
+    fn mark(&mut self, k: &Kernel, entity: Entity, mark: MarkType) {
+        Self::mark(self, k, entity, mark);
+    }
+}
+
 impl Marks {
     /// Import the caller's persistent topology record before traversal.
     pub fn set_record(&mut self, entity: Entity, record: Topology) {
@@ -142,7 +160,7 @@ fn edge_vertices(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
 pub fn collect_faces(
     k: &Kernel,
     b: &Brep,
-    marks: &mut Marks,
+    marks: &mut impl FaceTraversalMarks,
     start: Option<FaceId>,
     mark: MarkType,
     faces: &mut Vec<FaceId>,
