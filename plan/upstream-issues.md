@@ -81,6 +81,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no. The `-O2` reference build caps the read.
 - **Severity:** crash/UB.
 - **Rust port:** Caps the word at 255 bytes, as the optimised build does.
+- **Platform dependence:** confirmed 2026-10-21 on macOS arm64 (Apple clang 21, libc++, C++17): libc++ does not bound `>> char*`, so the `-O2` build overflows too. `topology.database_io` gen0185 (and gen0576, gen0883, gen1324, gen1363, gen1519, gen1590, gen1652, gen1783) abort in `__stack_chk_fail` <- `SmDatabaseIO::ReadType`. Only libstdc++ under `__OPTIMIZE__` makes the reference build safe. GitHub issue #450.
 
 #### UB-6. Other ASCII readers use uninitialised locals after a failed extraction [PSIRT]
 - **Location:** `SmAttribute.cpp:210` `SmAttributeData::ReadIndexedAttributesFromDB` (uninitialised count when the stream is already failed or at EOF; a count near `ULONG_MAX` wraps `SetSize`); `SmLine.cpp:2505` `SmLine::ReadFromDB` and `SmBSplineCurve::ReadFromDB` (short header leaves `n`, `p` uninitialised before the allocation); `SmEllipse.cpp:1488` `SmPolarConversion::ReadFromDB`; `SmConic.cpp:905` `SmConic::ReadFromDB` (uninitialised `lConicType`); `SmCrvInVolume.cpp:1404` `SmCrvInVolume::ReadFromDB` (dereferences a NULL volume for `SmVolume_TYPE`).
@@ -90,6 +91,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` for unreadable headers and bounds every count.
+- **Platform dependence:** confirmed 2026-10-21 on macOS arm64 (libc++). libc++ sets `failbit` when it extracts a subnormal double (strtod `ERANGE` underflow; libstdc++ stores the value and does not fail), so an ASCII `.smb` holding a subnormal (`topology.brep_data` generator, e.g. gen0010 `4.7e-321`) fails the stream and every later `>>` leaves its local unset. gen0018 then hangs in `SmAttributeData::ReadIndexedAttributesFromDB` (`SmAttribute.cpp:224`-`229`, uninitialised `ULONG lCnt` drives the loop) under `SmFaceData::ReadFromDB`; gen0110 segfaults in `SmShellData::ReadFromDB`. Of 2379 brep_data cases, 84 SIGSEGV and 228 hang on macOS; 0 fail on x86-64 Linux. GitHub issue #450.
 
 #### UB-75. `SmBrepData` readers use uninitialised locals and unchecked `SetSize` [PSIRT]
 - **Location:** `source/SMLib/src/SmBrepData.cpp:2933` `SmBrepData::ReadFromDB` (section count `lCount` uninitialised at `:2942`; every `SetSize(lCount)` unchecked); `:3245` (`lEdgeCount`, `lEdge` uninitialised in the composite edge loop); `:5098` `SmEdgeData::ReadFromDB` (`dMin`, `dMax` uninitialised); `:3613` `SmBrepData::ReadFromFile` (`lDBVersionNumber` uninitialised when the ASCII header extraction stores nothing; the binary `ReadLong` status is ignored); `:5393` `ReadCurveFromDB` composite branch (`lNumSegments`, `lDimension`, `lClosed`, `dGapStart`, `dGapEnd`).
@@ -891,6 +893,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes (SIGSEGV running the case through the shim; the knot-moving cases 2, 3, 5, 6, 7 with the same curves run and match the port).
 - **Severity:** crash/UB.
 - **Rust port:** swaps in the inserted UV curves themselves (the evident intent). The `nurbs.b_spline_curve_n_lib` FFI guard only lets UV curves through when every span and node the parameter could select takes a knot-moving case.
+
+#### UB-251. `SmBSplineCurve::DeformToEndPointTargets` reads the knot array that `N_CrvInsertKnot` freed
+- **Location:** `source/SMLib/src/SmBSplineCurveNLib.cpp:3138`-`3139` (`pCurrCrv_Knts[nCurrCrv_KnotIndex-nCurrCrv_Degree-1]`), in the knot-insertion loop `:3120`-`3155`; the in-place `N_CrvInsertKnot(pCurrCrv, ..., pCurrCrv, ...)` at `:3144` frees and reallocates the knot array, and `pCurrCrv_Knts` / `nCurrCrv_KnotIndex` are only refreshed after the loop (`:3160`).
+- **What happens:** When iteration `ii` 0 or 1 has inserted a knot, the `ii == 2` branch compares distances against knots read from the freed array (use after free). glibc malloc keeps the freed payload, and the stale index lands on the same knot value the new array holds, so Linux gets the intended choice. macOS malloc reuses the block, the `<` test picks the other knot (`ii++`), a different knot is inserted, and the deformed curve changes (control points off by 1e-3 to 1e-1 relative). Distinct from UB-47 (`:3038`, ignored `DegreeElevate` status) and UB-56 (`SmCurve.cpp:21563`).
+- **Trigger:** `DeformToEndPointTargets` where region 1 needs a knot inserted and region 3 holds exactly one interior knot (`nCurrCrv_InReg3_KntCnt == 1`), e.g. `curve.curve_p6` gen0161 / gen0953 / gen2879 and `nurbs.b_spline_curve_n_lib` gen0695 / gen0720 / gen0880 / gen0932 / gen1279 / gen1374 / gen1482 (`op = "deform"`).
+- **How found:** generated difftest cases failing on macOS arm64 only (the Rust result equals the Linux C++ result on both platforms); then ASan.
+- **Confirmed:** yes. ASan on macOS arm64 (harness built with `-fsanitize=address,undefined`) reports `heap-use-after-free` READ at `SmBSplineCurveNLib.cpp:3138`, freed by `N_FreeReal1dArray` <- `N_FreeCrv` <- `N_CrvInsertKnot`, for curve_p6 gen0161 / gen0953 and n_lib gen0695 / gen1279. Latent on x86-64 Linux (benign under glibc malloc). GitHub issue #449.
+- **Severity:** crash/UB (use after free; wrong result on non-glibc allocators).
+- **Rust port:** Reads the live knot vector after each insertion (`crates/solidcore/src/nurbs/b_spline_curve_n_lib.rs`, `curr.knots()` in the insertion loop), which equals the glibc result.
 
 ### Surfaces and volumes
 
@@ -3170,6 +3181,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (fixture `extension_then_step_inversion` waits on `surface.surface_p4`).
 - **Severity:** wrong result.
 - **Rust port:** Kept.
+
+#### WR-213. `SmBendVolume::WriteToDB` writes ASCII values with no separator before their label
+- **Location:** `source/SMLib/src/SmBendVolume.cpp:3255`-`3256` (`rFileOut << m_dBendNeutralDist << "BendVolume Bend NeutralDistance \n"`, same for `m_dSingularityTol`); read back at `:3328`-`3329` (`rFileIn >> pBendNeutralDist[0]`).
+- **What happens:** The ASCII line is `0.75845918449404492BendVolume ...`. libstdc++ stops the double at `B`; libc++ `num_get` first gathers every character in `0-9a-fA-FxX+-pPiInN` (`0.758...Bend`), so the extraction fails and the bend volume reads back wrong. The round trip only works with libstdc++.
+- **Trigger:** `WriteToDB` then `ReadFromDB` of an `SmBendVolume` (or a curve/surface in a bend volume) in ASCII, built against libc++.
+- **How found:** generated difftest cases failing on macOS arm64 only (`surface.srf_in_volume` read_db with a bend volume, 25 cases, e.g. gen1970: `values.out.len: cpp=70 rust=102`).
+- **Confirmed:** yes, on macOS arm64 (Apple clang 21, libc++); benign on x86-64 Linux (libstdc++). GitHub issue #450.
+- **Severity:** wrong result (platform dependent).
+- **Rust port:** Has no ASCII writer; `BendVolume::read_from_db` (`crates/solidcore/src/surface/bend_volume.rs`) reads the double as libstdc++ does (stops at the label), so it matches the reference build.
 
 ### Intersection
 
