@@ -130,6 +130,14 @@ impl List {
 }
 
 impl Brep {
+    /// A sheet of planar faces bounded by `loops`: closed loops of curves in one plane, in any
+    /// order, nested as outer loops, their holes and islands in the holes.
+    pub fn planar_faces(loops: &[Curve]) -> Result<Brep> {
+        init()?;
+        let l = List::of(loops)?;
+        ffi::sweeps::planar_faces(&l.raw()).map(Brep).map_err(error)
+    }
+
     /// The planar `profile` extruded `distance` along the unit `direction` (square to its plane).
     /// `draft` (radians) leans the walls: positive inward, negative outward; a drafted profile is
     /// one closed loop, its curves in order, and `direction` is its normal (either way round).
