@@ -8,6 +8,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod api;
+#[cfg(target_arch = "wasm32")]
+pub mod cloud_client;
 #[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
