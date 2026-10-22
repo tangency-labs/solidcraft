@@ -63,6 +63,12 @@
 //! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
 //!
 //! Deviations:
+//! - **Owner tolerance.** A surface holds only an owner handle, never its B-rep, so the
+//!   face tolerance upstream reads through `GetFace()->GetTolerance()` is cached on the
+//!   surface by the B-rep ([`Surface::owner_zone_tol_3d`], kept in step where a face
+//!   record's surface or tolerance changes) together with the face it belongs to; an
+//!   owner change drops it, the copy constructor resets it and a bare face handle
+//!   without it returns [`SolidError::Unported`] (`SmFace::GetTolerance`).
 //! - Evaluation dispatch and copies check all owned surface, curve and volume branches,
 //!   including curve-on-surface children, against a 64-level depth bound before invoking
 //!   recursive copies. The surface evaluator also bounds its wrapper traversal to 64
@@ -503,6 +509,7 @@ impl Surface {
             kind,
             owner: self.owner,
             owner_chain_face: self.owner_chain_face,
+            owner_zone_tol_3d: self.owner_zone_tol_3d,
         }
     }
 }
@@ -1747,6 +1754,8 @@ impl Surface {
     ) -> Result<()> {
         match &mut self.kind {
             SurfaceKind::Cone(s) => s.transform(k, rotate_n_move, scale),
+            SurfaceKind::Sphere(s) => s.transform(k, rotate_n_move, scale),
+            SurfaceKind::Torus(s) => s.transform(k, rotate_n_move, scale),
             SurfaceKind::SurfOfRevolution(s) => {
                 s.transform_at_depth(k, rotate_n_move, scale, depth)
             }

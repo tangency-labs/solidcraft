@@ -433,6 +433,15 @@ impl Volume {
         Some(map)
     }
 
+    /// Mutable [`Volume::last_map`] (a loop over the chain, no recursion).
+    fn last_map_mut(&mut self) -> Option<&mut Self> {
+        let mut map = self.next_map.as_deref_mut()?;
+        while map.next_map.is_some() {
+            map = map.next_map.as_deref_mut()?;
+        }
+        Some(map)
+    }
+
     /// The orient map (`GetOrientMap`).
     #[must_use]
     pub const fn orient_map(&self) -> Option<&Transform> {

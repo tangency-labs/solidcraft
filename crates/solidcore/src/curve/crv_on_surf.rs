@@ -71,8 +71,8 @@
 //!   `EvaluateSurfaceNormal` returns the UV point and tangent with the normal.
 //!   Derivatives `Evaluate` cannot compute (the surface gave fewer) are
 //!   [`Vec3::UNDEF`] (upstream leaves the caller's values).
-//! - **Requested derivative storage.** `Evaluate` accepts orders through 4096
-//!   (98,328 bytes of output), retaining zero derivatives above third order.
+//! - **Requested derivative storage.** `Evaluate` accepts orders through the shared
+//!   [`crate::curve::MAX_EVAL_DERIVS`] bound, retaining zero derivatives above third order.
 //!   Larger requests return [`SolidError::InvalidInput`] after the bounded UV
 //!   and surface evaluations, preserving their error precedence. Upstream writes
 //!   into caller-owned storage without a bound; the port must bound allocation
@@ -143,9 +143,9 @@ const OP_READ: &str = "curve::crv_on_surf::CrvOnSurf::read_from_db";
 /// `MAX_DERIVS` of `Evaluate`: the surface lifts go up to third derivatives.
 const MAX_DERIVS: usize = 3;
 
-/// Requested output bound, not the computed order: at most 4097 `Vec3`s (96 KiB + 24).
+/// Requested output bound shared with all allocating curve evaluators.
 /// Unlike a fallible reserve alone, this also bounds successful zero-filling work.
-const MAX_REQUESTED_DERIVS: usize = 4096;
+const MAX_REQUESTED_DERIVS: usize = crate::curve::MAX_EVAL_DERIVS;
 
 /// `SM_APPROX_TOL_3D` (`SM_ZONE_TOL_3D / 2`): the default approximation tolerance of
 /// `GetOrCreateBSApproxPointer`.
@@ -633,7 +633,7 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// Those of the UV curve's evaluation; the surface's last failure.
-    /// `InvalidInput` for requested orders above 4096, after those geometry errors.
+    /// `InvalidInput` above [`crate::curve::MAX_EVAL_DERIVS`], after those geometry errors.
     pub fn evaluate(
         &self,
         k: &Kernel,
@@ -642,8 +642,6 @@ impl CrvOnSurf {
         from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
-        // The output holds `num_derivs + 1` vectors: bound the caller's order.
-        crate::curve::check_eval_derivs(num_derivs, OP)?;
         // limit the number of derivatives to 3
         let mut n_eval = num_derivs.min(MAX_DERIVS);
 
@@ -679,12 +677,13 @@ impl CrvOnSurf {
 
         // The children only see orders <= 3. Check the requested output size after
         // their native error paths, but before any caller-sized arithmetic/storage.
+        crate::curve::check_eval_derivs(num_derivs, OP_EVAL)?;
         let output_len = num_derivs
             .checked_add(1)
             .filter(|&len| len <= MAX_REQUESTED_DERIVS + 1)
             .ok_or(SolidError::InvalidInput {
                 operation: OP_EVAL,
-                reason: "requested derivative order exceeds 4096",
+                reason: "requested derivative output length exceeds the shared bound",
             })?;
 
         // For subscripting into the surface pt/deriv array
@@ -2196,7 +2195,7 @@ mod tests {
     #[test]
     fn huge_derivative_orders_are_rejected() {
         // fuzz: `n = 2^31` sized the output allocation (abort)
-        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch(), None, 0).unwrap();
+        let c = CrvOnSurf::new(&Kernel::default(), uv(), patch().into(), None, 0).unwrap();
         for n in [crate::curve::MAX_EVAL_DERIVS + 1, 1 << 31, usize::MAX] {
             assert!(matches!(
                 c.evaluate(&Kernel::default(), 0.3, n, true, false),
@@ -2226,7 +2225,10 @@ mod tests {
     fn cached_knots_and_edits() {
         let k = Kernel::default();
         let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch().into(), None, 0).unwrap();
-        assert!(matches!(c.knots(None), Err(SolidError::Unported { .. })));
+        assert!(matches!(
+            c.knots(&k, None),
+            Err(SolidError::Unported { .. })
+        ));
         c.set_breaks_cache(false, vec![0.0, 0.25, 1.0]);
         let (kn, m) = c.knots(&k, None).unwrap();
         assert_eq!(kn, vec![0.0, 0.25, 1.0]);

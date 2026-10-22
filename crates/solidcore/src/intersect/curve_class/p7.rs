@@ -92,7 +92,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::Surface;
-use crate::topology::edge as topo_edge;
+use crate::topology::{edge, vertex, Brep, EdgeId, VertexId};
 
 use super::p1::{
     get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,

@@ -12,7 +12,7 @@
 //!   B-splines fail at `NL_MAXDER`). The port returns a `Vec` sized by the order,
 //!   so a caller order would size an allocation (`usize::MAX` overflows, `2^31`
 //!   exhausts memory). Every allocating evaluator of this module (and the
-//!   [`curve::Curve::evaluate`] dispatcher) calls [`check_eval_derivs`] first and
+//!   [`curve::Curve::evaluate`] dispatcher) calls [`check_eval_derivs`] before allocating and
 //!   returns [`SolidError::InvalidInput`] above the bound; below it results are
 //!   unchanged.
 

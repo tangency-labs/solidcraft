@@ -622,6 +622,8 @@ impl Curve {
         Self {
             kind,
             owner: self.owner,
+            // an evaluation snapshot is never notified under the original's identity
+            notify_identity: IdentitySlot::new(),
         }
     }
 }

@@ -26,16 +26,18 @@
 //! face's own tolerance (what `SmBSplineSurface::CalculateBoundingBox` reads through
 //! `GetFace()`): arena surfaces hold no owning face, so the B-spline/plane/revolution
 //! box is computed unexpanded and expanded here, as the override's last step does.
-//! `Point3DClassify` builds no surface cache (the Rust point solvers take none, as in
-//! `topology::vertexuse` and `intersect::curve_class::p1`), so upstream's temporary
-//! switch-off of the cache's point test (SmFace.cpp:12801) has nothing to act on yet:
-//! the face-owned surface's solve stops at `surface::surface::p4`'s
-//! `UNPORTED(query.face_p2)` `SmFace::PointClassify` stub, a call the C++ never makes
-//! here, and that stub's NOTE lists this caller so the switch is added for it when it is
-//! wired. `PointClassify` gets
-//! no trimmed surface cache (a fresh one is never face-containment-complete, so its
-//! cache branch cannot run). `EdgeCurveOnClassify` lifts a 2D curve to a curve on the
-//! face's surface only when an upward edge use of the face is found (upstream lifts it
+//! `Point3DClassify` builds the surface's trimmed surface cache first
+//! (`smsurf_GetSurfaceCache`, SmFace.cpp:12792) and hands it to `PointClassify`, which
+//! upstream finds again through `SmCacheMgr::GetObjectCache`: built for a face with
+//! loops, its face containment is done, so `PointClassify` classifies through the
+//! leaf node containing the point before the vertex and loop tests (`query.face_p1`
+//! `gen0160`: C++ FACE from an inside leaf, the vertex test alone gives VERTEX). Its
+//! face walk is [`SolidError::Unported`] today (`SmFace handle of a surface's face`,
+//! `topology.face_p2`), so every face-owned surface defers there. The Rust point solvers
+//! take no cache (as in `topology::vertexuse` and `intersect::curve_class::p1`), so
+//! upstream's temporary switch-off of the cache's point test (SmFace.cpp:12801) and the
+//! cache check-out have nothing to act on. `EdgeCurveOnClassify` lifts a 2D curve to a
+//! curve on the face's surface only when an upward edge use of the face is found (upstream lifts it
 //! first and ignores `SetAll`'s status). No recursion.
 
 use crate::curve::crv_on_surf::CrvOnSurf;

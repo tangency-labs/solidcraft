@@ -48,7 +48,6 @@ Latest unit: `surface.cone_p3` UB-154 native guard ([PR #292](https://github.com
 
 Latest unit: `boolean.merge_p2` ([PR #229](https://github.com/tangency-labs/solidcore/pull/229)) is partial: 45 differential cases, 30 bit-identical passes, 15 dependency deferrals, zero failures (`--seeds 1000`: 631 passes, 398 deferrals). It ports the `SmMerge` B-rep constructor, `MergeEdge`, `MakeFaceuse`, `MergeAddedFace` and `MergeAddedTopology`, with its stitch (`heal.stitch_p1` / `_p2`), intersector (`boolean.topology_intersector_p2`), `MakeFace` (`topology.brep_p7`), region and `topology.brep_p2` calls wired, and wires the `boolean.merge_p2` back-edges of `boolean.merge_p3`, `boolean.merge_p4`, `boolean.merge_p5`, `boolean.api_brep`, `heal.stitch_p1` and `topology.brep_p7`; its constructor builds `boolean.merge_p3`'s `MergeEngine` (#287), so the two-B-rep API booleans now run `ManifoldBoolean` (`boolean.merge_p4`) and stop at `query.brep`. It confirms UB-176 on the reference build (through `MergeAddedTopology`) and adds WR-197. The manifest has 235 ported units (114 green, 121 partial).
 
-
 Latest offset integration follow-up: `CrvOnSurf` retains the existing concrete
 `Surface`, including offset wrappers, and the offset creator now constructs and
 approximates real rails rather than stopping at the B-spline-only type gate.
@@ -62,6 +61,25 @@ branch is unported and unexercised. The offset rail path still reaches genuine
 face-owner/tolerance and classification dependencies; the production
 offset-executive/SSI bridge is separate work.
 
+
+## Handoff: `query.brep` (2026-10-21, PR #329)
+
+`query.brep` is partial (B-rep boxes, `LockBoundingBox`, `Point3DClassify`, the
+decimation attributes and `SmApiEvaluateSurface*`); `geom.a_object` and
+`topology.brep_cache` were promoted to green. Coverage and the remaining deferrals are in
+`plan/modules.toml` and `plan/findings.md` (section `query.brep`). For callers:
+
+- **Classify through a `BrepQuery`.** It holds the B-rep's identities and builds the
+  `SM_OC_BREP` cache on the first solve that needs it. Keep one per B-rep state (a loop
+  that does not edit the B-rep shares one) and make a fresh one after an edit. Callers that
+  hold the B-rep shared use `BrepClassifier`, which copies it on the first ray fire only.
+  The merge passes go through `boolean::merge::p1::classify_point_editing_disabled`.
+- **Lone B-reps** use `BrepIdentity::default()`; B-reps in a store pass their own
+  `BrepIdentity`.
+- **Shapes:** `geom::object::Shape::new` takes a `BrepStore` (`(BrepId, &Brep)` for one
+  B-rep, `NoBreps` for an empty shape) and is fully ported; `geom.object` is green.
+- **Open follow-up:** `topology::brep::p10::merge_curves_world` is a `DISPATCH GAP` until
+  the merge-curves world can own the B-rep (`topology.brep_p2`; PR #348).
 
 ## Port review note (2026-10-18, issue #210)
 

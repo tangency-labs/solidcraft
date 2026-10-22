@@ -115,6 +115,8 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
 use crate::surface::surface::Surface;
+use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::{edge, EdgeId};
 
 const OP_VALUES: &str = "blend::fillet_intersector::FilletIntersector::compute_point_values";
 const OP_DELTA: &str = "blend::fillet_intersector::FilletIntersector::compute_point_values_delta";

@@ -794,7 +794,7 @@ fn offset_surface_rail<O: ClassObject>(
     )?;
     let knots = match knots_source {
         Some(curve) => curve.knots(None)?.0,
-        None => rail.uv_curve().knots(None)?.0,
+        None => rail.uv_curve().knots(k, None)?.0,
     };
     // SmCrvOnSurf::ApproximateCurve explicitly ignores these two flags upstream.
     let _ = (

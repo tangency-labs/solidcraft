@@ -3064,7 +3064,8 @@ fn turn_to_nurbs_in(
             if curve_bspline_base(cos.uv_curve()).is_none() {
                 return Err(null_deref("curve on surface without a B-spline UV curve"));
             }
-            let base = Surface::from(cos.surface().copy());
+            // (`pCrvOnSurf->GetBaseSurface()`: the curve's own surface, not a copy)
+            let base = cos.surface();
             let ivl = b.edge(e)?.interval;
             match base.lift_curve(
                 k,
