@@ -91,6 +91,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no.
 - **Severity:** crash/UB.
 - **Rust port:** Returns `InvalidInput` for unreadable headers and bounds every count.
+- **Reconfirmed (surface.plane_p2 fuzz00842, 2026-10-22):** `SmPlane::ReadFromDB` (`SmPlane.cpp:3590`) of an ASCII stream with an empty plane header reads the B-spline header as plane values; `SmBSplineSurface::ReadFromDB` (`SmBSplineSurface.cpp:6401`) then reads `m` from `.69...`, the stream fails and `n m p q rat` stay uninitialised. Three runs of the reference build returned surfaces of 40251, 62874 and 65074 record values and one segfaulted (SIGSEGV). The plane_p2 runner refuses a header of other than 15 values.
 - **Platform dependence:** confirmed 2026-10-21 on macOS arm64 (libc++). libc++ sets `failbit` when it extracts a subnormal double (strtod `ERANGE` underflow; libstdc++ stores the value and does not fail), so an ASCII `.smb` holding a subnormal (`topology.brep_data` generator, e.g. gen0010 `4.7e-321`) fails the stream and every later `>>` leaves its local unset. gen0018 then hangs in `SmAttributeData::ReadIndexedAttributesFromDB` (`SmAttribute.cpp:224`-`229`, uninitialised `ULONG lCnt` drives the loop) under `SmFaceData::ReadFromDB`; gen0110 segfaults in `SmShellData::ReadFromDB`. Of 2379 brep_data cases, 84 SIGSEGV and 228 hang on macOS; 0 fail on x86-64 Linux. GitHub issue #450.
 
 #### UB-75. `SmBrepData` readers use uninitialised locals and unchecked `SetSize` [PSIRT]
@@ -2379,6 +2380,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes (no result after 20 s and the retry).
 - **Severity:** hang.
 - **Rust port:** not reached; the FFI wrapper requires radius `>= 1e-3` for kind-9 B-rep ops (`crates/solidcore-ffi/src/units/query_api_queries.rs:83`).
+
+#### HANG-46. `SmCurve::ApproximateCurve` never finishes for a break interval far from the origin
+- **Location:** `SmCurve.cpp:1504` `SmCurve::ApproximateCurve` (the bisection loop around `sm_AddToCurve`; the only stop is a span shorter than `SM_EFF_ZERO`).
+- **What happens:** Where coordinates reach about `1e10`, a Hermite span passes `sm_TestSpanAccuracy` only when it is tiny (about `1e-4` at `t = 5e10` with tolerance `1e-5`), so a break interval reaching `1e300` appends spans without end and the control polygon grows until memory runs out. When a failing span can no longer be split (its midpoint rounds onto an end and evaluates to that end's data), the loop repeats one state forever.
+- **Trigger:** `ApproximateCurve` of a line with breaks `[-0.81, 5.69, 8.33, 1e300, 8.53]` and tolerance `1e-5` (`fuzz-out/n2000/curve.curve_p1/fuzz01255.json`); the port, which follows the same loop, aborted on a 6 GiB control-polygon allocation after 16 s.
+- **How found:** fuzz-corpus replay against main (2026-10-22), located with gdb in the port.
+- **Confirmed:** no (the `curve.curve_p1` FFI refuses values above its coordinate bound, so the reference build never runs it; the port's loop is a line-by-line port).
+- **Severity:** hang (unbounded memory).
+- **Rust port:** Returns `InvalidInput` past `MAX_APPROX_SPANS = 2^20` appended spans and when a failing span cannot be split (`curve/curve/p1.rs`).
 
 ## Nondeterminism
 

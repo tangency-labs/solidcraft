@@ -128,6 +128,21 @@ fn record(flat: &[f64]) -> Output {
         .values("out", rest.to_vec())
 }
 
+/// The FFI's own validation of `i` (what [`cpp`] runs), applied to the Rust side too:
+/// its guards refuse inputs upstream (and the faithful port) never finish on. A
+/// surface of revolution is not checked here (its check builds the surface in C++).
+fn validate(i: &Inputs) -> Result<(), HarnessError> {
+    match &i.surf {
+        Geometry::Base(surface) => {
+            let mut input = vec![flag(i.wrap)];
+            push_surf(&mut input, surface)?;
+            input.extend(tail(i));
+            ffi::validate(i.op.code(), &input).map_err(|e| harness(e.to_string()))
+        }
+        Geometry::Rev { .. } => Ok(()),
+    }
+}
+
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let rest = tail(i);
     let result = match &i.surf {
@@ -433,7 +448,9 @@ impl UnitDiff for Runner {
         cpp(&case.parse()?)
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let i = case.parse()?;
+        validate(&i)?;
+        rust(&i)
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         serde_json::to_value(generated(rng)?).ok()

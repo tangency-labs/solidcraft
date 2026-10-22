@@ -627,6 +627,18 @@ fn per_point(
     Ok(Some(all))
 }
 
+/// The FFI's own validation of `op` (what [`cpp`] runs, point by point as there),
+/// applied to the Rust side too: its guards refuse inputs upstream (and the
+/// faithful port) never finish on (fuzz Rust-side hangs).
+fn validate(op: &OpIn) -> Result<Output, HarnessError> {
+    if let Some(o) = per_point(op, validate)? {
+        return Ok(o);
+    }
+    let (code, input) = cpp_input(op)?;
+    ffi::validate(code, &input).map_err(|e| harness(e.to_string()))?;
+    Ok(Output::new())
+}
+
 fn cpp(op: &OpIn) -> Result<Output, HarnessError> {
     if let Some(o) = per_point(op, cpp)? {
         return Ok(o);
@@ -1448,7 +1460,9 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let op = case.parse()?;
+        validate(&op)?;
+        rust(&op)
     }
 }
 
@@ -1456,6 +1470,27 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn approximation_of_a_break_at_1e300_fails_softly() {
+        // fuzz01255 (`tests/fuzz_corpus/curve.curve_p1.json`): the FFI refuses the
+        // `1e300` break, so the runner never hands it to the port; run directly, the
+        // port's `approximate_curve` used to abort on a 6 GiB allocation and now stops
+        // at `MAX_APPROX_SPANS` with an error status.
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_corpus/curve.curve_p1.json"
+        ))
+        .unwrap();
+        let case = corpus["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "fuzz01255_approx_break_1e300")
+            .unwrap();
+        let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
+        let out = rust(&op).unwrap();
+        assert_ne!(out.ints["status"], vec![0], "{out:?}");
+    }
 
     /// Generated cases cover every op, with passing (not deferred) cases.
     #[test]

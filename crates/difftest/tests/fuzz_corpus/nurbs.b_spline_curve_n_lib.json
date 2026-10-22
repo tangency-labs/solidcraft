@@ -1,0 +1,6 @@
+{
+  "unit": "nurbs.b_spline_curve_n_lib",
+  "cases": [
+    {"name": "fuzz00880_count_2p31", "origin": "fuzz-out/n2000/nurbs.b_spline_curve_n_lib/fuzz00880.json (rust: 16 GiB knot arrays (enomem under 4 GiB))", "issue": "-", "cpp": "harness: invalid argument: bad index/count 2147483648", "rust": "harness: invalid argument: bad index/count 2147483648", "inputs": {"closed": true, "deg": 2147483648, "op": "interp_pts", "par": 2, "params": null, "pts": [[-2.0213591566282942, 3.5344576126642675, 0.0], [-2.5106501429389714, 3.86740334525918, 0.0]], "te": null, "ts": null}}
+  ]
+}

@@ -57,6 +57,13 @@
 //!   just-copy branch (upstream returns a null curve with success) are errors.
 //!   Option vectors an operation reads without a `NULL` check are `InvalidInput`
 //!   when missing.
+//! - **Unbounded approximation.** `ApproximateCurve` returns `InvalidInput` where
+//!   upstream never finishes: when a span that fails the accuracy test can no
+//!   longer be split (its midpoint rounds onto an end and evaluates to that end's
+//!   data, so upstream repeats the same state forever), and past
+//!   [`MAX_APPROX_SPANS`] appended spans (upstream grows its control polygon until
+//!   memory runs out, e.g. for a break at `1e300`; fuzz `curve.curve_p1`
+//!   fuzz01255 aborted on a 6 GiB allocation).
 //! - `SM_ASSERT`, `WARN` and the `SM_DEBUG_CODE` drawing blocks are not ported;
 //!   `TessellateByBisection`'s unused `GetDegree` (its only consumer,
 //!   `sm_FindTestParams`, ignores it) is not called.
@@ -97,6 +104,13 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, Tessellation};
 
 const OP_REFINE: &str = "curve::curve::p1::refine_cc_solutions";
 const OP_APPROX: &str = "curve::curve::p1::Curve::approximate_curve";
+
+/// Most Hermite spans [`Curve::approximate_curve`] appends before it gives up (not
+/// upstream). Upstream grows its control polygon without limit, so a curve whose
+/// spans pass the accuracy test only when tiny (coordinates near `1e10` and beyond,
+/// e.g. a break at `1e300`) runs until memory is exhausted. Upstream fixtures need
+/// hundreds of spans at most; 2^20 spans are about 75 MB of control points.
+pub const MAX_APPROX_SPANS: usize = 1 << 20;
 const OP_LOCAL: &str = "curve::curve::p1::CpGlobalSolver::local_solve_branch";
 const OP_GLOBAL: &str = "curve::curve::p1::Curve::global_point_solve";
 
@@ -556,6 +570,14 @@ impl Curve {
                     // save max deviation
                     max_deviation = max2(max_deviation, acc.max_dist);
 
+                    // (not upstream) bound the growing curve: see MAX_APPROX_SPANS
+                    if knots.len() > MAX_APPROX_SPANS {
+                        return Err(SolidError::invalid_input(
+                            OP_APPROX,
+                            "approximation needs more than MAX_APPROX_SPANS spans",
+                        ));
+                    }
+
                     // Append Hermite interval to end of growing piecewise cubic bezier
                     add_to_curve(last_pv, curr_pv, last_t, curr_t, &mut ctrl_poly, &mut knots)?;
 
@@ -568,8 +590,22 @@ impl Curve {
                 } else {
                     // get param mid point and associated curve pos and tan
                     let mid_t = (last_t + curr_t) / 2.0;
+                    let mid_pv: [Vec3; 2] = eval_n(k, self, mid_t, 1, true, true)?; // NonZeroTangent values
+
+                    // (not upstream) the span cannot be split: the midpoint rounds onto
+                    // an end and evaluates to that end's data, so upstream repeats this
+                    // state forever (growing its stack or control polygon until memory
+                    // runs out)
+                    if (mid_t == curr_t && mid_pv == curr_pv)
+                        || (mid_t == last_t && mid_pv == last_pv)
+                    {
+                        return Err(SolidError::invalid_input(
+                            OP_APPROX,
+                            "break interval cannot be bisected further (upstream loops forever)",
+                        ));
+                    }
                     curr_t = mid_t;
-                    curr_pv = eval_n(k, self, curr_t, 1, true, true)?; // NonZeroTangent values
+                    curr_pv = mid_pv;
 
                     // push midPoint onto stach
                     push_point(curr_t, curr_pv, &mut stack);

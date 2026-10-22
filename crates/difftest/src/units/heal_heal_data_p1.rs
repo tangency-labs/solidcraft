@@ -112,7 +112,15 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     match i {
-        Inputs::Script(s) => p2_rust(s),
+        Inputs::Script(s) => {
+            // as the C++ side: the Rust side builds its B-rep through the same C++
+            // export, which hangs under HANG-29
+            let v = serde_json::to_value(s).map_err(|e| harness(e.to_string()))?;
+            if has_huge(&v) {
+                return Err(harness("script value above 1e150 (HANG-29)"));
+            }
+            p2_rust(s)
+        }
         Inputs::Api { api } => {
             let mut k = Kernel::default();
             // The C++ side heals a box made by `SmApiCreateBox`, which the Rust side

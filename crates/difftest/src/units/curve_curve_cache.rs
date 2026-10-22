@@ -18,6 +18,8 @@
 //! `SmCurve::IsArc`). Every run has at least [`MIN_GENERATED`] generated cases;
 //! generated inputs the ffi wrapper rejects are redrawn.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -288,12 +290,15 @@ fn put_aux(o: &mut Vec<f64>, a: &BezierAux1d) {
 
 fn tree_out(o: &mut Vec<f64>, tree: &Tree<u32>) -> Result<(), HarnessError> {
     let he = |e: SolidError| harness(e.to_string());
+    // (a map, not `order.contains`: a fuzzed tessellation builds millions of nodes)
     let mut order: Vec<NodeId> = Vec::new();
+    let mut index: BTreeMap<NodeId, usize> = BTreeMap::new();
     let mut stack: Vec<NodeId> = tree.top_node().into_iter().collect();
     while let Some(id) = stack.pop() {
-        if order.contains(&id) {
+        if index.contains_key(&id) {
             continue;
         }
+        index.insert(id, order.len());
         order.push(id);
         let n = tree.node(id).map_err(he)?;
         if let Some(c) = n.child2 {
@@ -305,10 +310,7 @@ fn tree_out(o: &mut Vec<f64>, tree: &Tree<u32>) -> Result<(), HarnessError> {
     }
     let idx_of = |p: Option<NodeId>| match p {
         None => -1.0,
-        Some(p) => order
-            .iter()
-            .position(|&q| q == p)
-            .map_or(-2.0, |i| i as f64),
+        Some(p) => index.get(&p).map_or(-2.0, |&i| i as f64),
     };
     o.push(order.len() as f64);
     for &id in &order {
@@ -649,6 +651,11 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let i = case.parse()?;
+        // Run only what the FFI accepts, as the C++ side: its guards refuse inputs
+        // upstream (and the faithful port) never finish on (fuzz Rust-side hangs).
+        let (code, input) = cpp_input(&i)?;
+        ffi::validate(code, &input).map_err(|e| HarnessError::new(e.to_string()))?;
+        rust(&i)
     }
 }

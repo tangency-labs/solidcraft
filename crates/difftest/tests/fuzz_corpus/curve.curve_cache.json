@@ -1,0 +1,6 @@
+{
+  "unit": "curve.curve_cache",
+  "cases": [
+    {"name": "fuzz01735_rust_hang", "origin": "fuzz-out/n2000/curve.curve_cache/fuzz01735.json (timeout: rust: no result after 20 s)", "issue": "-", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "harness: invalid argument: bad index/count 9223372036854776000", "inputs": {"a": 0.11953088536247941, "b": 0.37659329557163246, "curve": {"hermite": {"d1": [0.7309785735442542, 0.8826728254190117, 0.2439469007800854], "d2": [0.9708629604787209, -2.832332658757199, 2.7428382390631967], "dim": 9223372036854775807, "p1": [0.6419526332117562, -1.3572182540982427, -1e+300], "p2": [-1.9126665909158314, 0.3436573572772206, -1.3816515194832892]}}, "op": "tessellate", "opts": {"angle": 58.24187036732898, "aux": true, "chord": 0.0, "full": true, "max3d": 0.729454056142697, "minseg": 0, "offaxis": 0.1516505531642267, "ratio": -1e-300}}}
+  ]
+}

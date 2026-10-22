@@ -301,6 +301,21 @@ fn to_output(flat: &[f64]) -> Output {
         .values("out", rest.to_vec())
 }
 
+/// The FFI's own validation of `i` (what [`cpp`] runs), applied to the Rust side too:
+/// its guards refuse inputs upstream (and the faithful port) never finish on. A
+/// surface of revolution is not checked here (its check builds the surface in C++).
+fn validate(i: &Inputs) -> Result<(), HarnessError> {
+    let (op, rest) = cpp_rest(i);
+    match &i.surf {
+        AnySurf::Rev { .. } => Ok(()),
+        AnySurf::Base(s) => {
+            let mut input = cpp_head(i, s)?;
+            input.extend(rest);
+            ffi::validate(op, &input).map_err(|e| harness(e.to_string()))
+        }
+    }
+}
+
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let (op, rest) = cpp_rest(i);
     let flat = match &i.surf {
@@ -1066,7 +1081,9 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let i = case.parse()?;
+        validate(&i)?;
+        rust(&i)
     }
 }
 

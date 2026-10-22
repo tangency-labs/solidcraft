@@ -315,6 +315,15 @@ fn db_bytes(d: &DbIn) -> Result<Vec<u8>, HarnessError> {
     if d.binary && d.cut > 0 {
         return Err(harness("truncated binary streams are not comparable"));
     }
+    // A header of other than 15 values shifts the B-spline header into the wrong
+    // fields: upstream then reads `n m p q rat` from failed extractions and uses them
+    // uninitialised (UB-6; fuzz00842 segfaults or returns a different surface each
+    // run), the port refuses the unreadable header.
+    if d.header.len() != 15 {
+        return Err(harness(
+            "plane header must hold 15 values (upstream reads the B-spline header uninitialised)",
+        ));
+    }
     let s = &d.surface;
     let n = s.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))? as i64;
     let m = s

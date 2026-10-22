@@ -241,7 +241,12 @@ fn arc_tangents_ok(x: [f64; 3], y: [f64; 3], as_: f64, ae: f64, nc: usize) -> Re
     Ok(())
 }
 
-fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
+/// Checks that `input` is a well-formed record for `op` (what [`eval`] accepts).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] describing the first problem.
+pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader::new(input);
     match op {
         Op::NumCpts => {

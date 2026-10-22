@@ -1548,7 +1548,11 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        rust(&case.parse()?)
+        let i: Inputs = case.parse()?;
+        // Run only what the FFI accepts, as the C++ side: the Rust side honours sizes
+        // the FFI refuses (fuzz00880: a 2^31 count, 16 GiB knot arrays).
+        ffi::validate(i.op.ffi(), &cpp_input(&i)?).map_err(|e| harness(e.to_string()))?;
+        rust(&i)
     }
 }
 
