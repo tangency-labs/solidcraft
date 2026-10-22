@@ -331,13 +331,7 @@ pub fn golden(seed: u64, max_steps: usize) -> Value {
 fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (Run, Session) {
     let mut r = Rng::new(seed);
     let mut s = Session::default();
-    let mut run = Run {
-        seed,
-        steps: Vec::new(),
-        outcome: Outcome::ok(),
-        unsupported: Vec::new(),
-        rejected: 0,
-    };
+    let mut run = Run { seed, steps: Vec::new(), outcome: Outcome::ok(), unsupported: Vec::new(), rejected: 0 };
     let mut last_feature: Option<String> = None;
     let n = 2 + r.below(max_steps.max(2) - 1);
     let mut tries = 0;
