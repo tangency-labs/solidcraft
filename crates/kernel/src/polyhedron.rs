@@ -179,30 +179,14 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
 /// Hollow a body: walls of `thickness` inside, open at the faces under `open` (SMLib's shell).
 /// The result's history is over `[b]`: the inner walls are offsets of the faces they line.
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
-    #[cfg(feature = "smlib")]
-    {
-        crate::offset_backend::shell(b, open, thickness)
-    }
-    #[cfg(not(feature = "smlib"))]
-    {
-        let _ = (b, open, thickness);
-        Err(crate::smlib_sweeps::not_built())
-    }
+    crate::offset_backend::shell(b, open, thickness)
 }
 
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull` (SMLib's draft).
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     b.require_brep("draft")?;
-    #[cfg(feature = "smlib")]
-    {
-        crate::offset_backend::draft(b, faces, neutral, pull, angle)
-    }
-    #[cfg(not(feature = "smlib"))]
-    {
-        let _ = (faces, neutral, pull, angle);
-        Err(crate::smlib_sweeps::not_built())
-    }
+    crate::offset_backend::draft(b, faces, neutral, pull, angle)
 }
 
 /// Move the faces at the given points along their outward normals by `distance` (negative: into
@@ -233,14 +217,6 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         }
     }
     let chosen = crate::offset::with_same_surface(&healed, &chosen);
-    #[cfg(feature = "smlib")]
-    {
-        let moved = crate::offset_backend::offset_faces(&healed, &chosen, distance)?;
-        Ok(crate::record::after(moved, &healed, &crate::record::counts(&[b])))
-    }
-    #[cfg(not(feature = "smlib"))]
-    {
-        let _ = chosen;
-        Err(crate::smlib_sweeps::not_built())
-    }
+    let moved = crate::offset_backend::offset_faces(&healed, &chosen, distance)?;
+    Ok(crate::record::after(moved, &healed, &crate::record::counts(&[b])))
 }
