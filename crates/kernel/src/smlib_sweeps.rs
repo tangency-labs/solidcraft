@@ -1,8 +1,8 @@
-//! Extrusions, revolutions, sweeps, lofts and screw sweeps through SMLib ([`crate::backend`]
-//! picks them): the profile's segments go to SMLib as 3D curves (lines, circular arcs, Béziers
-//! and conics as NURBS), SMLib sweeps them, and the result comes back through its schema 4
-//! record as a kernel body. A result SMLib's own check refuses is an error, never a body. An
-//! option SMLib has no sweep for is "not supported yet", never truck's sweep in its place.
+//! Extrusions, revolutions, sweeps, lofts and screw sweeps through SMLib: the profile's
+//! segments go to SMLib as 3D curves (lines, circular arcs, Béziers and conics as NURBS), SMLib
+//! sweeps them, and the result comes back through its schema 4 record as a kernel body. A result
+//! SMLib's own check refuses is an error, never a body. An option SMLib has no sweep for is "not
+//! supported yet".
 //!
 //! A sweep that twists, scales, keeps an orientation direction or follows guide rails, and a
 //! loft that follows guide rails, place the profile at stations by the laws the kernel's own

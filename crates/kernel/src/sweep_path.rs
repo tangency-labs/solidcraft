@@ -773,7 +773,14 @@ mod tests {
         assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
         assert!((m.area - caps - lateral).abs() < 2e-3 * lateral, "lateral {} vs {lateral}", m.area - caps);
         // The end cap is the scaled circle.
-        let top = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap().positions.iter().filter(|p| (p.z - h).abs() < 1e-6).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+        let top = b
+            .mesh(&crate::MeshTolerance::chord(0.005))
+            .unwrap()
+            .positions
+            .iter()
+            .filter(|p| (p.z - h).abs() < 1e-6)
+            .map(|p| p.x.hypot(p.y))
+            .fold(0.0, f64::max);
         assert!((top - small).abs() < 1e-3, "end radius {top}");
         // The surface sweep of the circle's curve: the frustum's lateral face alone.
         let sheet = crate::sweep_sheet_with(&Plane::XY, std::slice::from_ref(&circle(big).outer.segs), &up(h), &ctl).unwrap();
