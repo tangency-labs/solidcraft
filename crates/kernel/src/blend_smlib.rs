@@ -1,13 +1,13 @@
-//! Fillets and chamfers through SMLib, when [`crate::backend`] selects it.
+//! Fillets and chamfers through SMLib.
 //!
-//! Each kernel entry point ([`crate::fillet`], [`crate::chamfer`], …) asks [`selected`] first and,
-//! when SMLib is the kernel, hands its arguments here unchanged: the body goes into SMLib as its
-//! schema 4 record (healed where SMLib's check refuses it as given), tagged as operand 0; each
-//! point picks the body's nearest edge in its own edge order, as truck's blends do, and SMLib is
-//! given that edge's midpoint, which no other edge is as near to (a point at a vertex between two
-//! edges would leave SMLib to choose); SMLib blends those edges with their tangent chains, its check must pass, and the result comes back decoded with its
-//! geometry checked. An option SMLib has no construction for is refused as "not supported yet",
-//! never built by truck instead, so a comparison never compares truck with itself.
+//! Each kernel entry point ([`crate::fillet`], [`crate::chamfer`], …) hands its arguments here
+//! unchanged: the body goes into SMLib as its schema 4 record (healed where SMLib's check refuses
+//! it as given), tagged as operand 0; each point picks the body's nearest edge in its own edge
+//! order, and SMLib is given that edge's midpoint, which no other edge is as near to (a point at
+//! a vertex between two edges would leave SMLib to choose); SMLib blends those edges with their
+//! tangent chains and the corners where they meet, its check must pass, and the result comes
+//! back decoded with its geometry checked. An option SMLib has no construction for is refused as
+//! "not supported yet".
 //!
 //! The history is SMLib's tags, renumbered into the body's orders; a blend face, which SMLib
 //! leaves untagged, comes from the edge it replaces ([`solidcraft_smlib::history::blends`]).
@@ -18,13 +18,7 @@ use crate::blend_variable::RadiusSpline;
 use crate::body::Body;
 use crate::{KernelError, Result};
 
-/// Whether SMLib runs the blends ([`crate::backend`]). A setting naming SMLib in a build without
-/// it, or naming no kernel, is the error it is for every operation.
-pub(crate) fn selected() -> Result<bool> {
-    Ok(crate::backend()? == crate::Backend::Smlib)
-}
-
-/// What SMLib cannot build yet: refused rather than built by truck.
+/// What SMLib cannot build yet.
 pub(crate) fn unsupported(what: &str) -> KernelError {
     KernelError::Invalid(format!("not supported yet: {what} with the SMLib kernel"))
 }
@@ -95,7 +89,7 @@ mod imp {
         KernelError::Failed(format!("SMLib {what}: {step}: {e}"))
     }
 
-    /// How far a pick may lie from its edge: as far as truck's blends accept one.
+    /// How far a pick may lie from its edge.
     fn pick_tolerance(body: &Body) -> f64 {
         body.size() * 0.05 + 1e-3
     }
@@ -235,7 +229,7 @@ mod imp {
     }
 
     /// `h` with each blend face still without origin (a corner patch where blends meet) made in
-    /// place of all the edges of the blend faces next to it, as truck records a corner, and every
+    /// place of all the edges of the blend faces next to it, and every
     /// edge of a face new to the blend recorded as where its faces meet (two chamfers' mitre is
     /// where the two chamfers meet).
     fn with_corners(mut h: History) -> History {
@@ -361,7 +355,7 @@ mod tests {
     #[test]
     fn a_pick_at_a_vertex_takes_the_nearest_edge_by_its_midpoint() {
         // (20, 20, 10) is on the vertical edge only; (20, 20, 20) is a corner of three edges, which
-        // the body's own order resolves as truck's blends do, never left to SMLib.
+        // the body's own order resolves, never left to SMLib.
         let b = cube();
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
@@ -441,7 +435,7 @@ mod tests {
         let saved = crate::decode_native_body(&crate::encode_native_body(&r).unwrap()).unwrap();
         assert!(crate::validity(&saved).record.is_ok());
         assert!(
-            crate::validity(&saved.placed(&truck_modeling::Matrix4::from_translation(truck_modeling::Vector3::new(5.0, 0.0, 0.0))).unwrap())
+            crate::validity(&crate::transform_matrix(&saved, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]]).unwrap())
                 .record
                 .is_ok()
         );
