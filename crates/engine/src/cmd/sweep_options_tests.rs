@@ -161,3 +161,34 @@ fn hostile_sweep_options_are_refused() {
         assert_eq!(s.doc.features.len(), before, "{bad}");
     }
 }
+
+/// #3345: a 4 x 3 profile drawn at the middle of the bottom line of a closed rounded rectangle
+/// (60 x 40, corners r8), swept round all of it, path picked from that line's start. The path is
+/// followed from the profile: the tube stays on the path (Pappus: A L), within 2 mm of it
+/// sideways, instead of standing off it by the half line the path's start lies away.
+#[test]
+fn a_sweep_round_a_closed_path_starts_where_the_profile_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!(["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"]);
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "body_name": "Tube"}));
+    let m = measure(&s, "Tube");
+    let want = 12.0 * (2.0 * 44.0 + 2.0 * 24.0 + 4.0 * (PI / 2.0) * 8.0);
+    assert!((m.volume - want).abs() < want * 1e-3, "{} vs {want}", m.volume);
+    // Within the rig's 1e-3 of the box diagonal (the box is measured on a mesh).
+    for (got, want) in [(m.bbox.min.x, -32.0), (m.bbox.min.y, -22.0), (m.bbox.max.x, 32.0), (m.bbox.max.y, 22.0)] {
+        assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
+    }
+}
