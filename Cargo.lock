@@ -3348,6 +3348,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-wrap"
+version = "10.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f21b97672d2dc848e7b25701ab4535618b92f4861c13cc3f7f7bed52ad3c8da"
+dependencies = [
+ "indexmap",
+ "nix 0.31.3",
+ "windows",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4358,11 +4369,14 @@ dependencies = [
  "gethostname",
  "gltf",
  "log",
+ "process-wrap",
  "quick-xml",
  "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "shlex",
+ "solidcraft-cloud",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
