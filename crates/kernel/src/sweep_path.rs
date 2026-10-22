@@ -152,10 +152,6 @@ pub(crate) fn clean(path: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
-pub(crate) fn closed_path(pts: &[Vec3]) -> bool {
-    pts.len() > 3 && pts.first().zip(pts.last()).is_some_and(|(a, b)| a.dist(*b) <= 1e-7)
-}
-
 /// The cyclic correspondence of a loop's last section to its first. Matching whole curves
 /// (rather than vertices alone) prevents sewing an incompatible twist or scale shut.
 pub(crate) fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Result<usize> {
@@ -185,13 +181,6 @@ pub(crate) fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Statio
         .ok_or_else(fail)
 }
 
-fn turn(a: Vec3, b: Vec3) -> f64 {
-    match (a.normalized(), b.normalized()) {
-        (Some(a), Some(b)) => a.dot(b).clamp(-1.0, 1.0).acos(),
-        _ => 0.0,
-    }
-}
-
 /// Rotation-minimising frames (double reflection) at the points, for the given unit tangents;
 /// each station maps the first frame onto its own.
 fn frames(pts: &[Vec3], tangents: &[Vec3]) -> Option<Vec<[Vec3; 3]>> {
@@ -212,26 +201,6 @@ fn frames(pts: &[Vec3], tangents: &[Vec3]) -> Option<Vec<[Vec3; 3]>> {
         out.push([tn, r, tn.cross(r)]);
     }
     Some(out)
-}
-
-/// Stations: each maps a world vector at the first station to the same vector at its own,
-/// optionally stretched across a corner (mitre).
-fn stations(pts: &[Vec3], tangents: &[Vec3], mitre: &[Option<(Vec3, f64)>]) -> Result<Vec<Station>> {
-    let f = frames(pts, tangents).ok_or_else(|| KernelError::Invalid("the sweep path doubles back".into()))?;
-    let f0 = *f.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
-    let mut out = Vec::with_capacity(f.len());
-    for (i, fi) in f.iter().enumerate() {
-        // Rotation taking f0 to fi: columns are the images of the world axes.
-        let col = |e: Vec3| fi[0] * f0[0].dot(e) + fi[1] * f0[1].dot(e) + fi[2] * f0[2].dot(e);
-        let mut m = [col(Vec3::X), col(Vec3::Y), col(Vec3::Z)];
-        if let Some(Some((b, s))) = mitre.get(i) {
-            for c in &mut m {
-                *c += *b * ((s - 1.0) * c.dot(*b));
-            }
-        }
-        out.push(Station { at: *pts.get(i).ok_or_else(|| KernelError::Invalid("sweep path".into()))?, m });
-    }
-    Ok(out)
 }
 
 /// Frames square to the path whose turn about it keeps `d`'s projection: none where the path

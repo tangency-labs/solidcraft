@@ -1946,11 +1946,8 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             // The post: a (tapered) cylinder standing on the face.
             let base = Plane::new(position.0, x, z.cross(x)).ok_or_else(|| DocError::Invalid("boss frame".into()))?;
             let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, r0), holes: Vec::new() };
-            let post = if dr.abs() > 1e-12 {
-                vec![kernel::extrude_tapered(&base, &disc, h, 1.0, -dr)?]
-            } else {
-                kernel::extrude(&base, &[disc], 0.0, h)?
-            };
+            let post =
+                if dr.abs() > 1e-12 { vec![kernel::extrude_tapered(&base, &disc, h, 1.0, -dr)?] } else { kernel::extrude(&base, &[disc], 0.0, h)? };
             let mut tools: Vec<Traced> = post.into_iter().map(|b| crate::lineage::part_tool(b, "post")).collect();
             if let Some(n) = ribs {
                 let n = val(vals, n, Kind::Unitless)?.round();

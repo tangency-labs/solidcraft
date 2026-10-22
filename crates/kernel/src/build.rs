@@ -1240,15 +1240,6 @@ fn smlib_sweep(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::S
     if path.iter().any(|s| s.tangents().is_none()) {
         return Err(KernelError::Invalid("a path segment has no direction".into()));
     }
-    let controlled = ctl.varies() || matches!(ctl.orientation, crate::SweepOrientation::Direction(_));
-    if controlled {
-        let ends: Vec<(Vec3, Vec3)> = path.iter().filter_map(PathSeg::tangents).collect();
-        if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
-            return Err(crate::smlib_sweeps::refuse(
-                "sweep with a twist, an end scale, guide rails or an orientation direction along a path with corners",
-            ));
-        }
-    }
     let translate = match ctl.orientation {
         _ if ctl.varies() => return crate::smlib_sweeps::sweep_controlled(plane, &oriented(region)?, path, ctl),
         crate::SweepOrientation::Perpendicular => false,

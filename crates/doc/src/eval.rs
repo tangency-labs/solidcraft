@@ -4734,7 +4734,7 @@ fn feature_tools_with_constructor(
                     }
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let (operation, targets) = feature_op(f);
+            let (operation, _) = feature_op(f);
             let axis_w = ss.plane.dir_to_world(d);
             let origin_w = ss.plane.to_world(o);
             // To a curved face: turn past the whole target body, then cut back to its surface
