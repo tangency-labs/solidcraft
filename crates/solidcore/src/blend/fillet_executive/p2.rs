@@ -80,6 +80,14 @@ use crate::surface::surface::Surface;
 
 const OP: &str = "blend::fillet_executive::p2";
 
+/// `SM_ERR_NULL_POINTER` (`NER`, or a null upstream dereferences). `$what` names the
+/// null object and is kept in the error's operation (`blend::fillet_executive::p2: …`).
+macro_rules! null {
+    ($what:literal) => {
+        SolidError::null_pointer(concat!("blend::fillet_executive::p2: ", $what))
+    };
+}
+
 fn status(code: i32) -> SolidError {
     SolidError::Upstream {
         operation: OP,
@@ -973,7 +981,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = start_edge {
                 fs = self
                     .fillet_solver_of_edge(access, edge)?
-                    .ok_or_else(|| null("no solver of edge"))?;
+                    .ok_or_else(|| null!("no solver of edge"))?;
             }
 
             let corner0 = access.solver_corner(fs, 0)?;

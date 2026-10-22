@@ -2626,8 +2626,8 @@ mod tests {
             law.clone(),
             false,
         );
-        // the fillet law evaluation is unported
-        assert!(vr.is_err_and(|e| e.is_unported()));
+        // the fillet law evaluates (blend.fillet_executive_p1)
+        assert!(vr.is_ok());
         let mut vr = VariableRadiusFs {
             curve_based: CurveBasedFs::new(1e-6, 0.5, 0.03),
             law,

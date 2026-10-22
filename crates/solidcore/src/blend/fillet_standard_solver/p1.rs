@@ -46,9 +46,8 @@
 //! | [`CircularCrossSectionFsg`], [`CircularCrossSectionFsg::create_surface_from_curves`] | `SmCircularCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`BlendCurveCrossSectionFsg`], [`BlendCurveCrossSectionFsg::create_surface_from_curves`] | `SmBlendCurveCrossSectionFSG`, `CreateSurfaceFromCurves` |
 //! | [`GuessSphereSolve::new`]                                | `SmGuessSphereSolveENFO::SmGuessSphereSolveENFO` (file-local class) |
-//! | [`FilletSolverData`] (CO-PORTED)                         | the `SmFilletSolver` members these solvers read       |
-//! | [`fillet_solver_is_kind_of`] (CO-PORTED)                 | `SmFilletSolver::IsKindOf`                            |
-//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`], [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
+//! | [`FilletSolver`] (re-exported from `blend.fillet_solver_p1`) | the `SmFilletSolver` base of the solvers (`FilletSolver::is_kind_of` is `SmFilletSolver::IsKindOf`) |
+//! | [`FilletSolverType`], [`FilletSurfaceGeneratorType`] (re-exported from `blend.fillet_solver_p1`), [`BoundaryTrimmingType`] (re-exported from `blend.fillet_geom_p1`) | `SmFilletSolverType`, `SmFilletSurfaceGeneratorType`, `SmBoundaryTrimmingType` |
 //! | [`FilletLaw`], [`FilletLawKind`] (CO-PORTED)             | `SmFilletLaw`, `SmLinearFilletLaw`, `SmBSplineFilletLaw` (the data these solvers read; `Evaluate` is in `blend::fillet_executive::p1`, the constructors in `blend::fillet_executive::p2`) |
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
@@ -111,8 +110,9 @@
 //!   (`SmCircularCrossSectionFSG::CreateSurfaceFromCurves` reads past its cross sections
 //!   when a ruled or revolved surface needs a second, knot-equalising pass,
 //!   `plan/upstream-issues.md`).
-//! - **Unported callees.** `SmFilletSolver::SetExtensionFlags` (`blend.fillet_solver_p1`)
-//!   returns [`SolidError::Unported`].
+//! - **Unported callees.** `SmFilletSolver::SetExtensionFlags`
+//!   ([`FilletSolver::set_extension_flags`]) takes the B-rep and stops at its corner
+//!   lookup (`blend.fillet_executive_p1`).
 //! - No recursion.
 
 use crate::blend::fillet_custom_solver::{
@@ -3522,10 +3522,11 @@ mod tests {
         assert!(fs.offset_radii_can_change().expect("can change"));
         fs.curve_based.solver.set_fillet_surface_generator(None);
         assert!(fs.offset_radii_can_change().is_err());
-        assert!(fs
-            .set_extension_flags()
-            .expect_err("unported")
-            .is_unported());
+        // the base SetExtensionFlags dereferences the missing edge uses
+        assert!(matches!(
+            fs.set_extension_flags(k, &Brep::new()),
+            Err(SolidError::InvalidInput { .. })
+        ));
         // the law evaluates (1.25); the solver has no offset surfaces to set
         let mut t = TsectPnt::new();
         t.user_doubles[0] = 0.25;
