@@ -2620,33 +2620,28 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
         crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
-        // Its browser row under the pointer lights it as a hovered body's edges are lit.
-        let hovered = app.viewport.hover_joint == Some(g.id);
-        let col = if g.picked {
-            t.sel_edge
-        } else if hovered {
-            t.hover_edge
-        } else if j.suppressed {
-            t.text_dim
-        } else {
-            t.accent
-        };
-        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
-        let width = if g.picked || hovered { 2.5 } else { 1.5 };
-        let stroke = Stroke::new(width, col);
+        let (stroke, rim) = glyph_strokes(app, g.id, g.picked, j.suppressed);
+        // A glyph piled on another is drawn faint.
+        let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
+        let (stroke, rim) = (fade(stroke), rim.map(fade));
+        let width = stroke.width;
         let c = g.centre;
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
         if g.rigid {
             let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
-            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            let rect = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
+            if let Some(rim) = rim {
+                painter.rect_stroke(rect, 0.0, rim, egui::StrokeKind::Middle);
+            }
+            painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Middle);
             continue;
         }
         let len = g.len;
-        // The motion axis (z), both ways.
-        if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            painter.line_segment([a, b], stroke);
-        }
-        // A ring about the axis.
+        // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
+        let axis = match (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
+            (Some(a), Some(b)) => Some([a, b]),
+            _ => None,
+        };
         let r = len * 0.5;
         let ring: Vec<Pos2> = (0..=32)
             .filter_map(|k| {
@@ -2654,8 +2649,13 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
             })
             .collect();
-        if ring.len() > 1 {
-            painter.add(egui::Shape::line(ring, stroke));
+        for s in rim.into_iter().chain([stroke]) {
+            if let Some(axis) = axis {
+                painter.line_segment(axis, s);
+            }
+            if ring.len() > 1 {
+                painter.add(egui::Shape::line(ring.clone(), s));
+            }
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
         let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
@@ -2677,8 +2677,27 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 }
             }
         }
-        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
+        if let Some(rim) = rim {
+            painter.circle_stroke(c, 4.5, rim);
+        }
+        painter.circle(c, if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke);
+    }
+}
+
+/// A joint glyph's core stroke and, while it is picked or its browser row is hovered, the
+/// lighter rim under it: the colours and widths a selected or hovered body's edges use.
+pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
+    let t = Tokens::get();
+    let lit = if picked {
+        Some((t.sel_edge, t.sel_edge_rim))
+    } else if app.viewport.hover_joint == Some(id) {
+        Some((t.hover_edge, t.hover_edge_halo))
+    } else {
+        None
+    };
+    match lit {
+        Some((core, rim)) => (Stroke::new(2.5, core), Some(Stroke::new(2.5 + 3.0, rim))),
+        None => (Stroke::new(1.5, if suppressed { t.text_dim } else { t.accent }), None),
     }
 }
 
