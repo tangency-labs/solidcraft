@@ -9,18 +9,9 @@ use serde_json::{Value, json};
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
 
-/// The kernel this process runs on (`SOLIDCRAFT_KERNEL`, set by the caller).
+/// The kernel the cases run on: SMLib, the only one.
 fn kernel() -> String {
-    kernel_name(std::env::var("SOLIDCRAFT_KERNEL").ok().as_deref())
-}
-
-/// The rig's name for a `SOLIDCRAFT_KERNEL` setting: unset, empty or `truck` (all of which the
-/// kernel runs as truck) is `default`, the name `boolean_kernel` reports for truck.
-fn kernel_name(setting: Option<&str>) -> String {
-    match setting.map(str::trim) {
-        None | Some("") | Some("truck") => "default".into(),
-        Some(other) => other.into(),
-    }
+    "smlib".into()
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one
@@ -165,15 +156,9 @@ fn check_case(dir: &str) -> Value {
             return out;
         }
     };
-    if kernel() == "smlib" && !solidcraft_engine::kernel::smlib_built() {
+    if !solidcraft_engine::kernel::smlib_built() {
         out["status"] = json!("unsupported");
         out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
-        return out;
-    }
-    let running = solidcraft_engine::kernel::boolean_kernel();
-    if kernel() != running {
-        out["status"] = json!("unsupported");
-        out["error"] = json!(format!("this build runs booleans on the {running} kernel, not {}", kernel()));
         return out;
     }
     // `refused`: only a clean refusal is right; `solid_or_refused`: a clean refusal, or a result
@@ -378,15 +363,6 @@ mod tests {
         // `$OUT` is the running case's scratch directory, in its bases too.
         assert_eq!(s["commands"][0]["params"]["file"], json!("/scratch/a.step"));
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn truck_named_explicitly_is_the_default_kernel() {
-        // `SOLIDCRAFT_KERNEL=truck` runs truck, so the rig must not call it a build mismatch.
-        for setting in [None, Some(""), Some(" "), Some("truck")] {
-            assert_eq!(kernel_name(setting), "default");
-        }
-        assert_eq!(kernel_name(Some("smlib")), "smlib");
     }
 
     #[test]

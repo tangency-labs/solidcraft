@@ -7275,22 +7275,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 None => (input, cyl.radius),
             };
             let open = ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol);
-            let (nb, groove_faces) = match kernel::backend()? {
-                kernel::Backend::Truck => {
-                    let groove = thread_groove(&t, radius, open)?;
-                    // The B-rep boolean can't take helical walls in reasonable time: the body is cut
-                    // faceted (curved faces within a two-hundredth of the pitch).
-                    let nb = kernel::faceted_boolean(&input.body, &groove, BoolOp::Cut, t.pitch * 0.005)?;
-                    (nb, groove.triangles.len())
-                }
-                kernel::Backend::Smlib => {
-                    // SMLib cuts the exact groove: its screw sweep, a B-rep boolean.
-                    let g = thread_groove_shape(&t, radius, open)?;
-                    let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
-                    let groove = kernel::sweep_helix(&g.plane, &section, g.base, g.axis, g.pitch, g.turns)?;
-                    (kernel::boolean(&input.body, &groove, BoolOp::Cut)?, groove.face_count())
-                }
-            };
+            // The exact groove: SMLib's screw sweep, cut by a B-rep boolean.
+            let g = thread_groove_shape(&t, radius, open)?;
+            let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
+            let groove = kernel::sweep_helix(&g.plane, &section, g.base, g.axis, g.pitch, g.turns)?;
+            let (nb, groove_faces) = (kernel::boolean(&input.body, &groove, BoolOp::Cut)?, groove.face_count());
             let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
             // The groove's faces have no role to name them by.
             let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
