@@ -20,12 +20,39 @@ fn arr(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
-/// A boundary edge of the face, as its ends and (for an arc) a point halfway.
+/// A boundary edge of the face, as its ends and, for an arc, its circle: the centre and the
+/// angle it turns through about the face's normal from `a` to `b` (positive counter-clockwise;
+/// ±2π for a whole circle, whose ends are one point).
 #[derive(Clone, Copy)]
 struct Piece {
     a: Vec3,
     b: Vec3,
-    mid: Option<Vec3>,
+    arc: Option<Arc>,
+}
+
+#[derive(Clone, Copy)]
+struct Arc {
+    centre: Vec3,
+    sweep: f64,
+}
+
+impl Piece {
+    /// The point a fraction `f` of the way along the piece (an arc turning about `n`).
+    fn at(&self, n: Vec3, f: f64) -> Vec3 {
+        match self.arc {
+            None => self.a + (self.b - self.a) * f,
+            Some(Arc { centre, sweep }) => {
+                let x = self.a - centre;
+                let (s, c) = (f * sweep).sin_cos();
+                centre + x * c + n.cross(x) * s
+            }
+        }
+    }
+
+    /// The piece moved by `d`.
+    fn moved(&self, d: Vec3) -> Piece {
+        Piece { a: self.a + d, b: self.b + d, arc: self.arc.map(|x| Arc { centre: x.centre + d, ..x }) }
+    }
 }
 
 /// The planar face of `body` at `at`: its index and outward normal.
@@ -60,25 +87,21 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
     let left = |a: Vec3, b: Vec3| n.cross(b - a).normalized();
     let mut out: Vec<Piece> = Vec::new();
     for p in pieces {
-        out.push(match p.mid {
+        out.push(match p.arc {
             None => {
                 let l = left(p.a, p.b).ok_or_else(|| fail("zero edge"))?;
-                Piece { a: p.a + l * w, b: p.b + l * w, mid: None }
+                p.moved(l * w)
             }
-            Some(m) => {
-                // Each point moves square to the arc (along its radius), to the left.
-                let lm = left(p.a, p.b).ok_or_else(|| fail("arc"))?;
-                let c = circle_centre(p.a, m, p.b).ok_or_else(|| fail("arc"))?;
-                let r = m.dist(c);
-                let shift = if (m - c).dot(lm) >= 0.0 { w } else { -w };
+            Some(arc) => {
+                // Each point moves along its radius, to the left: towards the centre of an arc
+                // turning counter-clockwise, away from that of one turning clockwise.
+                let r = p.a.dist(arc.centre);
+                let shift = if arc.sweep > 0.0 { -w } else { w };
                 if r + shift <= tol {
                     return Err(fail("the offset closes an arc"));
                 }
-                // Use one radial scale for the whole arc. At a semicircle's ends the
-                // radial is perpendicular to the chord's left, so its dot product cannot
-                // reliably choose the side independently at each end.
-                let moved = |q: Vec3| c + (q - c) * ((r + shift) / r);
-                Piece { a: moved(p.a), b: moved(p.b), mid: Some(moved(m)) }
+                let moved = |q: Vec3| arc.centre + (q - arc.centre) * ((r + shift) / r);
+                Piece { a: moved(p.a), b: moved(p.b), arc: Some(arc) }
             }
         });
     }
@@ -94,7 +117,7 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
             }
             continue;
         }
-        match (pi.mid, pj.mid) {
+        match (pi.arc, pj.arc) {
             (None, None) => {
                 let (d1, d2) = (pi.b - pi.a, pj.b - pj.a);
                 let w0 = pj.a - pi.a;
@@ -118,38 +141,38 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
     Ok(out)
 }
 
-fn circle_centre(a: Vec3, m: Vec3, b: Vec3) -> Option<Vec3> {
-    let (u, v) = (b - a, m - a);
-    let w = u.cross(v);
-    let d = 2.0 * w.len2();
-    if d < 1e-300 {
-        return None;
-    }
-    Some(a + (v.cross(w) * u.len2() + w.cross(u) * v.len2()) * (1.0 / d))
-}
-
-/// The pieces of a loop (seen from outside the body), from its record edges: lines, and arcs
-/// with their middle point.
-fn pieces(asm: &Assembly, lp: &[AUse]) -> Result<Vec<Piece>> {
+/// The pieces of a loop (seen from outside the body, whose normal is `n`), from its record edges:
+/// lines, and arcs with their circle.
+fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
     lp.iter()
         .map(|u| {
             let e = asm.edges.get(u.edge as usize).ok_or_else(|| fail("edge"))?;
             let (s, t) = asm.ends(u).ok_or_else(|| fail("edge"))?;
             let (a, b) = (asm.point(s).ok_or_else(|| fail("vertex"))?, asm.point(t).ok_or_else(|| fail("vertex"))?);
             let [t0, t1] = e.interval;
-            match e.curve {
-                Curve::Line { .. } => Ok(Piece { a, b, mid: None }),
-                Curve::Circle { .. } => Ok(Piece { a, b, mid: Some(asm.edge_point(u.edge, 0.5 * (t0 + t1)).ok_or_else(|| fail("arc"))?) }),
+            match &e.curve {
+                Curve::Line { .. } => Ok(Piece { a, b, arc: None }),
+                Curve::Circle { frame, .. } => {
+                    // The parameter is the angle about the frame's z, which lies along ±n.
+                    let z = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis));
+                    if z.cross(n).len() > 1e-9 {
+                        return Err(fail("an arc not in the face's plane"));
+                    }
+                    let along = if u.forward { 1.0 } else { -1.0 };
+                    let sweep = (t1 - t0) * along * z.dot(n).signum();
+                    Ok(Piece { a, b, arc: Some(Arc { centre: Vec3::from(frame.origin), sweep }) })
+                }
                 _ => Err(fail("edges must be lines or arcs")),
             }
         })
         .collect()
 }
 
-/// Signed area ordering including arc midpoints: two semicircles have only two
-/// vertices, whose polygon has zero area for both the inner and outer loops.
+/// Signed area ordering, through points along the arcs: a whole circle has one vertex, two
+/// semicircles two, whose polygon has no area.
 fn turn(pieces: &[Piece], n: Vec3) -> f64 {
-    let ring: Ring<Vec3> = pieces.iter().flat_map(|p| [Some(p.a), p.mid]).flatten().collect();
+    let ring: Ring<Vec3> =
+        pieces.iter().flat_map(|p| if p.arc.is_some() { vec![p.a, p.at(n, 1.0 / 3.0), p.at(n, 2.0 / 3.0)] } else { vec![p.a] }).collect();
     ring.area_vector().dot(n)
 }
 
@@ -157,26 +180,21 @@ fn turn(pieces: &[Piece], n: Vec3) -> f64 {
 fn rim_loops(asm: &Assembly, fi: usize, n: Vec3) -> Result<(Vec<AUse>, Vec<AUse>)> {
     let f = asm.faces.get(fi).and_then(Option::as_ref).ok_or_else(|| fail("face"))?;
     let [a, b] = f.loops.as_slice() else { return Err(fail("the face must have an outer and one inner loop (a rim)")) };
-    let (ta, tb) = (turn(&pieces(asm, a)?, n), turn(&pieces(asm, b)?, n));
+    let (ta, tb) = (turn(&pieces(asm, a, n)?, n), turn(&pieces(asm, b, n)?, n));
     Ok(if ta >= tb { (a.clone(), b.clone()) } else { (b.clone(), a.clone()) })
 }
 
 fn profile(pieces: &[Piece], plane: &Plane) -> Result<Loop2> {
-    use std::f64::consts::TAU;
     let segs = pieces
         .iter()
         .map(|p| {
             let (a, b) = (plane.to_local(p.a), plane.to_local(p.b));
-            Ok(match p.mid {
+            Ok(match p.arc {
                 None => Seg2::Line { a, b },
-                Some(m) => {
-                    let center = plane.to_local(circle_centre(p.a, m, p.b).ok_or_else(|| fail("arc"))?);
-                    let mid = plane.to_local(m);
-                    let start = (a - center).angle();
-                    let end = (b - center).angle();
-                    let sweep = (end - start).rem_euclid(TAU);
-                    let sweep = if ((mid - center).angle() - start).rem_euclid(TAU) <= sweep { sweep } else { sweep - TAU };
-                    Seg2::Arc { center, radius: a.dist(center), start, sweep }
+                // The plane's normal is the face's: the arc turns the same way in it.
+                Some(arc) => {
+                    let center = plane.to_local(arc.centre);
+                    Seg2::Arc { center, radius: a.dist(center), start: (a - center).angle(), sweep: arc.sweep }
                 }
             })
         })
@@ -198,7 +216,7 @@ pub fn rim_band(body: &Body, at: Vec3, width: f64, free: f64, outside: bool) -> 
         let asm = Assembly::from_record(&rec)?;
         let (outer, inner) = rim_loops(&asm, fi, n)?;
         let along = if outside { outer } else { inner };
-        let p = pieces(&asm, &along)?;
+        let p = pieces(&asm, &along, n)?;
         let tol = (body.size() * 1e-5).max(1e-7);
         let plane = Plane::from_normal(at, n).ok_or_else(|| fail("rim plane"))?;
         let into = profile(&offset_loop(&p, n, width, tol)?, &plane)?;
@@ -208,19 +226,16 @@ pub fn rim_band(body: &Body, at: Vec3, width: f64, free: f64, outside: bool) -> 
     })
 }
 
-/// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc about `n` through its
-/// middle point): the use that runs from `a` to `b`.
+/// An edge from vertex `a` to vertex `b` along `p` (a line, or an arc of its circle about `n`):
+/// the use that runs from `a` to `b`.
 fn piece_edge(asm: &mut Assembly, a: u32, b: u32, p: &Piece, n: Vec3) -> Result<AUse> {
-    let Some(m) = p.mid else { return Ok(AUse { edge: asm.line(a, b)?, forward: true, given: None }) };
-    let c = circle_centre(p.a, m, p.b).ok_or_else(|| fail("arc"))?;
-    let r = c.dist(p.a);
-    let x = (p.a - c).normalized().ok_or_else(|| fail("arc"))?;
-    let y = n.cross(x);
-    let at = |q: Vec3| (q - c).dot(y).atan2((q - c).dot(x)).rem_euclid(std::f64::consts::TAU);
-    let (tm, tb) = (at(m), at(p.b));
-    let frame = Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(y) };
-    // Counter-clockwise about n from a (angle 0) through the middle to b, or the other way.
-    let (interval, ends, forward) = if tm < tb { ([0.0, tb], (a, b), true) } else { ([tb, std::f64::consts::TAU], (b, a), false) };
+    let Some(arc) = p.arc else { return Ok(AUse { edge: asm.line(a, b)?, forward: true, given: None }) };
+    let r = arc.centre.dist(p.a);
+    let x = (p.a - arc.centre).normalized().ok_or_else(|| fail("arc"))?;
+    let frame = Frame { origin: arr(arc.centre), x_axis: arr(x), y_axis: arr(n.cross(x)) };
+    // Counter-clockwise about n from a (angle 0) to b, or clockwise: then from b to a.
+    let tau = std::f64::consts::TAU;
+    let (interval, ends, forward) = if arc.sweep > 0.0 { ([0.0, arc.sweep], (a, b), true) } else { ([tau + arc.sweep, tau], (b, a), false) };
     Ok(AUse { edge: asm.edge(Curve::Circle { frame, radius: r }, interval, ends.0, ends.1)?, forward, given: None })
 }
 
@@ -233,21 +248,18 @@ fn wall(p: &Piece, n: Vec3, bottom: &AUse, top: &AUse, up_a: u32, up_b: u32, rig
         AUse { edge: top.edge, forward: !top.forward, given: None },
         AUse { edge: up_a, forward: false, given: None },
     ];
-    let (surface, natural_out) = match p.mid {
+    let (surface, natural_out) = match p.arc {
         None => {
             let d = (p.b - p.a).normalized().ok_or_else(|| fail("zero edge"))?;
             // Natural normal d × n: the right of the piece.
             (Surface::Plane { origin: arr(p.a), u_axis: arr(d), v_axis: arr(n) }, right)
         }
-        Some(m) => {
-            let c = circle_centre(p.a, m, p.b).ok_or_else(|| fail("arc"))?;
-            let x = (p.a - c).normalized().ok_or_else(|| fail("arc"))?;
-            let surface = Surface::Cylinder { frame: Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(n.cross(x)) }, radius: c.dist(p.a) };
-            // The piece's direction at its middle, and which side of it is away from the axis.
-            let along = (p.b - p.a).normalized().ok_or_else(|| fail("arc"))?;
-            let rightward = along.cross(n);
-            let away = (m - c).dot(rightward) > 0.0;
-            (surface, away == right)
+        Some(arc) => {
+            let x = (p.a - arc.centre).normalized().ok_or_else(|| fail("arc"))?;
+            let surface =
+                Surface::Cylinder { frame: Frame { origin: arr(arc.centre), x_axis: arr(x), y_axis: arr(n.cross(x)) }, radius: arc.centre.dist(p.a) };
+            // Right of an arc turning counter-clockwise about n is away from its axis.
+            (surface, (arc.sweep > 0.0) == right)
         }
     };
     // The loop runs up the piece's right: the outside there. On its left it runs the other way.
@@ -279,7 +291,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let (outer, inner) = rim_loops(&asm, fi, n)?;
         let (along, other) = if outside { (outer, inner) } else { (inner, outer) };
         let face = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
-        let below = pieces(&asm, &along)?;
+        let below = pieces(&asm, &along, n)?;
         let moved = offset_loop(&below, n, width, tol)?;
         let k = moved.len();
         let up = n * height;
@@ -288,7 +300,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         let averts: Vec<u32> = along.iter().map(|u| asm.ends(u).map(|e| e.0).ok_or_else(|| fail("edge"))).collect::<Result<_>>()?;
         let atop: Vec<u32> = below.iter().map(|p| asm.vertex(p.a + up)).collect::<Result<_>>()?;
         let ctop: Vec<u32> = moved.iter().map(|p| asm.vertex(p.a + up)).collect::<Result<_>>()?;
-        let lift = |p: &Piece| Piece { a: p.a + up, b: p.b + up, mid: p.mid.map(|m| m + up) };
+        let lift = |p: &Piece| p.moved(up);
         let (mut cedges, mut aup, mut cup, mut atops, mut ctops) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for i in 0..k {
             let j = (i + 1) % k;

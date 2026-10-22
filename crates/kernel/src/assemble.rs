@@ -186,12 +186,6 @@ impl Assembly {
         Some(if u.forward { (a, b) } else { (b, a) })
     }
 
-    /// The point of edge `e` at its parameter `t`.
-    pub(crate) fn edge_point(&self, e: u32, t: f64) -> Option<Vec3> {
-        let e = self.edges.get(e as usize)?;
-        CurveEval::new(&e.curve).ok()?.point(t)
-    }
-
     /// The record of the faces left and added, in canonical order (`Brep::canonical`), checked:
     /// each face's loops stored relative to its surface's natural normal with their pcurves and
     /// parameter box, shells and regions as the source's (a region whose outer shell lost every
