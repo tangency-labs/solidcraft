@@ -30,7 +30,8 @@ mod build;
 mod chamfer_sides_curved_tests;
 mod clearance;
 mod continuity;
-mod coplanar;
+#[cfg(test)]
+mod coplanar_tests;
 mod corner_g2;
 mod delete_face;
 mod distance;
@@ -96,7 +97,6 @@ mod par;
 pub use par::{for_each_on_threads, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod pinch_tests;
-mod planar_faces;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -109,7 +109,8 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
-mod seam_faces;
+#[cfg(test)]
+mod seam_faces_tests;
 mod sew;
 mod smlib_boolean;
 mod smlib_sweeps;

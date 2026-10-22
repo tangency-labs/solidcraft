@@ -516,99 +516,15 @@ pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<usize> {
 pub(crate) type Chain = Vec<(usize, bool)>;
 
 /// A surface filling a closed loop of a body's edges (each picked by a point on it): one face on
-/// the body's own edges, planar when every edge's curve lies in one plane by its own definition
-/// (its control points, or its circle's frame), else a B-spline patch ([`crate::fill`]; loops that
-/// do not bound one are refused). Its history is over `[body]`: the face is new, its edges the
-/// body's own.
+/// the body's own edges, the loop's plane when it is certainly planar, else a B-spline patch
+/// ([`crate::fill`], with no crown; loops that do not bound one are refused). Its history is over
+/// `[body]`: the face is new, its edges the body's own.
 pub fn patch_edges(body: &Body, at: &[Vec3]) -> Result<Body> {
     body.require_brep("patch")?;
     if at.is_empty() || at.len() > 10_000 {
         return Err(invalid("pick the edges of a closed loop"));
     }
-    let r = body.record();
-    let chain = picked_loop(body, at)?;
-    let Some(plane) = chain_plane(&r, &chain, crate::fill::planarity_tolerance(body))? else {
-        return crate::fill::fill_loop(body, &chain);
-    };
-    let surface = crate::freeform::plane_surface(&plane);
-    let mut parts = Parts { tolerance: r.tolerance, vertices: r.vertices.clone(), ..Parts::default() };
-    parts.edges = r.edges.iter().map(|e| b::Edge { uses: Vec::new(), ..e.clone() }).collect();
-    let mut uses = Vec::with_capacity(chain.len());
-    for &(e, forward) in &chain {
-        let edge = r.edges.get(e).ok_or_else(|| invalid("an edge reference"))?;
-        uses.push(b::pcurve::EdgeUse {
-            edge: index(e)?,
-            curve: &edge.curve,
-            interval: edge.interval,
-            forward,
-            tolerance: edge.tolerance,
-            given: None,
-        });
-    }
-    let pcurves = b::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("patch: {e}")))?;
-    let edges = chain
-        .iter()
-        .zip(pcurves.into_iter().flatten())
-        .map(|(&(e, forward), pcurve)| Ok(b::OrientedEdge { edge: index(e)?, forward, pcurve }))
-        .collect::<Result<Vec<_>>>()?;
-    let loops = vec![b::Loop::Edges { edges }];
-    let domain = uv_box(&loops).ok_or_else(|| invalid("the loop encloses no area"))?;
-    parts.faces.push((b::Face { surface, domain, loops }, true));
-    let c = parts.canonical()?;
-    let h = record_history(&c.brep, 1, vec![record::generated(Vec::new())], |e, _, _| {
-        c.edges.get(e).map(|&edge| EdgeOrigin::Edge { operand: 0, edge }).into_iter().collect()
-    });
-    let (result, same) = record_body(&c.brep)?;
-    with_history(result, same, h, &record::counts(&[body]))
-}
-
-/// The plane every curve of `chain` lies in by its definition, within `tol` (lines and splines by
-/// their control points, circles and ellipses by their frames), its axes turned so that the chain
-/// runs counter-clockwise about its normal; `None` when there is none.
-fn chain_plane(r: &Brep, chain: &Chain, tol: f64) -> Result<Option<Plane>> {
-    let edge = |e: usize| r.edges.get(e).ok_or_else(|| invalid("an edge reference"));
-    let mut points: Vec<Vec3> = Vec::new();
-    let mut axes: Vec<(Vec3, Vec3)> = Vec::new();
-    for &(e, _) in chain {
-        match &edge(e)?.curve {
-            b::Curve::Line { start, end } => points.extend([v3(*start), v3(*end)]),
-            b::Curve::Polyline { points: p } | b::Curve::Spline { points: p, .. } => points.extend(p.iter().map(|q| v3(*q))),
-            b::Curve::RationalSpline { homogeneous, .. } => {
-                points.extend(homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])))
-            }
-            b::Curve::Circle { frame, .. } | b::Curve::Ellipse { frame, .. } => {
-                points.push(v3(frame.origin));
-                axes.push((v3(frame.origin), v3(frame.x_axis).cross(v3(frame.y_axis))));
-            }
-            b::Curve::SurfaceIntersection { .. } => return Ok(None),
-        }
-    }
-    let Some(&p0) = points.first() else { return Ok(None) };
-    // The normal: a circle's axis, else the widest cross product of the points about the first.
-    let normal = axes.first().map(|(_, n)| *n).or_else(|| {
-        let far = points.iter().copied().max_by(|a, c| a.dist(p0).total_cmp(&c.dist(p0)))?;
-        points.iter().map(|q| (far - p0).cross(*q - p0)).max_by(|a, c| a.len().total_cmp(&c.len()))
-    });
-    let Some(n) = normal.and_then(|n| n.normalized()) else { return Ok(None) };
-    let on = |q: Vec3| (q - p0).dot(n).abs() <= tol;
-    if !points.iter().all(|q| on(*q)) || axes.iter().any(|(c, a)| !on(*c) || a.cross(n).len() > 1e-9 * a.len().max(1.0)) {
-        return Ok(None);
-    }
-    // Which way round the chain runs about `n`: the turn of points along it.
-    let mut ring: Vec<Vec3> = Vec::new();
-    for &(e, forward) in chain {
-        let x = edge(e)?;
-        let c = CurveEval::new(&x.curve).map_err(|err| failed(format!("patch: {err}")))?;
-        let [t0, t1] = x.interval;
-        for k in 0..16 {
-            let f = k as f64 / 16.0;
-            ring.push(c.point(if forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f }).ok_or_else(|| failed("patch: an edge has no point"))?);
-        }
-    }
-    let turn: f64 = ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, c)| (*a - p0).cross(*c - p0).dot(n)).sum();
-    let n = if turn < 0.0 { n * -1.0 } else { n };
-    let x = (if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).cross(n).normalized().ok_or_else(|| failed("patch plane"))?;
-    Ok(Plane::new(p0, x, n.cross(x)))
+    crate::fill::patch_loop(body, at, 0.0)
 }
 
 /// The edges of `body` picked by points on them, chained into one closed loop (each turned to run

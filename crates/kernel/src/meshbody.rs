@@ -2,7 +2,6 @@
 //! export; B-rep features refuse them.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use solidcraft_geom::{Mesh, Vec3};
 
@@ -112,24 +111,7 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
             t.swap(1, 2);
         }
     }
-    Ok(Body {
-        solid: Arc::new(crate::body::Solid::new_unchecked(Vec::new())),
-        size: out.span(),
-        boundary_tol: None,
-        volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-        coarse_missing: None,
-        mesh: Some(Arc::new(out)),
-        color: None,
-        paint: None,
-        splits: None,
-        face_sources: None,
-        history: None,
-        display_of: None,
-        meshes: None,
-        phased: false,
-        tolerances: None,
-        regularization_protected: false,
-    })
+    Ok(Body::of_mesh(out))
 }
 
 /// Wind every connected piece one way: a triangle that runs a side in the same direction as
@@ -213,23 +195,11 @@ impl Body {
                 t.swap(1, 2);
             }
         }
-        Some(Body {
-            solid: self.solid.clone(),
-            size: out.span(),
-            boundary_tol: None,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            coarse_missing: None,
-            mesh: Some(Arc::new(out)),
-            color: self.color,
-            paint: self.paint.clone(),
-            splits: self.splits.clone(),
-            face_sources: None,
-            history: None,
-            display_of: None,
-            meshes: None,
-            phased: false,
-            tolerances: None,
-            regularization_protected: self.regularization_protected,
-        })
+        let mut placed = Body::of_mesh(out);
+        placed.color = self.color;
+        placed.paint = self.paint.clone();
+        placed.splits = self.splits.clone();
+        placed.regularization_protected = self.regularization_protected;
+        Some(placed)
     }
 }

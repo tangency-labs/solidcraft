@@ -3,7 +3,6 @@
 use crate::{Body, KernelError, Result, guard};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
-use std::sync::Arc;
 
 mod binary;
 mod metadata;

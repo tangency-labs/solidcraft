@@ -99,8 +99,6 @@ pub struct BoolCase {
     /// "ok", or the kind of failure: "error", "invalid", "identity".
     pub outcome: String,
     pub detail: String,
-    pub boolean_fallbacks: std::collections::BTreeMap<crate::BooleanStrategy, usize>,
-    pub boolean_reports_truncated: bool,
 }
 
 fn vol(b: &Option<Body>) -> crate::Result<f64> {
@@ -126,8 +124,6 @@ pub fn boolean_case(seed: u64) -> BoolCase {
         b: b.clone(),
         outcome: "ok".into(),
         detail: String::new(),
-        boolean_fallbacks: Default::default(),
-        boolean_reports_truncated: false,
     };
     let fail = |c: &mut BoolCase, kind: &str, d: String| {
         c.outcome = kind.into();
@@ -139,11 +135,7 @@ pub fn boolean_case(seed: u64) -> BoolCase {
     };
     let mut res = Vec::new();
     for op in [BoolOp::Union, BoolOp::Intersect, BoolOp::Cut] {
-        let (result, diagnostics) = crate::capture_boolean_diagnostics(|| boolean(&ba, &bb, op));
-        case.boolean_reports_truncated |= diagnostics.truncated;
-        for event in diagnostics.events {
-            *case.boolean_fallbacks.entry(event.strategy).or_default() += 1;
-        }
+        let result = boolean(&ba, &bb, op);
         match result {
             Ok(x) => {
                 if let Some(body) = &x {
