@@ -196,7 +196,7 @@ fn nearest_boundary_edge(x: &Body, side: &ToolSide) -> Result<Vec3> {
     let record = crate::native::brep_record(x)?;
     let mut best: Option<(f64, Vec3)> = None;
     for e in record.edges.iter().filter(|e| e.uses.len() == 1) {
-        let curve = CurveEval::new(&e.curve).map_err(|err| KernelError::Failed(format!("trim: an edge's curve: {err}")))?;
+        let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("trim: an edge's curve: {err}")))?;
         let Some(mid) = curve.point(0.5 * (e.interval[0] + e.interval[1])) else { continue };
         let d = side.at(mid).abs();
         if d.is_finite() && best.is_none_or(|(b, _)| d < b) {

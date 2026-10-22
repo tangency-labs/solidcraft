@@ -376,7 +376,7 @@ pub(crate) fn tensor_sheet(n: &NurbsSurface) -> Result<Body> {
     let mut uses = Vec::with_capacity(4);
     for (i, (ctrl, knots, [a, z], [pa, pz], forward)) in sides.into_iter().enumerate() {
         let (curve, interval) = spline_curve(&ctrl, knots)?;
-        parts.edges.push(b::Edge { curve, interval, vertices: [index(a)?, index(z)?], tolerance: parts.tolerance, uses: Vec::new() });
+        parts.edges.push(b::Edge { nurbs: None, curve, interval, vertices: [index(a)?, index(z)?], tolerance: parts.tolerance, uses: Vec::new() });
         uses.push(b::OrientedEdge { edge: index(i)?, forward, pcurve: uv_line(pa, pz, interval) });
     }
     parts.faces.push((b::Face { nurbs: None, surface: spline_surface(n), domain: n.domain(), loops: vec![b::Loop::Edges { edges: uses }] }, true));
@@ -428,7 +428,7 @@ fn sketch_loop(parts: &mut Parts, plane: &Plane, segs: &[Seg2]) -> Result<b::Loo
         let (curve, pcurve) = crate::freeform::segment(plane, s)?;
         let vertices = [index(v0 + i)?, index(v0 + (i + 1) % segs.len())?];
         let edge = index(parts.edges.len())?;
-        parts.edges.push(b::Edge { curve, interval: crate::freeform::INTERVAL, vertices, tolerance: parts.tolerance, uses: Vec::new() });
+        parts.edges.push(b::Edge { nurbs: None, curve, interval: crate::freeform::INTERVAL, vertices, tolerance: parts.tolerance, uses: Vec::new() });
         edges.push(b::OrientedEdge { edge, forward: true, pcurve });
     }
     Ok(b::Loop::Edges { edges })
@@ -440,7 +440,7 @@ pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<usize> {
     let r = body.record();
     let mut best: Option<(f64, usize)> = None;
     for (i, e) in r.edges.iter().enumerate() {
-        let Ok(c) = CurveEval::new(&e.curve) else { continue };
+        let Ok(c) = CurveEval::new(e.parameters()) else { continue };
         let [t0, t1] = e.interval;
         for k in 0..=32 {
             let Some(q) = c.point(t0 + (t1 - t0) * k as f64 / 32.0) else { continue };
@@ -667,7 +667,7 @@ fn without_t_junctions(c: Canonical, offsets: &Offsets, tol: f64) -> Result<Cano
     let point = |v: u32| r.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
     let mut splits: Vec<(u32, f64)> = Vec::new();
     for (e, (edge, ke)) in r.edges.iter().zip(&input_of_edge).enumerate() {
-        let Ok(curve) = CurveEval::new(&edge.curve) else { continue };
+        let Ok(curve) = CurveEval::new(edge.parameters()) else { continue };
         let ends: Vec<Vec3> = edge.vertices.iter().filter_map(|v| point(*v)).collect();
         // Only vertices within a chord's reach of the edge's samples can lie on it.
         let [a, z] = edge.interval;
@@ -816,6 +816,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         let (Some(a), Some(z)) = (parts.vertices.get(i), parts.vertices.get((i + 1) % m)) else { continue };
         let curve = b::Curve::Line { start: a.point, end: z.point };
         parts.edges.push(b::Edge {
+            nurbs: None,
             curve,
             interval: [0.0, 1.0],
             vertices: [index(i)?, index((i + 1) % m)?],
@@ -828,7 +829,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(b::pcurve::EdgeUse { edge: index(i)?, curve: &e.curve, interval: e.interval, forward: true, tolerance: e.tolerance, given: None })
+            Ok(b::pcurve::EdgeUse { edge: index(i)?, curve: e.parameters(), interval: e.interval, forward: true, tolerance: e.tolerance, given: None })
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
@@ -899,7 +900,7 @@ fn check_chains(chains: &[Vec<Seg2>], what: &str) -> Result<()> {
 fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
     let mut from: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); r.faces.len()];
     for e in &r.edges {
-        let Some(mid) = CurveEval::new(&e.curve).ok().and_then(|c| c.point(0.5 * (e.interval[0] + e.interval[1]))) else { continue };
+        let Some(mid) = CurveEval::new(e.parameters()).ok().and_then(|c| c.point(0.5 * (e.interval[0] + e.interval[1]))) else { continue };
         let near = 4.0 * e.tolerance.max(r.tolerance);
         if start.height(mid).abs() > near {
             continue;

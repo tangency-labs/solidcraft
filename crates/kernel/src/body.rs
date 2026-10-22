@@ -1266,7 +1266,7 @@ impl Body {
 /// rest at the evaluator's points (capped).
 fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
     const MAX_POINTS: usize = 4096;
-    let curve = brep::eval::CurveEval::new(&e.curve).map_err(|err| KernelError::Invalid(err.to_string()))?;
+    let curve = brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;
     let at = |t: f64| curve.point(t).ok_or_else(|| KernelError::Invalid(format!("edge curve has no point at {t}")));
     if let Curve::Line { .. } = e.curve {

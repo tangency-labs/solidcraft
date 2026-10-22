@@ -377,7 +377,7 @@ pub(crate) fn regions(split: &Body, tool: &SplitTool) -> Result<(Vec<usize>, usi
         .collect::<Result<_>>()?;
     let tol = (split.size() * 2e-3).max(1e-4);
     let along = |e: &brep::Edge| -> bool {
-        let Ok(c) = CurveEval::new(&e.curve) else { return false };
+        let Ok(c) = CurveEval::new(e.parameters()) else { return false };
         let [t0, t1] = e.interval;
         let at: Vec<Vec3> = [0.25, 0.5, 0.75].iter().filter_map(|s| c.point(t0 + (t1 - t0) * s)).collect();
         at.len() == 3 && fields.iter().any(|g| at.iter().all(|p| g.at(*p).abs() <= tol))
@@ -521,7 +521,7 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
         if prov.origins.iter().any(|o| matches!(o, EdgeOrigin::Edge { .. })) {
             continue;
         }
-        let c = CurveEval::new(&e.curve).map_err(|err| failed("split face", err))?;
+        let c = CurveEval::new(e.parameters()).map_err(|err| failed("split face", err))?;
         let n = if matches!(e.curve, brep::Curve::Line { .. }) { 1 } else { 64 };
         let [t0, t1] = e.interval;
         let pts: Option<Vec<Vec3>> = (0..=n).map(|k| c.point(t0 + (t1 - t0) * k as f64 / n as f64)).collect();

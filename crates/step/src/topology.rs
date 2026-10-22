@@ -842,6 +842,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         for &e in &edge_order {
             let edge = self.edges.get(e as usize).ok_or("edge reference")?;
             edges.push(Edge {
+                nurbs: None,
                 curve: edge.curve.clone(),
                 interval: edge.interval,
                 vertices: [vmap(edge.vertices[0])?, vmap(edge.vertices[1])?],

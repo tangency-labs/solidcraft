@@ -119,7 +119,7 @@ fn patch_faces(patches: &[BezierPatch]) -> Result<Parts> {
                         let knots = std::iter::repeat_n(0.0, degree + 1).chain(std::iter::repeat_n(1.0, degree + 1)).collect();
                         let (curve, interval) = spline_curve(&seg, knots)?;
                         let e = index(parts.edges.len())?;
-                        parts.edges.push(b::Edge { curve, interval, vertices, tolerance: 0.0, uses: Vec::new() });
+                        parts.edges.push(b::Edge { nurbs: None, curve, interval, vertices, tolerance: 0.0, uses: Vec::new() });
                         edges.insert((ka, kb), e);
                         (e, (ka, kb))
                     }

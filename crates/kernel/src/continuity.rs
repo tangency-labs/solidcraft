@@ -208,7 +208,7 @@ fn two_sided(adjacent: &[Vec<usize>], index: usize) -> bool {
 fn nearest_edge(edges: &[b::Edge], p: Vec3, reach: f64) -> Result<usize> {
     let mut best: Option<(f64, usize)> = None;
     for (index, edge) in edges.iter().enumerate() {
-        let Ok(curve) = CurveEval::new(&edge.curve) else { continue };
+        let Ok(curve) = CurveEval::new(edge.parameters()) else { continue };
         let [t0, t1] = edge.interval;
         for k in 0..=PICK_SAMPLES {
             let Some(q) = curve.point(t0 + (t1 - t0) * k as f64 / PICK_SAMPLES as f64) else { continue };
@@ -265,7 +265,7 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
             continue;
         }
         budget -= samples;
-        let report = match (face(first), face(second), CurveEval::new(&edge.curve)) {
+        let report = match (face(first), face(second), CurveEval::new(edge.parameters())) {
             (Some(a), Some(b), Ok(curve)) => seam(index, &curve, edge.interval, a, b, samples, tolerances),
             _ => None,
         };

@@ -128,7 +128,7 @@ fn picked_faces(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<usize
         .edges
         .iter()
         .enumerate()
-        .map(|(i, e)| CurveEval::new(&e.curve).map_err(|err| KernelError::Failed(format!("extend: edge {i}'s curve: {err}"))))
+        .map(|(i, e)| CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("extend: edge {i}'s curve: {err}"))))
         .collect::<Result<_>>()?;
     let reach = size * 0.05 + 1e-6;
     let mut faces = Vec::new();

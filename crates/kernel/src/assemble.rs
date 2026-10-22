@@ -218,6 +218,7 @@ impl Assembly {
             }
         }
         let edges = self.edges.iter().map(|a| Edge {
+            nurbs: None,
             curve: a.curve.clone(),
             interval: a.interval,
             vertices: a.vertices,

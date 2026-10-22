@@ -53,7 +53,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         }
         return Ok(Nodes { points: pts, params });
     }
-    let curve = CurveEval::new(&edge.curve).map_err(|e| fail(e.to_string()))?;
+    let curve = CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?;
     let at =
         |t: f64| -> Result<Vec3> { curve.point(t).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {t}"))) };
     // A closed curve's chord between its ends is empty: start it from a few segments. An open

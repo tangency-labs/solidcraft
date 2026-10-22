@@ -83,6 +83,7 @@ fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) ->
                     None => {
                         let vs = [vertex(&mut b, a), vertex(&mut b, z)];
                         b.edges.push(Edge {
+                            nurbs: None,
                             curve: Curve::Line { start: points[a], end: points[z] },
                             interval: [0., 1.],
                             vertices: vs,
@@ -138,7 +139,7 @@ fn hollow() -> Brep {
 fn tube() -> Brep {
     let f = a_frame();
     let circle = |z: f64| Curve::Circle { frame: Frame { origin: [1., 2., 3. + z], ..f.clone() }, radius: 2. };
-    let edge = |curve, interval, vertices| Edge { curve, interval, vertices, tolerance: 1e-7, uses: vec![] };
+    let edge = |curve, interval, vertices| Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-7, uses: vec![] };
     let mut b = Brep {
         version: VERSION,
         tolerance: 1e-7,
@@ -182,7 +183,10 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
             domain,
             loops: vec![Loop::Edges { edges: uses.iter().map(|&(edge, forward)| OrientedEdge { edge, forward, pcurve: segment(0., 1.) }).collect() }],
         }],
-        edges: edges.into_iter().map(|(curve, interval, vertices)| Edge { curve, interval, vertices, tolerance: 1e-7, uses: vec![] }).collect(),
+        edges: edges
+            .into_iter()
+            .map(|(curve, interval, vertices)| Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-7, uses: vec![] })
+            .collect(),
         vertices: vertices.iter().map(|&point| Vertex { point, tolerance: 1e-7 }).collect(),
     };
     list_uses(&mut b);
@@ -230,6 +234,7 @@ fn sheet_with_lower_forms() -> Brep {
     // Vertex order: edge vertices first (the wire edge's), then the vertex loop's, then the shell's.
     b.vertices.extend([[2., 0., 0.], [3., 0., 0.], [0.5, 0.5, 0.], [5., 5., 5.]].map(|point| Vertex { point, tolerance: 1e-7 }));
     b.edges.push(Edge {
+        nurbs: None,
         curve: Curve::Line { start: [2., 0., 0.], end: [3., 0., 0.] },
         interval: [0., 1.],
         vertices: [n, n + 1],

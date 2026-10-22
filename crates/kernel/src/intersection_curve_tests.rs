@@ -22,7 +22,7 @@ fn triangle_with_intersection_edge(support_gap: f64) -> b::Brep {
     };
     let curve = |k: usize| if k == 0 { traced.clone() } else { Curve::Line { start: corners[k], end: corners[(k + 1) % 3] } };
     let edges = (0..3)
-        .map(|k| b::Edge { curve: curve(k), interval: [0.0, 1.0], vertices: [k as u32, ((k + 1) % 3) as u32], tolerance: 1e-6, uses: Vec::new() })
+        .map(|k| b::Edge { nurbs: None, curve: curve(k), interval: [0.0, 1.0], vertices: [k as u32, ((k + 1) % 3) as u32], tolerance: 1e-6, uses: Vec::new() })
         .collect();
     let uses = (0..3)
         .map(|k| b::OrientedEdge {

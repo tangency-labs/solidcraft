@@ -69,7 +69,7 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]]) -> Record {
         .zip(uses)
         .map(|(&(s, t), uses)| {
             let vs = [number(s, &mut vertices), number(t, &mut vertices)];
-            Edge { curve: Curve::Line { start: corners[s], end: corners[t] }, interval: [0.0, 1.0], vertices: vs, tolerance: 1e-6, uses }
+            Edge { nurbs: None, curve: Curve::Line { start: corners[s], end: corners[t] }, interval: [0.0, 1.0], vertices: vs, tolerance: 1e-6, uses }
         })
         .collect();
     Record {

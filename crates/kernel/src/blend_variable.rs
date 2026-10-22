@@ -305,7 +305,7 @@ fn edge_points(rec: &Faces, e: usize, tol: f64) -> Option<Vec<Vec3>> {
         return Some(vec![a, b]);
     }
     let edge = rec.rec.edges.get(e)?;
-    let c = CurveEval::new(&edge.curve).ok()?;
+    let c = CurveEval::new(edge.parameters()).ok()?;
     let [t0, t1] = edge.interval;
     // Start from 8 pieces (a closed or turning curve's chord says nothing of its middle).
     let mut out = vec![a];

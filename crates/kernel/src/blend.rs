@@ -451,7 +451,7 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     let mut out = picks.to_vec();
     for e in chain.into_iter().skip(picked) {
         let edge = rec.rec.edges.get(e).ok_or_else(|| KernelError::Failed("a chain edge".into()))?;
-        let mid = CurveEval::new(&edge.curve)
+        let mid = CurveEval::new(edge.parameters())
             .ok()
             .and_then(|c| c.point(0.5 * (edge.interval[0] + edge.interval[1])))
             .ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?;

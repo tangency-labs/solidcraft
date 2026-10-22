@@ -60,7 +60,7 @@ impl<'a> DistanceShape<'a> {
     pub fn new(body: &'a Body, mesh: &'a Mesh, chord: f64) -> DistanceShape<'a> {
         let record = body.record();
         let faces: Vec<Option<SurfaceEval>> = record.faces.iter().map(|f| SurfaceEval::new(f.parameters()).ok()).collect();
-        let edges = record.edges.iter().map(|e| CurveEval::new(&e.curve).ok().map(|c| (c, e.interval))).collect();
+        let edges = record.edges.iter().map(|e| CurveEval::new(e.parameters()).ok().map(|c| (c, e.interval))).collect();
         let surfaces = faces.iter().map(|_| OnceLock::new()).collect();
         let chord = if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
         DistanceShape { body, mesh, set: TriangleSet::new(mesh), chord, faces, edges, surfaces, face_tris: OnceLock::new() }
