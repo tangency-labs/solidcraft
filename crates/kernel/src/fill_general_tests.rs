@@ -3,64 +3,115 @@
 //! against the analytic surface the loop was cut from, or against a quadrature of the fitted
 //! surface itself, never against the mesher alone.
 
-use mt::{BoundedCurve, InnerSpace, ParametricCurve, ParametricSurface, ParametricSurface3D};
+use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
 use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
-use truck_modeling as mt;
 
 use super::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, face_tolerance, patch_edges_report};
-use crate::body::{Body, from_p3, p3};
+use crate::body::Body;
 use crate::bridge::Continuity;
 use crate::{BoolOp, boolean, box_solid, copy_faces, cylinder, extrude, measure, patch_edges, stitch, torus};
 
-/// The surface's parameters nearest `p`: the nearest of a grid of samples (or `hint`), then
-/// Gauss–Newton within the domain.
-fn nearest(s: &mt::Surface, p: Vec3, hint: Option<(f64, f64)>) -> (f64, f64) {
-    let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { panic!("a bounded surface") };
-    let p = p3(p);
-    let (mut u, mut v) = match hint {
-        Some(h) => h,
-        None => {
-            let n = 100;
-            let mut best = (f64::MAX, u0, v0);
-            for i in 0..=n {
-                for j in 0..=n {
-                    let (u, v) = (u0 + (u1 - u0) * i as f64 / n as f64, v0 + (v1 - v0) * j as f64 / n as f64);
-                    let d = (s.subs(u, v) - p).magnitude();
-                    if d < best.0 {
-                        best = (d, u, v);
+/// A body's faces as surfaces over their parameter boxes, with the (u, v) polygon of each face's
+/// loops (its exact pcurves, sampled).
+struct Faces {
+    faces: Vec<(SurfaceEval, [[f64; 2]; 2], Vec<Vec<[f64; 2]>>)>,
+}
+
+impl Faces {
+    fn of(body: &Body) -> Faces {
+        let r = body.record();
+        let faces = r
+            .faces
+            .iter()
+            .map(|f| {
+                let polys = f
+                    .loops
+                    .iter()
+                    .filter_map(|l| match l {
+                        b::Loop::Edges { edges } => Some(
+                            edges
+                                .iter()
+                                .flat_map(|u| {
+                                    let [t0, t1] = r.edges[u.edge as usize].interval;
+                                    (0..64).map(move |k| {
+                                        let x = k as f64 / 64.0;
+                                        u.pcurve.eval(if u.forward { t0 + (t1 - t0) * x } else { t1 - (t1 - t0) * x }).unwrap()
+                                    })
+                                })
+                                .collect(),
+                        ),
+                        b::Loop::Vertex { .. } => None,
+                    })
+                    .collect();
+                (SurfaceEval::new(&f.surface).unwrap(), f.domain, polys)
+            })
+            .collect();
+        Faces { faces }
+    }
+
+    /// The face, parameters and point of the fill nearest `p`.
+    fn nearest(&self, p: Vec3) -> (usize, [f64; 2], Vec3) {
+        let mut best: Option<(f64, usize, [f64; 2], Vec3)> = None;
+        for (k, (s, dom, _)) in self.faces.iter().enumerate() {
+            let [[u0, u1], [v0, v1]] = *dom;
+            let Some(uv) = s.project(p, None, f64::INFINITY) else { continue };
+            let uv = [uv[0].clamp(u0, u1), uv[1].clamp(v0, v1)];
+            let q = s.point(uv).unwrap();
+            if best.is_none_or(|(d, ..)| q.dist(p) < d) {
+                best = Some((q.dist(p), k, uv, q));
+            }
+        }
+        let (_, k, uv, q) = best.unwrap();
+        (k, uv, q)
+    }
+
+    /// `∫∫ f(S, S_u × S_v) du dv` over every face's own region (inside its loops' (u, v)
+    /// polygons), by the midpoint rule on an `n × n` grid over each region's box.
+    fn quadrature(&self, n: usize, f: &dyn Fn(Vec3, Vec3) -> f64) -> f64 {
+        let mut sum = 0.0;
+        for (s, _, polys) in &self.faces {
+            let all: Vec<[f64; 2]> = polys.iter().flatten().copied().collect();
+            let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+            for q in &all {
+                lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+                hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+            }
+            let inside = |u: f64, v: f64| {
+                let mut w = false;
+                for poly in polys {
+                    for k in 0..poly.len() {
+                        let (a, c) = (poly[k], poly[(k + 1) % poly.len()]);
+                        if (a[1] > v) != (c[1] > v) && u < a[0] + (v - a[1]) / (c[1] - a[1]) * (c[0] - a[0]) {
+                            w = !w;
+                        }
+                    }
+                }
+                w
+            };
+            let (du, dv) = ((hi[0] - lo[0]) / n as f64, (hi[1] - lo[1]) / n as f64);
+            for i in 0..n {
+                for j in 0..n {
+                    let (u, v) = (lo[0] + (i as f64 + 0.5) * du, lo[1] + (j as f64 + 0.5) * dv);
+                    if inside(u, v) {
+                        let (p, su, sv) = s.derivs(u, v).unwrap();
+                        sum += f(p, su.cross(sv)) * du * dv;
                     }
                 }
             }
-            (best.1, best.2)
         }
-    };
-    for _ in 0..60 {
-        let (q, a, b) = (s.subs(u, v), s.uder(u, v), s.vder(u, v));
-        let r = q - p;
-        let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
-        let det = aa * bb - ab * ab;
-        if det.abs() < 1e-300 {
-            break;
-        }
-        let (ga, gb) = (a.dot(r), b.dot(r));
-        u = (u - (bb * ga - ab * gb) / det).clamp(u0, u1);
-        v = (v - (aa * gb - ab * ga) / det).clamp(v0, v1);
+        sum
     }
-    (u, v)
 }
 
-fn v3(v: mt::Vector3) -> Vec3 {
-    Vec3::new(v.x, v.y, v.z)
-}
-
-/// Points along every edge of the loop: `per` on each.
-fn rim_points(face: &mt::Face, per: usize) -> Vec<Vec3> {
+/// Points along every free edge of the fill (its loop): `per` on each.
+fn rim_points(body: &Body, per: usize) -> Vec<Vec3> {
+    let r = body.record();
     let mut out = Vec::new();
-    for e in face.boundaries().iter().flat_map(|w| w.edge_iter()) {
-        let c = e.oriented_curve();
-        let (t0, t1) = c.range_tuple();
+    for e in r.edges.iter().filter(|e| e.uses.len() == 1) {
+        let c = CurveEval::new(&e.curve).unwrap();
+        let [t0, t1] = e.interval;
         for k in 0..per {
-            out.push(from_p3(c.subs(t0 + (t1 - t0) * (k as f64 + 0.5) / per as f64)));
+            out.push(c.point(t0 + (t1 - t0) * (k as f64 + 0.5) / per as f64).unwrap());
         }
     }
     out
@@ -71,105 +122,54 @@ fn rim_points(face: &mt::Face, per: usize) -> Vec<Vec3> {
 /// the whole loop: a fold would show as 180°), and the largest difference between the patch's
 /// normal curvature across the loop and `curvature(p)`, the neighbour's.
 fn along_the_loop(fill: &Body, normal: &dyn Fn(Vec3) -> Vec3, curvature: &dyn Fn(Vec3) -> f64) -> (f64, f64, f64) {
-    let face = fill.solid.face_iter().next().unwrap().clone();
-    let s = face.surface();
-    let pts = rim_points(&face, 200);
-    let mut found = Vec::with_capacity(pts.len());
-    let mut hint = None;
-    for p in &pts {
-        let uv = nearest(&s, *p, hint);
-        hint = Some(uv);
-        found.push(uv);
-    }
+    let faces = Faces::of(fill);
+    let pts = rim_points(fill, 200);
+    let found: Vec<(usize, [f64; 2], Vec3)> = pts.iter().map(|p| faces.nearest(*p)).collect();
+    let patch_normal = |k: usize, uv: [f64; 2]| {
+        let (_, su, sv) = faces.faces[k].0.derivs(uv[0], uv[1]).unwrap();
+        su.cross(sv).normalized().unwrap()
+    };
     // One sign for the whole loop: the one most rim points agree with.
-    let patch_normal = |(u, v): (f64, f64)| v3(s.normal(u, v));
-    let agree: f64 = pts.iter().zip(&found).map(|(p, uv)| patch_normal(*uv).dot(normal(*p)).signum()).sum();
+    let agree: f64 = pts.iter().zip(&found).map(|(p, (k, uv, _))| patch_normal(*k, *uv).dot(normal(*p)).signum()).sum();
     let sign = agree.signum();
     let (mut gap, mut angle, mut kappa) = (0.0f64, 0.0f64, 0.0f64);
-    for (k, (p, &(u, v))) in pts.iter().zip(&found).enumerate() {
-        gap = gap.max(from_p3(s.subs(u, v)).dist(*p));
-        let n = patch_normal((u, v));
+    for (i, (p, &(k, uv, q))) in pts.iter().zip(&found).enumerate() {
+        gap = gap.max(q.dist(*p));
+        let n = patch_normal(k, uv);
         let want = normal(*p) * sign;
         angle = angle.max(n.dot(want).clamp(-1.0, 1.0).acos().to_degrees());
         // Across the loop: the tangent-plane direction square to the rim.
-        let next = pts.get(k + 1).or(pts.get(k.wrapping_sub(1))).copied().unwrap();
+        let next = pts.get(i + 1).or(pts.get(i.wrapping_sub(1))).copied().unwrap();
         let t = (next - *p).normalized().unwrap();
         let Some(d) = n.cross(t).normalized() else { continue };
-        let (su, sv) = (v3(s.uder(u, v)), v3(s.vder(u, v)));
+        let s = &faces.faces[k].0;
+        let (_, su, sv) = s.derivs(uv[0], uv[1]).unwrap();
         // d = a·su + b·sv.
         let (aa, ab, bb) = (su.dot(su), su.dot(sv), sv.dot(sv));
         let det = aa * bb - ab * ab;
-        let (a, b) = ((bb * d.dot(su) - ab * d.dot(sv)) / det, (aa * d.dot(sv) - ab * d.dot(su)) / det);
-        // The second derivatives by central differences of the surface's own points.
-        let h = 1e-3;
-        let e = |du: f64, dv: f64| from_p3(s.subs(u + du * h, v + dv * h));
-        let suu = (e(1.0, 0.0) - e(0.0, 0.0) * 2.0 + e(-1.0, 0.0)) * (1.0 / (h * h));
-        let svv = (e(0.0, 1.0) - e(0.0, 0.0) * 2.0 + e(0.0, -1.0)) * (1.0 / (h * h));
-        let suv = (e(1.0, 1.0) - e(1.0, -1.0) - e(-1.0, 1.0) + e(-1.0, -1.0)) * (0.25 / (h * h));
-        let second = suu * (a * a) + suv * (2.0 * a * b) + svv * (b * b);
+        let (a, c) = ((bb * d.dot(su) - ab * d.dot(sv)) / det, (aa * d.dot(sv) - ab * d.dot(su)) / det);
+        let (suu, suv, svv) = s.second(uv[0], uv[1]).unwrap();
+        let second = suu * (a * a) + suv * (2.0 * a * c) + svv * (c * c);
         kappa = kappa.max((second.dot(want) - curvature(*p)).abs());
     }
     (gap, angle, kappa)
 }
 
-/// `∫∫ f(S, S_u × S_v) du dv` over the face's own region of its surface (its loop taken into
-/// parameter space by the nearest parameters of points along it), by the midpoint rule on a
-/// `n × n` grid over the region's box: the quadrature the mesher's area is checked against.
-fn quadrature(face: &mt::Face, n: usize, f: &dyn Fn(Vec3, Vec3) -> f64) -> f64 {
-    let s = face.surface();
-    let mut poly: Vec<(f64, f64)> = Vec::new();
-    let mut hint = None;
-    for p in rim_points(face, 400) {
-        let uv = nearest(&s, p, hint);
-        hint = Some(uv);
-        poly.push(uv);
-    }
-    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
-    for &(u, v) in &poly {
-        lo = (lo.0.min(u), lo.1.min(v));
-        hi = (hi.0.max(u), hi.1.max(v));
-    }
-    let inside = |u: f64, v: f64| {
-        let mut w = false;
-        for k in 0..poly.len() {
-            let (a, b) = (poly[k], poly[(k + 1) % poly.len()]);
-            if (a.1 > v) != (b.1 > v) && u < a.0 + (v - a.1) / (b.1 - a.1) * (b.0 - a.0) {
-                w = !w;
-            }
-        }
-        w
-    };
-    let (du, dv) = ((hi.0 - lo.0) / n as f64, (hi.1 - lo.1) / n as f64);
-    let mut sum = 0.0;
-    for i in 0..n {
-        for j in 0..n {
-            let (u, v) = (lo.0 + (i as f64 + 0.5) * du, lo.1 + (j as f64 + 0.5) * dv);
-            if inside(u, v) {
-                sum += f(from_p3(s.subs(u, v)), v3(s.uder(u, v)).cross(v3(s.vder(u, v)))) * du * dv;
-            }
-        }
-    }
-    sum
-}
-
-/// The fill is one face on the open body's own edges, within the fill's tolerance of them; its
-/// mesh has no folded triangle (each faces the way its corners' normals do); and the mesher's
-/// area agrees with a quadrature of the surface over its own region. Returns the area.
+/// The fill is a sheet on the open body's own edges (its free edges lie on the body's edge curves;
+/// a loop of five or more edges is filled by patches about a centre, its edges in halves), within
+/// the fill's tolerance of them; its mesh has no folded triangle (each faces the way its corners'
+/// normals do); and the mesher's area agrees with a quadrature of the surfaces over their own
+/// regions. Returns the area.
 fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
     assert!(fill.is_surface());
-    assert_eq!(fill.face_count(), 1, "{name}: one face");
-    let own: Vec<mt::EdgeID> = open.solid.edge_iter().map(|e| e.id()).collect();
-    assert!(fill.solid.edge_iter().all(|e| own.contains(&e.id())), "{name}: an edge that is not the body's");
-    let face = fill.solid.face_iter().next().unwrap().clone();
-    let s = face.surface();
-    let tol = face_tolerance(open);
-    let mut off = 0.0f64;
-    let mut hint = None;
-    for p in rim_points(&face, 64) {
-        let uv = nearest(&s, p, hint);
-        hint = Some(uv);
-        off = off.max(from_p3(s.subs(uv.0, uv.1)).dist(p));
+    assert!(fill.face_count() >= 1, "{name}: a face");
+    let (own, made) = (open.record(), fill.record());
+    for e in made.edges.iter().filter(|e| e.uses.len() == 1) {
+        assert!(own.edges.iter().any(|o| o.curve == e.curve), "{name}: an edge that is not the body's");
     }
+    let faces = Faces::of(fill);
+    let tol = face_tolerance(open);
+    let off = rim_points(fill, 64).iter().map(|p| faces.nearest(*p).2.dist(*p)).fold(0.0f64, f64::max);
     assert!(off <= tol * 1.01, "{name}: an edge is {off} off the face (tolerance {tol})");
     let m = fill.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     assert!(!m.triangles.is_empty(), "{name}: the face meshes");
@@ -182,8 +182,8 @@ fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
         }
     }
     let area = measure(fill).unwrap().area;
-    let quad = quadrature(&face, 500, &|_, n| n.len());
-    eprintln!("{name}: one face, edges within {off:e} (tolerance {tol:e}), mesh area {area:.4}, quadrature {quad:.4}");
+    let quad = faces.quadrature(500, &|_, n| n.len());
+    eprintln!("{name}: {} faces, edges within {off:e} (tolerance {tol:e}), mesh area {area:.4}, quadrature {quad:.4}", fill.face_count());
     assert!((area - quad).abs() < 3e-3 * quad, "{name}: mesh area {area} against the surface's {quad}");
     area
 }
@@ -211,12 +211,16 @@ fn open_tube() -> (Body, Vec<Vec3>) {
 /// `body` without its planar faces but those at height `z0` or `z1` (the ends of a cylinder):
 /// a cut solid's walls (and ends) as a surface, the faces the cut made taken away.
 fn curved_and_ends(body: &Body, ends: &[f64]) -> Body {
-    let drop: Vec<usize> = body
-        .solid
-        .face_iter()
+    let r = body.record();
+    let drop: Vec<usize> = r
+        .faces
+        .iter()
         .enumerate()
-        .filter(|(_, f)| match f.surface() {
-            mt::Surface::Plane(p) => !ends.iter().any(|z| (p.origin().z - z).abs() < 1e-9 && p.normal().z.abs() > 1.0 - 1e-12),
+        .filter(|(_, f)| match &f.surface {
+            b::Surface::Plane { origin, u_axis, v_axis } => {
+                let n = Vec3::from(*u_axis).cross(Vec3::from(*v_axis)).normalized().unwrap();
+                !ends.iter().any(|z| (origin[2] - z).abs() < 1e-9 && n.z.abs() > 1.0 - 1e-12)
+            }
             _ => false,
         })
         .map(|(i, _)| i)
@@ -229,22 +233,14 @@ fn curved_and_ends(body: &Body, ends: &[f64]) -> Body {
 /// A point on each edge that bounds only one face of `body` (its free edges): the middle of
 /// each, where the edge picker samples it.
 fn free_edge_points(body: &Body) -> Vec<Vec3> {
-    let mut uses: std::collections::HashMap<mt::EdgeID, (usize, mt::Edge)> = std::collections::HashMap::new();
-    for f in body.solid.face_iter() {
-        for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-            uses.entry(e.id()).or_insert((0, e.clone())).0 += 1;
-        }
-    }
-    let mut points = uses
-        .values()
-        .filter(|(n, _)| *n == 1)
-        .map(|(_, e)| {
-            let c = e.curve();
-            let (t0, t1) = c.range_tuple();
-            from_p3(c.subs(0.5 * (t0 + t1)))
-        })
+    let r = body.record();
+    let mut points = r
+        .edges
+        .iter()
+        .filter(|e| e.uses.len() == 1)
+        .map(|e| CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap())
         .collect::<Vec<_>>();
-    // In a fixed order, whatever the map's.
+    // In a fixed order.
     points.sort_by(|a, b| (a.z, a.y, a.x).partial_cmp(&(b.z, b.y, b.x)).unwrap());
     points
 }
@@ -283,8 +279,7 @@ fn an_opened_tube_end_capped_g1_and_g2_meets_the_wall() {
         // patch (∫∫ (z − 30)·n_z dA), independent of the mesher.
         let closed = stitch(&[&open, &fill], 0.0).unwrap();
         assert!(!closed.is_surface(), "{name}: the cap closes the tube");
-        let face = fill.solid.face_iter().next().unwrap().clone();
-        let dome = quadrature(&face, 500, &|p, n| (p.z - 30.0) * n.z).abs();
+        let dome = Faces::of(&fill).quadrature(500, &|p, n| (p.z - 30.0) * n.z).abs();
         let (got, want) = (measure(&closed).unwrap().volume, std::f64::consts::PI * 100.0 * 30.0 + dome);
         eprintln!("{name}: sealed volume {got:.3}, tube + dome {want:.3}");
         assert!((got - want).abs() < 2e-4 * want, "{name}: {got} vs {want}");
@@ -320,16 +315,15 @@ fn a_window_cut_through_a_cylinder_wall_past_half_way_fills_g1_close_to_the_cyli
         let (gap, angle, _) = along_the_loop(&fill, &radial, &|_| 0.0);
         eprintln!("{name}: along the window (1600 points): within {gap:e}, normal within {angle:.5}° of the wall's");
         // How far the fill strays from the cylinder it replaces, inside.
-        let face = fill.solid.face_iter().next().unwrap().clone();
-        let s = face.surface();
-        let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { panic!() };
         let mut stray = 0.0f64;
-        for i in 0..=40 {
-            for j in 0..=40 {
-                let p = from_p3(s.subs(u0 + (u1 - u0) * i as f64 / 40.0, v0 + (v1 - v0) * j as f64 / 40.0));
-                let ang = p.y.atan2(p.x);
-                if ang.abs() < half - 0.05 && p.z > 15.5 && p.z < 24.5 {
-                    stray = stray.max((Vec2::new(p.x, p.y).len() - 10.0).abs());
+        for (s, [[u0, u1], [v0, v1]], _) in &Faces::of(&fill).faces {
+            for i in 0..=40 {
+                for j in 0..=40 {
+                    let p = s.point([u0 + (u1 - u0) * i as f64 / 40.0, v0 + (v1 - v0) * j as f64 / 40.0]).unwrap();
+                    let ang = p.y.atan2(p.x);
+                    if ang.abs() < half - 0.05 && p.z > 15.5 && p.z < 24.5 {
+                        stray = stray.max((Vec2::new(p.x, p.y).len() - 10.0).abs());
+                    }
                 }
             }
         }
@@ -389,11 +383,12 @@ fn pentagon_window() -> (Body, Vec<Vec3>) {
 }
 
 #[test]
-fn a_five_sided_window_fills_as_one_face_g1_and_through_a_point() {
+fn a_five_sided_window_fills_g1_and_through_a_point() {
     let (open, rim) = pentagon_window();
     let (fill, r) = patch_edges_report(&open, &rim, &spec(Continuity::G1)).unwrap();
     report("pentagon g1", &r);
-    assert!(fill.edge_count() >= 5, "the rim's own edges (five, or more where a seam splits one)");
+    // Five patches about a centre: each rim edge in two halves, and five spokes.
+    assert!(fill.face_count() == 5 && fill.edge_count() >= 15, "five patches on the rim's halves and five spokes");
     check_face("pentagon g1", &open, &fill);
     let (gap, angle, _) = along_the_loop(&fill, &radial, &|_| 0.0);
     eprintln!("pentagon g1: along the rim: within {gap:e}, normal within {angle:.5}° of the wall's");
@@ -406,9 +401,7 @@ fn a_five_sided_window_fills_as_one_face_g1_and_through_a_point() {
         let (fill, r) = patch_edges_report(&open, &rim, &spec).unwrap();
         report(&name, &r);
         check_face(&name, &open, &fill);
-        let s = fill.solid.face_iter().next().unwrap().surface();
-        let (u, v) = nearest(&s, point, None);
-        let off = from_p3(s.subs(u, v)).dist(point);
+        let off = Faces::of(&fill).nearest(point).2.dist(point);
         eprintln!("{name}: the point is {off:e} off the surface");
         assert!(off <= face_tolerance(&open), "{name}: {off}");
     }
@@ -431,17 +424,14 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
     let open = copy_faces(&solid, &keep).unwrap();
     let plain = patch_edges(&open, &rim).unwrap();
     let sealed = |f: &Body| measure(&stitch(&[&open, f], 0.0).unwrap()).unwrap().volume;
-    // Six sides, G0, through a point 3 mm above the middle of the plain fill: one face.
-    let s = plain.solid.face_iter().next().unwrap().surface();
-    let (u, v) = nearest(&s, Vec3::new(0.0, 0.0, 12.0), None);
-    let point = from_p3(s.subs(u, v)) + Vec3::Z * 3.0;
+    // Six sides, G0, through a point 3 mm above the middle of the plain fill: six patches about
+    // a centre.
+    let point = Faces::of(&plain).nearest(Vec3::new(0.0, 0.0, 12.0)).2 + Vec3::Z * 3.0;
     let (lifted, r) = patch_edges_report(&open, &rim, &PatchSpec { points: vec![point], ..PatchSpec::default() }).unwrap();
     report("hexagon through a point", &r);
-    assert_eq!(lifted.edge_count(), 6, "the rim's own six edges");
+    assert_eq!((lifted.face_count(), lifted.edge_count()), (6, 18), "six patches on the rim's twelve halves and six spokes");
     check_face("hexagon through a point", &open, &lifted);
-    let s = lifted.solid.face_iter().next().unwrap().surface();
-    let (u, v) = nearest(&s, point, None);
-    let off = from_p3(s.subs(u, v)).dist(point);
+    let off = Faces::of(&lifted).nearest(point).2.dist(point);
     eprintln!("hexagon through a point: the point is {off:e} off the surface; sealed {:.2} against {:.2} plain", sealed(&lifted), sealed(&plain));
     assert!(off <= face_tolerance(&open) && sealed(&lifted) > sealed(&plain));
     // G1 to the walls: at a corner no surface is tangent to both walls (its tangent plane there
@@ -491,9 +481,7 @@ fn per_edge_continuity_and_hostile_specs() {
     check_face("pentagon g1 crown 0.1", &open, &full);
     let (_, angle, _) = along_the_loop(&full, &radial, &|_| 0.0);
     let middle = |b: &Body| {
-        let s = b.solid.face_iter().next().unwrap().surface();
-        let (u, v) = nearest(&s, Vec3::new(10.0, 0.0, 20.0), None);
-        let p = from_p3(s.subs(u, v));
+        let p = Faces::of(b).nearest(Vec3::new(10.0, 0.0, 20.0)).2;
         Vec2::new(p.x, p.y).len()
     };
     let (a, b) = (middle(&plain), middle(&full));
