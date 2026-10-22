@@ -550,82 +550,15 @@ fn end_directions(a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
     Some((chord, chord))
 }
 
-/// The B-spline basis functions non-zero at `t` and their first two derivatives (The NURBS Book
-/// A2.3): the span's first control point index and, per derivative, `degree + 1` values.
-fn basis(knots: &[f64], degree: usize, count: usize, t: f64) -> Option<(usize, [Vec<f64>; 3])> {
-    let (lo, hi) = (*knots.get(degree)?, *knots.get(count)?);
-    let t = t.clamp(lo, hi);
-    let mut span = degree;
-    while span + 1 < count && *knots.get(span + 1)? <= t {
-        span += 1;
-    }
-    let p = degree;
-    let k = |i: usize| knots.get(i).copied().unwrap_or(0.0);
-    let mut ndu = vec![vec![0.0; p + 1]; p + 1];
-    let (mut left, mut right) = (vec![0.0; p + 1], vec![0.0; p + 1]);
-    ndu[0][0] = 1.0;
-    for j in 1..=p {
-        left[j] = t - k(span + 1 - j);
-        right[j] = k(span + j) - t;
-        let mut saved = 0.0;
-        for r in 0..j {
-            ndu[j][r] = right[r + 1] + left[j - r];
-            let tmp = if ndu[j][r] != 0.0 { ndu[r][j - 1] / ndu[j][r] } else { 0.0 };
-            ndu[r][j] = saved + right[r + 1] * tmp;
-            saved = left[j - r] * tmp;
-        }
-        ndu[j][j] = saved;
-    }
-    let mut ders = [vec![0.0; p + 1], vec![0.0; p + 1], vec![0.0; p + 1]];
-    for j in 0..=p {
-        ders[0][j] = ndu[j][p];
-    }
-    let mut a = vec![vec![0.0; p + 1]; 2];
-    for r in 0..=p {
-        let (mut s1, mut s2) = (0usize, 1usize);
-        a[0][0] = 1.0;
-        for kk in 1..=2usize.min(p) {
-            let mut d = 0.0;
-            let (rk, pk) = (r as isize - kk as isize, p - kk);
-            if r >= kk {
-                let ru = rk as usize;
-                a[s2][0] = a[s1][0] / if ndu[pk + 1][ru] != 0.0 { ndu[pk + 1][ru] } else { 1.0 };
-                d = a[s2][0] * ndu[ru][pk];
-            }
-            let j1 = if rk >= -1 { 1 } else { (-rk) as usize };
-            let j2 = if (r as isize - 1) <= pk as isize { kk - 1 } else { p - r };
-            for j in j1..=j2 {
-                let ru = (rk + j as isize) as usize;
-                let den = ndu[pk + 1][ru];
-                a[s2][j] = (a[s1][j] - a[s1][j - 1]) / if den != 0.0 { den } else { 1.0 };
-                d += a[s2][j] * ndu[ru][pk];
-            }
-            if r <= pk {
-                let den = ndu[pk + 1][r];
-                a[s2][kk] = -a[s1][kk - 1] / if den != 0.0 { den } else { 1.0 };
-                d += a[s2][kk] * ndu[r][pk];
-            }
-            ders[kk][r] = d;
-            std::mem::swap(&mut s1, &mut s2);
-        }
-    }
-    let mut factor = p as f64;
-    for (kk, row) in ders.iter_mut().enumerate().skip(1).take(2usize.min(p)) {
-        for v in row.iter_mut() {
-            *v *= factor;
-        }
-        factor *= (p - kk) as f64;
-    }
-    Some((span - p, ders))
-}
-
 /// The rational basis of a curve with `c`'s knots and weights at `t`, and its first two
 /// derivatives: the coefficients of each control point in the curve's point, first and second
 /// derivative there (by its parameter), as (control point index, [R, R', R'']).
 fn rational_basis(c: &CurveN<4>, t: f64) -> Option<Vec<(usize, [f64; 3])>> {
-    let (first, n) = basis(&c.knots, c.degree, c.ctrl.len(), t)?;
+    let [t0, t1] = range(c);
+    let (first, n) = solidcraft_geom::bspline::basis_derivatives(&c.knots, c.degree, c.ctrl.len(), t.clamp(t0, t1), 2)?;
     let w: Vec<f64> = (0..=c.degree).map(|j| c.ctrl.get(first + j).map_or(1.0, |h| h[3])).collect();
-    let weight = |k: usize| (0..=c.degree).map(|j| n[k][j] * w[j]).sum::<f64>();
+    let nd = |j: usize, k: usize| n.get(j).and_then(|d| d.get(k)).copied().unwrap_or(0.0);
+    let weight = |k: usize| (0..=c.degree).map(|j| nd(j, k) * w[j]).sum::<f64>();
     let (w0, w1, w2) = (weight(0), weight(1), weight(2));
     if !(w0.abs() > 1e-300) {
         return None;
@@ -633,9 +566,9 @@ fn rational_basis(c: &CurveN<4>, t: f64) -> Option<Vec<(usize, [f64; 3])>> {
     Some(
         (0..=c.degree)
             .map(|j| {
-                let r = n[0][j] * w[j] / w0;
-                let r1 = (n[1][j] * w[j] - r * w1) / w0;
-                let r2 = (n[2][j] * w[j] - 2.0 * r1 * w1 - r * w2) / w0;
+                let r = nd(j, 0) * w[j] / w0;
+                let r1 = (nd(j, 1) * w[j] - r * w1) / w0;
+                let r2 = (nd(j, 2) * w[j] - 2.0 * r1 * w1 - r * w2) / w0;
                 (first + j, [r, r1, r2])
             })
             .collect(),
