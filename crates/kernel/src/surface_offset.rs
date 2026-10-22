@@ -111,7 +111,7 @@ mod tests {
         let z = |x: f64| 50.0 - (1600.0 - x * x).sqrt();
         let rim = [Vec3::new(14.0, 0.0, z(14.0)), Vec3::new(0.0, 14.0, z(0.0)), Vec3::new(-14.0, 0.0, z(-14.0)), Vec3::new(0.0, -14.0, z(0.0))];
         let cover = crate::patch_edges(&cup, &rim).unwrap();
-        let record = crate::native::brep_record(&cover).unwrap();
+        let record = cover.record();
         let s = solidcraft_geom::brep::eval::SurfaceEval::new(&record.faces[0].surface).unwrap();
         let out = offset_surface(&cover, &[0], 1.5, 0.01).unwrap();
         let mesh = out.mesh(&crate::MeshTolerance::chord(0.05)).unwrap();

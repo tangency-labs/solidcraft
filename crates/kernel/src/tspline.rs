@@ -214,7 +214,7 @@ mod tests {
         assert!(body.is_surface());
         assert_eq!(body.shell_count(), 1);
         assert_eq!(body.face_count(), faces);
-        let record = crate::native::brep_record(&body).unwrap();
+        let record = body.record();
         assert!(
             record.edges.iter().all(|e| e.uses.len() == 1 || (e.uses.len() == 2 && e.uses[0].upper != e.uses[1].upper)),
             "neighbours share edges, run opposite ways"
