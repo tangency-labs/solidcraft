@@ -466,6 +466,15 @@ impl ExecutiveAccess<Handle> for Access {
         executive.error.code = 6;
         Ok(())
     }
+    fn test_rollover(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &mut Vec<Handle>,
+        _: &mut FilletExecutive<Handle>,
+    ) -> Result<()> {
+        absent()
+    }
     fn trim_rails(
         &mut self,
         _: &mut Kernel,

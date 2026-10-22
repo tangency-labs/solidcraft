@@ -41,7 +41,9 @@
 //!   [`FilletBrep`] (`blend.fillet_geom_p1`); the solver's geometries are
 //!   [`FilletGeomId`]s in that pseudo B-rep.
 //!   `GetFilletExecutive()->GetPseudoBrep()` (unit `blend.fillet_executive_p1`) is the
-//!   `fillets` argument; the target B-rep is `target`.
+//!   `fillets` argument; the target B-rep is `target`. Full rollover receives
+//!   the caller's [`RailOwnership`] to preserve curve identities and notifications
+//!   through the shared p1 rail helpers; cliff trimming resolves its live solver.
 //! - **Statuses.** `SE(...)` statuses are ignored, as upstream (debug builds only
 //!   print them); [`SolidError::Unported`] always propagates. A `NULL` dereference
 //!   upstream is [`SolidError::InvalidInput`]; an index past an array is
@@ -52,6 +54,7 @@
 use super::p1::{
     compute_support_edge, find_next_good_interval, split_rail, test_manifold_tangent_rollover,
     FilletSolver, FilletSolverOps, FilletSolverType, FilletSphereSolveEnfo, FindClippedRadiusEfo,
+    RailOwnership,
 };
 use crate::blend::fillet_geom::p1::{
     BoundaryTrimmingType, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId,
@@ -1241,6 +1244,7 @@ impl FilletSolver {
     /// radial sector. `fillet_geom` is the geometry in `fillets` (the executive's pseudo
     /// B-rep). Tangent
     /// rollover is not handled (upstream: "Unimplemented Tangent Rollover Case").
+    /// `ownership` resolves the caller's curve owner identities and notifications.
     ///
     /// # Errors
     ///
@@ -1252,8 +1256,8 @@ impl FilletSolver {
     /// `sm_SplitRail` (`blend.fillet_solver_p1`, its fillet geometry calls),
     /// `SmFilletEdge::MakeFilletEdge` ([`FilletBrep::make_fillet_edge`], while the
     /// pseudo B-rep has no infinite region or shell), `CreateCliffRollOverSideFG`
-    /// (`blend.fillet_solver_p2`) and `SmFilletGeom::TrimCliffRails`
-    /// (`blend.fillet_geom_p5`; a justified stub, it needs the solver table).
+    /// (`blend.fillet_solver_p2`) and the remaining callees of cliff rail trimming.
+    /// The caller's ownership routing and actual geometry solver id are retained.
     #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
     pub fn process_full_roll_over(
         &mut self,
@@ -1262,6 +1266,7 @@ impl FilletSolver {
         fillets: &mut FilletBrep,
         fillet_geom: FilletGeomId,
         roll_over_rail_index: usize,
+        ownership: &mut dyn RailOwnership,
     ) -> Result<()> {
         const OP_P: &str = "blend::fillet_solver::p3::process_full_roll_over";
         let nul = || SolidError::null_pointer(OP_P);
@@ -1374,7 +1379,7 @@ impl FilletSolver {
             let mut new_rail = None;
             if j != total_edges {
                 // Split the rail now
-                let (new_v, split) = split_rail(k, fillets.brep_mut(), fillet_geom, rail)?;
+                let (new_v, split) = split_rail(k, fillets, ownership, fillet_geom, rail)?;
                 new_rail = Some(split);
 
                 let cw = eu::cw_edgeuse(target, radial_eu)?;
@@ -1455,9 +1460,10 @@ impl FilletSolver {
                 let edge_on_edge = edge_on_edge.ok_or_else(nul)?;
                 compute_support_edge(
                     k,
-                    fillets.brep_mut(),
+                    fillets,
+                    ownership,
                     edge_on_edge,
-                    &fillet_surface,
+                    geom,
                     self.this_approx_tol_3d(),
                     self.this_ang_tol_rad(),
                 )?;
@@ -1465,8 +1471,8 @@ impl FilletSolver {
         }
 
         // Finally, trim all rails of the fillet
-        // UNPORTED(blend.fillet_geom_p5): SmFilletGeom::TrimCliffRails (justified: findings.md "blend.fillet_solver_p3 (`SmFilletSolver.cpp` part 3")
-        unported_on::<_, ()>(geom, "SmFilletGeom::TrimCliffRails", "blend.fillet_geom_p5")
+        let solver_id = fillets.geom(geom)?.fillet_solver().ok_or_else(nul)?;
+        fillets.trim_rail_curves_with_solver(k, geom, solver_id, self, target)
     }
 }
 
@@ -1986,12 +1992,27 @@ mod tests {
 
     #[test]
     fn process_full_roll_over_needs_the_solver_edge_use() {
+        struct NoOwnership;
+        impl RailOwnership for NoOwnership {
+            fn edge_owner(
+                &self,
+                _: EdgeId,
+            ) -> Result<(
+                crate::geom::object::ObjectRef,
+                Option<crate::geom::object::ObjectRef>,
+            )> {
+                Err(invalid("unexpected owner lookup"))
+            }
+            fn owner_changed(&mut self, _: crate::curve::curve::p2::OwnerChange) -> Result<()> {
+                Err(invalid("unexpected owner notification"))
+            }
+        }
         let k = Kernel::default();
         let (mut fb, g, _) = geometry_with_rails(&k, [&[], &[]]);
         let mut fs = FilletSolver::new(1e-6, 0.1, 0.01);
         fs.fillet_geoms.push(g);
         let mut target = Brep::new();
-        let r = fs.process_full_roll_over(&k, &mut target, &mut fb, g, 0);
+        let r = fs.process_full_roll_over(&k, &mut target, &mut fb, g, 0, &mut NoOwnership);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
     }
 }

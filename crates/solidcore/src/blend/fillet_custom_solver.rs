@@ -2065,6 +2065,114 @@ mod tests {
         t
     }
 
+    fn assisted_parallel_planes() -> ConstantRadiusAssistedFs {
+        let k = Kernel::default();
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        ConstantRadiusAssistedFs::from_parts(
+            1e-6,
+            0.5,
+            0.03,
+            [1.0, 2.0],
+            [
+                Some(rail(&k, 7.0, plane(Vec3::new(0.0, 0.0, 0.0), x, y), 11)),
+                Some(rail(&k, 9.0, plane(Vec3::new(0.0, 0.0, 1.0), x, y), 29)),
+            ],
+            [1.0, -1.0],
+            [None, None],
+        )
+    }
+
+    #[test]
+    fn assisted_virtuals_use_ported_constant_radius_methods() {
+        let mut fs = assisted_parallel_planes();
+        let mut distance = -17.0;
+        let ops: &mut dyn FilletSolverOps = &mut fs;
+        assert_eq!(ops.jacobian_size().expect("size"), 4);
+        assert!(!ops.offset_radii_can_change().expect("fixed radii"));
+        assert_eq!(
+            ops.type_code().expect("type"),
+            CONSTANT_RADIUS_ASSISTED_FS_TYPE
+        );
+        ops.setup_offset_values(&TsectPnt::new(), Some(&mut distance))
+            .expect("offsets");
+        assert_eq!(distance, 1.0);
+        ops.setup_offset_values(&TsectPnt::new(), None)
+            .expect("optional distance");
+        assert!(!ops.is_kind_of(0).expect("unrelated type"));
+        assert!(ops
+            .is_kind_of(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+            .expect("assisted type"));
+        assert_eq!(fs.surface(0).expect("first rail").offset_distance(), 1.0);
+        assert_eq!(fs.surface(1).expect("second rail").offset_distance(), -2.0);
+    }
+
+    #[test]
+    fn assisted_virtual_jacobian_writes_rail_offsets_values_and_matrix() {
+        let k = Kernel::default();
+        for rail_index in [0, 1] {
+            let mut fs = assisted_parallel_planes();
+            let x = [99.0, 99.0, 0.25, 0.75, 0.5, 0.125];
+            let mut load = JacobianLoad {
+                rail_index,
+                surface1: None,
+                surf1_offset: 71,
+                surface2: None,
+                surf2_offset: 83,
+                x: &x,
+            };
+            let (mut ne, mut np) = (1, 2);
+            let mut f = [17.0; 5];
+            let mut matrix = Matrix::new(4, 6);
+            let ops: &mut dyn FilletSolverOps = &mut fs;
+            assert!(!ops
+                .load_jacobian(&k, &mut ne, &mut np, &mut load, &mut f, Some(&mut matrix))
+                .expect("jacobian"));
+            assert_eq!((ne, np), (4, 6));
+            assert_eq!(
+                [load.surf1_offset, load.surf2_offset],
+                if rail_index == 0 { [2, 4] } else { [4, 2] }
+            );
+            assert_eq!(f, [17.0, -0.25, 0.625, 2.0, 17.0]);
+            for (row, expected) in [
+                [1.0, 0.0, -1.0, 0.0],
+                [0.0, 1.0, 0.0, -1.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+            .iter()
+            .enumerate()
+            {
+                for (column, value) in expected.iter().enumerate() {
+                    assert_eq!(matrix.at(row + 1, column + 2).expect("entry"), *value);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn assisted_virtual_jacobian_preserves_offsets_after_later_error() {
+        let k = Kernel::default();
+        let mut fs = assisted_parallel_planes();
+        let mut load = JacobianLoad {
+            rail_index: 1,
+            surface1: None,
+            surf1_offset: 71,
+            surface2: None,
+            surf2_offset: 83,
+            x: &[0.25, 0.75],
+        };
+        let (mut ne, mut np) = (0, 0);
+        let mut f = [17.0; 3];
+        let ops: &mut dyn FilletSolverOps = &mut fs;
+        assert!(matches!(
+            ops.load_jacobian(&k, &mut ne, &mut np, &mut load, &mut f, None),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!((ne, np), (0, 4));
+        assert_eq!([load.surf1_offset, load.surf2_offset], [2, 0]);
+        assert_eq!(f, [17.0; 3]);
+    }
+
     #[test]
     fn cross_section_point_curve_when_rails_meet() {
         let k = &Kernel::default();

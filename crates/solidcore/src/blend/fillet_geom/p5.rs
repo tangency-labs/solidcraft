@@ -20,7 +20,7 @@
 //! | [`FilletBrep::make_rail_edge`]                    | `SmFilletGeom::MakeRailEdge`                     |
 //! | [`FilletBrep::make_rail_edgeuse`]                 | `SmFilletGeom::MakeRailEdgeuse`                  |
 //! | [`FilletBrep::create_end_curve`]                  | `SmFilletGeom::CreateEndCurve`                   |
-//! | [`FilletBrep::trim_rail_curves`]                  | `SmFilletGeom::TrimRailCurves`                   |
+//! | [`FilletBrep::trim_rail_curves`], [`FilletBrep::trim_rail_curves_with_solver`] | `SmFilletGeom::TrimRailCurves`                   |
 //! | [`FilletBrep::trim_cliff_rails`]                  | `SmFilletGeom::TrimCliffRails`                   |
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
 //!
@@ -28,7 +28,9 @@
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
 //!   geometry is an id of the [`FilletBrep`] (`self`, upstream's pseudo B-rep
 //!   `pPseudoBrep`). `GetFilletSolver()` is an opaque [`FilletSolverId`] resolved in
-//!   the caller's `solvers` table (index `id.0`); an id not in the table is
+//!   the caller's `solvers` table (index `id.0`). `trim_rail_curves_with_solver`
+//!   uses its caller's single live solver at the actual id; both entries share the
+//!   normal and cliff trimming bodies. An id not in the table is
 //!   [`SolidError::InvalidInput`], a geometry without a solver `SM_ERR_NULL_POINTER`
 //!   (upstream dereferences `NULL`). The target B-rep the original faces, edges and
 //!   the solvers' edge uses refer to is `target`. The `SmContext` of a corner or
@@ -47,10 +49,10 @@
 //!   `blend.fillet_geom_p1` links them; the generic list of
 //!   `topology.proto_topology_p1` works on its own record store, not on [`Brep`]
 //!   arenas. The edge uses come from [`FilletBrep::new_fillet_edgeuse`], which needs
-//!   the pseudo B-rep's infinite region (`SmBrep()`, `UNPORTED(topology.brep_p3)` in
-//!   [`FilletBrep::new`]) and its first shell (`MakeShellVertexTopology`,
-//!   `UNPORTED(topology.brep_p2)`): a B-rep without them returns
-//!   [`SolidError::Unported`] from every builder here. Upstream's `SmObjDelete`
+//!   the pseudo B-rep's infinite region (created by [`FilletBrep::new`]) and its
+//!   first shell (`MakeShellVertexTopology`, `topology.brep_p2`). A missing region
+//!   returns `SM_ERR_NULL_POINTER`; an empty region receives a shell vertex through
+//!   the real topology builder. Upstream's `SmObjDelete`
 //!   clean-ups delete the new objects on a failure; the Rust arenas are append-only,
 //!   so the records made before a failure stay, unreferenced by the edge list only
 //!   when the edge was not made yet.
@@ -1109,9 +1111,7 @@ impl FilletBrep {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for a missing vertex; those of the edge use constructor
-    /// ([`FilletBrep::new_fillet_edgeuse`], [`SolidError::Unported`] while the pseudo
-    /// B-rep has no infinite region or shell); [`SolidError::NotFound`] for dangling
-    /// ids.
+    /// ([`FilletBrep::new_fillet_edgeuse`]); [`SolidError::NotFound`] for dangling ids.
     pub fn make_fillet_edge(
         &mut self,
         start: Option<VertexId>,
@@ -1322,8 +1322,8 @@ impl FilletBrep {
             // accessor (`edge::vertex`, `start_end_vertices`, `vertices`) derives the
             // vertices from the edge uses' vertex uses, as upstream's `GetVertex(es)`
             // do, so it is never returned as the rail's vertex; the difftest export
-            // reads that field, which the first success-path comparison of this
-            // routine (after `topology.brep_p3`) has to account for
+            // reads that field; its native counterpart preserves creation order
+            // rather than using orientation-dependent GetVertices ordering.
             let r = self.new_fillet_edge(fv, fv, None)?;
             self.fillet_edge_mut(r)?
                 .set_fillet_edge_type(FilletEdgeType::Rail);
@@ -1572,7 +1572,6 @@ impl FilletBrep {
     /// `SM_ERR` when the rail does not follow either v side of the surface, the start
     /// vertex does not drop, the start use is not `SM_OT_SAME` or the end vertex has
     /// no solution; those of the evaluations, solves and trims.
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn trim_rail_curves(
         &mut self,
         k: &Kernel,
@@ -1580,9 +1579,48 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &Brep,
     ) -> Result<()> {
+        self.trim_rail_curves_resolved(k, g, &|id, op| solver_of(solvers, id, op), target)
+    }
+
+    /// `TrimRailCurves` using the actual live solver of geometry `g`, without
+    /// copying it or assuming its id is zero. The indexed-table entry is unchanged.
+    ///
+    /// # Errors
+    /// The errors of [`Self::trim_rail_curves`]; [`SolidError::InvalidInput`] if
+    /// the geometry names a solver other than `solver_id`.
+    pub fn trim_rail_curves_with_solver(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        solver_id: FilletSolverId,
+        solver: &FilletSolver,
+        target: &Brep,
+    ) -> Result<()> {
+        self.trim_rail_curves_resolved(
+            k,
+            g,
+            &|id, op| {
+                if id == solver_id {
+                    Ok(solver)
+                } else {
+                    Err(SolidError::invalid_input(op, "unresolved geometry solver"))
+                }
+            },
+            target,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn trim_rail_curves_resolved<'s>(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        resolve: &impl Fn(FilletSolverId, &'static str) -> Result<&'s FilletSolver>,
+        target: &Brep,
+    ) -> Result<()> {
         // handle CliffRollover separately
         if self.geom(g)?.fillet_geom_type() == FilletGeomType::CliffRollover {
-            self.trim_cliff_rails(k, g, solvers, target)?;
+            self.trim_cliff_rails_resolved(k, g, resolve, target)?;
             return Ok(());
         }
 
@@ -1595,7 +1633,11 @@ impl FilletBrep {
 
         // locals: FilletSurface Natural domain and current tolerance
         let uv_domain = fillet_surface.natural_uv_domain();
-        let app_tol = self.geom_solver(g, solvers, OP_TRIM)?.approx_tol_3d;
+        let sid = self
+            .geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
+        let app_tol = resolve(sid, OP_TRIM)?.approx_tol_3d;
 
         // for both rail curves
         for ii in 0..2 {
@@ -1851,7 +1893,6 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` for missing solver, surface, rails, uses, curves, faces;
     /// those of the evaluations, solves, copies and trims; [`SolidError::Unported`] for
     /// the intersection (`sm_SrfSrfIntersection`) and the cliff vertices' callees.
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn trim_cliff_rails(
         &mut self,
         k: &Kernel,
@@ -1859,10 +1900,25 @@ impl FilletBrep {
         solvers: &[FilletSolver],
         target: &Brep,
     ) -> Result<()> {
+        self.trim_cliff_rails_resolved(k, g, &|id, op| solver_of(solvers, id, op), target)
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn trim_cliff_rails_resolved<'s>(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        resolve: &impl Fn(FilletSolverId, &'static str) -> Result<&'s FilletSolver>,
+        target: &Brep,
+    ) -> Result<()> {
         if self.geom(g)?.fillet_geom_type() != FilletGeomType::CliffRollover {
             return Err(SolidError::sm_err(OP_CLIFF));
         }
-        let solver = self.geom_solver(g, solvers, OP_CLIFF)?;
+        let sid = self
+            .geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
+        let solver = resolve(sid, OP_CLIFF)?;
         let tolerance = solver.approx_tol_3d;
         let angle_tol = solver.ang_tol_rad;
         let fillet_surface = self

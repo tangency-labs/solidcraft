@@ -7,6 +7,43 @@ of each section.
 Upstream C++ defects only (UB, crashes, hangs, nondeterminism, wrong results, wrong docs)
 are also logged, one entry each, in `plan/upstream-issues.md` for the upstream maintainers.
 
+## PR #208 — integrate landed fillet glue and native harness fixes (2026-10-22)
+
+The landing-batch comment #6327780964 identified conflicts after #303 landed.
+The merge keeps main's shared `FilletGeomId`, `FilletBrep` geometry storage,
+constructor geometry/FinishConstruction wiring, common `FilStatus`, and the
+intersector FlushCurve geometry writes. The p1 rail/support entry points retain
+one typed implementation in `p1/rails.rs`; the duplicate opaque helper bodies
+are removed. Existing assisted-solver virtual dispatch and partial point/Jacobian
+writes remain in place. Both findings sets and p1 co-port attributions are kept.
+
+Rollover now visits the snapshot of actual `FilletGeomId`s in the solver list,
+and registers the actual id returned by a topology split. No separate opaque
+handle/resolver or fabricated index is retained. All evaluation sites forward
+the caller's Kernel. The p1 rail constructor delegates to the landed
+`FilletBrep::make_fillet_edge`, whose unavailable infinite-region constructor
+still reports `topology.brep_p3`. The rollover TrimRailCurves call delegates to
+the landed geom p5 implementation through a single-live-solver entry using its
+actual id; indexed-table callers retain their existing entry and share both the
+normal and cliff trimming bodies. A missing or different solver is not replaced
+by a cloned solver, default Kernel or index zero.
+
+The public rail helper regression exercises the real builder with an explicit
+infinite region and checks endpoint backlinks, rail kind, geometry id, curve
+owner and notification. The trim regression uses a bounded plane with a rail
+on its v boundary and solver id 37, observes its UV curve, and rejects solver id
+0. These are Rust service regressions, not new native completed-rollover parity.
+
+The native rollover worker also compiles `shim/sc_shim.cpp`, where
+`sc_native_mutex` now lives. The p5 ClassGeometry adapter reads the actual vertex
+use's face gap with the caller Kernel; it returns zero only when that real use
+has no gap. These harness fixes adapt bherbruck's `b87e1aaa3` / `680654aff` and the
+corresponding worker change on `batch/shepherd-1`; unrelated batch changes are
+not imported. Numerical formulas, operation order, tolerances and fixtures'
+comparison thresholds are unchanged. Completed tangent/cliff rollover repair
+remains outside the documented native fixture coverage.
+
+
 ## PR #233 — caller Kernel integration (2026-10-21)
 
 Main #133 made curve and surface evaluation explicitly take the caller Kernel.
@@ -10599,6 +10636,131 @@ rejected: nothing runs on either side.
   `CreateUVTrimCurves` must still return this clipped domain (callers in
   `boolean.topology_intersector_p1` keep it on success).
 
+## blend.fillet_solver_p5 — dependency-limited rollover (PR #208)
+
+- `ProcessRollOver` compares the blend early return, NER for missing rail
+  classifications/corners, two classified single-interval rails, and the rejection
+  of unsupported full-rollover corner types. Every compared case observes the
+  post-call geometry type, interval endpoints/classes and the ordered adjusted
+  corner list (including existing duplicates). Interval scale cases change stored
+  classification parameters; they do not establish large/small fillet geometry
+  coverage. Statuses/enums/counts/identities compare as integers.
+- `two_real_rails_classified_on_rectangle` constructs real `SmLine` rails inside a
+  real planar face. C++ finishes with `SM_SUCCESS` and one `SM_PC_FACE` interval on
+  each rail. Rust installs the first classification on its rail, then the actual
+  `query.face_p2::curve_on_classify` stops at `intersect.curve_class_p2::ReSet`.
+  This is deferred, not a comparison of the completed classifications. The native
+  target is exported/imported using the existing edgeuse graph format.
+- `multi_or_empty_intervals_2_1` (and the other non-[1,1] interval counts) reaches
+  `IsConvexRadialSector(10, TRUE, 0.0)`. Its wire edgeuse returns an upstream soft
+  binormal error (the Boolean SER returns true), then C++ returns
+  `SM_ERR_NULL_POINTER` for the absent fillet surface. Rust stops at the existing
+  `topology.edgeuse_p3::EvaluateBinormal` dependency. No analytic detection, splitting,
+  tangent/cliff repair, corner adjustment or surface rebuild is compared.
+- Supported full rollover needs real rail/face geometry that the process fixture
+  does not construct. Exactly that reachable incomplete-fixture branch is rejected
+  by both guards; blend/known-class/missing-class/unsupported-corner paths stay
+  accepted. These are fixture limitations, not claims that valid upstream full
+  rollover inputs are undefined. A Rust unit test checks lazy corner resolution,
+  resolver-error propagation, retained caller output and the p3 recovery deferral.
+- The API-level `TestSmCircularFillet`/`TestSmFilletEdges` inputs need the full fillet
+  executive and topology construction; this unit does not claim those end-to-end
+  fillet outputs. Solver and pseudo-B-rep records reuse PRs #192/#147. The latter's
+  shared-solver integration uses the base GetSurface path (including its existing
+  geometry-redirection boundary), not a second copy of solver data.
+- A guard-fuzz probe with rail 1 interval `[0, -1e300]` found a fixture-builder
+  mismatch: C++ `SetMinMax` rejects the assignment and preserves the default
+  inside-out extent, while the Rust fixture's two-end constructor reordered it.
+  The fixture now calls the matching setter and preserves its ignored-error state;
+  `reversed_interval_preserves_initial_extent` is the regression. No kernel
+  tolerance or upstream interval implementation was changed.
+- Native fixture parsing is inside the exception boundary, including its small
+  vector allocations. The standalone regression in
+  `harness/cpp/tests/blend_fillet_solver_p5_alloc.cpp` forces the first allocation
+  to throw: before this fix the exception escaped; afterwards the shim returns
+  `SC_ERR_EXCEPTION` (-1000). This test is linked separately so its allocator
+  override is never part of the FFI library.
+
+
+### PR #208 follow-up: complete caller continuation and native containment
+
+The original prefix-only port was incomplete, despite passing its limited gate.
+The caller bodies now continue through their final return. The following mapping
+was checked against the active pinned upstream source (debug drawing excluded):
+
+| Upstream `SmFilletSolver.cpp` | Rust continuation |
+|---|---|
+| 5714–5752 | geometry-list snapshot; new classification installed before fallible `CurveOnClassify` |
+| 5765–5810 | original reverse interval walk; start/end `ConnectIntervals` direction; descending interior-short list |
+| 5811–5822 | full refinement arguments; warning-only status with retained mutations; process each geometry |
+| 7161–7254 | blend skip, ordered rail NERs, corner restriction, rail 0 then rail 1 full recovery |
+| 7256–7327 | convexity, analytic test, lifetime of original rail/UV/surface copies |
+| 7329–7450 | segment state, saved offsets, side search, adjacent face, tangent offset orientation/type |
+| 7452–7504 | parameter comparison at exactly 1e-3, index increments, no-side early returns |
+| 7506–7622 | last segment; cliff rail vs tangent geometry splits; mates; base faces; saved offset copy/output even on ignored error |
+| 7624–7744 | rail intersections; recomputation after a previous split; cliff support construction and side geometry |
+| 7747–7802 | ordered AddUnique of adjusted corners; mate classifications; solver non-convergence |
+| 7805–7867 | delete surface; global solve; derivative direction; rebuild; support edges; trim; restore tangent offsets |
+| 7869–7899 | update current geometry/rail handles and split flags; final return |
+
+`p5/recovery.rs` also supplies typed adapters for p1's `sm_SplitRail` and
+`sm_ComputeSupportEdge`. Their full bodies retain the continuation after
+`MakeFilletEdge` and `sm_SrfSrfIntersection`. Curve installation reuses the real
+pseudo-rail notification reset, updates `Curve::owner` with caller-resolved object
+keys, and routes owner-change notifications through `RolloverOwnership`. Curve
+and surface solution handles retain their real natural domains, reusing p1's
+`CliffHandle` rather than an opaque `NoObject`. The offset copy takes the caller's
+Kernel; the support intersection preserves explicit null optional arguments and
+`bOptSkipTwoPntsIntersection=FALSE`. New
+solver-local geometry handles are distinct from arena ids. The segment loop has
+a checked progress budget of `8 + 4 * total_intervals * (target_edgeuses + 1)`;
+a non-progressing corner callee returns `InvalidInput` instead of looping forever.
+
+Fourteen new kernel regressions cover full-rollover call order and early failure,
+tiny end intervals with explicit `bAllowRemovalOfEnds=TRUE`, interior-short
+ordering, refinement argument transfer and
+warning-only mutations, two-segment tangent rebuild/offset restoration, retained
+partial output before failed rebuild, ignored Copy status with usable output,
+cliff support ordering, stalled corner traversal, empty classes, typed split
+backlinks/endpoints/curve ownership notifications, support-intersection failure, and the complete successful support-curve
+intersection/trim/installation path.
+These tests script unavailable callees to exercise the real caller; they do not
+establish Rust-versus-C++ repair parity. The native gate remains 86 cases:
+78 passed / 0 failed / 6 deferred / 2 rejected, with the same dependency boundaries.
+
+The pre-fix native audit found 5184 bytes leaked for a simple process fixture and
+21872 bytes for the nonempty TestRollOver fixture. Fixture vertices/rails now have
+explicit RAII owners; rail curves receive their actual native owner; TestRollOver
+is not seeded with classifications it would overwrite and leak. The standalone
+ASan/LSan regression calls the in-process implementation directly, so process exit
+cannot hide leaked allocations. It checks process, empty/nonempty TestRollOver and
+the native rectangular target, with real destruction and zero reported leaks.
+The upstream libraries are the normal reference build; the shim and standalone
+regression are instrumented, not all SMLib source files.
+
+The pre-fix calloc sweep produced 9 SIGSEGV and 15 SIGABRT in 200 probes, including
+`CreateRectangle` cleanup and the allocating `SmBrep` destructor. A catch around the
+fixture cannot intercept either. Both exported rollover functions now run all
+native construction, evaluation and destruction in a Unix child with bounded IPC
+and a 30-second stalled-read timeout. Parent bookkeeping uses bounded stack arrays;
+no SMLib objects are made in the caller. Child signals, aborts, exceptions and failed
+protocols become `SC_ERR_EXCEPTION`, not parity statuses or rejected fixtures. The
+parent reaps its own worker and kills only that worker on failed/stalled IPC. On a
+non-Unix platform the fixture fails closed. This changes harness isolation only;
+no upstream algorithm or kernel tolerance is modified.
+
+Reproduce the committed native regressions (reference libraries must exist):
+
+```sh
+SOLIDCORE_CPP_DIR=/path/to/bin/cpp python3 harness/cpp/tests/run_blend_fillet_solver_p5_safety.py
+SOLIDCORE_CPP_DIR=/path/to/bin/cpp python3 harness/cpp/tests/run_blend_fillet_solver_p5_safety.py --asan
+```
+
+The sweep runs 1200 combinations of `new`/`calloc` allocation failure across both
+exports: zero host crashes; 843 successful calls and 357 contained native errors.
+Explicit native SIGSEGV and SIGABRT are contained as well. Rust FFI regressions
+cover raw-parser truncation, empty/short output buffers and repeated concurrent
+workers. Native operation failures remain distinct from fixture rejection.
 ## boolean.topology_intersector_p3 (`SmTopologyIntersector.cpp` part 3: `MergeCurveClasses`, `MergeCurveOnSurfaces`, `MergeCoincidentSurfaces`; PR #211, 2026-10-17; partial, no disagreements)
 
 - **Dependencies.** Parts 1 and 2 (#146, #203) and `intersect.curve_class_p2` / `_p4`
@@ -10770,7 +10932,7 @@ accessors, `SmFilletEdgeuse::SetUVCurve/Get/SetFilletGeom`, ...). They are not w
 `&mut FilletBrep`). Wiring means replacing the handles by `FilletBrep` ids and threading `&mut FilletBrep` through `FilletSolverOps`,
 `blend.fillet_custom_solver`, `blend.fillet_intersector` and the three shims (the 7 deferred `FinishConstruction` cases of this unit's
 report, which stop at `SetOffsetSurface`, are the first to run). That signature change touches every downstream solver PR and is left
-to a follow-up. The two sites that were wireable are wired: `SmFilletSolver::FindIndexOfRailOnFace` (`blend/fillet_geom/p1.rs`, 
+to a follow-up. The two sites that were wireable are wired: `SmFilletSolver::FindIndexOfRailOnFace` (`blend/fillet_geom/p1.rs`,
 `sm_CreateCubicRailRailInterpolant`) and the `SmCircularCrossSectionFSG` constructor (`offset/offset_geometry_creation.rs`).
 
 ## blend.fillet_solver_p1: fillet geometries in the pseudo B-rep (glue cluster, 2026-10-20)
@@ -11533,6 +11695,100 @@ returns `Unported(curve.crv_on_surf)` with the same DISPATCH GAP marker as
 ## boolean.topology_intersector_p1: B-rep cache of the difftest adapter (exposed by topology.brep_p1)
 
 Wiring #146's `UNPORTED(topology.brep_p1)` stubs `SmBrep::GetEdges` / `GetVertices` (#145; `IntersectorBrep::brep_edges` / `brep_vertices`) lets the wire/lamina pass reach `TopologySolver::brep_curve_solve`, which reads the B-rep's cache trees through `TopologyObjects::brep_cache`. The difftest adapter `Two` (crates/difftest/src/units/boolean_topology_intersector_p1.rs) had no cache mapping (the trait default returns `InvalidInput`), so 16 cases reported the null-dereference guard where the C++ (which builds the cache on demand) succeeds. The adapter now builds each B-rep's `BrepCache<H>` on first use (a `OnceCell`, the adapter's own handles, as query.api_queries' runner maps its objects), never an empty cache. Building it starts with `SmBrep::CalculateBoundingBox` (`topology/brep_cache.rs`, `UNPORTED(query.brep)`), so these cases now defer under `query.brep`, the real blocker; they compare once query.brep lands. The cache is built at the state of the first solve that needs it, as upstream; mutating ops before it are not re-reflected (upstream invalidates stale caches through B-rep notifications, `DeleteStaleCaches`, unit topology.brep_p2).
+
+## blend.fillet_solver_p5 — PR #208 maintainer review (2026-10-19)
+
+Integrated the current #147 (`b396cdd3`) and #192 (`a88c62af`) heads and canonical
+main `28cd7d9a`, preserving both sides of the findings history. The offset wrapper
+is the real `surface.offset_surface::OffsetSurface` plus its base identity.
+
+- `ProcessRollOver` calls `IsConvexRadialSector(10, FALSE, 0.0)`, matching the
+  omitted default in `SmEdgeuse.h:356`, rather than stepping off by 20 edge
+  tolerances. Continuation regressions assert the arguments at the callee boundary.
+- Tangent rollover constructs the real offset with `SS_UNKNOWN`, as upstream's
+  two-argument constructor does; `SetAllowExtension(TRUE)` follows construction.
+  Offset copying calls the real `OffsetSurface::copy(k)`, preserving base identity.
+  The existing output/status adapter still preserves a usable copy when an ignored
+  failing status carries one. Regression covers a real copy and its options.
+- `EvaluateBinormal` is wired by the current dependency heads. The target B-rep is
+  mutable because the real evaluator can create UV trim curves. No p5/p1 binormal
+  or offset-copy stub remains.
+- `sm_SplitRail` and `sm_ComputeSupportEdge` now have one implementation each in
+  `blend::fillet_solver::p1::rails`, re-exported as p1's public typed functions.
+  p5 delegates through those implementations. They use `FilletBrep`, geometry ids
+  and `RailOwnership` rather than unresolved opaque topology references. The
+  public-entry regression reaches only the genuinely missing `MakeFilletEdge`
+  (fillet_geom_p5) / `sm_SrfSrfIntersection` (fillet_geom_p2); the continuation
+  regressions exercise successful splits/support curves with scripted callees.
+  Split tolerance uses the real SetTolerance defaults, including vertex cascades.
+- The C++ guard rejects missing rail curves only on the multi-interval path after
+  a non-null fillet surface. Earlier blend, missing-classification, 1x1 and
+  null-surface returns retain their defined behavior. A standalone guard regression
+  distinguishes the null-surface and blend/1x1 returns from the unsafe copy path.
+- Native calls now use `posix_spawn` to execute a separately built worker image.
+  SMLib allocation/destruction never runs in a forked copy of the multithreaded
+  Rust host. Bounded requests/results use private CLOEXEC pipes; the entire small
+  request is written before spawning, avoiding parent SIGPIPE. Signals/aborts and
+  stalled/failed workers remain `SC_ERR_EXCEPTION`, distinct from guard rejection.
+  The worker is built with the same compiler flags and existing SMLib libraries
+  by `solidcore-ffi/build.rs`; no CI workflow changes are required.
+- `TestRollOver`'s four-argument constructor now calls the real `reset` with
+  upstream defaults and the caller's source tolerance; `ConnectIntervals` is also
+  wired to its real p2 port. No actual tangent/cliff repair parity is claimed. Added 84 committed adversarial fixtures: all class pairs at huge/tiny
+  intervals, eight-interval rails across every geometry kind with zero, inverted,
+  huge, tiny, narrow and offset domains, and both TestRollOver operations.
+
+Native safety verification with the spawn worker: 1200 allocation-failure probes,
+818 successes / 382 contained native failures, zero host crashes; SIGSEGV and
+SIGABRT contained. Four direct ASan/LSan calls executed fixture destruction with
+no reported errors/leaks (shim/test instrumented, normal reference libraries).
+
+Review regression results: p5 170 cases / 164 pass / 4 deferred on
+`topology.face_p4::SmFace::GetEdges` / 2 rejected / 0 failed, all compared values
+bit-identical. The original five binormal deferrals now compare. Current dependency
+runs: solver_p1 343/303 pass/40 deferred, geom_p1 480/446 pass/21 deferred/13
+rejected, custom_solver 448/401 pass/47 deferred; no failures. Kernel 1420 tests
+pass, including 18 rollover tests. Native guard/parser/capacity/concurrent-worker
+tests: 4 pass. Fmt, explicit runner/FFI rustfmt, Clippy and wasm32 pass.
+
+### Worker completion and late global finalizers
+
+The fresh worker must not run SMLib global destructors after sending its reply:
+that would put C++ work outside the parent's protocol-read timeout, before the
+blocking reap. It now calls `std::_Exit` after `rollover_worker_main` returns.
+All per-call fixture destructors have already executed inside the in-process
+functions, before the reply is produced; direct ASan/LSan still exercises normal
+destruction. A standalone regression arms a global destructor that aborts and
+requires a successful worker response: post-response global finalization must
+not run. Rechecked: 1200 allocation probes (818 success / 382 contained errors),
+SIGSEGV/SIGABRT containment, the new exit regression, four direct ASan/LSan calls
+and four checked FFI tests all pass. No host crash or reported leak/error.
+
+Full local `--green --no-report` after integration (`e28e6dbf`): 214 units,
+114 passed, 100 partial, 0 failed. The worker-exit follow-up changes only the native
+process completion; the affected p5 native comparisons are rechecked separately.
+
+Canonical main `5040b0b2` (including #130, topology.brep_p10) was subsequently
+merged, retaining both sides of the findings history. Post-integration fmt,
+plain workspace Clippy, 1426 kernel tests and wasm32 check pass. The 214-unit
+full-sweep result above is scoped to the earlier integrated candidate; PR #208
+records the refreshed differential sweep and exact-head CI results.
+
+### Fresh vertex tolerances below the system zone tolerance
+
+A final constructor audit found that the typed rail split and cliff support
+creation used `Brep::add_vertex`, whose convenience default is `ZONE_TOL_3D`.
+Upstream `SmFilletVertex()` inherits `SmVertex()` (`SmVertex.h:117`), which stores
+tolerance `0.0`; a native probe of `new (&pseudo) SmFilletVertex()` confirmed zero.
+With a rail tolerance of `1e-12`, the old Rust split kept the new vertex at `1e-5`
+because `SetTolerance` only increases tolerances. The regression failed before
+the fix (`1e-5` vs `1e-12`). Both fresh-vertex sites now use `add_vertex_record`
+with `Vertex::default()`, preserving the zero constructor tolerance. The split
+then cascades the rail's actual `1e-12`; cliff support creation is checked for
+zero tolerance at its `MakeFilletEdge` call boundary. All 19 rollover tests and
+1427 kernel tests pass; fmt, plain Clippy and wasm32 also pass.
+This is a Rust port correction, not an upstream defect; native repair paths
+remain dependency-limited as described above.
 
 ## heal.stitch_p1 (`SmStitch` part 1 and the SM_API stitch entry points, PR #196, 2026-10-18; partial, no disagreements)
 
@@ -12643,6 +12899,56 @@ The unit stays `blocked` until these are isolated (start with a curve-level diff
   Upstream defects kept by the port: WR-186 (`DoStitching`'s sticky candidate flags),
   WR-187 (a cancelled squeeze reported as done), UB-197 (stale edge after a failed glue with `m_bIgnoreProblems`).
 
+
+## PR #208 — latest p1/main integration (2026-10-20)
+
+Merged PR #192 at `3fe34880` and canonical main at `95b823ed` without rebasing.
+The module lists retain every addition in sorted order. The intersector delegates
+base operations to `FilletSolver`, uses `FilletGeomRef`, and keeps offsets in that
+base instead of reintroducing `ConstantRadiusAssistedFs::saved_offsets`.
+`RailUvCurveIntersectEnfo` keeps #192's `&Curve` dispatch. The geometry constructor
+and accessors use the base solver's real offset slots and surface accessor.
+
+`sm_SplitRail` and `sm_ComputeSupportEdge` still have exactly one typed body, in
+`fillet_solver/p1/rails.rs`, publicly re-exported by p1 and called by p5. The duplicate
+opaque bodies brought by main are removed. At #192 head `3fe34880`, its runner,
+FFI and shims have no `split_rail` / `support_edge` operations to adapt. The existing
+public-entry regressions in `p5/tests.rs` call the typed p1 API directly; they were
+retained and extended.
+
+Main also added `blend.fillet_geom_p2` as partial. Both newly available calls are
+wired: support construction delegates to `srf_srf_intersection` with the caller's
+kernel, actual vertex point, tolerances, null optional endpoints/directions and
+`skip_two_pnts_intersection = false`; rollover corner recomputation delegates to
+`calc_rail_int_edgeuse_with_solver`. The latter shares the complete existing
+`CalcRailIntEdgeuse` body and accepts the caller's live solver with its actual id,
+without renumbering geometry ids or allocating an input-sized table. Indexed
+executive tables keep their existing API. Geometry-owned offsets take precedence;
+a missing adjacent solver id is a resolver error. The corner getter still defers
+on `blend.fillet_corner_p1`, so later solve branches are not natively compared.
+
+Regressions check a nonzero solver id, retained live-solver mutations, unresolved
+adjacent ids and geometry-owned offsets; the p5 adapter now reaches the real
+corner dependency. A public support-helper regression uses two perpendicular
+planes and completes the real intersection, final-surface intersection, vertex
+update, curve trim, owner installation and notification. The earlier expectation
+of an immediate `UNPORTED(blend.fillet_geom_p2)` was replaced by this successful
+real-callee regression. These kernel tests do not claim C++ parity of a complete
+rollover repair: native p5 fixtures still stop before the unavailable segment walk.
+`fixtures/blend.fillet_geom_p2/review_pr208.json` separately compares the real
+surface-intersection callee on the support helper's plane/plane, start-only,
+null-directions input, including its 3D and UV curves (60 compared values, bit-identical).
+
+
+The integrated targeted gate has 0 failures across `blend.fillet_solver_p5`,
+`blend.fillet_solver_p1`, `blend.fillet_geom_p1`, `blend.fillet_geom_p2`,
+`blend.fillet_custom_solver`, `blend.fillet_intersector` and
+`offset.offset_geometry_creation`. P5 remains 170/164 pass/4 deferred/2 rejected;
+p1 is 346/339 pass/7 deferred; geom p2 is 351/220 pass/131 deferred. Every compared
+value is bit-identical. Perturbation detects 164/164, 339/339 and 220/220 cases in
+p5, p1 and geom p2 respectively. All 1500 kernel tests and four native p5 FFI tests
+pass. The complete sweep and CI status are recorded in the PR description.
+
 ## sweep.topology_sweep — second review integration (PR #222, 2026-10-20)
 
 Merged canonical main through `95b823ed`, preserving both sides of the appended
@@ -13288,6 +13594,17 @@ evidence only. See STATUS for the exact handoff, artifact paths and resume steps
   `sm_GetEllipseTrimIntervals` through `IntersectWithCone`, which has no such guard yet.
   Reproduced with main's unpatched `cone/p2.rs` too. Tracked in issue #276; the
   `surface.cone_p2` refusals that are now stricter than needed are issue #277.
+
+
+## PR #208 — current main review integration (2026-10-20)
+
+Merged canonical main `e5f3e441` without rebasing. Both appended sections in
+`findings.md` survive, including the query-face and boolean-merge entries. The
+p1 manifest retains the round-4 counts and PR #208 integration text together
+with main's `CO-PORTED in blend.fillet_intersector (PR #179)` attribution.
+A comment at `corner_vertex` records why the recovery context's solver is the
+current geometry's own solver in `ProcessRollOver`. No numeric algorithm or
+coverage boundary changes. Validation results are recorded on the final PR head.
 
 ## Fuzz sweep over all green/partial units (2026-10-20)
 
@@ -14457,6 +14774,35 @@ stitching still have their documented dependencies; merge p3/p4 remain paired
 with the missing p2 merge constructor. Final native/CI evidence is recorded on
 the tested PR head; no tolerance or absolute floor is relaxed.
 
+
+## PR #208 — assisted virtual dispatch and native point writeback (2026-10-21)
+
+The five `ConstantRadiusAssistedFs` virtuals owned by the already partial
+`blend.fillet_standard_solver_p1` now delegate to its inherent methods. Jacobian
+offset reference arguments are copied back even when a later evaluation fails;
+`IsKindOf` and `LoadInitialValues` retain their unavailable p2 calls. Three Rust
+trait-object regressions check queries, oriented offsets, both rail-index mappings,
+nonzero Jacobian row/column offsets and partial writes on an invalid later UV.
+
+Enabling `SetupOffsetValues` exposed 33 previously deferred native delta cases.
+The Rust difftest runner cloned both arena points but discarded their mutations,
+so e.g. `gen0047` compared native point type 2 against the old Rust type 0 and
+native surface position values against zero. `Delta` now writes both points back
+before status propagation; `Values` also retains its caller's point mutations.
+Five concrete failing inputs and a derived zero-chord case are fixtures in
+`fixtures/blend.fillet_intersector/review4_virtual_dispatch.json`; the latter
+compares the surface writes retained before `SM_ERR`.
+
+The regenerated native intersector report has 1292 cases: 914 pass with values,
+378 deferred, 0 failed, maximum relative error 0. All 33 former standard-solver p1
+deferrals now compare. The remaining deferrals belong to solver p2/p3/p4 and the
+plane `SmCrvOnSurf` dispatch boundary. This does not certify actual rollover repair
+or previously unavailable solver/corner construction. No tolerance was relaxed.
+
+The merge retains both findings append sets, existing co-port attributions and
+`test_analytic_surface`'s failing-iso-status-as-TRUE behavior verified against
+`SmCone.cpp`'s `SER` returns and `SmFilletSolver.cpp`'s boolean test.
+
 ## topology.brep_p3 — `OrientTrimmedSurfaces` SwapUV cases defer under `harness:surface-notify-identity` (PR #204, 2026-10-21)
 
 - **Root cause.** `SmFace::SwapUV` calls `pSurface->SwapUV()`. `SmBSplineSurface::SwapUV`
@@ -15042,6 +15388,22 @@ stitching still have their documented dependencies; merge p3/p4 remain paired
 with the missing p2 merge constructor. Final native/CI evidence is recorded on
 the tested PR head; no tolerance or absolute floor is relaxed.
 
+## blend.fillet_solver_p5 — integrating geom p3/p6 (PR #208)
+
+After #247 landed, rollover recovery delegates `TopologySplit` and
+`ReCalcFilletGeom` to geom p3 with the caller Kernel, live solver and actual
+pseudo-B-rep geometry id. The split uses the upstream default geometry type and
+keeps partial edits on failure; registration in the solver list still occurs only
+after successful return. Recalculation forwards both the analytic flag and optional
+march direction with the upstream default reference curve (`None`).
+
+The geom p2 live-solver adapter also uses p6's newly available side-edge rail index
+and rail/edge-use intersection. Indexed and live-solver rail-index calls share one
+body; resolution happens only on the upstream fallback for incomplete rails.
+Rust regressions check split-time geometry allocation, solver id 37, the default
+geometry type and the removed end use before the infinite-region dependency;
+recalculation reaches the real missing-edge-curve error. These do not claim native
+coverage of completed rollover repair.
 ## Batch shepherd-2 (#204 + #72 after #222/#233/#250): primitive entry points not wired yet (2026-10-21)
 
 #250/#233 (primitive.primitive_creation_p2/p3) and #204 (topology.brep_p3) were each written assuming the other was missing. After both landed, the `SmApiCreate*` entry points in `primitive::api_primitives`, `sweep::api_brep` and `sweep::api_surfaces` build the new B-rep (`brep::p3::new_brep` / `Brep::new_with_infinite_region`) and then return `Unported` at the `SmPrimitiveCreation` call. Those units are partial now, so these calls should be wired through `PrimitiveCreation` and its access traits in a follow-up. The same applies to `primitive_creation::p1::primitives::new_brep` (still `UNPORTED(topology.brep_p3)`) and `create_face` (`UNPORTED(topology.brep_p8)`), and to `create_blend_primitive`'s `CreateFaceFromSurface`. No case changes outcome: the Rust side defers where it used to, only at a later call.
@@ -15131,6 +15493,19 @@ reconciliation with main's `surface.offset_surface`. With both, the affected dif
   Not committed as a fixture (it fails the unit); tracking it down is a follow-up in
   `surface.offset_surface`.
 
+
+### PR #208 — integration after solver p3 landed (#236)
+
+The p3 main merge follows the #462 per-unit plan migration. Both intersector test
+sets and all prior attribution notes are retained. P5 calls the landed p3 rail
+classification refinement, rail/side-edge intersection and full rollover. Refinement
+restores its attached classification, including partial changes, on every result;
+the caller still ignores ordinary warning statuses and propagates Unported.
+Full rollover receives the caller's RailOwnership and uses the one typed p1
+split/support implementation. Its final cliff trim uses the existing live-solver
+resolver with the geometry's actual id, without constructing an artificial table.
+The still-unavailable solver p2 calls remain explicit at their actual sites. The
+new Rust service regressions do not establish completed native rollover parity.
 ## Fuzz crash corpus replayed on main (2026-10-22)
 
 The 2,061 unique crash/panic/timeout inputs of the 2026-10-20 fuzz sweep corpus were

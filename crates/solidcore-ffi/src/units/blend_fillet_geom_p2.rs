@@ -47,7 +47,9 @@
 
 use crate::{call_with_buffer, FfiError};
 
-use super::blend_fillet_geom_p1::{surface, validate_block, Reader, MAX_LIST, MAX_SOLVER_MAGNITUDE};
+use super::blend_fillet_geom_p1::{
+    surface, validate_block, Reader, MAX_LIST, MAX_SOLVER_MAGNITUDE,
+};
 
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

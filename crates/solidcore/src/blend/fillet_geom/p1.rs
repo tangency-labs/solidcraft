@@ -1079,10 +1079,10 @@ impl FilletGeom {
         let mut off_surfs = [None, None];
         for (slot, i) in off_surfs.iter_mut().zip(0..2usize) {
             if let Some((_, fs)) = solver {
-                *slot = match fs.surface(i)? {
+                *slot = match fs.surface(i)?.map(|slot| &slot.surface) {
                     // SmOffsetSurface::Copy() returns an SmSurface*, not SmOffsetSurface*;
                     // its status is ignored, so a failed copy leaves NULL
-                    Some(off_srf) => match offset_surface_copy(k, &off_srf.surface) {
+                    Some(off_srf) => match offset_surface_copy(k, off_srf) {
                         Ok(new_surf) => Some(new_surf),
                         Err(e) if e.is_unported() => return Err(e),
                         Err(_) => None,
@@ -2183,7 +2183,7 @@ fn ignore_non_unported<T>(r: Result<T>) -> Result<()> {
 /// upstream's solutions point at the target curve and the fillet surface, whose
 /// natural domains the solver reads back (`SmSolution::GetParameterInterval`).
 #[derive(Clone, Copy)]
-enum CliffHandle<'a> {
+pub(crate) enum CliffHandle<'a> {
     Curve(&'a Curve),
     Surface(&'a Surface),
 }

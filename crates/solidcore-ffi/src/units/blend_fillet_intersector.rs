@@ -427,12 +427,7 @@ impl Enc {
                     self.nums(p)?;
                 }
             }
-            Op::Delta {
-                uv,
-                uv_delta,
-                a,
-                b,
-            } => {
+            Op::Delta { uv, uv_delta, a, b } => {
                 if a == b {
                     return Err(bad("delta point is the point"));
                 }

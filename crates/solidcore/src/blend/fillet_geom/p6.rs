@@ -118,7 +118,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
 use super::p1::{
     classify_face_point, interpolate_endpts_and_tangents, is_order_correct, set_rail_curve,
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType,
-    FilletGeomId, FilletVertexType,
+    FilletGeomId, FilletSolverId, FilletVertexType,
 };
 use super::p4::solver_of;
 
@@ -1500,13 +1500,24 @@ impl FilletBrep {
         target: &Brep,
         solvers: &[FilletSolver],
     ) -> Result<usize> {
+        self.rail_index_of_side_eu_resolved(g, eu, target, &|id| solver_of(solvers, id, OP_SIDE_EU))
+    }
+
+    /// Shared indexed-table and live-solver implementation; resolution stays at
+    /// the upstream lookup, after the complete-rail shortcut.
+    pub(crate) fn rail_index_of_side_eu_resolved<'s>(
+        &self,
+        g: FilletGeomId,
+        eu: EdgeuseId,
+        target: &Brep,
+        resolve: &impl Fn(FilletSolverId) -> Result<&'s FilletSolver>,
+    ) -> Result<usize> {
         let geom = self.geom(g)?;
         let (Some(rail0), Some(rail1)) = (geom.rail(0), geom.rail(1)) else {
             let solver_id = geom
                 .fillet_solver()
                 .ok_or_else(|| invalid(OP_SIDE_EU, "fillet geometry without solver"))?;
-            return solver_of(solvers, solver_id, OP_SIDE_EU)?
-                .find_index_of_rail_x_side_edgeuse(target, eu);
+            return resolve(solver_id)?.find_index_of_rail_x_side_edgeuse(target, eu);
         };
 
         let face0 = self.fillet_edge(rail0)?.original_face();

@@ -13,10 +13,12 @@
 //! op values only on success), reported as the values `rec`. A case whose Rust side reaches an
 //! unported unit is deferred as a whole.
 //!
-//! Deferred cases: everything past the solver calls that are not ported
-//! (`SmFilletSolver::StepSolve` in `ComputeNextPoint` from a crossing point,
-//! `ComputeSurfaceValues` in `ComputePointValuesDelta`, `ComputePointValues`,
-//! `PointOnPlaneSolve` in `EvaluateLawPoint`) and the span test past its angle check on a plane
+//! The constant-radius `SetupOffsetValues` dispatch runs the ported standard solver,
+//! so `ComputePointValuesDelta` can compare both mutated surface records.
+//! Deferred cases reach unavailable solver calls (`SmFilletSolver::StepSolve` in
+//! `ComputeNextPoint` from a crossing point, `ComputePointValues` in solver p4,
+//! `PointOnPlaneSolve` in `EvaluateLawPoint`)
+//! or the span test past its angle check on a plane
 //! (`SmCrvOnSurf` over an `SmPlane`, a dispatch gap of `curve.crv_on_surf`). `FlushCurve` of two
 //! or more points is not run: in C++ it dereferences the solver's unset executive and the
 //! fillet geometry's `NULL` rails (the Rust side evaluates the offset rails, then stops at
@@ -27,10 +29,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use solidcore::blend::fillet_custom_solver::{ConstantRadiusAssistedFs, OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletGeomId, FilletSolverId};
 use solidcore::blend::fillet_intersector::{
     find_guess_mid_tsect_pnt, flush_crv, FilletIntersector, TYPE,
 };
-use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletGeomId, FilletSolverId};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::{Extent1d, ExtentPointType};
 use solidcore::geom::extent2d::Extent2d;
@@ -728,16 +730,16 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
         return Err(Fail::Harness(harness(format!("fillet geometry: {e}"))));
     }
 
-    let mut fi: Fi<'_> = match FilletIntersector::new(&k, &a, &ext(i.dom1), bref, &ext(i.dom2), None)
-    {
-        Ok(fi) => fi,
-        Err(e) => {
-            if let Some(d) = Output::unported(&e) {
-                return Err(Fail::Deferred(Box::new(d)));
+    let mut fi: Fi<'_> =
+        match FilletIntersector::new(&k, &a, &ext(i.dom1), bref, &ext(i.dom2), None) {
+            Ok(fi) => fi,
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Err(Fail::Deferred(Box::new(d)));
+                }
+                return Err(Fail::Harness(harness(format!("constructor: {e}"))));
             }
-            return Err(Fail::Harness(harness(format!("constructor: {e}"))));
-        }
-    };
+        };
     fi.base.base.this_ang_tol_rad = i.ang_tol;
     fi.base.base.this_approx_tol_3d = i.approx_tol;
     fi.base.base.clipped_by_through_point = i.clipped;
@@ -940,7 +942,13 @@ fn lerp_dom(d: [f64; 4], fu: f64, fv: f64) -> [f64; 2] {
 /// A point of the generated trace at `t`: UV points `base + t dir` on both surfaces,
 /// the curve point on the first surface and its unit tangent (central differences),
 /// UV tangents scaled to the unit-speed parameter `t |tangent|`.
-fn trace_point(k: &Kernel, srfs: &[Surface; 2], base: [[f64; 2]; 2], dir: [[f64; 2]; 2], t: f64) -> PointIn {
+fn trace_point(
+    k: &Kernel,
+    srfs: &[Surface; 2],
+    base: [[f64; 2]; 2],
+    dir: [[f64; 2]; 2],
+    t: f64,
+) -> PointIn {
     let uv = [
         [base[0][0] + t * dir[0][0], base[0][1] + t * dir[0][1]],
         [base[1][0] + t * dir[1][0], base[1][1] + t * dir[1][1]],

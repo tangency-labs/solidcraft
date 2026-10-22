@@ -50,8 +50,8 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_geom_p2::{self as ffi, Op};
 
 use super::blend_fillet_geom_p1::{
-    analytic_surface, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of,
-    status, surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
+    analytic_surface, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
+    surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
 };
 use super::blend_fillet_geom_p4::{
     empty_model, gen_analytic, push_analytic, uv_line, vertex_at, SolverIn,
@@ -591,7 +591,9 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             let (fs, of, nf) = (face(*set)?, face(*f1)?, face(*f2)?);
             rm.fb.fillet_edge_mut(eid).map_err(h)?.set_original_face(fs);
             // the shim refuses runs reaching ShouldSwapFaces (its corners carry no data)
-            let r = rm.fb.update_edge_split_face(&k, eid, of, nf, &mut rm.target, &[]);
+            let r = rm
+                .fb
+                .update_edge_split_face(&k, eid, of, nf, &mut rm.target, &[]);
             o.push(status_of!(r));
             let index = |f: Option<FaceId>| {
                 f.and_then(|f| rm.target_faces.iter().position(|&x| x == f))
@@ -622,14 +624,21 @@ fn plane_in(o: [f64; 3], x: [f64; 3], y: [f64; 3], scale: f64, rng: &mut Rng) ->
         x_axis: x,
         y_axis: y,
         uv_scale: [scale, scale],
-        domain: [d, [d[0] + rng.uniform(1.5, 3.0), d[1] + rng.uniform(1.5, 3.0)]],
+        domain: [
+            d,
+            [d[0] + rng.uniform(1.5, 3.0), d[1] + rng.uniform(1.5, 3.0)],
+        ],
         make_nurb: rng.chance(0.95),
     }
 }
 
 /// A unit vector perpendicular-ish to `n`.
 fn perp(n: [f64; 3]) -> [f64; 3] {
-    let a = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let a = if n[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let c = [
         n[1] * a[2] - n[2] * a[1],
         n[2] * a[0] - n[0] * a[2],
@@ -733,7 +742,12 @@ fn gen_pair(k: &Kernel, rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
                 plane @ AnalyticSrf::Plane { .. } => {
                     return (
                         SurfIn::Analytic(plane),
-                        SurfIn::Analytic(plane_through(rng.point3(-scale, scale), unit(rng), scale, rng)),
+                        SurfIn::Analytic(plane_through(
+                            rng.point3(-scale, scale),
+                            unit(rng),
+                            scale,
+                            rng,
+                        )),
                     )
                 }
             };
@@ -769,15 +783,29 @@ fn probe_curve(s1: &SurfIn, s2: &SurfIn, tol: f64, ang: f64) -> Option<Curve> {
     let k = Kernel::default();
     let a = surf(&k, s1).ok()?.ok()?;
     let b = surf(&k, s2).ok()?.ok()?;
-    srf_srf_intersection(&k, None, None, None, None, &a, &b, tol, ang, SrfSrfOptions::default())
-        .ok()?
-        .curve_3d
+    srf_srf_intersection(
+        &k,
+        None,
+        None,
+        None,
+        None,
+        &a,
+        &b,
+        tol,
+        ang,
+        SrfSrfOptions::default(),
+    )
+    .ok()?
+    .curve_3d
 }
 
 fn gen_srf_srf(k: &Kernel, rng: &mut Rng) -> Inputs {
     let scale = scale_of(rng);
     let (s1, s2) = gen_pair(k, rng, scale);
-    let tol = scale * *rng.choose(&[1e-6, 1e-6, 1e-4, 1e-8, 1e-3, 1e-12, 1e-2]).unwrap_or(&1e-6);
+    let tol = scale
+        * *rng
+            .choose(&[1e-6, 1e-6, 1e-4, 1e-8, 1e-3, 1e-12, 1e-2])
+            .unwrap_or(&1e-6);
     let ang = *rng
         .choose(&[0.5235987755982988, 0.1, 0.5, 0.01, 1.2])
         .unwrap_or(&0.5);
@@ -925,7 +953,11 @@ fn seg(a: [f64; 3], b: [f64; 3], ext: f64) -> Crv {
 fn arc3(a: [f64; 3], m: [f64; 3], b: [f64; 3]) -> Crv {
     Crv {
         dim: 3,
-        cpts: vec![[a[0], a[1], a[2], NOW], [m[0], m[1], m[2], NOW], [b[0], b[1], b[2], NOW]],
+        cpts: vec![
+            [a[0], a[1], a[2], NOW],
+            [m[0], m[1], m[2], NOW],
+            [b[0], b[1], b[2], NOW],
+        ],
         p: 2,
         u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
     }
@@ -954,7 +986,9 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
     let d = rs.natural_uv_domain();
     let at = |a: f64, b: f64| -> Option<([f64; 3], [f64; 2])> {
         let uv = d.evaluate(a, b);
-        rs.evaluate_point(&k, uv).ok().map(|p| (v3a(p), [uv.x, uv.y]))
+        rs.evaluate_point(&k, uv)
+            .ok()
+            .map(|p| (v3a(p), [uv.x, uv.y]))
     };
     // the edge's two vertices and the rails' far ends
     // fractions of the domain (the planes' domains are large: points near the middle)
@@ -968,7 +1002,11 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
     let mate_type = 3; // SM_FV_MATE
     for (p, uv) in [(p0, uv0), (p1, uv1), (p2, uv2), (p3, uv3)] {
         let mut v = vertex_at(p);
-        v.vtype = if rng.chance(0.85) { mate_type } else { rng.below(14) as i64 };
+        v.vtype = if rng.chance(0.85) {
+            mate_type
+        } else {
+            rng.below(14) as i64
+        };
         v.uv = uv;
         if rng.chance(0.1) {
             // off the face
@@ -976,7 +1014,13 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
         }
         model.vertices.push(v);
     }
-    let rail = |rng: &mut Rng, from: usize, to: usize, pf: [f64; 3], pt: [f64; 3], uf: [f64; 2], ut: [f64; 2]| {
+    let rail = |rng: &mut Rng,
+                from: usize,
+                to: usize,
+                pf: [f64; 3],
+                pt: [f64; 3],
+                uf: [f64; 2],
+                ut: [f64; 2]| {
         let curve = if rng.chance(0.6) {
             seg(pf, pt, *rng.choose(&[0.0, 0.0, 0.1, 0.5]).unwrap_or(&0.0))
         } else {
@@ -1060,11 +1104,7 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
         query: Query::RailRail {
             e: 0,
             face_tol: scale * *rng.choose(&[1e-6, 1e-6, 1e-4, 1e-9, 0.0]).unwrap_or(&1e-6),
-            face: if rng.chance(0.03) {
-                None
-            } else {
-                Some(face)
-            },
+            face: if rng.chance(0.03) { None } else { Some(face) },
         },
     })
 }
@@ -1185,7 +1225,10 @@ mod tests {
             }
             let kind = match Runner.run_rust(case) {
                 Ok(o) if o.deferred.is_some() => {
-                    format!("deferred {}", o.deferred.map(|d| d.unit).unwrap_or_default())
+                    format!(
+                        "deferred {}",
+                        o.deferred.map(|d| d.unit).unwrap_or_default()
+                    )
                 }
                 Ok(o) => match o.values.get("status").and_then(|v| v.first()).copied() {
                     Some(s) => {

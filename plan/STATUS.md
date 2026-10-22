@@ -1095,6 +1095,18 @@ Review verification: the extended 256-seed run has 380 cases, 291 bit-identical
 passes, zero failures and 89 query deferrals. Perturbation detects every compared
 case (108/108 default, 291/291 extended).
 
+### PR #208 current-main review refresh (2026-10-20)
+
+Merged canonical main `e5f3e441`, retaining both findings append sets and the
+complete p1 integration/co-port attribution. All seven affected native gates
+pass with maximum relative error zero; p5 remains 170 cases / 164 pass /
+4 deferred / 2 rejected, and p1 remains 346 / 339 pass / 7 deferred. Current
+main's offset dependency now compares 552/861 cases, with 309 deferred and no
+failures. All 1550 kernel tests, four p5 native FFI regressions, plain/native
+Clippy, fmt and wasm32 pass. The complete local gate and exact-head CI results
+are recorded with the final tested commit in the PR discussion. Coverage of a
+completed rollover repair remains limited by the unavailable solver callees.
+
 `blend.fillet_solver_p1` partial -> green (PR #303, glue with `blend.fillet_geom_p1`): 346/346 pass, 0 deferred.
 
 ## primitive.primitive_creation_p1 — PR #213 (review, 2026-10-19)
