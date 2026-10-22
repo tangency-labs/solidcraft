@@ -13,6 +13,7 @@
 //! Deviations: co-ported by `sweep.api_brep` (only `SmSweepOptions`); `SmBoolean`
 //! flags are `bool`.
 
+pub mod model;
 pub mod p1;
 pub mod p2;
 pub mod p3;

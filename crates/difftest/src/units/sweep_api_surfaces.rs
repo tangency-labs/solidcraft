@@ -33,7 +33,6 @@ use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::primitive::api_curves;
 use solidcore::sweep::api_surfaces as api;
-use solidcore::topology::Brep;
 use solidcore::SolidError;
 use solidcore_ffi::units::sweep_api_surfaces::{self as ffi, Call, CurveSpec};
 
@@ -551,11 +550,30 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 }
             }
         }
-        Inputs::SkinFromFaces { circles: _, degree } => {
-            // The planar circle breps (`SmApiCreatePlanarCircle`) cannot be built in
-            // Rust yet; the entry point is unported whatever its faces.
+        Inputs::SkinFromFaces { circles, degree } => {
             let degree = usize::try_from(*degree).map_err(|_| harness("degree too large"))?;
-            match api::create_skin_from_faces(&mut k, &Brep::default(), &[], degree) {
+            // The first face of each `SmApiCreatePlanarCircle` B-rep, as the C++ side.
+            let discs = circles
+                .iter()
+                .map(|(c, r)| {
+                    solidcore::primitive::api_primitives::create_planar_circle(&mut k, pt(c), *r)
+                })
+                .collect::<solidcore::Result<Vec<_>>>();
+            let discs = match discs {
+                Ok(d) => d,
+                Err(e) if e.is_unported() => return Output::unported(&e).ok_or_else(|| harness("unported")),
+                Err(e) => return Err(harness(format!("planar circle: {e}"))),
+            };
+            let mut faces = Vec::new();
+            for b in &discs {
+                if let Some(f) = solidcore::topology::brep::p1::faces(b, None)
+                    .map_err(|e| harness(format!("faces: {e}")))?
+                    .first()
+                {
+                    faces.push((b, *f));
+                }
+            }
+            match api::create_skin_from_faces(&mut k, &faces, degree) {
                 Ok(r) => {
                     o.extend([0.0, 1.0, r.new_faces.len() as f64]);
                     Ok(())

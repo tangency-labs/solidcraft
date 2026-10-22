@@ -35,25 +35,23 @@
 //! - [`create_extrude`] makes a 2D curve's NURB 3D in place, as upstream (the curve
 //!   is the caller's, taken `&mut`).
 //! - The B-rep entry points ([`create_skin_primitive`], [`create_skin_from_faces`],
-//!   [`create_surface_revolution`]) validate and copy their inputs as upstream, build
-//!   the new B-rep ([`crate::topology::brep::p3::new_brep`] in the caller's kernel,
-//!   upstream's API context; it stops at `SmRegion::SetIsVoid`, `topology.shell`) and
-//!   return [`SolidError::Unported`]: `SmPrimitiveCreation` (units
-//!   `primitive.primitive_creation_p1..p3`) is not ported yet.
+//!   [`create_surface_revolution`]) validate and copy their inputs as upstream and run
+//!   the `SmPrimitiveCreation` method on a new B-rep through a [`PrimitiveModel`];
+//!   the faces of [`create_skin_from_faces`] are `(&Brep, id)` pairs.
 //! - [`create_surface_revolution`] copies the curve with the infallible
 //!   [`BSplineCurve::copy`]; upstream `SmCurve::Copy` can fail (only on allocation
 //!   failure) and then returns `SM_ERR`, a path the port does not have.
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
-use crate::geom::tol;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
+use crate::primitive::primitive_creation::model::PrimitiveModel;
+use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::surface::surface::Surface;
-use crate::topology::brep::p3 as brep_p3;
 use crate::topology::{Brep, FaceId};
 
 const OP_SKIN_PRIMITIVE: &str = "sweep::api_surfaces::create_skin_primitive";
@@ -170,44 +168,69 @@ pub fn create_skin_primitive(
 
     let curve_copies = copy_skin_primitive_curves(k, curves_3d)?;
 
-    // Arguments of the unported legacy call: the profile counts, the private curve
-    // copies, an approximation tolerance of 0.0, the degree and the cap flag.
-    let _ = (curve_copies, cap_ends);
-    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
-    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
-    let _ = new_brep.infinite_region();
-    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
-    // UNPORTED(primitive.primitive_creation_p2): SmPrimitiveCreation::CreateSkinPrimitive
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateSkinPrimitive",
-        "primitive.primitive_creation_p2",
-    ))
+    let mut curves: Vec<Option<Curve>> = curve_copies.into_iter().map(Some).collect();
+    let copy_count = curves.len();
+    let (brep, (start_faces, side_faces, end_faces)) =
+        PrimitiveModel::build_new(k, |pc, model| {
+            let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
+            let mut transferred = Vec::new();
+            let status = pc.create_skin_primitive(
+                model,
+                PrimitiveModel::MAIN,
+                curves_in_each_profile,
+                &mut curves,
+                0.0,
+                degree,
+                cap_ends,
+                &mut start,
+                &mut side,
+                &mut end,
+                &mut transferred,
+            );
+            match status {
+                Err(e) if e.is_unported() => return Err(e),
+                // Ownership is indeterminate for copies without a report entry.
+                _ if transferred.len() != copy_count => {
+                    return Err(SolidError::sm_err(OP_SKIN_PRIMITIVE));
+                }
+                other => other?,
+            }
+            Ok((start, side, end))
+        })?;
+    Ok(SkinPrimitive {
+        brep,
+        start_faces,
+        side_faces,
+        end_faces,
+    })
 }
 
-/// A solid lofted between the matching loops of the face sequence `faces` of
-/// `brep`, of degree `degree` in the loft direction (`SmApiCreateSkinFromFaces`).
+/// A solid lofted between the matching loops of the face sequence `faces` (each with
+/// its B-rep), of degree `degree` in the loft direction (`SmApiCreateSkinFromFaces`).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] (`SmPrimitiveCreation::CreateSkinFromFaces`).
+/// Those of `SmPrimitiveCreation::CreateSkinFromFaces`.
 pub fn create_skin_from_faces(
     k: &mut Kernel,
-    brep: &Brep,
-    faces: &[FaceId],
+    faces: &[(&Brep, FaceId)],
     degree: usize,
 ) -> Result<SkinFromFaces> {
-    // Arguments of the unported legacy call: the faces, no guide curves, an
-    // approximation tolerance of 0.0 and the degree.
-    let _ = (brep, faces, degree);
-    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
-    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
-    let _ = new_brep.infinite_region();
-    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
-    // UNPORTED(primitive.primitive_creation_p3): SmPrimitiveCreation::CreateSkinFromFaces
-    Err(SolidError::unported(
-        "SmPrimitiveCreation::CreateSkinFromFaces",
-        "primitive.primitive_creation_p3",
-    ))
+    let (brep, new_faces) = PrimitiveModel::build_new(k, |pc, model| {
+        let input = model.add_owner_breps(faces)?;
+        let mut new_faces = Vec::new();
+        pc.create_skin_from_faces(
+            model,
+            PrimitiveModel::MAIN,
+            &input,
+            &[],
+            0.0,
+            degree,
+            &mut new_faces,
+        )?;
+        Ok(new_faces)
+    })?;
+    Ok(SkinFromFaces { brep, new_faces })
 }
 
 /// The surface extruded from `curve` along `sweep_vector` (`SmApiCreateExtrude`,
@@ -270,19 +293,27 @@ pub fn create_surface_revolution(
     // Revolve a copy of the input: CreateRotationalSweep consumes the curve
     // (upstream's `SM_ERR` on a failed copy cannot happen: the copy is infallible)
     let curve_copy = Curve::from(curve.copy());
-    let curves_to_sweep = vec![curve_copy];
+    let mut curves_to_sweep = vec![Some(curve_copy)];
 
-    // Arguments of the unported call: the curves, the axis, the angle, one segment
-    // and no capping.
-    let _ = (curves_to_sweep, origin, axis_dir, angle_deg);
-    // the new B-rep (`new SmBrep()`, defaults SM_USE_DEFAULT) and its infinite region
-    let new_brep = brep_p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT)?;
-    let _ = new_brep.infinite_region();
-    // UNPORTED(primitive.primitive_creation_p1): SmPrimitiveCreation::SmPrimitiveCreation
-    // UNPORTED(primitive.primitive_creation_p3): SmPrimitiveCreation::CreateRotationalSweep
-    // ported (topology.brep_p1): SmBrep::GetSurfaces is topology::brep::p1::surfaces, on the
-    // sweep's B-rep after the call above
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+    let (brep, ()) = PrimitiveModel::build_new(k, |pc, model| {
+        pc.create_partial_rotational_sweep(
+            model,
+            PrimitiveModel::MAIN,
+            &mut curves_to_sweep,
+            origin,
+            axis_dir,
+            angle_deg,
+            RepeatedSweepOptions {
+                repetitions: 1,
+                cap_ends: false,
+                test_continuity: true,
+            },
+        )
+    })?;
+    crate::topology::brep::p1::surfaces(&brep, None)?
+        .first()
+        .map(|surface| (*surface).clone())
+        .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))
 }
 
 /// The surface skinned through `profiles` (`SmApiCreateSkin`,
@@ -398,8 +429,10 @@ mod tests {
             create_skin_primitive(&mut k, &[1, 2], &ok, 1, false),
             Err(SolidError::InvalidInput { .. })
         ));
-        assert!(create_skin_from_faces(&mut k, &Brep::default(), &[], 3)
-            .unwrap_err()
-            .is_unported());
+        // no faces: no cross sections to skin
+        assert!(matches!(
+            create_skin_from_faces(&mut k, &[], 3),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 }

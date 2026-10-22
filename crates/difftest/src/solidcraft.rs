@@ -523,7 +523,8 @@ fn take(bodies: &BTreeMap<String, Brep>, id: &str) -> Result<Brep, Run> {
 
 /// A cylinder along Z turned onto `axis` about `origin`.
 fn cylinder(k: &mut Kernel, origin: P3, axis: P3, radius: f64, height: f64) -> Result<Brep, Run> {
-    let mut b = primitives::create_cylinder(p3(origin), radius, height).map_err(|e| solid(&e))?;
+    let mut b =
+        primitives::create_cylinder(k, p3(origin), radius, height).map_err(|e| solid(&e))?;
     let a = p3(axis).unitize().map_err(|e| solid(&e))?;
     let z = Vec3::new(0.0, 0.0, 1.0);
     let cos = a.dot(z).clamp(-1.0, 1.0);
@@ -549,10 +550,10 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
     let body = match step {
         Step::Box { origin, size, .. } => {
             let [x, y, z] = *size;
-            primitives::create_box(p3(*origin), x, y, z).map_err(|e| solid(&e))?
+            primitives::create_box(k, p3(*origin), x, y, z).map_err(|e| solid(&e))?
         }
         Step::Sphere { center, radius, .. } => {
-            primitives::create_sphere(p3(*center), *radius).map_err(|e| solid(&e))?
+            primitives::create_sphere(k, p3(*center), *radius).map_err(|e| solid(&e))?
         }
         Step::Cylinder {
             origin,

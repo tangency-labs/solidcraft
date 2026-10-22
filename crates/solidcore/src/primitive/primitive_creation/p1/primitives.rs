@@ -82,18 +82,40 @@ pub enum Boolean2d {
     Merge = 4,
 }
 
-fn new_brep(_k: &Kernel) -> Result<Brep> {
-    // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-    Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
+fn new_brep(k: &mut Kernel) -> Result<Brep> {
+    crate::topology::brep::p3::new_brep(
+        k,
+        crate::geom::tol::USE_DEFAULT,
+        crate::geom::tol::USE_DEFAULT,
+    )
 }
 
-fn create_face(_k: &Kernel, _b: &mut Brep, _surface: Surface, _domain: Extent2d) -> Result<()> {
-    // PR #72 documents this construction dependency; do not duplicate it here.
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+/// Runs `body` with a face-construction environment over an arena-only notification
+/// store (`ArenaNotifyState`): no observer holds identities for these B-reps' objects.
+fn with_face_env<T>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    body: impl FnOnce(
+        &mut Kernel,
+        &mut Brep,
+        &mut crate::topology::brep::p8::FaceBuildEnv<'_, '_>,
+    ) -> Result<T>,
+) -> Result<T> {
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
+    let mut env = state.env(None);
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    let this_face =
+        |f: FaceId| crate::topology::loopuse::notify_ref(crate::error::EntityRef::Face(f));
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    body(k, b, &mut fenv)
+}
+
+fn create_face(k: &mut Kernel, b: &mut Brep, surface: Surface, domain: Extent2d) -> Result<()> {
+    create_face_id(k, b, surface, domain).map(|_| ())
 }
 
 fn stitch(k: &mut Kernel, b: &mut Brep) -> Result<()> {
@@ -101,57 +123,46 @@ fn stitch(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     stitch_and_orient(k, b, &StitchAndOrientOptions::default())
 }
 
+/// `CreatePlanarFaceWith3DCurves`; `None` when the curves bound no face.
 fn planar_face(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _region: Option<RegionId>,
-    _curves: Vec<Curve>,
-    _tolerance: f64,
-) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFaceWith3DCurves
-    Err(SolidError::unported(
-        "SmBrep::CreatePlanarFaceWith3DCurves",
-        "topology.brep_p8",
-    ))
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    curves: &[Curve],
+    tolerance: f64,
+) -> Result<Option<FaceId>> {
+    with_face_env(k, b, |k, b, fenv| {
+        crate::topology::brep::p8::create_planar_face_with_3d_curves(
+            k, b, region, curves, tolerance, fenv,
+        )
+    })
 }
 fn planar_faces(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _region: Option<RegionId>,
-    _curves: &[Curve],
-    _tolerance: f64,
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    curves: &[Curve],
+    tolerance: f64,
 ) -> Result<Vec<FaceId>> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreatePlanarFacesWith3DCurves
-    Err(SolidError::unported(
-        "SmBrep::CreatePlanarFacesWith3DCurves",
-        "topology.brep_p8",
-    ))
+    with_face_env(k, b, |k, b, fenv| {
+        crate::topology::brep::p8::create_planar_faces_with_3d_curves(
+            k, b, region, curves, tolerance, fenv,
+        )
+    })
 }
-fn cone_face(_k: &Kernel, _b: &mut Brep, _surface: &Cone, _domain: Extent2d) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+fn cone_face(k: &mut Kernel, b: &mut Brep, surface: &Cone, domain: Extent2d) -> Result<FaceId> {
+    create_face_id(k, b, Surface::from(surface.clone()), domain)
 }
-fn torus_face(_k: &Kernel, _b: &mut Brep, _surface: &Torus, _domain: Extent2d) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+fn torus_face(k: &mut Kernel, b: &mut Brep, surface: &Torus, domain: Extent2d) -> Result<FaceId> {
+    create_face_id(k, b, Surface::from(surface.clone()), domain)
 }
 fn extrusion_face(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _surface: &crate::surface::surf_of_extrusion::p1::SurfOfExtrusion,
-    _domain: Extent2d,
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: &crate::surface::surf_of_extrusion::p1::SurfOfExtrusion,
+    domain: Extent2d,
 ) -> Result<()> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+    create_face(k, b, Surface::from(surface.clone()), domain)
 }
 fn trimmed_face(
     k: &mut Kernel,
@@ -180,16 +191,14 @@ fn trimmed_face(
 }
 
 fn create_face_id(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _surface: Surface,
-    _domain: Extent2d,
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: Surface,
+    domain: Extent2d,
 ) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+    with_face_env(k, b, |k, b, fenv| {
+        crate::topology::brep::p8::create_face_from_surface(k, b, Some(surface), &domain, fenv)
+    })
 }
 /// `SmFace::GetEdges(rEdges)` with its defaults (`topology::face::p4::edges`).
 fn face_edges(_k: &Kernel, b: &Brep, face: FaceId) -> Result<Vec<crate::topology::EdgeId>> {
@@ -273,7 +282,7 @@ enum AnalyticSurface {
     Sphere(Sphere),
     Torus(Torus),
 }
-fn analytic_face(k: &Kernel, b: &mut Brep, surface: AnalyticSurface) -> Result<FaceId> {
+fn analytic_face(k: &mut Kernel, b: &mut Brep, surface: AnalyticSurface) -> Result<FaceId> {
     match surface {
         AnalyticSurface::Cone(surface) => {
             cone_face(k, b, &surface, surface.rev.base().natural_uv_domain())
@@ -293,18 +302,14 @@ fn sphere_surface(k: &Kernel, frame: &Axis2Placement, radius: f64) -> Result<Sph
     Sphere::create_canonical(k, frame, radius)
 }
 
-fn sphere_face(_k: &Kernel, _b: &mut Brep, _surface: &Sphere, _domain: Extent2d) -> Result<FaceId> {
-    // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-    Err(SolidError::unported(
-        "SmBrep::CreateFaceFromSurface",
-        "topology.brep_p8",
-    ))
+fn sphere_face(k: &mut Kernel, b: &mut Brep, surface: &Sphere, domain: Extent2d) -> Result<FaceId> {
+    create_face_id(k, b, Surface::from(surface.clone()), domain)
 }
 
 /// Static rectangular-face constructor. The tolerance is only used by release
 /// assertions upstream; the new B-rep inherits its context's tolerance.
 pub fn create_rectangle(
-    k: &Kernel,
+    k: &mut Kernel,
     _tolerance: f64,
     width: f64,
     height: f64,
@@ -340,7 +345,7 @@ fn circle_curve(radius: f64, frame: &Axis2Placement) -> Result<BSplineCurve> {
 /// Static circular-face constructor. `tolerance` is passed to the planarity
 /// check; it does not replace the context's B-rep tolerance.
 pub fn create_circle(
-    k: &Kernel,
+    k: &mut Kernel,
     tolerance: f64,
     radius: f64,
     frame: &Axis2Placement,
@@ -349,7 +354,7 @@ pub fn create_circle(
     let circle = circle_curve(radius, frame)?;
     brep.set_editing_enabled(true);
     let region = brep.infinite_region();
-    if let Err(error) = planar_face(k, &mut brep, region, vec![Curve::from(circle)], tolerance) {
+    if let Err(error) = planar_face(k, &mut brep, region, &[Curve::from(circle)], tolerance) {
         return Err(circle_error(error));
     }
     brep.set_editing_enabled(false);
@@ -522,24 +527,12 @@ impl PrimitiveCreation {
             .curve;
         let tolerance = brep.tolerance();
         let base_face = if base > tolerance {
-            Some(planar_face(
-                k,
-                brep,
-                self.region(),
-                vec![base_edge],
-                tolerance,
-            )?)
+            planar_face(k, brep, self.region(), &[base_edge], tolerance)?
         } else {
             None
         };
         let top_face = if top > tolerance {
-            Some(planar_face(
-                k,
-                brep,
-                self.region(),
-                vec![top_edge],
-                tolerance,
-            )?)
+            planar_face(k, brep, self.region(), &[top_edge], tolerance)?
         } else {
             None
         };
@@ -553,7 +546,7 @@ impl PrimitiveCreation {
     /// temporary edit mode restores on every exit.
     pub fn create_sphere(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         brep: &mut Brep,
         radius: f64,
         frame: &Axis2Placement,
@@ -574,7 +567,7 @@ impl PrimitiveCreation {
     /// Maps clear and temporary edit mode restores even on constructor failure.
     pub fn create_torus(
         &mut self,
-        k: &Kernel,
+        k: &mut Kernel,
         brep: &mut Brep,
         major: f64,
         minor: f64,
@@ -988,16 +981,10 @@ impl PrimitiveCreation {
             k,
             brep,
             brep.infinite_region(),
-            vec![Curve::from(front)],
+            &[Curve::from(front)],
             0.001,
         )?;
-        planar_face(
-            k,
-            brep,
-            brep.infinite_region(),
-            vec![Curve::from(rear)],
-            0.001,
-        )?;
+        planar_face(k, brep, brep.infinite_region(), &[Curve::from(rear)], 0.001)?;
         stitch(k, brep)
     }
 }
@@ -1006,7 +993,7 @@ impl PrimitiveCreation {
 /// Lines on the axis, interior axis crossings and unsuitable circular arcs return
 /// `SM_ERR`; topology construction defers at its exact owning unit.
 pub fn analytic_rotational_sweep(
-    k: &Kernel,
+    k: &mut Kernel,
     brep: &mut Brep,
     curve: &Curve,
     axis_base: crate::math::Point3,
@@ -1069,7 +1056,7 @@ pub fn analytic_rotational_sweep(
                     )?));
                 }
             }
-            return match planar_face(k, brep, brep.infinite_region(), circles, tol) {
+            return match planar_face(k, brep, brep.infinite_region(), &circles, tol) {
                 Ok(_) => Ok(()),
                 Err(e) if e.is_unported() => Err(e),
                 Err(_) => Err(SolidError::sm_err(op)),

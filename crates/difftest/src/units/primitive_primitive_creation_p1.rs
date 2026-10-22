@@ -270,7 +270,40 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Vec3::new(value(v, 11), value(v, 12), value(v, 13)),
                 Vec3::new(value(v, 14), value(v, 15), value(v, 16)),
             );
-            let mut brep = Brep::new_with_infinite_region()?;
+            if shape <= 1 {
+                // The static constructors return their own B-rep (NULL on failure).
+                let made = if shape == 0 {
+                    api::create_rectangle(&mut k, value(v, 7), value(v, 1), value(v, 2), &frame)
+                } else {
+                    api::create_circle(&mut k, value(v, 7), value(v, 1), &frame)
+                };
+                match made {
+                    Err(e) if e.is_unported() => return Err(e),
+                    Ok(b) => record.extend([
+                        0.0,
+                        f64::from(b.editing_enabled()),
+                        0.0,
+                        solidcore::topology::brep::p1::faces(&b, None)?.len() as f64,
+                        solidcore::topology::brep::p1::edges(&b, None)?.len() as f64,
+                        solidcore::topology::brep::p1::vertices(&b, None)?.len() as f64,
+                    ]),
+                    Err(_) => record.extend([
+                        f64::from(solidcore::error::SM_ERR),
+                        -1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]),
+                }
+                return Ok(record);
+            }
+            // `SmBrep b(SM_USE_DEFAULT, SM_USE_DEFAULT, context)`
+            let mut brep = solidcore::topology::brep::p3::new_brep(
+                &mut k,
+                solidcore::geom::tol::USE_DEFAULT,
+                solidcore::geom::tol::USE_DEFAULT,
+            )?;
             brep.set_editing_enabled(value(v, 17) != 0.0);
             let mut primitive = PrimitiveCreation::new(brep.infinite_region(), 17, true);
             if value(v, 18) != 0.0 {
@@ -280,9 +313,6 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 );
             }
             let result = match shape {
-                0 => api::create_rectangle(&k, value(v, 7), value(v, 1), value(v, 2), &frame)
-                    .map(|_| ()),
-                1 => api::create_circle(&k, value(v, 7), value(v, 1), &frame).map(|_| ()),
                 2 => primitive.create_box(
                     &mut k,
                     &mut brep,
@@ -312,8 +342,8 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                     value(v, 3),
                     &frame,
                 ),
-                5 => primitive.create_sphere(&k, &mut brep, value(v, 1), &frame),
-                6 => primitive.create_torus(&k, &mut brep, value(v, 1), value(v, 2), &frame),
+                5 => primitive.create_sphere(&mut k, &mut brep, value(v, 1), &frame),
+                6 => primitive.create_torus(&mut k, &mut brep, value(v, 1), value(v, 2), &frame),
                 7 => PrimitiveCreation::create_sphere_no_pole(
                     &mut k,
                     &mut brep,
@@ -396,9 +426,13 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             ]);
         }
         5 => {
-            let mut brep = Brep::new();
+            let mut brep = solidcore::topology::brep::p3::new_brep(
+                &mut k,
+                solidcore::geom::tol::USE_DEFAULT,
+                solidcore::geom::tol::USE_DEFAULT,
+            )?;
             let result = api::analytic_rotational_sweep(
-                &k,
+                &mut k,
                 &mut brep,
                 &Curve::from(curve(v.get(..7).unwrap_or_default())?),
                 Vec3::new(value(v, 7), value(v, 8), value(v, 9)),
