@@ -7,7 +7,7 @@
 //! |-----------------------------------------------|-------------------------------------------|
 //! | [`BSplineSurface::create_corner_blend`], [`OrientType`] | `CreateCornerBlend`, `SmOrientType` |
 //! | [`BSplineSurface::create_skinned_surface`], [`SkinnedSurfaceOptions`] | `CreateSkinnedSurface` |
-//! | [`BSplineSurface::trim_with_domain`]          | `TrimWithDomain`                          |
+//! | [`BSplineSurface::trim_with_domain`], [`BSplineSurface::trim_with_domain_with`], [`TrimOptions`] | `TrimWithDomain` |
 //! | [`BSplineSurface::evaluate`], [`EvaluateFlags`] | `Evaluate`                              |
 //!
 //! The other functions of the file belong to `nurbs.b_spline_surface_n_lib_p1` and
@@ -45,6 +45,15 @@
 //!   is `surface::surface::p3`'s, `SmSurface::EvaluateNormal`
 //!   is `surface::surface::p7`'s, `Evaluate1stDerivatives` `surface::surface::p1`'s.) Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
+//! - **Not upstream: `TrimWithDomain` knot snapping** (tangency-labs/solidcore#472), only
+//!   with [`TrimOptions::snap_roundoff_to_knots`] ([`BSplineSurface::trim_with_domain`]
+//!   keeps upstream's behaviour). Upstream moves a trim boundary that lies within
+//!   `SM_EFF_ZERO_SQRT * (1 + |t|)` *inside* a knot away from it by ten times that, so a
+//!   boundary one rounding error inside a knot leaves a sliver span (2.1e-4 on a fillet
+//!   round at u = 20) where a boundary on the knot leaves none. With the option a
+//!   boundary within `SM_EFF_ZERO_PARAM` of a knot is snapped onto it, and the
+//!   requested domain passed to `sm_CheckTrimBoundaries` takes the knot too, so the
+//!   `[B306]` widening does not run for that rounding error.
 //! - Status values upstream ignores stay ignored (`EditParameterization` before
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
 //!   `GetKnots`, `N_CrvElevateDegree`, `SetMinMax`).
@@ -97,6 +106,17 @@ pub enum OrientType {
     Same,
     /// `SM_OT_OPPOSITE` (2): parametrised against it.
     Opposite,
+}
+
+/// Options of [`BSplineSurface::trim_with_domain_with`]. `Default` is upstream's
+/// `TrimWithDomain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TrimOptions {
+    /// Not upstream (tangency-labs/solidcore#472): a trim boundary at most
+    /// `SM_EFF_ZERO_PARAM` inside a knot is snapped onto the knot instead of being
+    /// moved `10 * SM_EFF_ZERO_SQRT * (1 + |t|)` away from it, which leaves a sliver
+    /// span. Off by default (upstream).
+    pub snap_roundoff_to_knots: bool,
 }
 
 /// The flags of [`BSplineSurface::evaluate`].
@@ -815,7 +835,22 @@ impl BSplineSurface {
     /// fails; `InvalidInput` when the snapped u boundaries are too close;
     /// `SM_ERR_NULL_POINTER` without NURB (once a trim is needed).
     pub fn trim_with_domain(&mut self, trim_domain: &mut Extent2d) -> Result<()> {
+        self.trim_with_domain_with(trim_domain, TrimOptions::default())
+    }
+
+    /// [`BSplineSurface::trim_with_domain`] with [`TrimOptions`]; the default options
+    /// are upstream's `TrimWithDomain`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::trim_with_domain`].
+    pub fn trim_with_domain_with(
+        &mut self,
+        trim_domain: &mut Extent2d,
+        options: TrimOptions,
+    ) -> Result<()> {
         const OP: &str = OP_TRIM;
+        let snap = options.snap_roundoff_to_knots;
         // get current natural boundary
         let natural_domain = self.natural_uv_domain();
 
@@ -834,6 +869,10 @@ impl BSplineSurface {
         let mut ur = trim_domain.max().x;
         let mut vl = trim_domain.min().y;
         let mut vr = trim_domain.max().y;
+
+        // Not upstream (#472): the requested domain as sm_CheckTrimBoundaries sees it,
+        // with any boundary snapped onto a knot by `snap_roundoff_to_knots`.
+        let (mut req_ul, mut req_ur, mut req_vl, mut req_vr) = (ul, ur, vl, vr);
 
         // don't build too small spans in u direction.
         {
@@ -856,8 +895,11 @@ impl BSplineSurface {
                 // when lower trim boundary is close to knot
                 if (knot - ul).abs() < tol_min {
                     // when trim boundary is slightly larger than knot - set trim
-                    // boundary to knot
-                    if ul >= knot || i == 0 {
+                    // boundary to knot (or, not upstream, a rounding error smaller)
+                    if ul >= knot || i == 0 || (snap && knot - ul <= EFF_ZERO_PARAM) {
+                        if snap && ul < knot {
+                            req_ul = knot;
+                        }
                         ul = knot;
                         idx_min = Some(i);
                     } else {
@@ -875,7 +917,10 @@ impl BSplineSurface {
 
                 // when upper trim boundary is close to knot
                 if (knot - ur).abs() < tol_max {
-                    if ur <= knot || i == last {
+                    if ur <= knot || i == last || (snap && ur - knot <= EFF_ZERO_PARAM) {
+                        if snap && ur > knot {
+                            req_ur = knot;
+                        }
                         ur = knot;
                         idx_max = Some(i);
                     } else {
@@ -896,7 +941,7 @@ impl BSplineSurface {
                 idx_min,
                 ur,
                 idx_max,
-                trim_domain,
+                &Extent2d::from_bounds(req_ul, req_vl, req_ur, req_vr),
                 SurfParamType::U,
             )?;
 
@@ -927,7 +972,10 @@ impl BSplineSurface {
             for (i, &knot) in knots.iter().enumerate() {
                 // snap lower V Trim boundaries as appropriate
                 if (knot - vl).abs() < tol_min {
-                    if vl >= knot || i == 0 {
+                    if vl >= knot || i == 0 || (snap && knot - vl <= EFF_ZERO_PARAM) {
+                        if snap && vl < knot {
+                            req_vl = knot;
+                        }
                         vl = knot;
                         idx_min = Some(i);
                     } else {
@@ -942,7 +990,10 @@ impl BSplineSurface {
 
                 // snap upper V Trim Boundaries as appropriate
                 if (knot - vr).abs() < tol_max {
-                    if vr <= knot || i == last {
+                    if vr <= knot || i == last || (snap && vr - knot <= EFF_ZERO_PARAM) {
+                        if snap && vr > knot {
+                            req_vr = knot;
+                        }
                         vr = knot;
                         idx_min = Some(i);
                     } else {
@@ -964,7 +1015,7 @@ impl BSplineSurface {
                 idx_min,
                 vr,
                 idx_max,
-                trim_domain,
+                &Extent2d::from_bounds(req_ul, req_vl, req_ur, req_vr),
                 SurfParamType::V,
             )?;
         }
@@ -1812,6 +1863,123 @@ mod tests {
         // outside the domain fails
         let mut bad = Extent2d::from_bounds(-1.0, 0.0, 0.5, 0.5);
         assert!(s.trim_with_domain(&mut bad).is_err());
+    }
+
+    /// A cubic-by-linear surface with u knots `u` (clamped) and v knots `v`, its
+    /// control points on z = 0.
+    fn net_with_knots(u: &[f64], v: &[f64]) -> BSplineSurface {
+        let (p, q) = (3, 1);
+        let nu = u.len() - p - 1;
+        let nv = v.len() - q - 1;
+        let net: Vec<Vec<CPoint>> = (0..nu)
+            .map(|i| {
+                (0..nv)
+                    .map(|j| CPoint::new(i as f64, j as f64, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let s = Surface::new(net, p, q, u.to_vec(), v.to_vec()).unwrap();
+        BSplineSurface::from_nurb(s, false)
+    }
+
+    fn u_knots(s: &BSplineSurface) -> Vec<f64> {
+        s.knots(SurfParamType::U, None).unwrap().0
+    }
+
+    fn v_knots(s: &BSplineSurface) -> Vec<f64> {
+        s.knots(SurfParamType::V, None).unwrap().0
+    }
+
+    /// tangency-labs/solidcore#472: the round's u knots and face domains of the
+    /// (+x,-y) and (-x,+y) rounds of a drafted box (their domains differ by one ULP).
+    #[test]
+    fn trim_one_ulp_inside_a_knot_leaves_a_sliver_upstream_and_none_with_snapping() {
+        let k = 20.152507010543033_f64;
+        let (k2, end) = (60.45751479, 80.61001657);
+        let u = [0.0, 0.0, 0.0, 0.0, k, k, k, k2, k2, k2, end, end, end, end];
+        let v = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let below = f64::from_bits(k.to_bits() - 1);
+        assert!(below < k && k - below < 4e-15);
+        let ur = 60.601175783809218;
+
+        // on the knot: no sliver
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(k, 0.0, ur, 1.0);
+        s.trim_with_domain(&mut dom).unwrap();
+        assert_eq!(u_knots(&s), vec![k, k2, ur]);
+        assert_eq!(dom.min().x, k);
+
+        // one ULP inside the knot: upstream moves the boundary 10 * 1e-6 * (1 + u) away
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(below, 0.0, ur, 1.0);
+        s.trim_with_domain(&mut dom).unwrap();
+        let sliver = k - 10.0 * EFF_ZERO_SQRT * (1.0 + below.abs());
+        assert_eq!(u_knots(&s), vec![sliver, k, k2, ur]);
+        assert!((k - sliver - 2.115e-4).abs() < 1e-6);
+
+        // with snapping: the boundary goes onto the knot, as for the face on it
+        let snap = TrimOptions {
+            snap_roundoff_to_knots: true,
+        };
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(below, 0.0, ur, 1.0);
+        s.trim_with_domain_with(&mut dom, snap).unwrap();
+        assert_eq!(u_knots(&s), vec![k, k2, ur]);
+        assert_eq!(dom.min().x, k);
+        assert_eq!(s.natural_uv_domain().min().x, k);
+    }
+
+    #[test]
+    fn snapping_covers_upper_and_v_boundaries() {
+        let u = [0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 5.0, 5.0, 5.0, 5.0];
+        let v = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let snap = TrimOptions {
+            snap_roundoff_to_knots: true,
+        };
+        let above = 2.0 + 1e-12;
+        let v_above = 0.5 + 1e-13;
+
+        // upstream: an upper boundary just outside a knot is moved further out
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(0.5, 0.0, above, v_above);
+        s.trim_with_domain(&mut dom).unwrap();
+        assert_eq!(dom.max().x, 2.0 + 10.0 * EFF_ZERO_SQRT * (1.0 + above));
+        assert_eq!(dom.max().y, 0.5 + 10.0 * EFF_ZERO_SQRT * (1.0 + v_above));
+        assert_eq!(u_knots(&s).len(), 3);
+
+        // with snapping both go onto their knots
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(0.5, 0.0, above, v_above);
+        s.trim_with_domain_with(&mut dom, snap).unwrap();
+        assert_eq!((dom.max().x, dom.max().y), (2.0, 0.5));
+        assert_eq!(u_knots(&s), vec![0.5, 2.0]);
+        assert_eq!(v_knots(&s), vec![0.0, 0.5]);
+
+        // lower v boundary just inside a knot
+        let mut s = net_with_knots(&u, &v);
+        let mut dom = Extent2d::from_bounds(0.5, 0.5 - 1e-13, 4.0, 1.0);
+        s.trim_with_domain_with(&mut dom, snap).unwrap();
+        assert_eq!(dom.min().y, 0.5);
+        assert_eq!(v_knots(&s), vec![0.5, 1.0]);
+    }
+
+    #[test]
+    fn snapping_leaves_boundaries_beyond_eff_zero_param_to_upstream() {
+        let u = [0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 5.0, 5.0, 5.0, 5.0];
+        let v = [0.0, 0.0, 1.0, 1.0];
+        let snap = TrimOptions {
+            snap_roundoff_to_knots: true,
+        };
+        for ul in [2.0 - 3e-8, 2.0 - 1e-6, 2.0 + 1e-9, 1.0] {
+            let mut a = net_with_knots(&u, &v);
+            let mut b = a.clone();
+            let mut da = Extent2d::from_bounds(ul, 0.0, 4.0, 1.0);
+            let mut db = da;
+            a.trim_with_domain(&mut da).unwrap();
+            b.trim_with_domain_with(&mut db, snap).unwrap();
+            assert_eq!(da, db, "ul = {ul}");
+            assert_eq!(u_knots(&a), u_knots(&b), "ul = {ul}");
+        }
     }
 
     #[test]

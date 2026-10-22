@@ -21,7 +21,7 @@
 //! | [`swap_uv`]                                  | `SmFace::SwapUV`                             |
 //! | [`move_seam`], [`MoveSeamOptions`], [`MoveSeamResult`], [`SeamProblem`] | `SmFace::MoveSeam` |
 //! | [`split_at_seam`], [`SeamSplit`]             | `SmFace::SplitAtSeam`                        |
-//! | [`shrink_geometry`]                          | `SmFace::ShrinkGeometry`                     |
+//! | [`shrink_geometry`], [`shrink_geometry_with`] | `SmFace::ShrinkGeometry`                    |
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
 //! Deviations:
@@ -110,6 +110,9 @@
 //!   (upstream asserts the recursion only fixes V seams); the port carries a depth and
 //!   returns [`SolidError::InvalidInput`] past [`MAX_SPLIT_AT_SEAM_DEPTH`]. Every other
 //!   loop is over B-rep arrays, knots or a fixed sample count.
+//! - **Not upstream: [`shrink_geometry_with`]** (tangency-labs/solidcore#472) passes
+//!   [`TrimOptions`] to the surface trim; [`shrink_geometry`] uses the defaults
+//!   (upstream). See `nurbs::b_spline_surface_n_lib::p2`'s Deviations.
 
 use core::cmp::Ordering;
 
@@ -134,7 +137,7 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{OrientType, TrimOptions};
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
 use crate::surface::surface::p4::NoObject;
@@ -1192,6 +1195,25 @@ pub fn shrink_geometry(
     f: FaceId,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
+    shrink_geometry_with(k, b, f, key_of, TrimOptions::default())
+}
+
+/// [`shrink_geometry`] with the [`TrimOptions`] of its surface trim (not upstream,
+/// tangency-labs/solidcore#472). The fillet executive's shrink of the new fillet faces
+/// passes [`TrimOptions::snap_roundoff_to_knots`], so that a face domain one rounding
+/// error inside a knot does not leave a sliver span on a round. The default options
+/// are upstream's `ShrinkGeometry`.
+///
+/// # Errors
+///
+/// Those of [`shrink_geometry`].
+pub fn shrink_geometry_with(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    trim: TrimOptions,
+) -> Result<()> {
     // no work - don't work on faces when in an intermediate state
     match fp2::surface(b, f)? {
         Some(s) if s.owner().is_some() => {}
@@ -1227,7 +1249,7 @@ pub fn shrink_geometry(
 
     // Trim the surface (status ignored)
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
-        ignore_status(s.trim_with_domain(k, &mut new_domain))?;
+        ignore_status(s.trim_with_domain_with(k, &mut new_domain, trim))?;
     }
 
     // remove all associated UVTrimCurves (status ignored)

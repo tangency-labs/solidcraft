@@ -31,7 +31,7 @@
 //! | [`Surface::intersect_with_plane`]                 | `IntersectWithPlane`                             |
 //! | [`Surface::reverse`], [`Surface::reparameterize`] | `Reverse`, `Reparameterize`                      |
 //! | [`Surface::split_at`], [`Surface::step_inversion`] | `SplitAt`, `STEPInversion`                      |
-//! | [`Surface::swap_uv`], [`Surface::transform`], [`Surface::trim_with_domain`] | `SwapUV`, `Transform`, `TrimWithDomain` |
+//! | [`Surface::swap_uv`], [`Surface::transform`], [`Surface::trim_with_domain`], [`Surface::trim_with_domain_with`] | `SwapUV`, `Transform`, `TrimWithDomain` |
 //! | [`Surface::knots`]                                | `GetKnots`                                       |
 //! | [`Surface::convert_uv_from_step_to_nurbs`], [`Surface::convert_uv_from_nurbs_to_step`] | `ConvertUVFromSTEPToNURBS`, `ConvertUVFromNURBSToSTEP` |
 //! | [`Surface::curve_on_classify`]                    | `CurveOnClassify`                                |
@@ -190,7 +190,9 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, LocationType, SurfParamType};
-use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType, SkinnedSurfaceOptions};
+use crate::nurbs::b_spline_surface_n_lib::p2::{
+    EvaluateFlags, OrientType, SkinnedSurfaceOptions, TrimOptions,
+};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::surface::cone::Cone;
@@ -1737,8 +1739,25 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn trim_with_domain(&mut self, k: &Kernel, trim_domain: &mut Extent2d) -> Result<()> {
+        self.trim_with_domain_with(k, trim_domain, TrimOptions::default())
+    }
+
+    /// [`Surface::trim_with_domain`] with [`TrimOptions`] (not upstream,
+    /// tangency-labs/solidcore#472). Only a plain B-spline surface reads them
+    /// ([`BSplineSurface::trim_with_domain_with`]); the other kinds trim as
+    /// [`Surface::trim_with_domain`]. The default options are upstream's.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::trim_with_domain`].
+    pub fn trim_with_domain_with(
+        &mut self,
+        k: &Kernel,
+        trim_domain: &mut Extent2d,
+        options: TrimOptions,
+    ) -> Result<()> {
         match &mut self.kind {
-            SurfaceKind::BSpline(s) => s.trim_with_domain(trim_domain),
+            SurfaceKind::BSpline(s) => s.trim_with_domain_with(trim_domain, options),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
             SurfaceKind::OffsetSurface(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::SrfInVolume(s) => s.trim_with_domain(k, trim_domain),
