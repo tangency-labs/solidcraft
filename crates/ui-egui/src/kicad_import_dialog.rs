@@ -17,8 +17,7 @@ pub struct Dialog {
     pub components: bool,
     pub copper: KicadCopper,
     pub silkscreen: bool,
-    /// Use the board's own `general.thickness` (otherwise `thickness`).
-    pub board_thickness: bool,
+    /// The board's thickness (mm): its own when the window opens, and editable.
     pub thickness: f64,
     pub color: [u8; 3],
 }
@@ -30,7 +29,6 @@ impl Dialog {
             components: true,
             copper: KicadCopper::None,
             silkscreen: true,
-            board_thickness: true,
             thickness: 1.6,
             color: [13, 84, 46],
         }
@@ -38,32 +36,38 @@ impl Dialog {
 
     /// The `doc.open` parameters, without the path.
     pub fn params(&self) -> Value {
-        let mut params = json!({
+        json!({
             "components": self.components,
             "copper": self.copper.as_str(),
             "silkscreen": self.silkscreen,
             "color": format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]),
-        });
-        if !self.board_thickness
-            && let Some(map) = params.as_object_mut()
-        {
-            map.insert("thickness".into(), json!(self.thickness));
-        }
-        params
+            "thickness": self.thickness,
+        })
     }
 
     /// Why the options cannot be imported yet, if they cannot.
     fn problem(&self) -> Option<&'static str> {
-        if !self.board_thickness && (!self.thickness.is_finite() || self.thickness <= 0.0 || self.thickness > 1000.0) {
+        if !self.thickness.is_finite() || self.thickness <= 0.0 || self.thickness > 1000.0 {
             return Some("Board thickness must be greater than 0 and at most 1000 mm.");
         }
         None
     }
 }
 
-/// Open the window for a chosen board.
+/// Open the window for a chosen board, starting from the board's own thickness.
 pub fn open(app: &mut SolveApp, path: &str) {
-    app.kicad_import = Some(Dialog::new(path));
+    let mut dialog = Dialog::new(path);
+    if let Some(thickness) = board_thickness(path) {
+        dialog.thickness = thickness;
+    }
+    app.kicad_import = Some(dialog);
+}
+
+/// The board's own thickness, read without building it (the import reads it again on a worker).
+fn board_thickness(path: &str) -> Option<f64> {
+    let board = solidcraft_engine::io::kicad_board_path(std::path::Path::new(path)).ok()?;
+    let bytes = solidcraft_engine::io::vfs::read(&board.to_string_lossy(), solidcraft_engine::io::MAX_KICAD_BYTES).ok()?;
+    solidcraft_engine::io::kicad_board_thickness(&bytes)
 }
 
 /// The window. Called once per frame while it is open.
@@ -76,16 +80,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(crate::i18n::tr("Open"), crate::i18n::tr("Cancel"), None)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, dialog.problem().is_none(), |ui| {
-            ui.label(crate::i18n::tr_label("The board substrate always comes in, with its cutouts and drilled holes."));
+            ui.label(crate::i18n::tr_label("Select options to include"));
             ui.add_space(6.0);
             egui::Grid::new("kicad_import_grid").num_columns(2).min_col_width(200.0).spacing([12.0, 6.0]).show(ui, |ui| {
-                let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("3D component models"));
+                let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("Include components"));
                 crate::scenario::publish_handle("kicad:components", r.rect.center());
                 ui.end_row();
 
                 let copper_label = ui.label(crate::i18n::tr_label("Copper (traces, vias, zones, pads)"));
                 crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
                     for (mode, label) in [
                         (KicadCopper::None, "None"),
                         (KicadCopper::Overlay, "Overlay on the board"),
@@ -100,21 +105,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.end_row();
 
-                let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Silkscreen"));
+                let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Include silkscreen"));
                 crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
                 ui.end_row();
 
+                ui.label(crate::i18n::tr_label("Board colour"));
                 let r = ui.color_edit_button_srgb(&mut dialog.color);
                 crate::scenario::publish_handle("kicad:color", r.rect.center());
-                ui.label(crate::i18n::tr_label("Board colour"));
                 ui.end_row();
 
-                let r = ui.checkbox(&mut dialog.board_thickness, crate::i18n::tr_label("Use the board's thickness"));
-                crate::scenario::publish_handle("kicad:board_thickness", r.rect.center());
-                let t = ui.add_enabled(
-                    !dialog.board_thickness,
-                    egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3),
-                );
+                ui.label(crate::i18n::tr_label("Board thickness"));
+                let t = ui.add(egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3));
                 crate::scenario::publish_handle("kicad:thickness", t.rect.center());
                 ui.end_row();
             });
@@ -152,8 +153,7 @@ mod tests {
         assert!(p.get("pads").is_none(), "pads follow the copper option");
         assert_eq!(p["silkscreen"], json!(false));
         assert_eq!(p["color"], json!("#010203"));
-        assert!(p.get("thickness").is_none());
-        d.board_thickness = false;
+        assert_eq!(p["thickness"], json!(1.6), "the board's thickness is always sent");
         d.thickness = 2.4;
         assert_eq!(d.params()["thickness"], json!(2.4));
     }
@@ -161,7 +161,6 @@ mod tests {
     #[test]
     fn an_impossible_thickness_is_refused() {
         let mut d = Dialog::new("board.kicad_pcb");
-        d.board_thickness = false;
         d.thickness = 0.0;
         assert!(d.problem().is_some());
         d.thickness = 2.0;
@@ -231,12 +230,12 @@ mod tests {
         let label = crate::scenario::rect_of("kicad:copper_label").expect("the copper label was drawn");
         assert!(label.width() > 150.0, "the copper label is squeezed: {label:?}");
         for label in [
-            "3D component models",
+            "Include components",
             "Copper (traces, vias, zones, pads)",
             "None",
             "Overlay on the board",
             "Modelled",
-            "Silkscreen",
+            "Include silkscreen",
         ] {
             assert!(h.widget(label).is_some(), "`{label}` is missing");
         }
@@ -258,13 +257,14 @@ mod tests {
         std::fs::write(
             &path,
             r#"(kicad_pcb (version 20240108) (generator pcbnew)
-  (general (thickness 1.6))
+  (general (thickness 2.2))
   (gr_rect (start -20 -20) (end 20 20) (stroke (width 0.1) (type default)) (fill none) (layer "Edge.Cuts"))
   (segment (start -10 0) (end 10 0) (width 2) (layer "F.Cu") (net 0)))"#,
         )
         .unwrap();
         open(&mut h.app, &path.to_string_lossy());
         h.frames(2);
+        assert!((h.app.kicad_import.as_ref().expect("the window opened").thickness - 2.2).abs() < 1e-9, "the window did not start at the board's thickness");
         h.step(&json!({"click": {"handle": "kicad:copper:overlay"}})).unwrap();
         h.frames(1);
         h.step(&json!({"widget": "Open"})).unwrap();

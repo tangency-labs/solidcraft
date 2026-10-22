@@ -61,7 +61,7 @@ mod kicad_in;
 pub use kicad_in::{
     DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile,
     KicadOptions, KicadPad, KicadRepresentation, KicadStroke, KicadText, KicadVia, KicadZone, MAX_KICAD_BYTES, is_kicad_path, kicad_board_mesh,
-    kicad_board_path, parse_kicad_board, parse_kicad_board_with, read_kicad,
+    kicad_board_path, kicad_board_thickness, parse_kicad_board, parse_kicad_board_with, read_kicad,
 };
 mod obj;
 pub use obj::read_obj;
