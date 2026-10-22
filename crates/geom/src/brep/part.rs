@@ -3,6 +3,8 @@
 //! of its faces, edges and vertices was in the whole. A lump of a body is the part of one of its
 //! material regions; material inside one of its voids (an island) is a lump of its own. Records
 //! of bodies apart from each other join into one by [`Brep::compound`].
+use serde::{Deserialize, Serialize};
+
 use super::{Brep, EdgeUseRef, Invalid, Loop, OrientedFace, Region, Result, Shell, require};
 
 /// A record cut from a larger one, and the source index of each of its items.
@@ -12,6 +14,26 @@ pub struct Part {
     pub faces: Vec<u32>,
     pub edges: Vec<u32>,
     pub vertices: Vec<u32>,
+}
+
+/// The most two material regions of a record share, least first: a point, a curve, an area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Contact {
+    /// A vertex and no edge or face: they touch at a point.
+    Vertex,
+    /// An edge and no face: they touch along a curve.
+    Edge,
+    /// A face: they meet over an area.
+    Face,
+}
+
+/// Two material regions that meet (positions in [`Brep::material_regions`], the lower first),
+/// and the most they share.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegionContact {
+    pub regions: [usize; 2],
+    pub contact: Contact,
 }
 
 /// First-appearance numbering of a subset of `n` source items.
@@ -43,6 +65,79 @@ impl Brep {
     /// Indices of the bounded material regions (not voids), in region order.
     pub fn material_regions(&self) -> Vec<usize> {
         self.regions.iter().enumerate().skip(1).filter(|(_, r)| !r.void).map(|(i, _)| i).collect()
+    }
+
+    /// How the material regions meet, read from the record: each pair of regions that shares a
+    /// face, an edge or a vertex, with the most they share. `regions` index
+    /// [`Brep::material_regions`] (so a body's lumps); pairs not listed are apart. Regions share
+    /// an edge where it is used by faces of both (more than two faces), a vertex where edges or
+    /// vertex loops of both end at it. Sorted by pair.
+    pub fn region_contacts(&self) -> Result<Vec<RegionContact>> {
+        let material = self.material_regions();
+        // The material regions (positions in `material`) each face, edge and vertex belongs to.
+        let mut on_face: Vec<Vec<usize>> = vec![Vec::new(); self.faces.len()];
+        let mut on_edge: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
+        let mut on_vertex: Vec<Vec<usize>> = vec![Vec::new(); self.vertices.len()];
+        let mark = |list: &mut Vec<Vec<usize>>, i: u32, k: usize| -> Result<()> {
+            let owners = list.get_mut(i as usize).ok_or(Invalid("contact reference"))?;
+            if owners.last() != Some(&k) {
+                owners.push(k);
+            }
+            Ok(())
+        };
+        for (k, &r) in material.iter().enumerate() {
+            let region = self.regions.get(r).ok_or(Invalid("region reference"))?;
+            for &s in &region.shells {
+                match self.shells.get(s as usize).ok_or(Invalid("shell reference"))? {
+                    Shell::Faces { faces, wires } => {
+                        for f in faces {
+                            mark(&mut on_face, f.face, k)?;
+                            for l in &self.faces.get(f.face as usize).ok_or(Invalid("face reference"))?.loops {
+                                match l {
+                                    Loop::Edges { edges } => {
+                                        for u in edges {
+                                            mark(&mut on_edge, u.edge, k)?;
+                                        }
+                                    }
+                                    Loop::Vertex { vertex } => mark(&mut on_vertex, *vertex, k)?,
+                                }
+                            }
+                        }
+                        for &e in wires {
+                            mark(&mut on_edge, e, k)?;
+                        }
+                    }
+                    Shell::Wire { edges } => {
+                        for &e in edges {
+                            mark(&mut on_edge, e, k)?;
+                        }
+                    }
+                    Shell::Vertex { vertex } => mark(&mut on_vertex, *vertex, k)?,
+                }
+            }
+        }
+        for (e, owners) in on_edge.iter().enumerate() {
+            for &v in &self.edges.get(e).ok_or(Invalid("edge reference"))?.vertices {
+                for &k in owners {
+                    let list = on_vertex.get_mut(v as usize).ok_or(Invalid("contact reference"))?;
+                    if !list.contains(&k) {
+                        list.push(k);
+                    }
+                }
+            }
+        }
+        let mut pairs = std::collections::BTreeMap::<[usize; 2], Contact>::new();
+        for (owners, contact) in [(&on_face, Contact::Face), (&on_edge, Contact::Edge), (&on_vertex, Contact::Vertex)] {
+            for list in owners.iter().filter(|l| l.len() > 1) {
+                for (i, &a) in list.iter().enumerate() {
+                    for &b in list.iter().skip(i + 1) {
+                        let most = pairs.entry([a.min(b), a.max(b)]).or_insert(contact);
+                        *most = (*most).max(contact);
+                    }
+                }
+            }
+        }
+        Ok(pairs.into_iter().map(|(regions, contact)| RegionContact { regions, contact }).collect())
     }
 
     /// The part made of the material regions `regions` (indices into `self.regions`, bounded,
