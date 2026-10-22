@@ -59,7 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.ruled", "Ruled Surface", ruled)
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
-        .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back). Lines and arcs give exact planes, cylinders and cones, other edges a fitted ruled B-spline. A new surface body"),
+        .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back); far?: [null|[[x,y,z]]] (per chain edge, the interior control points of a free strip's far curve, as the default curve's handles list them; null: the default). A constant ruling, or one keeping its angle to an arc's axis, gives an exact plane, cylinder or cone; where the rulings turn freely along an edge, the strip is the exact ruled surface to a far curve of its own (from corner to corner, fair, near the rulings' ends). A new surface body"),
     CommandSpec::new("surface.blend", "Blend Surface", blend)
         .at("SURFACE", "CREATE")
         .icon("surface_blend")
@@ -501,6 +501,26 @@ fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`face` must be [x, y, z] on a face"))?),
         None => None,
     };
+    // A free strip's far-curve handles, per chain edge: a list of points, or null for the default.
+    let far = match p.get("far").filter(|v| !v.is_null()) {
+        None => Vec::new(),
+        Some(v) => {
+            let lists =
+                v.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`far` must be a list, per edge, of null or [[x, y, z], ...]"))?;
+            lists
+                .iter()
+                .map(|h| match h {
+                    Value::Null => Ok(None),
+                    Value::Array(pts) if pts.len() <= 100_000 => pts
+                        .iter()
+                        .map(|q| vec3(q).map(Position).ok_or_else(|| bad(cmd, "`far` handles must be [x, y, z]")))
+                        .collect::<Result<Vec<_>>>()
+                        .map(Some),
+                    _ => Err(bad(cmd, "`far` must be a list, per edge, of null or [[x, y, z], ...]")),
+                })
+                .collect::<Result<Vec<_>>>()?
+        }
+    };
     let kind = FeatureKind::SurfaceRuled {
         body: BodyName(body),
         edges: edges.into_iter().map(Position).collect(),
@@ -511,6 +531,7 @@ fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
         flip: bool_(p, "flip").unwrap_or(false),
         corners,
         face: face.map(FacePick),
+        far,
     };
     add_feature(s, p, kind)
 }

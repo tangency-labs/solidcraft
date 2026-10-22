@@ -1568,7 +1568,9 @@ pub enum FeatureKind {
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
     /// face's normal; along `direction`), from the face at `face` where it borders the chain;
-    /// `flip` puts it on the other side; sharp corners as `corners` says.
+    /// `flip` puts it on the other side; sharp corners as `corners` says. `far`: per chain edge,
+    /// the interior control points of a free strip's far curve (moved handles); `None` or
+    /// missing, the kernel's default curve.
     SurfaceRuled {
         body: BodyName,
         edges: Vec<Position>,
@@ -1587,6 +1589,8 @@ pub enum FeatureKind {
         corners: RuledCorners,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         face: Option<FacePick>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        far: Vec<Option<Vec<Position>>>,
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
