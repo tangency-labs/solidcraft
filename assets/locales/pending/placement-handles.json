@@ -1,0 +1,18 @@
+{
+  "en": {
+    "Drag to move the rest across the model. It snaps to sketch points on the face.": "Drag to move the rest across the model. It snaps to sketch points on the face.",
+    "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely."
+  },
+  "ja": {
+    "Drag to move the rest across the model. It snaps to sketch points on the face.": "ドラッグしてレストをモデル上で移動します。面上のスケッチ点にスナップします。",
+    "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "ドラッグしてレストを 5° 刻みで回転します。Alt または Ctrl を押したままにすると自由に回転します。"
+  },
+  "pl": {
+    "Drag to move the rest across the model. It snaps to sketch points on the face.": "Przeciągnij, aby przesunąć podparcie po modelu. Przyciąga się do punktów szkicu na ścianie.",
+    "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Przeciągnij, aby obrócić podparcie co 5°. Przytrzymaj Alt lub Ctrl, aby obracać swobodnie."
+  },
+  "zh": {
+    "Drag to move the rest across the model. It snaps to sketch points on the face.": "拖动以在模型上移动垫块。它会吸附到面上的草图点。",
+    "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "拖动以 5° 为步长旋转垫块。按住 Alt 或 Ctrl 可自由旋转。"
+  }
+}

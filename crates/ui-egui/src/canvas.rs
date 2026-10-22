@@ -279,6 +279,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
         || (app.dialog.is_none()
             && app.tool.is_none()
             && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
+        || crate::place_gizmo::contains_pointer(app, p)
 }
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
@@ -350,6 +351,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     {
         draw(app, ui, painter, proj, &mut d, base, bs, dir);
     }
+    crate::place_gizmo::show(app, ui, painter, proj, &mut d);
     app.dialog = Some(d);
     // A Single hole's handles, over the depth arrow's stem: a press on a hole moves it.
     crate::hole_place::show(app, ui, painter, proj);
@@ -1472,7 +1474,7 @@ fn rotation_handle(
 
 /// An edge-on ring has two equally valid depths; retain the branch nearest the current handle.
 #[allow(clippy::too_many_arguments)]
-fn projected_rotation_angle(
+pub(crate) fn projected_rotation_angle(
     proj: &Proj,
     pointer: Pos2,
     centre: Vec3,

@@ -2379,9 +2379,11 @@ pub enum Shown {
     Max,
 }
 
-fn vec3_of(v: &Value) -> Option<Vec3> {
+/// A finite `[x, y, z]` of plain numbers.
+pub(crate) fn vec3_of(v: &Value) -> Option<Vec3> {
     let a = v.as_array()?;
-    Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+    let p = Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?);
+    p.is_finite().then_some(p)
 }
 
 /// The distance shown for a measured pair: which one, its value and its two ends. The chosen
