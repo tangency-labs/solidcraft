@@ -344,7 +344,7 @@ impl Stitch<'_> {
                 // get modified Brep Bounding box (status not checked)
                 let brep_bbox = ignored(qbrep::calculate_bounding_box(
                     k,
-                    b,
+                    &mut *b,
                     BoundingBoxOptions::default(),
                 ))?
                 .unwrap_or_default();

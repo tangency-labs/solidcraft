@@ -55,6 +55,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::LazyBrep;
 use crate::surface::surface::p1::{make_surface_cache, make_trim_srf_cache};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -108,8 +109,10 @@ pub fn evaluate_curve(k: &Kernel, curve: Option<&Curve>, parameter: f64) -> Resu
 
 // ---- bounding boxes ------------------------------------------------------------------------
 
-fn tight_face_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
-    crate::query::face::p3::calculate_tight_bounding_box(k, b, f)
+fn tight_face_box(k: &Kernel, lb: &mut LazyBrep<'_>, f: FaceId) -> Result<Extent3d> {
+    let mut face_bbox = Extent3d::new();
+    crate::query::face::p3::calculate_tight_bounding_box_into(k, lb, f, &mut face_bbox)?;
+    Ok(face_bbox)
 }
 
 const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
@@ -131,11 +134,32 @@ const NORMAL_BOX: BoundingBoxRequest = BoundingBoxRequest {
 /// or a vertex use without vertex; those of the curve and surface boxes and of the
 /// face's vertex and edge lists; with `tight`, those of
 /// [`crate::query::face::p3::calculate_tight_bounding_box`].
-pub fn calculate_bounding_box(k: &Kernel, b: &Brep, f: FaceId, tight: bool) -> Result<Extent3d> {
+pub fn calculate_bounding_box<'a>(
+    k: &Kernel,
+    b: impl Into<LazyBrep<'a>>,
+    f: FaceId,
+    tight: bool,
+) -> Result<Extent3d> {
+    calculate_bounding_box_in(k, &mut b.into(), f, tight)
+}
+
+/// [`calculate_bounding_box`] on a [`LazyBrep`] the caller keeps (for the B-rep's box,
+/// which runs it for every face).
+///
+/// # Errors
+///
+/// Those of [`calculate_bounding_box`].
+pub fn calculate_bounding_box_in(
+    k: &Kernel,
+    lb: &mut LazyBrep<'_>,
+    f: FaceId,
+    tight: bool,
+) -> Result<Extent3d> {
     // when asked - call expensive TightBoundingBox
     if tight {
-        return tight_face_box(k, b, f);
+        return tight_face_box(k, lb, f);
     }
+    let b = lb.get();
 
     let mut face_box = Extent3d::new();
 

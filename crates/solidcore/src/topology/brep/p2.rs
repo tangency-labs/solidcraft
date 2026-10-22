@@ -350,7 +350,7 @@ pub fn set_tolerance(
         // (status ignored: a failure leaves the initialised box)
         let bbox = crate::error::ignored(qbrep::calculate_bounding_box(
             k,
-            b,
+            &mut *b,
             BoundingBoxOptions::default(),
         ))?
         .unwrap_or_default();
@@ -1325,7 +1325,7 @@ pub fn ray_fire(
     answer_limit: Option<f64>,
 ) -> Result<RayFireResult> {
     // get Brep BoundingBox and BoundingSphere
-    let bbox = qbrep::calculate_bounding_box(k, b, BoundingBoxOptions::default())?;
+    let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     let sphere = bbox.sphere_bound();
     let radius = sphere.radius;
 

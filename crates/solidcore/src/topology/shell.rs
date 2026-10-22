@@ -1078,7 +1078,7 @@ where
         } else {
             shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
             // pBrep->CalculateBoundingBox(sBBox) (unit `query.brep`, default arguments)
-            qbrep::calculate_bounding_box(kernel, brep, BoundingBoxOptions::default())?
+            qbrep::calculate_bounding_box(kernel, &mut *brep, BoundingBoxOptions::default())?
                 .sphere_bound()
                 .radius
         };

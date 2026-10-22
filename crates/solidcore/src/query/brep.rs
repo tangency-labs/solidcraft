@@ -13,6 +13,7 @@
 //! | [`unlock_bounding_box`]                      | `SmBrep::UnLockBoundingBox`                    |
 //! | [`BrepQuery::point_3d_classify`]             | `SmBrep::Point3DClassify`                      |
 //! | [`BrepQuery`], [`BrepIdentity`]              | the B-rep's `SM_OC_BREP` cache (`CacheMakeOrValidate`) and pointer identities |
+//! | [`LazyBrep`]                                 | the `this` of the `const` box methods, which may edit the B-rep |
 //! | [`BrepClassifier`]                           | `Point3DClassify` on a B-rep held `const` (its lazily made UV trim curves on a copy) |
 //! | [`evaluate_surface_point`]                   | `SmApiEvaluateSurfacePoint`                    |
 //! | [`evaluate_surface_normal`]                  | `SmApiEvaluateSurfaceNormal`                   |
@@ -31,6 +32,11 @@
 //!   `SmTol::GetZoneTol3d`).
 //! - **Locked box.** `m_pLockedBoundingBox` is [`Brep::locked_bounding_box`], an
 //!   `Option` instead of a heap pointer.
+//! - **`const` boxes that edit.** A tight box classifies points on faces, which may
+//!   attach missing UV trim curves and raise edge tolerances (upstream does this to
+//!   the B-rep from its `const` methods). [`calculate_bounding_box`] and
+//!   [`calculate_tight_bounding_box`] take a [`LazyBrep`]: pass `&mut Brep` for the
+//!   upstream behaviour; with `&Brep` the edits are made on a private copy and lost.
 //! - **Ignored statuses.** [`calculate_tight_bounding_box`] ignores the statuses of the
 //!   edge and face boxes, as upstream, and keeps what a failed call leaves: the
 //!   previous face's box after a failed loose face box (upstream writes it only on
@@ -148,7 +154,13 @@ impl Default for BoundingBoxOptions {
 ///
 /// Those of the B-rep lists, [`qe::calculate_bounding_box`] and
 /// [`qf1::calculate_bounding_box`].
-pub fn calculate_bounding_box(k: &Kernel, b: &Brep, opts: BoundingBoxOptions) -> Result<Extent3d> {
+pub fn calculate_bounding_box<'a>(
+    k: &Kernel,
+    b: impl Into<LazyBrep<'a>>,
+    opts: BoundingBoxOptions,
+) -> Result<Extent3d> {
+    let mut lb = b.into();
+    let b = lb.get();
     // when LockedBoundingBox exists - return that value
     if let Some(locked) = b.locked_bounding_box() {
         return Ok(locked);
@@ -199,10 +211,10 @@ pub fn calculate_bounding_box(k: &Kernel, b: &Brep, opts: BoundingBoxOptions) ->
     if !opts.approx {
         // for every face
         for f in bp1::faces(b, None)? {
-            let mut f_bbox = qf1::calculate_bounding_box(k, b, f, opts.tight)?;
+            let mut f_bbox = qf1::calculate_bounding_box_in(k, &mut lb, f, opts.tight)?;
 
             if opts.expand_by_zone_tol_3d {
-                f_bbox.expand_absolute(face::p2::tolerance(b, f)?); // SM_USE_OLDTOL
+                f_bbox.expand_absolute(face::p2::tolerance(lb.get(), f)?); // SM_USE_OLDTOL
             }
 
             // union face bounding box into brep bounding box
@@ -222,7 +234,12 @@ pub fn calculate_bounding_box(k: &Kernel, b: &Brep, opts: BoundingBoxOptions) ->
 ///
 /// Those of the B-rep lists and vertex points; [`SolidError::Unported`] from the edge
 /// and face boxes.
-pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep) -> Result<Extent3d> {
+pub fn calculate_tight_bounding_box<'a>(
+    k: &Kernel,
+    b: impl Into<LazyBrep<'a>>,
+) -> Result<Extent3d> {
+    let mut lb = b.into();
+    let b = lb.get();
     let mut brep_bbox = Extent3d::new();
 
     for v in bp1::vertices(b, None)? {
@@ -250,7 +267,7 @@ pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep) -> Result<Extent3d> {
     // face).
     let mut face_bbox = Extent3d::new();
     for f in bp1::faces(b, None)? {
-        if let Some(loose) = ignored(qf1::calculate_bounding_box(k, b, f, false))? {
+        if let Some(loose) = ignored(qf1::calculate_bounding_box(k, lb.get(), f, false))? {
             face_bbox = loose;
         }
         if face_bbox.is_contained_by(&brep_bbox, 0.0) {
@@ -258,7 +275,7 @@ pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep) -> Result<Extent3d> {
         }
         ignore_status(qf3::calculate_tight_bounding_box_into(
             k,
-            b,
+            &mut lb,
             f,
             &mut face_bbox,
         ))?;
@@ -282,9 +299,9 @@ pub fn lock_bounding_box(k: &Kernel, b: &mut Brep, tight: bool) -> Result<()> {
     }
 
     let bbox = if tight {
-        calculate_tight_bounding_box(k, b)?
+        calculate_tight_bounding_box(k, &mut *b)?
     } else {
-        calculate_bounding_box(k, b, BoundingBoxOptions::default())?
+        calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?
     };
 
     // Okay, now lock it.
@@ -554,6 +571,57 @@ impl<'a> BrepQuery<'a> {
         pc.set_deviation(0.0); // SM_USE_OLDTOL
         pc.set_pre_snap_param(BIG_DOUBLE);
         Ok(pc)
+    }
+}
+
+/// A B-rep an upstream `const` query may still edit (`PointClassify` attaches missing
+/// UV trim curves, and `SetUVTrimCurve` raises the edge tolerances to fit them): the
+/// caller's, lent mutably, where the edits persist as upstream; or one the caller holds
+/// shared, edited on a private copy made at the first edit, whose edits are lost when
+/// the query returns. Built with `From` from `&mut Brep` or `&Brep`.
+#[derive(Debug)]
+pub enum LazyBrep<'a> {
+    /// The caller's B-rep, edited in place.
+    Own(&'a mut Brep),
+    /// A B-rep the caller holds shared.
+    Shared {
+        /// The caller's B-rep.
+        source: &'a Brep,
+        /// Its private copy, made at the first edit.
+        copy: Option<Box<Brep>>,
+    },
+}
+
+impl<'a> From<&'a mut Brep> for LazyBrep<'a> {
+    fn from(b: &'a mut Brep) -> Self {
+        Self::Own(b)
+    }
+}
+
+impl<'a> From<&'a Brep> for LazyBrep<'a> {
+    fn from(source: &'a Brep) -> Self {
+        Self::Shared { source, copy: None }
+    }
+}
+
+impl LazyBrep<'_> {
+    /// The B-rep as it stands (the copy once made).
+    #[must_use]
+    pub fn get(&self) -> &Brep {
+        match self {
+            Self::Own(b) => b,
+            Self::Shared { source, copy } => copy.as_deref().unwrap_or(source),
+        }
+    }
+
+    /// The B-rep to edit, copying a shared one first.
+    pub fn get_mut(&mut self) -> &mut Brep {
+        match self {
+            Self::Own(b) => b,
+            Self::Shared { source, copy } => {
+                copy.get_or_insert_with(|| Box::new((*source).clone()))
+            }
+        }
     }
 }
 
@@ -966,6 +1034,23 @@ mod tests {
         let _ = classifier.point_3d_classify(&k, Point3::new(3.0, 2.0, 1.0), 1e-6, false);
         assert!(core::ptr::eq(classifier.brep(), copied), "copied once");
         assert_eq!(format!("{b:?}"), before);
+    }
+
+    #[test]
+    fn lazy_brep_edits_the_callers_brep_or_a_copy() {
+        let mut b = Brep::new();
+        let v = b.add_vertex(Point3::new(1.0, 2.0, 3.0)).unwrap();
+
+        let mut shared = LazyBrep::from(&b);
+        shared.get_mut().vertex_mut(v).unwrap().tolerance = 0.5;
+        assert_eq!(shared.get().vertex(v).unwrap().tolerance, 0.5);
+        drop(shared);
+        assert_ne!(b.vertex(v).unwrap().tolerance, 0.5);
+
+        let mut own = LazyBrep::from(&mut b);
+        own.get_mut().vertex_mut(v).unwrap().tolerance = 0.5;
+        drop(own);
+        assert_eq!(b.vertex(v).unwrap().tolerance, 0.5);
     }
 
     #[test]

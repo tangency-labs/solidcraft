@@ -37,10 +37,12 @@
 //!   borrows the B-rep and resolves the face, surface, topology, edge curve and trim
 //!   curve handles `CurveOnClassify` makes against it.
 //! - **B-rep snapshots.** `PointClassify` (tight box) and `SmEdge::IsSeam` (bisector)
-//!   may attach missing UV trim curves to the B-rep, which the port's functions take
-//!   immutably; they run on one private copy of the B-rep per call, as
-//!   `query::face::p2`'s boundary views do. The attached curves are the same ones a
-//!   later call makes again, so no result changes.
+//!   may attach missing UV trim curves to the B-rep, and `SetUVTrimCurve` then raises
+//!   the edge (and vertex) tolerances, which changes later tolerance-expanded boxes.
+//!   The tight box takes a [`LazyBrep`]: given `&mut Brep` the edits persist, as
+//!   upstream; given `&Brep` they go to a private copy and are lost. The bisector runs
+//!   on one private copy of the B-rep per call, as `query::face::p2`'s boundary views
+//!   do.
 //! - **Surface boxes of a face's surface.** `IsPlanar` and `CalculateBoundingBox` of a
 //!   B-spline, plane or surface of revolution expand their boxes by the owning face's
 //!   tolerance (`GetFace()->GetTolerance()`); the port's surface cannot reach its face,
@@ -102,6 +104,7 @@ use crate::nurbs::b_spline_surface::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
     curve_on_classify, face_vertices, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
@@ -334,9 +337,13 @@ fn surface_bounding_box(
 /// those of [`face_vertices`], the edge boxes ([`qe::calculate_tight_bounding_box`]),
 /// the planarity test and the surface's loose box; [`SolidError::Unported`] from the
 /// global solves and point classifications.
-pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
+pub fn calculate_tight_bounding_box<'a>(
+    k: &Kernel,
+    b: impl Into<LazyBrep<'a>>,
+    f: FaceId,
+) -> Result<Extent3d> {
     let mut face_bbox = Extent3d::new();
-    calculate_tight_bounding_box_into(k, b, f, &mut face_bbox)?;
+    calculate_tight_bounding_box_into(k, &mut b.into(), f, &mut face_bbox)?;
     Ok(face_bbox)
 }
 
@@ -350,13 +357,16 @@ pub fn calculate_tight_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<E
 /// Those of [`calculate_tight_bounding_box`].
 pub fn calculate_tight_bounding_box_into(
     k: &Kernel,
-    b: &Brep,
+    lb: &mut LazyBrep<'_>,
     f: FaceId,
     out: &mut Extent3d,
 ) -> Result<()> {
+    let b = lb.get();
     let mut face_bbox = Extent3d::new();
 
-    let surface = face_surface(b, f, OP_TIGHT)?;
+    // (a copy that keeps the owning face: the point classifications below may edit
+    // the B-rep)
+    let surface = &face_surface(b, f, OP_TIGHT)?.clone_for_evaluation()?;
     let face_zone_tol_3d = zone_tol3d(k, b.face(f)?.tolerance);
 
     // Method: get the bounding box of the Vertices.
@@ -403,8 +413,6 @@ pub fn calculate_tight_bounding_box_into(
     let mut srf_bbox = Extent3d::new();
 
     let mut dir_vec = Vec3::new(1.0, 0.0, 0.0); // +/- x
-                                                // (PointClassify may attach missing UV trim curves: a private snapshot of the B-rep)
-    let mut snapshot = b.clone();
     for idx in 0..3 {
         if idx == 1 {
             dir_vec = Vec3::new(0.0, 1.0, 0.0); // +/- y
@@ -436,9 +444,10 @@ pub fn calculate_tight_bounding_box_into(
                 );
                 let mut eval = SurfaceEval::with_uv(k, Some(surface), uv.x, uv.y);
                 // (status ignored upstream)
+                // (it may attach missing UV trim curves to the B-rep)
                 ignored(point_classify(
                     k,
-                    &mut snapshot,
+                    lb.get_mut(),
                     f,
                     uv,
                     &mut pt_class,

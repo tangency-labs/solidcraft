@@ -1171,7 +1171,7 @@ impl<'c> Stitch<'c> {
             // upstream (a failure leaves the default-initialised box)
             let brep_bbox = ignored(qbrep::calculate_bounding_box(
                 k,
-                b,
+                &mut *b,
                 BoundingBoxOptions::default(),
             ))?
             .unwrap_or_default();

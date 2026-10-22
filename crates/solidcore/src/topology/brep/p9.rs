@@ -120,7 +120,7 @@ where
             Some(bounds) => bounds,
             None => crate::error::ignored(qbrep::calculate_bounding_box(
                 k,
-                b,
+                &mut *b,
                 BoundingBoxOptions::default(),
             ))?
             .unwrap_or_else(crate::geom::extent3d::Extent3d::new),
