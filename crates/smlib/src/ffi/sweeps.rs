@@ -1,5 +1,5 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_loft`, `smlib_screw_sweep`; the fork's `capi/src/smlib_sweeps.cpp`), declared by hand.
+//! `smlib_loft`, `smlib_screw_sweep`, `smlib_sweep_stations`; the fork's `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
 //! the curve lists.
 
@@ -20,6 +20,12 @@ pub const CURVE_MAX_POINTS: usize = 100_000;
 
 pub const SWEEP_FOLLOW: i32 = 0;
 pub const SWEEP_TRANSLATE: i32 = 1;
+
+pub const ENDS_OPEN: i32 = 0;
+pub const ENDS_CAPPED: i32 = 1;
+pub const ENDS_JOINED: i32 = 2;
+pub const SWEEP_MAX_STATIONS: usize = 4096;
+pub const SWEEP_MAX_STATION_CURVES: usize = 400_000;
 
 /// A curve list as the C API reads it: kinds (with a NURBS curve's degree and point count) and
 /// each curve's numbers.
@@ -105,6 +111,16 @@ unsafe extern "C" {
         tolerance: f64,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_sweep_stations(
+        kinds: *const i64,
+        n_kinds: i64,
+        reals: *const f64,
+        n_reals: i64,
+        maps: *const f64,
+        n_stations: i64,
+        ends: i32,
+        out: *mut *mut RawBrep,
+    ) -> i32;
 }
 
 /// The list's arrays and lengths as the C API takes them.
@@ -147,6 +163,17 @@ pub fn screw_sweep(profile: &List, origin: &[f64; 3], direction: &[f64; 3], pitc
     new_brep(|out| unsafe { smlib_screw_sweep(k, nk, r, nr, origin.as_ptr(), direction.as_ptr(), pitch, turns, tolerance, out) })
 }
 
+/// `maps` holds 12 numbers per station (a matrix by columns, then a translation).
+#[cfg(feature = "native")]
+pub fn sweep_stations(profile: &List, maps: &[f64], ends: i32) -> Result<Handle, i32> {
+    let (k, nk, r, nr) = raw(profile)?;
+    if !maps.len().is_multiple_of(12) {
+        return Err(ERR_ARG);
+    }
+    let n = i64::try_from(maps.len() / 12).map_err(|_| ERR_ARG)?;
+    new_brep(|out| unsafe { smlib_sweep_stations(k, nk, r, nr, maps.as_ptr(), n, ends, out) })
+}
+
 #[cfg(not(feature = "native"))]
 pub fn extrude(_: &List, _: &[f64; 3], _: f64, _: f64, _: bool) -> Result<Handle, i32> {
     Err(NOT_BUILT)
@@ -169,5 +196,10 @@ pub fn loft(_: &List, _: &[i64], _: i32, _: bool) -> Result<Handle, i32> {
 
 #[cfg(not(feature = "native"))]
 pub fn screw_sweep(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, _: f64) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn sweep_stations(_: &List, _: &[f64], _: i32) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
