@@ -179,8 +179,14 @@ impl SurfaceEval {
     /// The parameters of `p`, a point within `accept` of the surface, from `near` when given
     /// (not unwrapped to it).
     pub fn project(&self, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
+        self.project_with(&uv::Starts::default(), p, near, accept)
+    }
+
+    /// [`SurfaceEval::project`] with the search grid of a spline or revolution kept in `starts`
+    /// ([`uv::project_with`]), which must serve this surface only.
+    pub fn project_with(&self, starts: &uv::Starts, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
         let q = match self {
-            SurfaceEval::Eval(e, dom) => return uv::project(e, dom, p, near, accept),
+            SurfaceEval::Eval(e, dom) => return uv::project_with(e, dom, starts, p, near, accept),
             SurfaceEval::Cylinder { axes, .. } => {
                 let [a, b, h] = axes.local(p);
                 [angle(a, b, near.map(|n| n[0])), h]

@@ -148,9 +148,11 @@ fn own_pcurve(c: &Curve2, [t0, t1]: [f64; 2], budget: &mut Budget) -> Result<Cur
     Ok(c.clone())
 }
 
-/// A face's surface: its evaluator and parameter box.
+/// A face's surface: its evaluator and parameter box, and the grid a point's parameters on it
+/// are searched from, made once for all the face's points.
 struct On {
     surface: SurfaceEval,
+    starts: uv::Starts,
     dom: Domain,
     /// The face's own parameter box, where its kernel gives one.
     face: Option<[[f64; 2]; 2]>,
@@ -172,7 +174,7 @@ impl On {
     fn new(s: &Surface) -> Result<Self> {
         let surface = SurfaceEval::new(s)?;
         let dom = surface.domain();
-        Ok(On { surface, dom, face: None })
+        Ok(On { surface, starts: uv::Starts::default(), dom, face: None })
     }
 
     fn within(self, face: Option<[[f64; 2]; 2]>) -> Self {
@@ -293,7 +295,7 @@ impl On {
 
     /// The parameters of `p` within `accept`, from `near` (and unwrapped to it) when given.
     fn project(&self, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
-        let mut q = self.surface.project(p, near, accept)?;
+        let mut q = self.surface.project_with(&self.starts, p, near, accept)?;
         if let Some(n) = near {
             for (d, x) in q.iter_mut().enumerate() {
                 *x = uv::unwrap(*x, n[d], self.dom.period.get(d).copied().flatten());
