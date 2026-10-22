@@ -25,8 +25,8 @@ pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
 mod tests {
     use super::*;
     use crate::blend::Faces;
-    use solidcraft_geom::brep::eval::CurveEval;
     use crate::{box_solid, fillet, measure};
+    use solidcraft_geom::brep::eval::CurveEval;
 
     /// The 20 mm box and the three edges at its corner (20, 0, 20): `a` along y, `b` along x,
     /// `c` up.
@@ -326,11 +326,7 @@ mod tests {
                 let rec = Faces::of(&result).unwrap();
                 for f in 0..rec.rec.faces.len() {
                     let Some(n) = rec.plane_normal(f) else { continue };
-                    let points: Vec<Vec3> = rec
-                        .uses(f)
-                        .filter_map(|u| rec.ends(u.edge as usize))
-                        .flat_map(|(a, b)| [a, b])
-                        .collect();
+                    let points: Vec<Vec3> = rec.uses(f).filter_map(|u| rec.ends(u.edge as usize)).flat_map(|(a, b)| [a, b]).collect();
                     let origin = points[0];
                     for p in points {
                         assert!((p - origin).dot(n).abs() < 1e-7);
