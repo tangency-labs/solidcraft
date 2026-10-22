@@ -542,7 +542,7 @@ impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
         self.backend.brep_tolerance(self.brep)
     }
     fn sector(
-        &self,
+        &mut self,
         _face: O,
         _vertex: Option<O>,
         _curve: &O,

@@ -218,6 +218,7 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
             };
             let mut out = old;
             let st = status(p5::make_edge_in_face(
+                k,
                 b,
                 i.editing,
                 face,
@@ -229,6 +230,7 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
                 OrientType::Same,
                 0.,
                 &mut out,
+                None,
             ))?;
             vec![
                 st,

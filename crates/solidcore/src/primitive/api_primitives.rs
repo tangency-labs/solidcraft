@@ -900,13 +900,14 @@ mod tests {
         for r in [create_sphere(k, o(), 5.0), create_torus(k, o(), 10.0, 2.0)] {
             assert_eq!(deferred_at(&r), Some("topology.brep_p6"));
         }
-        // partial solids sweep a profile (topology sweep) until SmFace::FindVertexSector
+        // partial solids sweep a profile (topology sweep) past SmFace::FindVertexSector
+        // until SmBrep::DeleteEdge
         for r in [
             create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
             create_partial_cylinder(k, o(), 5.0, 10.0, 0.0, 90.0),
             create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
         ] {
-            assert_eq!(deferred_at(&r), Some("topology.face_p4"));
+            assert_eq!(deferred_at(&r), Some("topology.brep_p4"));
         }
         assert_eq!(
             deferred_at(&create_sphere_no_pole(k, o(), -5.0)),

@@ -358,8 +358,7 @@ pub trait SweepAccess {
         orientation: OrientType,
         tolerance: f64,
     ) -> Result<EdgeRef> {
-        let brep = self.brep_mut(face.0)?;
-        let editing = brep.editing_enabled();
+        let editing = self.brep_mut(face.0)?.editing_enabled();
         if editing && (start.0 != face.0 || end.0 != face.0) {
             return Err(SolidError::invalid_input(
                 super::OP,
@@ -367,19 +366,23 @@ pub trait SweepAccess {
             ));
         }
         let mut output = crate::topology::brep::p5::EdgeInFace::default();
-        crate::topology::brep::p5::make_edge_in_face_with_uv_curve(
-            brep,
-            editing,
-            Some(face.1),
-            Some(start.1),
-            Some(end.1),
-            curve,
-            uv_curve,
-            interval,
-            orientation,
-            tolerance,
-            &mut output,
-        )?;
+        self.with_brep_mut(face.0, |k, brep, _face_ref, env| {
+            crate::topology::brep::p5::make_edge_in_face_with_uv_curve(
+                k,
+                brep,
+                editing,
+                Some(face.1),
+                Some(start.1),
+                Some(end.1),
+                curve,
+                uv_curve,
+                interval,
+                orientation,
+                tolerance,
+                &mut output,
+                Some(env),
+            )
+        })?;
         Ok((
             face.0,
             output

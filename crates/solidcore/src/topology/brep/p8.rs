@@ -639,6 +639,7 @@ pub fn create_faces_with_curves(
                 let mut made = EdgeInFace::default();
                 let editing = b.editing_enabled();
                 p5::make_edge_in_face(
+                    k,
                     b,
                     editing,
                     Some(face),
@@ -650,6 +651,7 @@ pub fn create_faces_with_curves(
                     orient,
                     tol,
                     &mut made,
+                    Some(&mut *fenv.env),
                 )?;
 
                 // A new face must be created when the loop exhausts:

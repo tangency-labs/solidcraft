@@ -833,9 +833,12 @@ mod tests {
                 OrientType::Same,
                 0.375
             ),
-            Err(SolidError::Unported {
-                upstream: "SmFace::FindVertexSector",
-                unit: "topology.face_p4"
+            // FindVertexSector (topology.face_p4) finds no sector of a face without
+            // face uses, so MakeEdgeInFace's NER(pStartVU) reports a null pointer
+            Err(SolidError::Upstream {
+                operation: "topology::brep::p5",
+                code: 1006,
+                ..
             })
         ));
         model.b[0].set_editing_enabled(false);
