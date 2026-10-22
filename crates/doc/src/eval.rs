@@ -2995,6 +2995,31 @@ fn apply_traced_with(
                 let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("join produced nothing".into()))?;
                 Ok(Traced::step(u, &[a, b]))
             };
+            // One target takes every tool, whichever it meets: the result is the union of all of
+            // them, made in a balanced tree of unions so that each body is in about log2(n) of
+            // them, instead of the target growing by one tool at a time and taking part, ever
+            // larger, in every one (n tools cost n²).
+            if let [keep] = live.as_slice()
+                && tools.len() > 1
+            {
+                let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(()) };
+                let mut level: Vec<Traced> = std::iter::once(base).chain(tools).collect();
+                while level.len() > 1 {
+                    let mut next = Vec::with_capacity(level.len().div_ceil(2));
+                    let mut it = level.into_iter();
+                    while let Some(a) = it.next() {
+                        next.push(match it.next() {
+                            Some(b) => union(&a, &b)?,
+                            None => a,
+                        });
+                    }
+                    level = next;
+                }
+                if let (Some(acc), Some(mb)) = (level.pop(), state.bodies.iter_mut().find(|b| b.name == *keep)) {
+                    *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+                }
+                return Ok(());
+            }
             for tool in &tools {
                 let mut met: Vec<String> = Vec::new();
                 for name in &live {
