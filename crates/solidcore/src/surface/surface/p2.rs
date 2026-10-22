@@ -73,6 +73,8 @@
 //!   64-level depth bound before invoking recursive copies. The surface evaluator
 //!   also bounds its wrapper traversal to 64 levels and retains B-spline output
 //!   written before zero-tangent correction fails, as upstream accessors do.
+//!   Leaf B-spline and plane checks avoid allocating a traversal stack, while
+//!   preserving the same depth-limit rejection.
 //! - **Object model.** `SmSurface` is not abstract upstream, but every ported surface
 //!   is a derived class: the [`SurfaceKind`] variants. The ported kinds are
 //!   [`BSplineSurface`], [`CurveBoundedSurface`] (unit
@@ -350,6 +352,13 @@ impl Surface {
     /// Check every owned geometry branch before invoking recursive `Clone` impls.
     /// This includes trim curves and volume chains, not only the surface basis.
     pub(crate) fn check_evaluation_copy_depth(&self, initial_depth: usize) -> Result<()> {
+        // These variants own no nested geometry. Preserve the depth-limit error
+        // through the general walker, but avoid its stack allocation for leaves.
+        if initial_depth < 64
+            && matches!(self.kind(), SurfaceKind::BSpline(_) | SurfaceKind::Plane(_))
+        {
+            return Ok(());
+        }
         Self::check_owned_evaluation_copy_depth(
             EvaluationCopyGeometry::Surface(self),
             initial_depth,
@@ -5514,6 +5523,25 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn evaluation_copy_leaf_depth_boundary_matches_general_walk() {
+        for surface in [
+            bilinear(),
+            Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)),
+        ] {
+            for depth in [0, 63, 64, usize::MAX] {
+                let general = Surface::check_owned_evaluation_copy_depth(
+                    EvaluationCopyGeometry::Surface(&surface),
+                    depth,
+                    "surface::surface::p2::clone_for_evaluation",
+                );
+                let leaf = surface.check_evaluation_copy_depth(depth);
+                assert_eq!(format!("{leaf:?}"), format!("{general:?}"));
+                assert_eq!(leaf.is_ok(), depth < 64);
+            }
+        }
     }
 
     #[test]
