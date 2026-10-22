@@ -1855,12 +1855,15 @@ impl SolveApp {
     }
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
-    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
+    /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
+    /// board asks for its import settings.
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
+            } else if solidcraft_engine::io::is_kicad_path(&path) {
+                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -2231,6 +2234,12 @@ impl SolveApp {
             } else {
                 self.pick_design_to_insert();
             }
+            return;
+        }
+        if id == "doc.open" {
+            // Open asks for the file (and a board for its import options) rather than running
+            // the command with no path.
+            self.pick_open_file();
             return;
         }
         if id == "component.relink" {
