@@ -5698,7 +5698,7 @@ fn feature_tools_with_constructor(
             let points = path_points(ps, path, start)?;
             let segs = match points {
                 Some(_) => Vec::new(),
-                None => path_segments(ps, path, start)?,
+                None => path_segments_at(ps, path, start, Some(&ss.plane))?,
             };
             let path_start =
                 points.as_ref().and_then(|p| p.points().first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
@@ -5973,6 +5973,14 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
 }
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
+    path_segments_at(ps, ids, start, None)
+}
+
+/// [`path_segments`] for a profile in `profile`: a closed path is followed from where the
+/// profile's plane crosses it nearest `start`, the curve there split in two, when that is not
+/// already where the chain starts (#3345). Swept from anywhere else, the profile would stand
+/// off the path by the distance between the two.
+pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
     if ids.is_empty() || ids.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
@@ -6011,6 +6019,9 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
             return Err(DocError::Invalid("the path curves are not connected end to end".into()));
         }
     }
+    if let Some(profile) = profile {
+        segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
+    }
     let n = ps.plane.normal();
     Ok(segs
         .iter()
@@ -6024,6 +6035,50 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
             }
         })
         .collect())
+}
+
+/// A closed chain `segs` (in the plane `path`) begun where `profile`'s plane crosses it nearest
+/// `start`: the curve there split in two, its second part first and its first part last (or the
+/// chain begun at the joint there). Unchanged when the chain is open, already starts on the
+/// profile's plane, or its point nearest `start` is off that plane.
+fn from_profile_on_closed_path(segs: Vec<solidcraft_geom::Seg2>, path: &Plane, profile: &Plane, start: Vec3) -> Vec<solidcraft_geom::Seg2> {
+    let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return segs };
+    let size: f64 = segs.iter().map(solidcraft_geom::Seg2::length).sum();
+    let on_plane = |p: Vec2| profile.height(path.to_world(p)).abs() <= (size * 1e-9).max(1e-9);
+    if !start.is_finite() || !(size > 0.0 && size.is_finite()) || last.end().dist(first.start()) > 1e-5 || on_plane(first.start()) {
+        return segs;
+    }
+    let local = path.to_local(start);
+    let Some((k, t, q)) = segs
+        .iter()
+        .enumerate()
+        .map(|(k, s)| {
+            let t = s.closest_param(local);
+            (k, t, path.to_world(s.point_at(t)))
+        })
+        .min_by(|a, b| a.2.dist(start).total_cmp(&b.2.dist(start)))
+    else {
+        return segs;
+    };
+    if profile.height(q).abs() > (size * 1e-6).max(1e-6) {
+        return segs;
+    }
+    let Some(seg) = segs.get(k).copied() else { return segs };
+    let n = segs.len();
+    let from = |k: usize| segs.iter().cycle().skip(k % n).take(n).copied().collect::<Vec<_>>();
+    let at = |p: Vec2| path.to_world(p).dist(q) <= 1e-6;
+    if at(seg.start()) {
+        return from(k);
+    }
+    if at(seg.end()) {
+        return from(k + 1);
+    }
+    let (before, after) = seg.split_at(t);
+    let mut out = Vec::with_capacity(n + 1);
+    out.push(after);
+    out.extend(from(k + 1).into_iter().take(n - 1));
+    out.push(before);
+    out
 }
 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
