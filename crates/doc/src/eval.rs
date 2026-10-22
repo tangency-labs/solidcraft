@@ -359,12 +359,18 @@ pub struct ThreadInfo {
     pub end: f64,
 }
 
-/// ISO metric coarse threads: (nominal diameter, pitch).
-const ISO_COARSE: [(f64, f64); 22] = [
+/// ISO metric coarse threads (ISO 261, first and second choice): (nominal diameter, pitch).
+const ISO_COARSE: [(f64, f64); 34] = [
+    (1.0, 0.25),
+    (1.2, 0.25),
+    (1.4, 0.3),
     (1.6, 0.35),
+    (1.8, 0.35),
     (2.0, 0.4),
+    (2.2, 0.45),
     (2.5, 0.45),
     (3.0, 0.5),
+    (3.5, 0.6),
     (4.0, 0.7),
     (5.0, 0.8),
     (6.0, 1.0),
@@ -379,10 +385,16 @@ const ISO_COARSE: [(f64, f64); 22] = [
     (24.0, 3.0),
     (27.0, 3.0),
     (30.0, 3.5),
+    (33.0, 3.5),
     (36.0, 4.0),
+    (39.0, 4.0),
     (42.0, 4.5),
+    (45.0, 4.5),
     (48.0, 5.0),
+    (52.0, 5.0),
     (56.0, 5.5),
+    (60.0, 5.5),
+    (64.0, 6.0),
 ];
 
 /// Nominal diameters and coarse pitches (mm) used for automatic ISO metric thread sizing.
