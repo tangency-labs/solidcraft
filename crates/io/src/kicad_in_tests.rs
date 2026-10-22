@@ -173,7 +173,8 @@ fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
     let imported = read_kicad(BOARD.as_bytes(), "test.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    assert_eq!(meshes.len(), 1, "only the board substrate should remain");
+    assert!(meshes.is_empty(), "only the solid board should remain");
+    assert!(imported.board_step.is_some(), "the board is not a solid");
     assert!(imported.plan.places.is_empty());
     assert!(imported.feature.warnings.iter().any(|warning| warning.contains("model file was not found")));
 }
@@ -240,11 +241,10 @@ fn import_options_build_copper_silk_and_a_colour_and_keep_the_plan_flat() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     let names: Vec<&str> = meshes.iter().map(|m| m.name.as_str()).collect();
-    assert!(names.contains(&"board"), "{names:?}");
+    assert!(!names.contains(&"board"), "the board is a solid, not a mesh: {names:?}");
+    assert!(imported.board_step.is_some(), "the board is not a solid");
     assert!(names.contains(&"Copper F.Cu"), "{names:?}");
     assert!(names.contains(&"Silkscreen F.SilkS"), "{names:?}");
-    let board = meshes.iter().find(|m| m.name == "board").unwrap();
-    assert_eq!(board.color, Some([0x11u8 as f32 / 255.0, 0x22u8 as f32 / 255.0, 0x33u8 as f32 / 255.0]));
     assert!(imported.plan.places.is_empty());
     assert!(imported.plan.slots.is_empty());
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -279,8 +279,28 @@ fn copper_and_silkscreen_are_off_by_default() {
     let options = KicadOptions { silkscreen: false, ..Default::default() };
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    assert_eq!(meshes.len(), 1);
-    assert_eq!(meshes[0].name, "board");
+    assert!(meshes.is_empty(), "only the board would be there");
+    assert!(imported.board_step.is_some(), "the board is not a solid");
+}
+
+#[test]
+fn the_board_comes_in_as_a_solid_with_its_thickness() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts")))"#;
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "solid.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let step = imported.board_step.expect("the board is a solid");
+    let imp = solidcraft_kernel::step_import_shared(&step).expect("the board is a STEP file");
+    assert_eq!(imp.bodies.len(), 1, "one board, one solid");
+    let volume = solidcraft_kernel::measure(&imp.bodies[0].body).expect("bounds").volume;
+    // 20 × 10 mm, 1.6 mm thick: a body whose faces can be picked.
+    assert!((volume - 20.0 * 10.0 * 1.6).abs() < 1e-6, "{volume}");
+    // The mesh representation is still there for scripts that ask for it.
+    let options = KicadOptions { representation: KicadRepresentation::Mesh, ..Default::default() };
+    let imported = read_kicad(source.as_bytes(), "solid.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the mesh board");
+    assert!(imported.board_step.is_none());
 }
 
 #[test]
@@ -299,7 +319,8 @@ fn vrml_models_are_read_and_placed() {
     };
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    assert_eq!(meshes.len(), 2, "the board and the VRML model");
+    assert_eq!(meshes.len(), 1, "the VRML model");
+    assert!(imported.board_step.is_some(), "the board is a solid");
     assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
     assert_eq!(imported.plan.places.len(), 1);
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -360,7 +381,7 @@ fn hidden_text_is_skipped_and_text_boxes_are_warned_about() {
     let options = KicadOptions { silkscreen: true, components: false, ..Default::default() };
     let imported = read_kicad(hidden.as_bytes(), "hidden.kicad_pcb", &options, &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    assert_eq!(meshes.len(), 1, "hidden text builds nothing");
+    assert!(meshes.is_empty(), "hidden text builds nothing");
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 
     let boxes = r#"(kicad_pcb (general (thickness 1.6))
