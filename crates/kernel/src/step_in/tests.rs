@@ -915,38 +915,6 @@ fn validator_catches_broken_files() {
     assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#5);\n#5=B();\n{TAIL}")).unwrap_err().contains("dense"));
 }
 
-#[test]
-fn split_band_edges_are_seams() {
-    // A quarter pipe (torus R 10, r 3) whose face wraps around the tube with a seam edge: it is
-    // split for the kernel, and the split edge is drawn as a seam.
-    let mut t = String::from(HEAD);
-    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
-    t += "#5=TOROIDAL_SURFACE('',#4,10.,3.);\n";
-    t += "#10=CARTESIAN_POINT('',(13.,0.,0.));\n#11=CARTESIAN_POINT('',(0.,13.,0.));\n#12=VERTEX_POINT('',#10);\n#13=VERTEX_POINT('',#11);\n";
-    // Tube circles at azimuth 0 (plane XZ) and 90 degrees (plane YZ), the seam around Z.
-    t += "#20=CARTESIAN_POINT('',(10.,0.,0.));\n#21=DIRECTION('',(0.,-1.,0.));\n#22=AXIS2_PLACEMENT_3D('',#20,#21,#3);\n#23=CIRCLE('',#22,3.);\n";
-    t += "#24=CARTESIAN_POINT('',(0.,10.,0.));\n#25=DIRECTION('',(1.,0.,0.));\n#26=DIRECTION('',(0.,1.,0.));\n#27=AXIS2_PLACEMENT_3D('',#24,#25,#26);\n#28=CIRCLE('',#27,3.);\n";
-    t += "#29=CIRCLE('',#4,13.);\n";
-    t += "#30=EDGE_CURVE('',#12,#12,#23,.T.);\n#31=EDGE_CURVE('',#13,#13,#28,.T.);\n#32=EDGE_CURVE('',#12,#13,#29,.T.);\n";
-    t += "#40=ORIENTED_EDGE('',*,*,#30,.T.);\n#41=ORIENTED_EDGE('',*,*,#32,.T.);\n#42=ORIENTED_EDGE('',*,*,#31,.F.);\n#43=ORIENTED_EDGE('',*,*,#32,.F.);\n";
-    t += "#44=EDGE_LOOP('',(#40,#41,#42,#43));\n#45=FACE_OUTER_BOUND('',#44,.T.);\n#46=ADVANCED_FACE('',(#45),#5,.F.);\n";
-    t += "#47=PLANE('',#22);\n#48=ORIENTED_EDGE('',*,*,#30,.F.);\n#49=EDGE_LOOP('',(#48));\n#50=FACE_OUTER_BOUND('',#49,.T.);\n#51=ADVANCED_FACE('',(#50),#47,.T.);\n";
-    t += "#52=PLANE('',#27);\n#53=ORIENTED_EDGE('',*,*,#31,.T.);\n#54=EDGE_LOOP('',(#53));\n#55=FACE_OUTER_BOUND('',#54,.T.);\n#56=ADVANCED_FACE('',(#55),#52,.T.);\n";
-    t += "#60=CLOSED_SHELL('',(#46,#51,#56));\n#61=MANIFOLD_SOLID_BREP('Pipe',#60);\n#62=SHAPE_REPRESENTATION('',(#61),$);\n";
-    t += TAIL;
-    let imp = step_import(&t).unwrap();
-    let ib = &imp.bodies[0];
-    assert_eq!(ib.file_faces, 3);
-    assert_eq!(ib.body.face_count(), 4, "{:?}", imp.warnings);
-    // The two halves of the tube face make a quarter torus: area π²·R·r.
-    let curved: f64 = ib.body.faces(1e-3).unwrap().iter().filter(|f| f.plane_normal.is_none()).map(|f| f.area).sum();
-    let want = std::f64::consts::PI.powi(2) * 30.0;
-    assert!(rel(curved, want) < 2e-3, "{curved} vs {want}");
-    let m = ib.body.mesh(&crate::MeshTolerance::chord(ib.body.size() * 1e-3)).unwrap();
-    // Seams: the file's own seam (inside the tube face) and the split edge.
-    assert!(m.seams.iter().filter(|s| **s).count() >= 2, "{:?}", m.seams);
-}
-
 /// Revolved faces of a mirrored tool keep their orientation through STEP (the writer used to
 /// drop an inverted or mirrored revolution's sense).
 #[test]

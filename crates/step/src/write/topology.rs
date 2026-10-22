@@ -319,8 +319,58 @@ pub struct Written {
     pub faces: Vec<u64>,
 }
 
+/// A solid of a record: the outer shell of a material region and the shells of the voids inside it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SolidShells {
+    pub outer: u32,
+    pub voids: Vec<u32>,
+}
+
+/// How a record's shells make up exchange items: a solid per material region, in region order,
+/// and the open shells (sheets), in shell order. Wire and vertex shells, and material regions
+/// that meet across a shell, have no exchange form here and are refused.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Layout {
+    pub solids: Vec<SolidShells>,
+    pub sheets: Vec<u32>,
+}
+
+/// The record's [`Layout`].
+pub fn layout(b: &Brep) -> R<Layout> {
+    // The bounded region each closed shell is the outer shell of.
+    let mut outer_of: Vec<Option<usize>> = vec![None; b.shells.len()];
+    for (ri, region) in b.regions.iter().enumerate().skip(1) {
+        if let Some(slot) = region.shells.first().and_then(|s| outer_of.get_mut(*s as usize)) {
+            *slot = Some(ri);
+        }
+    }
+    let mut out = Layout::default();
+    for region in b.regions.iter().skip(1).filter(|r| !r.void) {
+        let (Some(&outer), inner) = (region.shells.first(), region.shells.get(1..).unwrap_or(&[])) else { continue };
+        let mut voids = Vec::new();
+        for &shell in inner {
+            match outer_of.get(shell as usize).copied().flatten() {
+                Some(v) if b.regions.get(v).is_some_and(|r| r.void) => voids.push(shell),
+                Some(_) => return Err(unsupported("material regions that meet across a shell")),
+                // An open shell inside the material: one of the sheets.
+                None => {}
+            }
+        }
+        out.solids.push(SolidShells { outer, voids });
+    }
+    for (si, shell) in b.shells.iter().enumerate() {
+        match shell {
+            Shell::Faces { .. } if outer_of.get(si).copied().flatten().is_none() => out.sheets.push(index(si)?),
+            Shell::Faces { .. } => {}
+            Shell::Wire { .. } | Shell::Vertex { .. } => return Err(unsupported("wire and vertex shells")),
+        }
+    }
+    Ok(out)
+}
+
 /// Write `b`'s solids and sheets, each item named `name`.
 pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
+    let layout = layout(b)?;
     let mut w = BrepWriter {
         g,
         b,
@@ -329,29 +379,14 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
         edges: vec![None; b.edges.len()],
         faces: vec![None; b.faces.len()],
     };
-    // The bounded region each closed shell is the outer shell of.
-    let mut outer_of: Vec<Option<usize>> = vec![None; b.shells.len()];
-    for (ri, region) in b.regions.iter().enumerate().skip(1) {
-        if let Some(slot) = region.shells.first().and_then(|s| outer_of.get_mut(*s as usize)) {
-            *slot = Some(ri);
-        }
-    }
     let item_name = Param::Str(name.to_string());
     let mut out = Written::default();
-    for region in b.regions.iter().skip(1).filter(|r| !r.void) {
-        let (Some(&outer), inner) = (region.shells.first(), region.shells.get(1..).unwrap_or(&[])) else { continue };
-        let shell = w.shell(outer, true)?;
-        let mut voids = Vec::new();
-        for &inner_shell in inner {
-            match outer_of.get(inner_shell as usize).copied().flatten() {
-                Some(v) if b.regions.get(v).is_some_and(|r| r.void) => {
-                    let void = w.shell(inner_shell, true)?;
-                    voids.push(r(w.g.w.add_distinct("ORIENTED_CLOSED_SHELL", &[s(), Param::Derived, r(void), boolean(true)])));
-                }
-                Some(_) => return Err(unsupported("material regions that meet across a shell")),
-                // An open shell inside the material: written with the sheets.
-                None => {}
-            }
+    for solid in &layout.solids {
+        let shell = w.shell(solid.outer, true)?;
+        let mut voids = Vec::with_capacity(solid.voids.len());
+        for &v in &solid.voids {
+            let void = w.shell(v, true)?;
+            voids.push(r(w.g.w.add_distinct("ORIENTED_CLOSED_SHELL", &[s(), Param::Derived, r(void), boolean(true)])));
         }
         out.solids.push(if voids.is_empty() {
             w.g.w.add_distinct("MANIFOLD_SOLID_BREP", &[item_name.clone(), r(shell)])
@@ -359,19 +394,36 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
             w.g.w.add_distinct("BREP_WITH_VOIDS", &[item_name.clone(), r(shell), list(voids)])
         });
     }
-    let mut sheets = Vec::new();
-    for (si, shell) in b.shells.iter().enumerate() {
-        match shell {
-            Shell::Faces { .. } if outer_of.get(si).copied().flatten().is_none() => sheets.push(r(w.shell(index(si)?, false)?)),
-            Shell::Faces { .. } => {}
-            Shell::Wire { .. } | Shell::Vertex { .. } => return Err(unsupported("wire and vertex shells")),
-        }
+    let mut sheets = Vec::with_capacity(layout.sheets.len());
+    for &si in &layout.sheets {
+        sheets.push(r(w.shell(si, false)?));
     }
     if !sheets.is_empty() {
         out.sheets = Some(w.g.w.add_distinct("SHELL_BASED_SURFACE_MODEL", &[item_name, list(sheets)]));
     }
     out.faces = w.faces.iter().map(|f| f.map_or(0, |(id, _)| id)).collect();
     Ok(out)
+}
+
+/// The face's outer loop: the one edge loop whose pcurves run counter-clockwise in (u, v) about
+/// the natural normal (the record's loop convention); `None` when no single loop does.
+pub fn outer_loop(b: &Brep, face: &Face) -> Option<usize> {
+    let mut ccw = face.loops.iter().enumerate().filter_map(|(li, l)| match l {
+        Loop::Edges { edges } => {
+            let mut ring = Vec::with_capacity(edges.len() * AREA_SAMPLES);
+            for u in edges {
+                let [t0, t1] = edge_of(b, u.edge).ok()?.interval;
+                for k in 0..AREA_SAMPLES {
+                    let f = k as f64 / AREA_SAMPLES as f64;
+                    ring.push(u.pcurve.eval(if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
+                }
+            }
+            (signed_area(&ring) > 0.0).then_some(li)
+        }
+        Loop::Vertex { .. } => None,
+    });
+    let first = ccw.next();
+    if ccw.next().is_some() { None } else { first }
 }
 
 fn index(i: usize) -> R<u32> {
@@ -468,7 +520,7 @@ impl BrepWriter<'_, '_, '_> {
         let face = face_of(self.b, f)?;
         let (surface, map) = self.surface(f)?;
         let geometry = self.g.surface(&surface);
-        let outer = self.outer_loop(face);
+        let outer = outer_loop(self.b, face);
         let mut bounds = Vec::with_capacity(face.loops.len());
         for (li, l) in face.loops.iter().enumerate() {
             let lp = match l {
@@ -498,27 +550,6 @@ impl BrepWriter<'_, '_, '_> {
             *slot = Some((id, side));
         }
         Ok(id)
-    }
-
-    /// The face's outer loop: the one edge loop whose pcurves run counter-clockwise in (u, v)
-    /// about the natural normal (the record's loop convention); `None` when no single loop does.
-    fn outer_loop(&self, face: &Face) -> Option<usize> {
-        let mut ccw = face.loops.iter().enumerate().filter_map(|(li, l)| match l {
-            Loop::Edges { edges } => {
-                let mut ring = Vec::with_capacity(edges.len() * AREA_SAMPLES);
-                for u in edges {
-                    let [t0, t1] = edge_of(self.b, u.edge).ok()?.interval;
-                    for k in 0..AREA_SAMPLES {
-                        let f = k as f64 / AREA_SAMPLES as f64;
-                        ring.push(u.pcurve.eval(if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
-                    }
-                }
-                (signed_area(&ring) > 0.0).then_some(li)
-            }
-            Loop::Vertex { .. } => None,
-        });
-        let first = ccw.next();
-        if ccw.next().is_some() { None } else { first }
     }
 
     /// A face shell: CLOSED_SHELL when it bounds a region, else OPEN_SHELL.

@@ -53,8 +53,7 @@ pub struct ImportedBody {
     pub instance: Option<String>,
     /// The body is a closed solid (false: faces were left out, or the file had a surface model).
     pub closed: bool,
-    /// Faces read from the file. The body can have more: a face that wraps all the way around
-    /// a closed surface is split in two for the kernel.
+    /// Faces read from the file (each body face is one of them: `face_origin`).
     pub file_faces: usize,
 }
 
