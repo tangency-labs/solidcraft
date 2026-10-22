@@ -1683,38 +1683,10 @@ impl SheetBody {
             let slab = kernel::extrude_planar_regions(&Plane::XY, &cells, 0.0, self.t)?;
             let drill = kernel::cylinder(bore.base, bore.axis, bore.radius, bore.height)?;
             let Some(inside) = kernel::boolean(&drill, &slab, kernel::BoolOp::Intersect)? else { continue };
-            // Cut with the drill clipped to the panel. Where its ends, flush with the panel's
-            // rims, leave coincident faces the cut can't resolve, cut with the drill as long as
-            // the panel's material along it and a hair past it instead (the same material).
+            // Cut with the drill clipped to the panel, its ends flush with the panel's rims.
             let place = |tool: Body| if self.flat { Ok(tool) } else { kernel::transform_matrix(&tool, self.world(bore.panel)) };
-            let mut last = None;
-            for longer in [false, true] {
-                let tool = if longer {
-                    let axis = bore.axis.normalized().ok_or_else(|| DocError::Invalid("invalid sheet bore".into()))?;
-                    let mesh = inside.mesh(&solidcraft_kernel::MeshTolerance::chord((bore.radius * 0.1).max(1e-4)))?;
-                    let (lo, hi) =
-                        mesh.positions.iter().map(|p| (*p - bore.base).dot(axis)).fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
-                    if !(lo <= hi) {
-                        break;
-                    }
-                    let past = (bore.radius * 0.05).max(1e-3);
-                    kernel::cylinder(bore.base + axis * (lo - past), axis, bore.radius, hi - lo + 2.0 * past)?
-                } else {
-                    inside.clone()
-                };
-                match kernel::boolean(&body, &place(tool)?, kernel::BoolOp::Cut) {
-                    Ok(Some(cut)) => {
-                        body = cut;
-                        last = None;
-                        break;
-                    }
-                    Ok(None) => last = Some(DocError::Invalid("a sheet bore removes all sheet material".into())),
-                    Err(e) => last = Some(e.into()),
-                }
-            }
-            if let Some(e) = last {
-                return Err(e);
-            }
+            body = kernel::boolean(&body, &place(inside)?, kernel::BoolOp::Cut)?
+                .ok_or_else(|| DocError::Invalid("a sheet bore removes all sheet material".into()))?;
         }
         Ok(body)
     }
