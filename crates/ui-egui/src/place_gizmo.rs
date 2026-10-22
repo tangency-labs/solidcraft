@@ -14,6 +14,7 @@
 //! [`spec`] picks the file by the dialog kind. The handles are published as `<name>:position` and
 //! `<name>:rotate` for `ui.handles`.
 
+mod boss;
 mod rest;
 
 use egui::{Color32, Pos2, Stroke, vec2};
@@ -64,6 +65,7 @@ pub(crate) struct Turn {
 /// tools added on separate branches merge without touching each other's line.
 #[rustfmt::skip]
 static TOOLS: &[&Spec] = &[
+    &boss::SPEC,
     &rest::SPEC,
 ];
 
