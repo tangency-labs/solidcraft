@@ -21,6 +21,7 @@ pub mod compare;
 pub mod env;
 pub mod fill;
 pub mod fill_general;
+pub mod fill_iso;
 mod grid;
 mod mesh;
 pub mod mesh_distance;
