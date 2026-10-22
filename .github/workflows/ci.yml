@@ -35,22 +35,39 @@ jobs:
       - run: cargo fmt --all --check
 
   clippy:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The plain run above cannot see code behind the cpp feature (ffi bindings and the
+      # difftest unit runners); lint it too, with the C++ headers in place.
+      # difftest/cpp enables solidcore-ffi/cpp and registers the runners.
+      - uses: ./.github/actions/cpp-reference
+      - name: Clippy with the C++ feature
+        run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
 
   test:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo test --workspace
+      # The difftest runners' own unit tests (guards, decoders, probes) need the C++
+      # reference. Same profile as the difftest job's binary (Cargo.toml
+      # [profile.difftest]); here rather than after the difftest run, so they no longer
+      # add to its wall time.
+      - uses: ./.github/actions/cpp-reference
+      - name: Difftest runner tests
+        run: cargo test --profile difftest -p difftest --features cpp
 
   wasm:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -81,8 +98,10 @@ jobs:
           command: check licenses bans sources
 
   difftest:
+    # Starts with the other jobs (no `needs`): it is the critical path, and the merge queue
+    # requires every job anyway. Clippy with the cpp feature and the runner tests run in
+    # the clippy and test jobs, in parallel with this one.
     runs-on: blacksmith-16vcpu-ubuntu-2404
-    needs: [test]
     permissions:
       contents: read
       actions: read  # scripts/fetch-reports.sh reads main's report artifact
@@ -101,75 +120,9 @@ jobs:
             echo "No green units in plan/units/; nothing to difftest."
           fi
 
-      - name: Clone upstream at pinned commit
+      - name: Upstream sources, sccache and the C++ reference
         if: steps.green.outputs.any == 'true'
-        run: |
-          git init upstream
-          git -C upstream remote add origin "$UPSTREAM_REPO"
-          git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
-            || git -C upstream fetch origin
-          git -C upstream checkout --detach "$UPSTREAM_COMMIT"
-
-      # sccache caches the ~200 shim objects solidcore-ffi compiles (the cc crate wraps the
-      # C++ compiler in RUSTC_WRAPPER when it is sccache) and the workspace crates, which
-      # rust-cache does not keep; both survive across runs in the GitHub Actions cache.
-      - name: Set up sccache
-        if: steps.green.outputs.any == 'true'
-        uses: mozilla-actions/sccache-action@v0.0.11
-
-      - name: Enable sccache
-        if: steps.green.outputs.any == 'true'
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          # The difftest run is idle for sccache for ~20 min; without this the server
-          # exits after 10 idle minutes and the stats printed at the end read zero.
-          echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
-
-      # The C++ reference (bin/cpp/lib) comes prebuilt from the GitHub Release that
-      # .github/workflows/cpp-reference.yml publishes for scripts/cpp-ref-key.sh's key.
-      # When none matches (a PR that changes harness/cpp before it is published), build it
-      # from source and keep that build in actions/cache under the same key. It lives
-      # outside cargo's target dir (bin/): rust-cache's post-step cleans bin/.
-      - name: C++ reference key
-        if: steps.green.outputs.any == 'true'
-        id: cppkey
-        run: echo "key=$(scripts/cpp-ref-key.sh)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore C++ reference built from source
-        if: steps.green.outputs.any == 'true'
-        id: cppcache
-        uses: actions/cache/restore@v4
-        with:
-          path: .cpp
-          key: cpp-v3-${{ runner.os }}-${{ steps.cppkey.outputs.key }}
-
-      - name: Fetch C++ reference (build it when no prebuilt matches)
-        if: steps.green.outputs.any == 'true'
-        id: cpp
-        run: |
-          cpp=$SOLIDCORE_CPP_DIR
-          if [ -f "$cpp/lib/libSMLib.a" ] && [ -f "$cpp/lib/libSM_API.a" ] && [ -f "$cpp/ffi.env" ]; then
-            echo "C++ reference restored from cache"
-            exit 0
-          fi
-          command -v zstd >/dev/null || sudo apt-get install -y zstd
-          rc=0
-          scripts/fetch-cpp.sh --no-build || rc=$?
-          if [ "$rc" = 3 ]; then
-            sudo apt-get update && sudo apt-get install -y ninja-build cmake g++
-            harness/cpp/build.sh --no-tests --jobs "$(nproc)"
-            echo "built=true" >> "$GITHUB_OUTPUT"
-          elif [ "$rc" != 0 ]; then
-            exit "$rc"
-          fi
-
-      - name: Save C++ reference built from source
-        if: steps.green.outputs.any == 'true' && steps.cpp.outputs.built == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .cpp
-          key: cpp-v3-${{ runner.os }}-${{ steps.cppkey.outputs.key }}
+        uses: ./.github/actions/cpp-reference
 
       - uses: Swatinem/rust-cache@v2
         if: steps.green.outputs.any == 'true'
@@ -177,15 +130,9 @@ jobs:
           workspaces: ". -> bin"
           key: difftest
 
-      # The clippy job above cannot see code behind the cpp feature (ffi bindings and
-      # the difftest unit runners); lint it here, where the C++ headers exist.
-      # difftest/cpp enables solidcore-ffi/cpp and registers the runners.
-      - name: Clippy with the C++ feature
-        if: steps.green.outputs.any == 'true'
-        run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
-
       # Reports are not committed. main's latest set (uploaded below) only orders the
-      # --jobs queue, heaviest unit first; without it difftest estimates from fixtures.
+      # --jobs queue, slowest unit first (times.tsv: each unit's wall time in main's last
+      # run; else its case count; without either, an estimate from its fixtures).
       - name: Fetch main's difftest reports (queue order)
         if: steps.green.outputs.any == 'true'
         env:
@@ -219,16 +166,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: difftest-reports
-          path: reports/difftest/*.json
+          path: |
+            reports/difftest/*.json
+            reports/difftest/times.tsv
           if-no-files-found: error
           retention-days: 90
-
-      # The runners' own unit tests (guards, decoders, probes) need the C++ reference, so
-      # the test job cannot run them. Same profile as above: only the test harness of the
-      # difftest crate is compiled on top of that build.
-      - name: Difftest runner tests
-        if: steps.green.outputs.any == 'true'
-        run: cargo test --profile difftest -p difftest --features cpp
 
       - name: sccache stats
         if: always() && steps.green.outputs.any == 'true'

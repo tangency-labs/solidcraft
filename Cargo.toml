@@ -68,3 +68,10 @@ opt-level = 3
 overflow-checks = true
 debug-assertions = true
 incremental = true
+
+# The difftest crate itself (runners, fixtures, comparison; ~300k lines) is glue: at
+# opt-level 3 it took ~5 of CI's ~6 build minutes, at 0 about 1.5, and the --green run
+# is ~4% slower in total (the kernel, solidcore, and the C++ stay fully optimised).
+# Reports are byte-identical at either level.
+[profile.difftest.package.difftest]
+opt-level = 0

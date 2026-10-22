@@ -25,6 +25,8 @@ install() {
   mkdir -p "$dest"
   find "$dest" -maxdepth 1 -name '*.json' -delete
   find "$src" -maxdepth 1 -name '*.json' -exec mv -t "$dest" {} +
+  # Per-unit wall times of that run (difftest --jobs queue order only).
+  if [ -f "$src/times.tsv" ]; then mv "$src/times.tsv" "$dest/"; fi
   echo "fetch-reports: $n reports -> ${dest#"$root"/} ($2)"
 }
 

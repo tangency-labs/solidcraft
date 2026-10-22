@@ -2,9 +2,9 @@
 //! its own child process, at most N at a time.
 //!
 //! The C++ kernel keeps global state, so units never share a process (no threads). The
-//! parent hands out units dynamically from one queue, longest first (by the case count
-//! of each unit's previous report in the report directory, else an estimate from its
-//! fixture size), and spawns the next one as soon as a child exits. A child is the same
+//! parent hands out units dynamically from one queue, longest first (by each unit's
+//! wall time in the previous run's [`TIMES_FILE`], else the case count of its previous
+//! report in the report directory, else an estimate from its fixture size), and spawns the next one as soon as a child exits. A child is the same
 //! binary run as `--unit <id>` with the caller's other options and [`WORKER_ENV`] set;
 //! it prints and writes its report exactly as a serial run does. The parent prints each
 //! child's output in the serial order (as soon as every earlier unit is done) and the
@@ -31,6 +31,10 @@ const ORPHANED_EXIT: i32 = 3;
 
 /// Lines of a crashed child's stderr quoted under its `FAIL` line.
 const CRASH_STDERR_LINES: usize = 20;
+
+/// Per-unit wall times of the last `--jobs` run (`<unit>\t<milliseconds>` lines), written
+/// next to the reports. Only orders the queue; never part of any result.
+pub const TIMES_FILE: &str = "times.tsv";
 
 /// Command-line flags that take a value (forwarded to children with it).
 const VALUE_FLAGS: &[&str] = &[
@@ -101,6 +105,17 @@ fn previous_cases(dirs: &[&Path], id: &str) -> Option<u64> {
         .and_then(|v| v.get("cases_total").and_then(serde_json::Value::as_u64))
 }
 
+/// Wall milliseconds of `id` in the first `<dir>/`[`TIMES_FILE`] that lists it.
+fn previous_millis(dirs: &[&Path], id: &str) -> Option<u64> {
+    dirs.iter().find_map(|d| {
+        let text = std::fs::read_to_string(d.join(TIMES_FILE)).ok()?;
+        text.lines().find_map(|l| {
+            let (unit, ms) = l.split_once('\t')?;
+            (unit == id).then(|| ms.trim().parse().ok()).flatten()
+        })
+    })
+}
+
 /// Fixture bytes per case, roughly, for [`fixture_weight`].
 const FIXTURE_BYTES_PER_CASE: u64 = 512;
 
@@ -119,13 +134,19 @@ fn fixture_weight(fixtures: &Path, id: &str) -> u64 {
         / FIXTURE_BYTES_PER_CASE
 }
 
-/// Queue order: heaviest first, ties in the serial order. The weight is the case count
-/// of the unit's previous report (looked up in `dirs`, in order), else its fixture
-/// estimate under `fixtures` (see [`fixture_weight`]).
+/// Queue order: heaviest first, ties in the serial order. The weight is the unit's wall
+/// time in milliseconds from a previous run's [`TIMES_FILE`], else the case count of its
+/// previous report (both looked up in `dirs`, in order), else its fixture estimate
+/// under `fixtures` (see [`fixture_weight`]). A unit's time beats its case count: one
+/// slow case can outweigh thousands of fast ones.
 pub fn schedule(units: &[String], dirs: &[&Path], fixtures: &Path) -> Vec<usize> {
     let weights: Vec<u64> = units
         .iter()
-        .map(|u| previous_cases(dirs, u).unwrap_or_else(|| fixture_weight(fixtures, u)))
+        .map(|u| {
+            previous_millis(dirs, u)
+                .or_else(|| previous_cases(dirs, u))
+                .unwrap_or_else(|| fixture_weight(fixtures, u))
+        })
         .collect();
     let mut order: Vec<usize> = (0..units.len()).collect();
     order.sort_by_key(|&i| (std::cmp::Reverse(weights.get(i).copied().unwrap_or(0)), i));
@@ -271,13 +292,15 @@ fn spawn(exe: &Path, args: &[String], id: &str, unit: usize) -> std::io::Result<
 /// Runs `units` in up to `jobs` child processes and prints like the serial loop in
 /// `main.rs`: each unit's lines in `units` order, then the summary line. `weights` are
 /// the report directories whose previous reports order the queue, `fixtures` the
-/// fixture root for units without one (see [`schedule`]).
+/// fixture root for units without one (see [`schedule`]). With `times_out`, each unit's
+/// wall time is written there (a [`TIMES_FILE`]) for the next run's queue order.
 pub fn run_parallel(
     units: &[String],
     args: &[String],
     jobs: usize,
     weights: &[&Path],
     fixtures: &Path,
+    times_out: Option<&Path>,
 ) -> ExitCode {
     let exe = match std::env::current_exe() {
         Ok(e) => e,
@@ -366,6 +389,15 @@ pub fn run_parallel(
         sum.as_secs_f64(),
         slowest.as_secs_f64()
     );
+    if let Some(path) = times_out {
+        let mut tsv = String::new();
+        for (id, t) in units.iter().zip(&times) {
+            let _ = writeln!(tsv, "{id}\t{}", t.as_millis());
+        }
+        if let Err(e) = std::fs::write(path, tsv) {
+            eprintln!("difftest: write {}: {e}", path.display());
+        }
+    }
     if setup_error {
         ExitCode::from(2)
     } else if failed > 0 {
@@ -489,7 +521,15 @@ mod tests {
             &[none.as_path(), &dir],
             &fixtures,
         );
-        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(order, vec![2, 0, 1, 3]);
+        // A previous run's wall times beat case counts and fixture sizes.
+        std::fs::write(dir.join(TIMES_FILE), "b\t900000\nd\t7\nbad line\n").unwrap();
+        let order = schedule(
+            &s(&["a", "b", "c", "d"]),
+            &[none.as_path(), &dir],
+            &fixtures,
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(order, vec![1, 2, 0, 3]);
     }
 }

@@ -276,7 +276,15 @@ fn main() -> ExitCode {
         // and a unit with no report anywhere to its fixture size (reports are not committed).
         let default_dir = root.join("reports").join("difftest");
         let dirs = [report_dir.as_path(), default_dir.as_path()];
-        return difftest::jobs::run_parallel(&wanted, &fwd, jobs, &dirs, &root.join("fixtures"));
+        let times = (!args.no_report).then(|| report_dir.join(difftest::jobs::TIMES_FILE));
+        return difftest::jobs::run_parallel(
+            &wanted,
+            &fwd,
+            jobs,
+            &dirs,
+            &root.join("fixtures"),
+            times.as_deref(),
+        );
     }
 
     let mut failed = 0usize;
