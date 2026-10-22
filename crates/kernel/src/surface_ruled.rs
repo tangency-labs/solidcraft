@@ -481,7 +481,7 @@ impl Strip {
         let mut uses: Vec<(b::Curve, [f64; 2], [u32; 2], bool, Option<Curve2Pair>)> = Vec::new();
         let ruled = matches!(self.kind, Kind::Ruled);
         uses.push((base, base_iv, [corners[0], corners[1]], true, ruled.then_some(([u0, 0.0], [u1, 0.0]))));
-        let mut chain_up = |pts: &[Vec3], from: u32, u: f64, parts: &mut Parts, uses: &mut Vec<_>| -> Result<u32> {
+        let chain_up = |pts: &[Vec3], from: u32, u: f64, parts: &mut Parts, uses: &mut Vec<_>| -> Result<u32> {
             let mut at = from;
             for w in pts.windows(2) {
                 let next = vertex(w[1], parts)?;
