@@ -1075,6 +1075,12 @@ preference_settings! {
     toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_INTERFACE;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_INTERFACE;
+    /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
+    /// instead of a list of small icons with names (#4739).
+    ribbon_icon_grid: bool = false, PAGE_INTERFACE;
+    /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
+    /// which then list only the rest (#4739).
+    ribbon_menus_skip_pinned: bool = false, PAGE_INTERFACE => check_tr("ui.ribbon_menus_skip_pinned");
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -4958,6 +4964,8 @@ mod tests {
             ("ribbon_reveal", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
             ("toast_place", json!("centre"), PAGE_INTERFACE),
+            ("ribbon_icon_grid", json!(true), PAGE_INTERFACE),
+            ("ribbon_menus_skip_pinned", json!(true), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),

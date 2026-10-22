@@ -188,6 +188,16 @@ component's Bodies folder and the Origin (planes, axes and point) at the top of 
 it sits on the left or under the browser and is wide enough for names. They are the browser's own
 rows: the same eyes, folds and right-click menus, so one list is enough for single-part work. The
 History at the bottom is unchanged.
+Interface › **Menus** › **Large icons** (the default is **List**) shows a section's
+command menu as rows of large icons instead of a list of names. Point at an icon for its name,
+shortcut and help; the arrow keys move across and between rows. Rest the pointer on an icon for
+two seconds and a pin in its corner can be clicked to pin it to the ribbon or remove it (a
+quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
+onto the ribbon, also pins it; a pinned command always shows its pin.
+
+Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
+section's menu only the commands that are not already buttons on the ribbon. When the window is
+too narrow for a section's buttons, its menu lists them again.
 
 ### Colour themes
 
