@@ -7,9 +7,9 @@
 // validates every input. The input is a face selector (index into the traversal-order face
 // list, checked by the wrapper), the op's fixed-size arguments, then the B-rep block of
 // unit topology.vertexuse (built by the shared sc_topology_fixture.h), whose graph that
-// unit's Export op exports for the Rust import. As the topology.trimming_tools shim, the
-// faces and edges get the plain B-spline copies of analytic geometry (what the Rust import
-// rebuilds), keeping the surface owner, before the op.
+// unit's Export op exports for the Rust import. As in the topology.trimming_tools shim,
+// exactly exported analytic surfaces keep their dynamic kind; other surfaces and edge
+// curves get the plain B-spline copies the Rust import rebuilds, keeping the owner.
 //
 // Output: `0` (or `-1 status` when the B-rep build failed), then the op record. A slot of
 // `-2` marks a call the shim skips because upstream would dereference null, `-3` one it
@@ -50,9 +50,9 @@ struct Fp1LoopPeek : SmLoop
     static SmLoopuse* SmLoop::*lu() { return &Fp1LoopPeek::m_pLU; }
 };
 
-// The Rust import rebuilds NURBs as plain B-splines (and lines, planes): give the C++
-// faces and edges the same geometry. The analytic originals are leaked (they may still be
-// referenced as owners' geometry elsewhere).
+// Match the Rust import: keep exactly exported analytic surfaces and give other
+// surfaces and edge curves their plain B-spline copies (and lines, planes).
+// Replaced originals are leaked: they may still be referenced as owners' geometry.
 void fp1_normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -60,6 +60,10 @@ void fp1_normalise(Graph& g)
         SmSurface* s = f->*FPeek::srf();
         if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
             s->GetType() == SmPlane_TYPE)
+            continue;
+        // Preserve every surface the shared export imports as its exact analytic kind.
+        std::vector<double> head;
+        if (sc_analytic_export::put_exact_head(head, s, the_context()))
             continue;
         SmBSplineSurface* b = (SmBSplineSurface*)s;
         gw_SURFACE* nurb = b->GetGwNurbPointer();

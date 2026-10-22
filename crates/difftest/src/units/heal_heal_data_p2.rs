@@ -16,8 +16,9 @@
 //!   box or a full sphere face) with target lists, then a script of heal steps;
 //!   outputs each step's status and results and, at the end, the whole healer state
 //!   (targets, every props record ever allocated, every problem array with its labels,
-//!   histograms, statistics and the vertex voxel model). The C++ side replaces analytic
-//!   geometry by plain B-splines first (what the Rust import rebuilds); the Rust side
+//!   histograms, statistics and the vertex voxel model). The C++ side preserves exactly
+//!   exported analytic surfaces and replaces other surfaces and edge curves by the
+//!   plain B-splines the Rust import rebuilds; the Rust side
 //!   imports the C++ export (the `topology.vertexuse` importer) and restores each
 //!   vertex's vertex use order from the shim.
 //!
@@ -2052,6 +2053,25 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A native analytic face must reach healing as the same surface kind in Rust.
+    /// A plain B-spline copy has the same control net but different UV evaluation.
+    #[test]
+    fn sphere_export_preserves_analytic_surface() {
+        use solidcore::surface::surface::SurfaceKind;
+
+        for swap in [false, true] {
+            let input = BIn::Prim(Prim::Sphere { radius: 3.0, swap });
+            let (path, block) = block_of(&input, false, false).unwrap();
+            let (export, counts) = export_of(&path, &block).unwrap();
+            assert!(counts.is_some(), "sphere construction failed");
+            let (brep, exact) = import(&export).unwrap();
+            assert_eq!(exact, vec![true]);
+            let (_, face) = brep.faces().iter().next().unwrap();
+            let surface = face.surface.as_ref().unwrap();
+            assert!(matches!(surface.kind(), SurfaceKind::Sphere(_)));
+        }
+    }
 
     /// Object counts the C++ guard refuses are a harness error on the Rust side too,
     /// not a capacity-overflow panic or a 32 GiB object list (issue #181).

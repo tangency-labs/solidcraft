@@ -3,8 +3,9 @@
 //!
 //! Every op runs on a B-rep of unit `topology.vertexuse` (upstream `.smb` files, faces of
 //! B-spline surfaces or real `SmPlane`s, wire edges, the `my_test_topology` network): the
-//! C++ side builds a real `SmBrep`, gives its faces and edges the plain B-spline copies of
-//! analytic geometry (what the Rust import rebuilds, keeping the owners) and runs the
+//! C++ side builds a real `SmBrep`, preserves exactly exported analytic surfaces and
+//! gives other surfaces and edge curves the plain B-spline copies the Rust import
+//! rebuilds (keeping the owners), then runs the
 //! `SmFace` member on the selected face; the Rust side imports the graph that unit's shim
 //! exports (with each edge curve owned by its edge, as upstream) and runs the port. Face
 //! and loop selectors are taken modulo their counts. Both sides produce one flat record
@@ -37,9 +38,9 @@
 //! reports those cases as deferred to `cpp-crash-guard:UB-137`; they never become
 //! comparable.
 //!
-//! **Not compared.** The normalisation to plain B-splines means `MoveSeam`'s analytic
-//! branch (`CopyAndAddAnalytics` of the joined surface) and the conic UV trim curve and
-//! edge curve paths (`SwapUV`'s conic mirrors) are never compared with the C++.
+//! **Not compared.** Edge curves and UV trim curves are still imported as plain
+//! B-splines (except lines), so conic curve paths (`SwapUV`'s conic mirrors) are not
+//! compared with the C++. Exactly exported analytic surface branches are retained.
 
 use std::cell::RefCell;
 use std::rc::Rc;

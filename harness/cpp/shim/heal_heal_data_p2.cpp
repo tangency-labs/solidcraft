@@ -55,8 +55,9 @@ SmBSplineCurve* plain_curve(SmCurve* c)
     return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
 }
 
-// Gives every analytic face and edge of the B-rep a plain B-spline copy (the
-// originals are left unowned and leaked), as the heal.gap shim does.
+// Match the shared export/import: preserve exact analytic surfaces, and replace
+// other surfaces and edge curves with plain B-splines, as the heal.gap shim does.
+// Replaced originals are left unowned and leaked.
 void normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -64,6 +65,10 @@ void normalise(Graph& g)
         SmSurface* s = f->*FPeek::srf();
         if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
             s->GetType() == SmPlane_TYPE)
+            continue;
+        // Preserve every surface the shared export imports as its exact analytic kind.
+        std::vector<double> head;
+        if (sc_analytic_export::put_exact_head(head, s, the_context()))
             continue;
         SmBSplineSurface* b = (SmBSplineSurface*)s;
         gw_SURFACE* nurb = b->GetGwNurbPointer();

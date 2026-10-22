@@ -767,8 +767,9 @@ SmBSplineCurve* tt_plain_curve(SmCurve* c)
 }
 
 // The Rust side imports the export's NURBs as plain B-splines (and lines), and SmPlanes
-// as planes: give every other face and edge of the C++ B-rep the same geometry (the
-// analytic originals are left unowned and leaked), as the heal.gap shim does.
+// as planes, and exact analytic surfaces as their own kind: give every other face and
+// edge of the C++ B-rep the same geometry, as the heal.gap shim does. Replaced
+// originals are left unowned and leaked.
 void tt_normalise(Graph& g)
 {
     for (SmFace* f : g.faces)
@@ -776,6 +777,10 @@ void tt_normalise(Graph& g)
         SmSurface* s = f->*TtFacePeek::surface();
         if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
             s->GetType() == SmPlane_TYPE)
+            continue;
+        // Preserve every surface the shared export imports as its exact analytic kind.
+        std::vector<double> head;
+        if (sc_analytic_export::put_exact_head(head, s, the_context()))
             continue;
         SmBSplineSurface* b = (SmBSplineSurface*)s;
         gw_SURFACE* nurb = b->GetGwNurbPointer();
