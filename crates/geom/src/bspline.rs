@@ -161,6 +161,22 @@ pub fn local_basis(knots: &[f64], u: f64, side: Side, n: usize) -> Vec<f64> {
     out
 }
 
+/// The `degree + 1` basis functions of a B-spline with `knots` and `count` control points alive
+/// at `t`, with their derivatives up to `order`: the index of the first of them and, for each,
+/// its value and derivatives (element `k` the `k`-th). Each comes from its own local knots
+/// ([`local_basis`]), on the span used at `t` (the last non-empty span starting at or before it,
+/// the domain's last span at its end, from the left).
+pub fn basis_derivatives(knots: &[f64], degree: usize, count: usize, t: f64, order: usize) -> Option<(usize, Vec<Vec<f64>>)> {
+    if degree == 0 || count <= degree || knots.len() != count + degree + 1 || !t.is_finite() {
+        return None;
+    }
+    let span = crate::tess::span_of(knots, degree, count, t);
+    let side = if t >= *knots.get(count)? { Side::Left } else { Side::Right };
+    let first = span.checked_sub(degree)?;
+    let ders = (first..=span).map(|i| Some(local_basis(knots.get(i..=i + degree + 1)?, t, side, order))).collect::<Option<Vec<_>>>()?;
+    Some((first, ders))
+}
+
 /// [`local_basis`] into a fixed array (no allocation): element `k` is the `k`-th derivative,
 /// for `k ≤ min(n, MAX_SPLINE_DEGREE)`, the rest zero.
 pub(crate) fn local_basis_array(knots: &[f64], u: f64, side: Side, n: usize) -> [f64; MAX_SPLINE_DEGREE + 1] {

@@ -349,16 +349,10 @@ impl EvalSurface {
 }
 
 /// The values and first two derivatives of the `p + 1` basis functions of degree `p` alive at
-/// `t` on `span`, each from its own local knots (`bspline::local_basis`).
-fn basis_second(knots: &[f64], span: usize, p: usize, t: f64) -> Option<Vec<[f64; 3]>> {
-    let n = knots.len().checked_sub(p + 1)?;
-    let side = if t >= *knots.get(n)? { crate::bspline::Side::Left } else { crate::bspline::Side::Right };
-    (span.checked_sub(p)?..=span)
-        .map(|i| {
-            let d = crate::bspline::local_basis(knots.get(i..=i + p + 1)?, t, side, 2);
-            Some([*d.first()?, *d.get(1)?, *d.get(2)?])
-        })
-        .collect()
+/// `t` ([`crate::bspline::basis_derivatives`]), and the span they live on.
+fn basis_second(knots: &[f64], p: usize, n: usize, t: f64) -> Option<(usize, Vec<[f64; 3]>)> {
+    let (first, ders) = crate::bspline::basis_derivatives(knots, p, n, t, 2)?;
+    Some((first + p, ders.iter().map(|d| Some([*d.first()?, *d.get(1)?, *d.get(2)?])).collect::<Option<_>>()?))
 }
 
 fn nurbs_second(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ctrl: &[[f64; 4]], u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
@@ -368,8 +362,7 @@ fn nurbs_second(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
     if !ok(pu, nu, &knots[0]) || !ok(pv, nv, &knots[1]) || nu.checked_mul(nv)? != ctrl.len() {
         return None;
     }
-    let (su, sv) = (span_of(&knots[0], pu, nu, u), span_of(&knots[1], pv, nv, v));
-    let (bu, bv) = (basis_second(&knots[0], su, pu, u)?, basis_second(&knots[1], sv, pv, v)?);
+    let ((su, bu), (sv, bv)) = (basis_second(&knots[0], pu, nu, u)?, basis_second(&knots[1], pv, nv, v)?);
     // Homogeneous sums: [A, A_u, A_v, A_uu, A_uv, A_vv].
     let mut a = [[0.0f64; 4]; 6];
     for (j, bj) in bv.iter().enumerate() {
