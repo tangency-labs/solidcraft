@@ -3991,15 +3991,15 @@ fn sheet_hole_cut(
     // Many plain drills along one axis (a hole on each of a pattern's points): all in one pass.
     let prisms: Option<Vec<more::PrimitivePrism>> = tools.iter().map(|(_, prism)| *prism).collect();
     if let Some(prisms) = prisms {
-        match more::sheet_drill_cuts(f, st, &prisms, &mut parted) {
-            Ok(Some(done)) => {
+        match more::sheet_drill_cuts(f, st, &prisms, &mut parted)? {
+            Some(done) => {
                 if let Some(note) = parted {
                     append_warning(warning, note);
                 }
                 return Ok(done);
             }
-            // Not all of them that way, or refused at once: one by one, from the model as it was.
-            Ok(None) | Err(_) => {
+            // Not all of them that way: one by one, from the model as it was.
+            None => {
                 (st.sheets, st.bodies) = saved.clone();
                 parted = None;
             }
@@ -4007,21 +4007,14 @@ fn sheet_hole_cut(
     }
     for (tool, prism) in tools {
         let tool = &tool.body;
+        // Square across the panels it meets, a flat cut-out; along them into a rim, a bore.
         let done = match prism {
-            Some(prism) => match more::sheet_primitive_cut(f, st, tool, *prism, Operation::Cut, true, &mut parted) {
-                Ok(done) => done,
-                // Drilled along a panel (into a rim) the hole is no flat cut-out: a bore of
-                // that panel, when it stays inside it.
-                Err(e) => match more::sheet_bore_cut(f, st, *prism)? {
-                    Some(done) => done,
-                    None => return Err(e),
-                },
+            Some(prism) => match more::sheet_drill(f, st, *prism)? {
+                Some(more::Drill::Across) => more::sheet_primitive_cut(f, st, tool, *prism, Operation::Cut, true, &mut parted)?,
+                Some(more::Drill::Along) => more::sheet_bore_cut(f, st, *prism)?.unwrap_or_default(),
+                None => Vec::new(),
             },
             None => Vec::new(),
-        };
-        let done = match (done.is_empty(), prism) {
-            (true, Some(prism)) => more::sheet_bore_cut(f, st, *prism)?.unwrap_or_default(),
-            _ => done,
         };
         if done.is_empty() {
             let mut meets = false;

@@ -1065,11 +1065,39 @@ pub(super) fn sheet_primitive_cut(
     sheet_prism_cut(f, st, &plane, std::slice::from_ref(&region), operation, &tools, &[], None, false, &[], warning)
 }
 
+/// How a hole's straight drill machines the sheets it meets, from the panels it passes through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Drill {
+    /// Square across every panel it meets: a cut-out or pocket of the flat pattern
+    /// ([`sheet_primitive_cut`]).
+    Across,
+    /// Along every panel it meets, into a rim: a bore of each ([`sheet_bore_cut`]).
+    Along,
+}
+
+/// Which [`Drill`] a hole's straight drill is for the sheets `f` machines; None when it meets
+/// none of them. A box is a prism across its sheet. A drill square to some panels it meets and
+/// along others, or at an angle to one, has no exact place in the flat pattern and is refused.
+pub(super) fn sheet_drill(f: &Feature, st: &ModelState, prism: PrimitivePrism) -> Result<Option<Drill>> {
+    let PrimitivePrism::Cylinder { base, axis, radius, height } = prism else { return Ok(Some(Drill::Across)) };
+    let mut squares = Vec::new();
+    for sh in st.sheets.iter().filter(|sh| sheet_eligible(f, st, &[], sh)) {
+        squares.extend(sh.drilled_panels(base, axis, radius, height)?.into_iter().map(|(_, square)| square));
+    }
+    if squares.is_empty() {
+        Ok(None)
+    } else if squares.iter().all(|s| *s >= 1.0 - 1e-6) {
+        Ok(Some(Drill::Across))
+    } else if squares.iter().all(|s| *s <= 1e-6) {
+        Ok(Some(Drill::Along))
+    } else {
+        Err(DocError::Invalid("this hole crosses a sheet panel at an angle; drill it square to the panel, or along it into a rim".into()))
+    }
+}
+
 /// A hole's straight drill along a panel of a sheet (into its rim), kept as a bore of each
 /// panel it meets (see [`crate::sheet::SheetBore`]), so the sheet still unfolds. Returns the
-/// sheet bodies it machined; None, with the model as it was, when the drill is not a plain
-/// cylinder or a sheet it meets can't keep it that way (it runs into a bend, or crosses a
-/// panel at an angle).
+/// sheet bodies it machined; None when the drill is not a plain cylinder or meets no sheet.
 pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitivePrism) -> Result<Option<Vec<String>>> {
     let PrimitivePrism::Cylinder { base, axis, radius, height } = prism else { return Ok(None) };
     let mut plans = Vec::new();
@@ -1081,8 +1109,6 @@ pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitiveP
         match sh.add_bore(base, axis, radius, height) {
             Ok(true) => {}
             Ok(false) => continue,
-            // Refused here, the hole keeps the message of the machining it was first tried as.
-            Err(DocError::Invalid(_)) => return Ok(None),
             Err(e) => return Err(e),
         }
         let body = sh.solid()?;
@@ -1112,8 +1138,8 @@ const MAX_DRILLS_AT_ONCE: usize = 1000;
 /// of them, rather than one per drill, each on a sheet machined by the ones before.
 /// The drills are the cut-outs and pockets [`sheet_primitive_cut`] makes of them one at a time.
 /// None when they can't all be taken this way (they are not all cylinders along one axis that
-/// every sheet they may machine takes square, or a sheet keeps one some other way): the caller
-/// then puts the model back and drills them one by one.
+/// every sheet they may machine takes square, or a depth of them meets no sheet): the caller then
+/// puts the model back and drills them one by one.
 pub(super) fn sheet_drill_cuts(
     f: &Feature,
     st: &mut ModelState,

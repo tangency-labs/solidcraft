@@ -1691,17 +1691,13 @@ impl SheetBody {
         Ok(body)
     }
 
-    /// Record a round bore drilled along the sheet (a hole into a rim): the world cylinder from
-    /// `base` along `axis`, one record per panel whose material it meets. Ok(false) when it
-    /// meets no material; an error when it meets a bend, or crosses a panel other than along
-    /// its plane (that machining has no exact place in the flat pattern).
-    pub(crate) fn add_bore(&mut self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<bool> {
+    /// The panels a straight drill (the world cylinder from `base` along `axis`) meets, each with
+    /// how square the drill is to it: |panel normal · axis|, 1 across the panel and 0 along it.
+    /// A drill that meets a bend is refused (a bend's material has no flat place for a hole).
+    pub(crate) fn drilled_panels(&self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Vec<(Option<usize>, f64)>> {
         let axis = axis.normalized().ok_or_else(|| DocError::Invalid("bore axis".into()))?;
         if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
             return Err(DocError::Invalid("invalid sheet bore".into()));
-        }
-        if self.bores.len() >= MAX_BORES {
-            return Err(flat_budget_error());
         }
         let mut work = FlatWork::new();
         let drill = kernel::cylinder(base, axis, radius, height)?;
@@ -1726,11 +1722,29 @@ impl SheetBody {
                 ));
             };
             let w = self.world(if self.flat { None } else { pi });
-            if apply_vector(&w, Vec3::Z).dot(axis).abs() > 1e-6 {
+            found.push((pi, apply_vector(&w, Vec3::Z).dot(axis).abs()));
+        }
+        Ok(found)
+    }
+
+    /// Record a round bore drilled along the sheet (a hole into a rim): the world cylinder from
+    /// `base` along `axis`, one record per panel whose material it meets. Ok(false) when it
+    /// meets no material; an error when it meets a bend, or crosses a panel other than along
+    /// its plane (that machining has no exact place in the flat pattern).
+    pub(crate) fn add_bore(&mut self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<bool> {
+        if self.bores.len() >= MAX_BORES {
+            return Err(flat_budget_error());
+        }
+        let panels = self.drilled_panels(base, axis, radius, height)?;
+        let axis = axis.normalized().ok_or_else(|| DocError::Invalid("bore axis".into()))?;
+        let mut found = Vec::new();
+        for (pi, square) in panels {
+            if square > 1e-6 {
                 return Err(DocError::Invalid(
                     "this hole crosses a sheet panel at an angle; drill it square to the panel, or along it into a rim".into(),
                 ));
             }
+            let w = self.world(if self.flat { None } else { pi });
             let inv = mat_inverse(&w).ok_or_else(|| DocError::Invalid("invalid sheet panel frame".into()))?;
             let bore = SheetBore { panel: pi, base: apply_point(&inv, base), axis: apply_vector(&inv, axis), radius, height };
             if !found.contains(&bore) {
