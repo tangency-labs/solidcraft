@@ -41,6 +41,9 @@ pub enum ChamferSecond {
     Angle(f64),
 }
 
+/// Most bodies [`Brep::union_all`] takes (the C API's limit).
+pub const MAX_UNION_BREPS: usize = 100_000;
+
 /// Most points one selection may hold (the C API's limit).
 pub const MAX_POINTS: usize = 4096;
 
@@ -69,6 +72,19 @@ impl Brep {
             Err(ffi::ERR_EMPTY) => Ok(None),
             Err(s) => Err(error(s)),
         }
+    }
+
+    /// The union of `breps` in one call: they are unioned pairwise, level by level, so none takes
+    /// part in more than about log2(n) unions. The result is as [`Brep::boolean`]'s; operands
+    /// tagged each with its own number ([`Brep::tagged`]) give a result whose [`Brep::history`]
+    /// names them. At least one body and at most [`MAX_UNION_BREPS`].
+    pub fn union_all(breps: &[&Brep]) -> Result<Brep> {
+        init()?;
+        if breps.is_empty() || breps.len() > MAX_UNION_BREPS {
+            return Err(error(ffi::ERR_ARG));
+        }
+        let handles: Vec<&ffi::Handle> = breps.iter().map(|b| &b.0).collect();
+        ffi::ops::boolean_union_all(&handles).map(Brep).map_err(error)
     }
 
     /// `self` and `other`, sheets of planar faces on one plane ([`Brep::planar_faces`]), combined

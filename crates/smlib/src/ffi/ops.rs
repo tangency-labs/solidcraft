@@ -1,4 +1,4 @@
-//! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_boolean2d`, `smlib_fillet`,
+//! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_boolean_union_all`, `smlib_boolean2d`, `smlib_fillet`,
 //! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
 //! `smlib_thicken`, `smlib_draft`, `smlib_merge_faces`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
@@ -48,6 +48,7 @@ type PickFn = unsafe extern "C" fn(*const RawBrep, *const f64, i64, f64, f64, *m
 #[cfg(feature = "native")]
 unsafe extern "C" {
     fn smlib_boolean(a: *const RawBrep, b: *const RawBrep, op: i32, out: *mut *mut RawBrep) -> i32;
+    fn smlib_boolean_union_all(breps: *const *const RawBrep, n: i64, out: *mut *mut RawBrep) -> i32;
     fn smlib_boolean2d(a: *const RawBrep, b: *const RawBrep, op: i32, out: *mut *mut RawBrep) -> i32;
     fn smlib_brep_solid_count(brep: *const RawBrep, out: *mut i64) -> i32;
     fn smlib_imprint(body: *const RawBrep, tool: *const RawBrep, out: *mut *mut RawBrep) -> i32;
@@ -147,6 +148,13 @@ unsafe extern "C" {
 #[cfg(feature = "native")]
 pub fn boolean(a: &Handle, b: &Handle, op: i32) -> Result<Handle, i32> {
     new_brep(|out| unsafe { smlib_boolean(a.raw(), b.raw(), op, out) })
+}
+
+#[cfg(feature = "native")]
+pub fn boolean_union_all(breps: &[&Handle]) -> Result<Handle, i32> {
+    let raw: Vec<*const RawBrep> = breps.iter().map(|h| h.raw()).collect();
+    let n = i64::try_from(raw.len()).map_err(|_| ERR_ARG)?;
+    new_brep(|out| unsafe { smlib_boolean_union_all(raw.as_ptr(), n, out) })
 }
 
 #[cfg(feature = "native")]
@@ -312,6 +320,11 @@ pub fn fillet_variable(_: &Handle, _: &[f64; 3], _: f64, _: &[f64; 3], _: i32, _
 
 #[cfg(not(feature = "native"))]
 pub fn boolean(_: &Handle, _: &Handle, _: i32) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn boolean_union_all(_: &[&Handle]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
