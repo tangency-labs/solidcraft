@@ -34,7 +34,7 @@ pub(crate) enum Params {
 
 impl Params {
     /// The evaluator's parameters of the record's `uv`.
-    pub(crate) fn to_eval(&self, uv: [f64; 2]) -> [f64; 2] {
+    pub(crate) fn to_eval(self, uv: [f64; 2]) -> [f64; 2] {
         let [u, v] = uv;
         match self {
             Params::Same => uv,

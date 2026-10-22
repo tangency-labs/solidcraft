@@ -200,7 +200,8 @@ fn threads() -> Vec<(String, Body, f64, f64, f64)> {
 fn thread_display_mesh_stays_on_its_surfaces() {
     for (name, b, d, p, turns) in threads() {
         let tol = tol(&b);
-        let plan = b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
+        let plan =
+            b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
         let mesh = plan.evaluate();
         let q = quality(&plan, &mesh);
         assert!(q.worst_sag <= 1.5 * tol, "{name}: a triangle lies {} mm off its surface (tolerance {tol})", q.worst_sag);
@@ -238,7 +239,9 @@ fn thread_display_mesh_stays_on_its_surfaces() {
 #[test]
 fn thread_display_mesh_has_no_degenerate_or_flipped_triangles() {
     for (name, b, ..) in threads() {
-        let plan = b.mesh_plan(&crate::MeshTolerance { chord: tol(&b), angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
+        let plan = b
+            .mesh_plan(&crate::MeshTolerance { chord: tol(&b), angle: Some(DISPLAY_ANGLE) })
+            .unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
         let mesh = plan.evaluate();
         let q = quality(&plan, &mesh);
         assert!(q.tris > 1000, "{name}: {} triangles", q.tris);

@@ -311,9 +311,9 @@ fn shell(w: &mut W, b: &Brep, si: u32, paint: &HashMap<usize, [f32; 3]>) -> Resu
                     None => {
                         let e = b.edges.get(u.edge as usize).ok_or_else(|| failed(format!("edge {}: no such edge", u.edge)))?;
                         for v in e.vertices {
-                            if !vidx.contains_key(&v) {
+                            if let std::collections::hash_map::Entry::Vacant(e) = vidx.entry(v) {
                                 let p = b.vertices.get(v as usize).ok_or_else(|| failed(format!("vertex {v}: no such vertex")))?.point;
-                                vidx.insert(v, verts.len());
+                                e.insert(verts.len());
                                 verts.push(p);
                             }
                         }

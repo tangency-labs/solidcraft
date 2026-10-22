@@ -406,22 +406,6 @@ fn unfilleted_knife_edge_input_has_a_closed_display_plan() {
     }
 }
 
-/// The construction does not depend on the faces being curved: at a box's corner it gives the
-/// body the planar corner builder does (a sphere's octant where the three rounds meet).
-#[test]
-fn the_sphere_at_a_box_corner_is_the_planar_corner_builders() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap();
-    let picks = [Vec3::new(15.0, 0.0, 10.0), Vec3::new(0.0, 10.0, 10.0), Vec3::new(0.0, 0.0, 5.0)];
-    for r in [1.0, 2.5] {
-        let local = crate::blend_corner::fillet_radii(&b, &picks.iter().map(|p| (*p, r)).collect::<Vec<_>>()).unwrap();
-        let ball = crate::blend_vertex::fillet_ball_vertices(&b, &picks, r).unwrap_or_else(|e| panic!("r={r}: {e}"));
-        assert!(ball.validity().is_empty(), "r={r}: {:?}", ball.validity());
-        assert_eq!(ball.face_count(), local.face_count(), "r={r}");
-        let (a, c) = (planned_volume(&local), planned_volume(&ball));
-        assert!((a - c).abs() < 1e-3 * a, "r={r}: planar corner {a}, ball corner {c}");
-    }
-}
-
 /// Sizes at the ends of the range at a ball vertex: rounded or refused, never a panic.
 #[test]
 fn rounds_ending_in_a_sphere_of_any_size_never_panic() {

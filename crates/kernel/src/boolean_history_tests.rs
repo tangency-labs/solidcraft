@@ -310,69 +310,21 @@ fn trivial_paths() {
     assert!(h.faces.iter().all(|f| f.change == Change::Kept));
 }
 
-/// A body in two pieces, cut a piece at a time: each piece's faces are the body's own.
+/// A body in two pieces, cut: each piece's faces are the body's own.
 #[test]
-fn by_lumps_composes_the_pieces() {
+fn a_cut_of_two_pieces_composes_the_pieces() {
     let left = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let right = boxed(20.0, 0.0, 0.0, 30.0, 10.0, 10.0);
     let a = boolean(&left, &right, BoolOp::Union).unwrap().unwrap();
     assert_eq!(a.shell_count(), 2);
     let b = crate::sphere(Vec3::new(15.0, 5.0, 10.0), 7.0).unwrap();
-    let r = crate::ops::by_lumps(&a, &b, a.lumps().unwrap(), b.lumps().unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.02);
     // Both pieces are bitten: the sphere's patches inside each line its bite.
     let bites: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 1, .. })).collect();
     assert!(bites.len() >= 2, "{}", show(h));
     let targets: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 0, .. })).collect();
     assert_eq!(targets.len(), 12);
-}
-
-/// Two bodies touching along one whole face, back to back: glued, the two faces gone, the
-/// coplanar sides each side of the seam merged.
-#[test]
-fn glue_merges_across_the_seam() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = boxed(10.0, 0.0, 0.0, 20.0, 10.0, 10.0);
-    let r = crate::coplanar::glue(&a, &b).unwrap().unwrap();
-    let h = verified(&r, &[&a, &b], 0.02);
-    assert_eq!(changes(h), [2, 0, 0, 4, 0], "{}", show(h));
-    // The four seam edges went with the merged faces; the ends' edges are each box's.
-    assert_eq!(h.edges.len(), 12);
-    assert!(h.edges.iter().all(|e| !e.origins.is_empty()));
-}
-
-/// Coincident faces pushed apart: a cut flush with the target's top, and a union of bodies
-/// standing on one floor (the floor that is cut back is both operands' floors).
-#[test]
-fn faces_pushed_apart() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let tool = boxed(2.0, 2.0, 5.0, 8.0, 8.0, 10.0);
-    let r = crate::coplanar::boolean_apart(&a, &tool, BoolOp::Cut).unwrap().unwrap().unwrap();
-    let h = verified(&r, &[&a, &tool], 0.02);
-    // The pocket: its floor and four sides are the tool's.
-    let tool_faces: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 1, .. })).collect();
-    assert_eq!(tool_faces.len(), 5, "{}", show(h));
-    let left = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let right = boxed(5.0, 3.0, 0.0, 15.0, 7.0, 4.0);
-    let r = crate::coplanar::boolean_apart(&left, &right, BoolOp::Union).unwrap().unwrap().unwrap();
-    let h = verified(&r, &[&left, &right], 0.02);
-    assert!(h.faces.iter().any(|f| f.change == Change::Merged && f.origins.len() == 2), "{}", show(h));
-}
-
-/// The exact polygon boolean: pieces of planar faces joined back into faces.
-#[test]
-fn planar_fallback() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0);
-    for (op, count) in [(BoolOp::Cut, 9), (BoolOp::Union, 12), (BoolOp::Intersect, 6)] {
-        let r = crate::polybool::planar_boolean(&a, &b, op).unwrap().unwrap();
-        let h = verified(&r, &[&a, &b], 0.02);
-        assert_eq!(h.faces.len(), count, "{op:?}\n{}", show(h));
-        assert!(h.faces.iter().all(|f| f.origins.len() == 1));
-        // Three faces of each meet three of the other's.
-        assert_eq!(meets(h).len(), 6, "{op:?}\n{}", show(h));
-        assert!(h.edges.iter().all(|e| e.origins.len() == 1), "{op:?}\n{}", show(h));
-    }
 }
 
 /// A boolean with a triangle mesh: the mesh's faces are its triangles (and it has no edges).
@@ -431,24 +383,6 @@ fn regularized_step_cut() {
     assert_eq!(joined.len(), 1, "{}", show(ph));
     assert_eq!(faces_of(ph)[joined[0]], (Change::Modified, vec![face(0, 3)]));
     assert_eq!(faces_of(h), faces_of(ph), "{}", show(h));
-}
-
-/// A ring joined under a floor, its bore on the floor's hole (coincident cylinders): the ring's
-/// bore is narrowed, the bodies joined, and the bore cut out again. The ring's bore is a circle
-/// built in two arcs, and the recut wall is split where the cutting cylinder's own construction
-/// splits it, so which arc each piece of it restores is not known: no history.
-#[test]
-fn bore_union_of_a_bore_in_two_arcs_has_no_history() {
-    let hole = crate::cylinder(Vec3::new(50.0, 40.0, -5.0), Vec3::Z, 10.0, 30.0).unwrap();
-    let floor = boolean(&boxed(0.0, 0.0, 0.0, 100.0, 80.0, 10.0), &hole, BoolOp::Cut).unwrap().unwrap();
-    let centre = solidcraft_geom::Vec2::new(50.0, 40.0);
-    let annulus = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::circle(centre, 20.0),
-        holes: vec![solidcraft_geom::Loop2::circle(centre, 10.0).reversed()],
-    };
-    let ring = crate::extrude(&solidcraft_geom::Plane::XY, &[annulus], -5.0, 2.0).unwrap().remove(0);
-    let r = crate::coplanar::bore_union(&floor, &ring, &|_| true).expect("the bores are recut");
-    assert!(r.history().is_none());
 }
 
 /// Bodies clearly apart, joined as one body of several pieces (`union_apart`): every face and

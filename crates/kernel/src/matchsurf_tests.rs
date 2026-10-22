@@ -72,9 +72,9 @@ fn edge_at(body: &Body, p: Vec3) -> Chain {
 /// How far the rebuilt face's far boundary lies from the original one, in mm: the far row of the
 /// rebuilt surface sampled at its own stations, against the original boundary edge's own points.
 fn far_drift(made: &Body, sheet: &Body, far_mid: Vec3) -> f64 {
-    let patch = Patch::of(&made.record(), 0).unwrap();
+    let patch = Patch::of(made.record(), 0).unwrap();
     let ((u0, u1), (_, v1)) = (patch.ranges[0], patch.ranges[1]);
-    let poly = chain_polyline(&sheet.record(), &edge_at(sheet, far_mid)).unwrap();
+    let poly = chain_polyline(sheet.record(), &edge_at(sheet, far_mid)).unwrap();
     let mut worst = 0.0f64;
     for k in 0..=8 {
         let p = patch.surface.point([u0 + (u1 - u0) * k as f64 / 8.0, v1]).unwrap();
@@ -87,7 +87,7 @@ fn far_drift(made: &Body, sheet: &Body, far_mid: Vec3) -> f64 {
 /// point, the unit tangent, the curvature vector and the change of that curvature, read off the
 /// finished surface (never from the construction).
 fn seam_at(body: &Body, t: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    Patch::of(&body.record(), 0).unwrap().seam_shape(Side::V0, t).unwrap()
+    Patch::of(body.record(), 0).unwrap().seam_shape(Side::V0, t).unwrap()
 }
 
 /// The stations a seam is measured at, as fractions of its length.
@@ -122,7 +122,7 @@ fn a_g2_match_meets_a_cylinder_with_its_own_curvature() {
     println!("g2: far boundary drift {drift:e} mm");
     assert!(drift < 1e-9, "the far boundary drifted {drift:e} mm");
     // The interior stays near the original: the crowning that leaves it closest.
-    let stray = deviation(&Patch::of(&made.record(), 0).unwrap(), &Patch::of(&sheet.record(), 0).unwrap()).unwrap();
+    let stray = deviation(&Patch::of(made.record(), 0).unwrap(), &Patch::of(sheet.record(), 0).unwrap()).unwrap();
     println!("g2: interior stray {stray:.6} mm rms");
     // The seam moved 1 mm, so the face cannot be closer than that at the seam itself: over the
     // whole face the root mean square distance is well under half of it.

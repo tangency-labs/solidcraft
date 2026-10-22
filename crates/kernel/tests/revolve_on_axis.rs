@@ -75,7 +75,7 @@ fn a_half_slot_revolved_about_a_centreline_in_a_face_cuts_it() {
         for turn in [PI, -PI, TAU] {
             let tool = revolve(&plane, std::slice::from_ref(&r), Vec2::ZERO, Vec2::new(1.0, 0.0), turn).unwrap().pop().unwrap();
             // A half turn into the plate, or a full one, cuts a groove; a half turn out of it misses.
-            let into = turn.abs() > PI || tool.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().bounds().min.z < 9.0;
+            let into = turn.abs() > PI || tool.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().bounds().min.z < 9.0;
             let cut = boolean(&plate, &tool, BoolOp::Cut).unwrap().unwrap();
             assert!(cut.validity().is_empty(), "flip {flip}, {turn}: {:?}", cut.validity());
             let removed = whole - measure(&cut).unwrap().volume;

@@ -116,7 +116,7 @@ impl Faces {
 
     /// The unit direction into planar face `f` across the straight edge of `u`, square to the
     /// edge: the face lies to the left of its loop seen from its surface's natural normal.
-    pub(crate) fn into_face(&self, f: usize, u: &OrientedEdge) -> Option<Vec3> {
+    pub(crate) fn direction_into_face(&self, f: usize, u: &OrientedEdge) -> Option<Vec3> {
         let (a, b) = self.ends(u.edge as usize)?;
         let dir = if u.forward { b - a } else { a - b };
         self.natural_plane_normal(f)?.cross(dir.normalized()?).normalized()
@@ -167,7 +167,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
                 let (_, su, sv) = e.derivs(uv[0], uv[1])?;
                 Some(su.cross(sv))
             };
-            let along = normal(&*surfaces[0])?.cross(normal(&*surfaces[1])?);
+            let along = normal(&surfaces[0])?.cross(normal(&surfaces[1])?);
             let along = along.normalized()?;
             if along.dot(curve_tangent(leader, t)?) < 0.0 { along * -1.0 } else { along }
         }

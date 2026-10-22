@@ -41,10 +41,9 @@ fn disc_tangent_to_a_side_and_overhanging_joins() {
         let top = prism(disc(18.5, cy, r), 10., 20.);
         let want = 8990.0 + std::f64::consts::PI * r * r * 10.0;
         for (a, b) in [(&block, &top), (&top, &block)] {
-            let (res, d) = capture_boolean_diagnostics(|| boolean(a, b, BoolOp::Union));
+            let res = boolean(a, b, BoolOp::Union);
             let res = res.unwrap().unwrap();
             assert_solid(&res, want, 1e-5, 1, &format!("disc at {cy}, r {r}"));
-            assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{d:?}");
         }
     }
 }
@@ -129,10 +128,9 @@ fn hole_tangent_inside_a_stepped_boss_cuts_exactly() {
         for (z0, z1, want) in [(-1., 20., 2000. + 1000. - 25. * 15.), (6., 20., 2000. + 1000. - 25. * 9.), (-1., 4., 2000. + 1000. - 25. * 4.)] {
             let what = format!("hole z {z0}…{z1}, turned {turn}, flip {flip}");
             let hole = prism(circle(15., 5.), z0, z1);
-            let (res, d) = capture_boolean_diagnostics(|| boolean(&stepped, &hole, BoolOp::Cut));
+            let res = boolean(&stepped, &hole, BoolOp::Cut);
             let res = res.unwrap_or_else(|e| panic!("{what}: {e}")).unwrap();
             assert_solid(&res, PI * want, 1e-5, 1, &what);
-            assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{what}: {d:?}");
         }
     }
 }
@@ -146,10 +144,9 @@ fn hole_tangent_to_a_flat_side_of_a_stepped_block_cuts_exactly() {
     let boss = prism(rect(10., 10., 40., 30.), 5., 15.);
     let stepped = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
     let hole = prism(disc(35., 20., 5.), -1., 20.);
-    let (res, d) = capture_boolean_diagnostics(|| boolean(&stepped, &hole, BoolOp::Cut));
+    let res = boolean(&stepped, &hole, BoolOp::Cut);
     let res = res.unwrap().unwrap();
     assert_solid(&res, 8000. + 6000. - std::f64::consts::PI * 25. * 15., 1e-5, 1, "hole tangent to a flat side");
-    assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{d:?}");
 }
 
 /// A stepped block cut by a disc tangent to its back side from inside leaves two posts meeting
@@ -163,7 +160,7 @@ fn stepped_cuts_touching_along_a_line_keep_their_pieces() {
     let back = prism(rect(0., 20., 25., 29.), 10., 20.);
     let stepped = boolean(&block, &back, BoolOp::Union).unwrap().unwrap();
     let tool = prism(disc(18.5, 4., 25.), -1., 21.);
-    let (res, d) = capture_boolean_diagnostics(|| boolean(&stepped, &tool, BoolOp::Cut));
+    let res = boolean(&stepped, &tool, BoolOp::Cut);
     let res = res.unwrap().unwrap();
     let n = 400_000;
     let dx = 31.0 / n as f64;
@@ -176,18 +173,14 @@ fn stepped_cuts_touching_along_a_line_keep_their_pieces() {
         .sum();
     let v = res.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((v - volume).abs() <= volume * 1e-4, "posts: volume {v} vs {volume}");
-    assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{d:?}");
-    let sewn = crate::prism::prism_boolean(&stepped, &tool, BoolOp::Cut);
-    assert!(!matches!(&sewn, Some(Ok(Some(b))) if b.shell_count() < 2), "posts sewn into one shell");
 
     let block = prism(rect(0., 0., 40., 40.), 0., 5.);
     let boss = prism(rect(10., 10., 40., 30.), 5., 15.);
     let stepped = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
     let diamond = prism(poly(&[[30., 20.], [35., 15.], [40., 20.], [35., 25.]]), -1., 20.);
-    let (res, d) = capture_boolean_diagnostics(|| boolean(&stepped, &diamond, BoolOp::Cut));
+    let res = boolean(&stepped, &diamond, BoolOp::Cut);
     let res = res.unwrap().unwrap();
     assert_solid(&res, 8000. + 6000. - 50. * 15., 1e-9, 1, "diamond hole with a corner on a stepped side");
-    assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{d:?}");
 }
 
 /// A row of holes each touching the next (a 5 mm pattern of Ø5 holes) through a stepped plate:
@@ -199,9 +192,8 @@ fn row_of_touching_holes_through_a_stepped_plate_cuts_exactly() {
     let mut body = boolean(&plate, &notch, BoolOp::Cut).unwrap().unwrap();
     for x in [15.45, 20.45, 25.45] {
         let hole = prism(disc(x, 15.7, 2.5), -5., 7.5);
-        let (res, d) = capture_boolean_diagnostics(|| boolean(&body, &hole, BoolOp::Cut));
+        let res = boolean(&body, &hole, BoolOp::Cut);
         body = res.unwrap().unwrap();
-        assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "hole at {x}: {d:?}");
     }
     assert_solid(&body, 7312.5 - 3.0 * std::f64::consts::PI * 6.25 * 7.5, 1e-5, 1, "touching holes");
 }

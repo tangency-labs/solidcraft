@@ -485,7 +485,7 @@ fn newell(ring: &[Vec3]) -> Option<Vec3> {
     let mut s = Vec3::ZERO;
     for i in 0..n {
         let (a, b) = (*ring.get(i)?, *ring.get((i + 1) % n)?);
-        s = s + a.cross(b);
+        s += a.cross(b);
     }
     s.normalized()
 }

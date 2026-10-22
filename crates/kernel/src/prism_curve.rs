@@ -35,7 +35,7 @@ impl<'a> Run<'a> {
     }
 
     /// The parameters it runs from and to.
-    fn from_to(&self) -> (f64, f64) {
+    fn ends_along(&self) -> (f64, f64) {
         let [t0, t1] = self.interval;
         if self.forward { (t0, t1) } else { (t1, t0) }
     }
@@ -123,7 +123,7 @@ fn spans_of(run: &Run, work: &mut usize) -> Option<Vec<Vec<HPoint>>> {
         }
         Curve::Ellipse { frame, radii } => {
             let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
-            let (a, b) = run.from_to();
+            let (a, b) = run.ends_along();
             return ellipse_spans(v3(frame.origin), x, y, *radii, a, b, work);
         }
         _ => return None,
@@ -315,7 +315,7 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -
     if matches!(run.curve, Curve::SurfaceIntersection { .. }) {
         return None;
     }
-    let (ts, te) = run.from_to();
+    let (ts, te) = run.ends_along();
     if !ts.is_finite() || !te.is_finite() || run.interval[1] <= run.interval[0] {
         return None;
     }

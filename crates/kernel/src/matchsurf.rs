@@ -69,13 +69,13 @@ pub fn match_surface(body: &Body, faces: &[Vec3], target: &Body, target_pick: &[
         return Err(KernelError::Invalid("match rebuilds a surface body: this one is closed".into()));
     }
     let (record, target_record) = (body.record(), target.record());
-    let face = face_near(&record, faces, body.size() * 0.05 + 1e-6)?;
-    let original = Patch::of(&record, face)?;
+    let face = face_near(record, faces, body.size() * 0.05 + 1e-6)?;
+    let original = Patch::of(record, face)?;
     let chain = bridge::chain(target, target_pick)?;
-    let line = chain_polyline(&target_record, &chain)?;
+    let line = chain_polyline(target_record, &chain)?;
     let near = nearest_side(&original, &line)?;
     let far = near.opposite();
-    let far_edges = side_edges(&record, face, &original, far, body.size() * 1e-6 + 1e-9)?;
+    let far_edges = side_edges(record, face, &original, far, body.size() * 1e-6 + 1e-9)?;
     let (mid_near, mid_far) = (chain_mid(&line)?, original.at(far, 0.5)?);
     let leave = (mid_far - mid_near)
         .normalized()
@@ -111,7 +111,7 @@ pub fn match_surface(body: &Body, faces: &[Vec3], target: &Body, target_pick: &[
     for crown_near in CROWNS {
         for crown_far in CROWNS {
             let made = bridge::bridge(&near_frames, &far_frames, [order, Continuity::G1], [crown_near, crown_far])?;
-            let stray = deviation(&Patch::of(&made.record(), 0)?, &original)?;
+            let stray = deviation(&Patch::of(made.record(), 0)?, &original)?;
             if best.as_ref().is_none_or(|(b, _)| stray < *b) {
                 best = Some((stray, made));
             }
@@ -124,11 +124,11 @@ pub fn match_surface(body: &Body, faces: &[Vec3], target: &Body, target_pick: &[
     // same way round, which is what a stitch, a thicken or a display of the result reads.
     let seam = chain_mid(&line)?;
     let made_record = made.record();
-    let turn = match (Patch::of(&made_record, 0)?.normal_near(seam), Patch::of(&target_record, target_face)?.normal_near(seam)) {
+    let turn = match (Patch::of(made_record, 0)?.normal_near(seam), Patch::of(target_record, target_face)?.normal_near(seam)) {
         (Some((m, _)), Some((t, _))) => m.dot(t) < 0.0,
         _ => false,
     };
-    let kept = crate::surfaces::Parts::of(&made_record, &[(0, turn)])?.canonical()?;
+    let kept = crate::surfaces::Parts::of(made_record, &[(0, turn)])?.canonical()?;
     let sheet = crate::surfaces::surface_body(&kept.brep)?;
     let history = History {
         operands: 2,
@@ -147,12 +147,12 @@ pub fn seam_continuity(made: &Body, target: &Body, target_pick: &[Vec3]) -> Resu
     target.require_brep("match")?;
     let (record, target_record) = (made.record(), target.record());
     let chain = bridge::chain(target, target_pick)?;
-    let poly = chain_polyline(&target_record, &chain)?;
+    let poly = chain_polyline(target_record, &chain)?;
     // The face whose boundary runs along the chain: the one nearest it, so that a body that has
     // not been matched yet — where the seam is still some way off — can be measured too.
     let mid = chain_mid(&poly)?;
     let face = (0..record.faces.len())
-        .filter_map(|f| Patch::of(&record, f).ok().and_then(|p| p.normal_near(mid).map(|(_, d)| (d, p))))
+        .filter_map(|f| Patch::of(record, f).ok().and_then(|p| p.normal_near(mid).map(|(_, d)| (d, p))))
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, p)| p)
         .ok_or_else(|| KernelError::Failed("match: the body has no faces".into()))?;
@@ -165,7 +165,7 @@ pub fn seam_continuity(made: &Body, target: &Body, target_pick: &[Vec3]) -> Resu
     let Some(&(target_face, _)) = candidates.first() else {
         return Err(KernelError::Invalid("no face of the target holds the picked edges".into()));
     };
-    let target_patch = Patch::of(&target_record, target_face)?;
+    let target_patch = Patch::of(target_record, target_face)?;
     let frames = bridge::frames(target, target_face, &chain, leave, STATIONS)?;
     let size = target.size();
     let (mut gap, mut deg, mut curv, mut bend) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
@@ -472,7 +472,7 @@ fn support_faces(target: &Body, chain: &Chain, poly: &[Vec3], leave: Vec3) -> Re
         if !chain.iter().all(|(e, _)| bounds(f, *e)) {
             continue;
         }
-        let Some((n, d)) = Patch::of(&r, f).ok().and_then(|p| p.normal_near(mid)) else { continue };
+        let Some((n, d)) = Patch::of(r, f).ok().and_then(|p| p.normal_near(mid)) else { continue };
         if d > tol {
             continue;
         }
@@ -505,13 +505,13 @@ fn supply_order(target: &Body, candidates: &[(usize, f64)], chain: &Chain, leave
     }
     let r = target.record();
     let size = target.size();
-    let first_patch = Patch::of(&r, first)?;
+    let first_patch = Patch::of(r, first)?;
     let primary: Vec<Frame> = bridge::frames(target, first, chain, leave, STATIONS)?;
     for &other in keep.iter().skip(1) {
         // A face that cannot be read along the whole chain says nothing here: the face the match
         // is built on is the one that must be able to supply it.
         let Ok(other_frames) = bridge::frames(target, other, chain, leave, STATIONS) else { continue };
-        let other_patch = Patch::of(&r, other)?;
+        let other_patch = Patch::of(r, other)?;
         let mut worst_deg = 0.0f64;
         let mut worst = 0.0f64;
         let mut worst_change = 0.0f64;
