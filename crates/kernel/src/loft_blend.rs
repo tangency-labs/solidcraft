@@ -41,14 +41,12 @@
 //! each end span and leaves every joint's conditions alone.
 
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::bspline::{CurveN, HPoint, MAX_SPLINE_DEGREE, NurbsSurface};
-use truck_modeling as mt;
-use truck_modeling::{ParametricSurface3D, SearchNearestParameter};
 
-use crate::body::{Body, from_p3, p3};
+use crate::body::Body;
 use crate::bridge::{Continuity, Frame};
-use crate::surfaces::surface_body;
-use crate::{KernelError, Result, guard};
+use crate::{KernelError, Result};
 
 /// Most cross-sections one blend may run through.
 pub const MAX_BLEND_SECTIONS: usize = 50;
@@ -81,7 +79,7 @@ const ROWS_PER_SOLVE: usize = 16;
 pub fn loft_blend(sections: &[Vec<Frame>], orders: [Continuity; 2], crown: [f64; 2], samples: usize) -> Result<Body> {
     let blend = Blend::new(sections, orders, crown, samples)?;
     let net = blend.net()?;
-    guard("loft blend surface", || crate::spline_conv::tensor_face(&net).map(|f| surface_body(vec![f])))
+    crate::surfaces::tensor_sheet(&net)
 }
 
 /// The frames of one cross-section picked as an edge chain of a body, sampled at `stations`
@@ -94,34 +92,36 @@ pub fn loft_blend(sections: &[Vec<Frame>], orders: [Continuity; 2], crown: [f64;
 /// tangent plane (a direction normal to it has no tangent plane to leave in). The last section's
 /// `leave` runs back into the blend, towards the section before it.
 pub fn section_frames(body: &Body, edges: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<Frame>> {
-    guard("loft blend section", || {
-        let chain = crate::bridge::chain(body, edges)?;
-        let leave =
-            leave.normalized().filter(|l| l.is_finite()).ok_or_else(|| KernelError::Invalid("the leave direction must be a finite vector".into()))?;
-        let first = chain.first().ok_or_else(|| KernelError::Failed("loft blend: no chain".into()))?;
-        let mid = (from_p3(first.front().point()) + from_p3(first.back().point())) * 0.5;
-        // The face the chain lies on that the blend leaves through: the one whose tangent plane
-        // holds as much of `leave` as possible.
-        let mut best: Option<(f64, mt::Face)> = None;
-        for face in body.solid.face_iter() {
-            if !chain.iter().all(|e| face.edge_iter().any(|f| f.id() == e.id())) {
-                continue;
-            }
-            let surf = face.surface();
-            let Some((u, v)) = surf.search_nearest_parameter(p3(mid), None, 100) else { continue };
-            let normal = surf.normal(u, v);
-            let n = Vec3::new(normal.x, normal.y, normal.z).normalized().unwrap_or(Vec3::ZERO);
-            let score = (leave - n * leave.dot(n)).len();
-            if best.as_ref().is_none_or(|(b, _)| score > *b) {
-                best = Some((score, face.clone()));
-            }
+    let chain = crate::bridge::chain(body, edges)?;
+    let leave =
+        leave.normalized().filter(|l| l.is_finite()).ok_or_else(|| KernelError::Invalid("the leave direction must be a finite vector".into()))?;
+    let r = body.record();
+    let &(first, _) = chain.first().ok_or_else(|| KernelError::Failed("loft blend: no chain".into()))?;
+    let ends = r.edges.get(first).map(|e| e.vertices).ok_or_else(|| KernelError::Failed("loft blend: an edge reference".into()))?;
+    let point = |v: u32| r.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
+    let (Some(a), Some(b)) = (point(ends[0]), point(ends[1])) else { return Err(KernelError::Failed("loft blend: a vertex reference".into())) };
+    let mid = (a + b) * 0.5;
+    // The face the chain lies on that the blend leaves through: the one whose tangent plane holds
+    // as much of `leave` as possible.
+    let bounds = |f: usize, e: usize| r.edges.get(e).is_some_and(|x| x.uses.iter().any(|u| u.face as usize == f));
+    let mut best: Option<(f64, usize)> = None;
+    for (f, face) in r.faces.iter().enumerate() {
+        if !chain.iter().all(|(e, _)| bounds(f, *e)) {
+            continue;
         }
-        let (score, face) = best.ok_or_else(|| KernelError::Invalid("no face of the body holds the picked edges".into()))?;
-        if score < 0.2 {
-            return Err(KernelError::Invalid("the direction towards the next section lies in no face at the picked edges".into()));
+        let Ok(surf) = SurfaceEval::new(&face.surface) else { continue };
+        let Some((_, su, sv)) = surf.project(mid, None, f64::INFINITY).and_then(|uv| surf.derivs(uv[0], uv[1])) else { continue };
+        let n = su.cross(sv).normalized().unwrap_or(Vec3::ZERO);
+        let score = (leave - n * leave.dot(n)).len();
+        if best.is_none_or(|(b, _)| score > b) {
+            best = Some((score, f));
         }
-        crate::bridge::frames(&face, &chain, leave, stations)
-    })
+    }
+    let (score, face) = best.ok_or_else(|| KernelError::Invalid("no face of the body holds the picked edges".into()))?;
+    if score < 0.2 {
+        return Err(KernelError::Invalid("the direction towards the next section lies in no face at the picked edges".into()));
+    }
+    crate::bridge::frames(body, face, &chain, leave, stations)
 }
 
 /// What the face has to do at one section: where it is, and the run direction's first, second and
