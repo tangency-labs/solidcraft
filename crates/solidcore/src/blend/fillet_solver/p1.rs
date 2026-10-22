@@ -2650,7 +2650,7 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         },
         AnalyticTestSurface::Cone(c) => c.rev().base(),
         AnalyticTestSurface::Sphere(s) => s.base().base(),
-        AnalyticTestSurface::Torus(t) => t.base.base(),
+        AnalyticTestSurface::Torus(t) => t.base().base(),
     };
     match Cone::is_nurb_surface_cone(k, bss, 1.0) {
         Ok(None) => Ok(false),

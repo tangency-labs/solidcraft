@@ -916,8 +916,8 @@ impl OffsetSurface {
     /// `SM_ERR` for an offset nested twice; `SM_ERR_NULL_POINTER` when a non-B-spline
     /// base must be extended; those of the extension and the base evaluations; the
     /// zero-vector error of `Unitize`.
-    pub fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
-        self.with_extension(|ext| self.point_with(ext, uv))
+    pub fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
+        self.with_extension(|ext| self.point_with(k, ext, uv))
     }
 
     /// [`OffsetSurface::evaluate_point`], storing an extension it makes in
@@ -926,8 +926,8 @@ impl OffsetSurface {
     /// # Errors
     ///
     /// Those of [`OffsetSurface::evaluate_point`].
-    pub fn evaluate_point_extending(&mut self, uv: Point2) -> Result<Point3> {
-        let r = self.evaluate_point(uv);
+    pub fn evaluate_point_extending(&mut self, k: &Kernel, uv: Point2) -> Result<Point3> {
+        let r = self.evaluate_point(k, uv);
         self.fold_pending_extension();
         r
     }
@@ -954,6 +954,7 @@ impl OffsetSurface {
     ) -> Result<Vec<Vec<Vec3>>> {
         self.with_extension(|ext| {
             self.evaluate_with(
+                k,
                 ext,
                 !flags.non_zero_tangents,
                 uv,
@@ -977,7 +978,7 @@ impl OffsetSurface {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
-        let r = self.evaluate(uv, highest_u_deriv, highest_v_deriv, flags);
+        let r = self.evaluate(k, uv, highest_u_deriv, highest_v_deriv, flags);
         self.fold_pending_extension();
         r
     }
@@ -997,7 +998,7 @@ impl OffsetSurface {
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
         self.with_extension(|ext| {
-            self.evaluate_with(ext, true, uv, highest_u_deriv, highest_v_deriv, flags)
+            self.evaluate_with(k, ext, true, uv, highest_u_deriv, highest_v_deriv, flags)
         })
     }
 
@@ -1014,7 +1015,7 @@ impl OffsetSurface {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
-        let r = self.evaluate_simple(uv, highest_u_deriv, highest_v_deriv, flags);
+        let r = self.evaluate_simple(k, uv, highest_u_deriv, highest_v_deriv, flags);
         self.fold_pending_extension();
         r
     }
@@ -2161,7 +2162,7 @@ impl SurfaceEvaluate for OffsetEval<'_> {
         guess_uv: Point2,
         guess_t: f64,
     ) -> Result<Option<(f64, Point2)>> {
-        self.on_snapshot(|s| s.local_curve_maximize(curve, domain, interval, guess_uv, guess_t))
+        self.on_snapshot(|s| s.local_curve_maximize(k, curve, domain, interval, guess_uv, guess_t))
     }
 
     fn natural_uv_domain(&self) -> Extent2d {

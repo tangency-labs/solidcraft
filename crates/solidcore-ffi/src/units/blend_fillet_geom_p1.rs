@@ -404,7 +404,8 @@ fn points(rd: &mut Reader<'_>, k: usize) -> Result<Vec<[f64; 4]>, FfiError> {
 }
 
 /// Reads and validates a curve `dim n p m cpts knots` of dimension `want_dim`.
-fn curve(rd: &mut Reader<'_>, want_dim: usize, what: &str) -> Result<(), FfiError> {
+/// Reads and validates a curve `dim n p m cpts knots` of dimension `want_dim`.
+pub(crate) fn curve(rd: &mut Reader<'_>, want_dim: usize, what: &str) -> Result<(), FfiError> {
     let dim = rd.index(3)?;
     if dim != want_dim {
         return Err(bad(format!("{what}: need a {want_dim}D curve")));

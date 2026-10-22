@@ -848,8 +848,9 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// The fillet solver constructors `SetFilletParameters` and `SurfaceSurfaceFillet`
     /// call, dispatched on the spec: `SmConstantRadiusFS` through
     /// [`ExecutiveAccess::new_constant_radius_solver`]; `SmConstantDistanceFS`,
-    /// `SmVariableRadiusFS` and `SmSurfaceSurfaceFS` wait for
-    /// `blend.fillet_standard_solver_p2`.
+    /// `SmVariableRadiusFS` and `SmSurfaceSurfaceFS` are ported
+    /// (`blend.fillet_standard_solver_p2`) but need a solver arena in the adapter
+    /// that no adapter has yet (`plan/findings.md`, executive adapter stubs).
     fn new_fillet_solver(
         &mut self,
         k: &mut Kernel,

@@ -28,6 +28,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_solver::p1::OffsetSurfaceSlot;
+use solidcore::curve::curve::Curve;
 use solidcore::blend::fillet_standard_solver::p1::{
     constant_radius_from_edgeuse, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs, FilletLaw,
     FilletLawKind, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE,
@@ -57,6 +59,11 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_standard_solver_p2::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
+use super::blend_fillet_geom_p1::{
+    curve_of, gen_curve, gen_surface as gp1_gen_surface, push_crv, push_model, push_srf as gp1_push_srf,
+    scale_of as gp1_scale_of, surface_of as gp1_surface_of, Crv, EdgeIn, EuIn, GeomIn, Model,
+    RustModel, Srf, VertexIn,
+};
 use super::topology_edgeuse_p1::{
     brep_block_of, gen_brep, import_with_types, path_of, sel, BrepIn, FILES,
 };
@@ -195,6 +202,47 @@ enum Inputs {
         /// `m_dSurfaceExtensionFactor`.
         ext: f64,
     },
+    /// `SmVariableRadiusFS::ReCalcFilletGeom` on a pseudo B-rep of unit
+    /// `blend.fillet_geom_p1`.
+    Recalc(Box<RecalcIn>),
+}
+
+/// An intersection point set on the vertex use of edge use `which` of model edge `e`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TsectIn {
+    e: usize,
+    which: usize,
+    pos: [f64; 3],
+    /// `CrvDeriv()`: the curve tangent at the point.
+    deriv: [f64; 3],
+    t: f64,
+    uv0: [f64; 2],
+    uv1: [f64; 2],
+}
+
+/// The inputs of a `recalc` case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecalcIn {
+    model: Model,
+    /// The geometry put into `m_vFilletGeoms` (`-1` none).
+    g: i64,
+    tsects: Vec<TsectIn>,
+    /// The base surfaces A and B.
+    a: Srf,
+    b: Srf,
+    /// The constructor's centre curve (`m_pOriginal`).
+    center: Crv,
+    /// Offset distances and orientations: the offsets are `d[i] * o[i]`.
+    d: [f64; 2],
+    o: [f64; 2],
+    tol: f64,
+    ang: f64,
+    tan: f64,
+    /// `SmLinearFilletLaw(r[0], r[1])`.
+    r: [f64; 2],
+    law_orient: bool,
+    /// `pOptRefCurve` (`None`: `NULL`).
+    reference: Option<Crv>,
 }
 
 impl Inputs {
@@ -206,7 +254,7 @@ impl Inputs {
             Inputs::Plane { .. } => Op::Plane,
             Inputs::Ss { .. } => Op::Ss,
             Inputs::Types { .. } => Op::Types,
-            Inputs::CdEu { .. } | Inputs::CrEu { .. } => return None,
+            Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => return None,
         })
     }
 }
@@ -344,7 +392,7 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             push_kinds(&mut o, kinds);
         }
         Inputs::Types { kinds } => push_kinds(&mut o, kinds),
-        Inputs::CdEu { .. } | Inputs::CrEu { .. } => {
+        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => {
             return Err(harness("the edge-use op has its own input"))
         }
     }
@@ -354,6 +402,9 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     if matches!(i, Inputs::CrEu { .. }) {
         return cpp_cr_eu(i);
+    }
+    if let Inputs::Recalc(ri) = i {
+        return cpp_recalc(ri);
     }
     let Some(op) = i.ffi() else {
         return cpp_edgeuse(i);
@@ -541,7 +592,7 @@ fn rust_edgeuse_body(
                 d.min().x + fu * (d.max().x - d.min().x),
                 d.min().y + fv * (d.max().y - d.min().y),
             );
-            match s.surface.evaluate_point(uv) {
+            match s.surface.evaluate_point(&k, uv) {
                 Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => {
@@ -554,8 +605,8 @@ fn rust_edgeuse_body(
             }
         }
     }
-    put_eu_state(&mut v, b, Some(eu))?;
-    put_eu_state(&mut v, b, radial)?;
+    put_eu_state(&k, &mut v, b, Some(eu))?;
+    put_eu_state(&k, &mut v, b, radial)?;
     Ok(v)
 }
 
@@ -1134,7 +1185,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             let (d1, d2) = (extent2(plane.d1), extent2(plane.d2));
             let mut t = TsectPnt::new();
             let res = if guess {
-                fs.guess_point_on_plane_solve(
+                fs.guess_point_on_plane_solve(&k, 
                     v3(plane.orig),
                     v3(plane.normal),
                     &d1,
@@ -1215,7 +1266,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                         .and_then(|s| {
                             s.surface
                                 .surface
-                                .evaluate_normal_extending(uv, Side::Left, Side::Left)
+                                .evaluate_normal_extending(&k, uv, Side::Left, Side::Left)
                                 .ok()
                         })
                 };
@@ -1294,7 +1345,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             push_types(&mut o, ss.type_code(), |t| ss.is_kind_of(t), kinds);
             push_types(&mut o, vr.type_code(), |t| vr.is_kind_of(t), kinds);
         }
-        Inputs::CdEu { .. } | Inputs::CrEu { .. } => {
+        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => {
             return Err(harness("the edge-use op runs apart"))
         }
     }
@@ -1305,6 +1356,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     if matches!(i, Inputs::CrEu { .. }) {
         return rust_cr_eu(i);
     }
+    if let Inputs::Recalc(ri) = i {
+        return rust_recalc(ri);
+    }
     if i.ffi().is_none() {
         return rust_edgeuse(i);
     }
@@ -1312,6 +1366,323 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(flat) => to_output(&flat),
         Err(out) => *out,
     })
+}
+
+// ---- ReCalcFilletGeom ----------------------------------------------------------------
+
+/// The shim refused the case: `m_vFilletGeoms[0]` of an empty array.
+const REFUSED: f64 = -2.0;
+const NO_GEOM: &str = "upstream reads m_vFilletGeoms[0] out of bounds";
+
+fn recalc_input(ri: &RecalcIn) -> Result<Vec<f64>, HarnessError> {
+    let mut o = Vec::new();
+    push_model(&mut o, &ri.model)?;
+    o.push(ri.g as f64);
+    o.push(ri.tsects.len() as f64);
+    for t in &ri.tsects {
+        o.extend([t.e as f64, t.which as f64]);
+        o.extend(t.pos);
+        o.extend(t.deriv);
+        o.push(t.t);
+        o.extend(t.uv0);
+        o.extend(t.uv1);
+    }
+    gp1_push_srf(&mut o, &ri.a)?;
+    gp1_push_srf(&mut o, &ri.b)?;
+    push_crv(&mut o, &ri.center);
+    o.extend(ri.d);
+    o.extend(ri.o);
+    o.extend([ri.tol, ri.ang, ri.tan]);
+    o.extend(ri.r);
+    o.push(flag(ri.law_orient));
+    o.push(flag(ri.reference.is_some()));
+    if let Some(c) = &ri.reference {
+        push_crv(&mut o, c);
+    }
+    Ok(o)
+}
+
+/// `status extend_before extend_after` and the vertex uses' points.
+fn recalc_output(flat: &[f64]) -> Output {
+    match flat.first() {
+        Some(&f) if f == REFUSED => Output::rejected(NO_GEOM),
+        _ => to_output(flat),
+    }
+}
+
+fn cpp_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
+    let input = recalc_input(ri)?;
+    let flat = ffi::recalc(&input).map_err(|e| harness(e.to_string()))?;
+    Ok(recalc_output(&flat))
+}
+
+/// The shim's `p2r_put_tsect`: `t crv_pos[3] uv0[2] uv1[2]` (`-1` x 8 without vertex use).
+fn put_vu_tsect(o: &mut Vec<f64>, rm: &RustModel, eu: EdgeuseId) -> Result<(), HarnessError> {
+    let vu = rm.fb.brep().edgeuse(eu).map_err(|e| he(&e))?.vertexuse;
+    let Some(vu) = vu else {
+        o.extend([-1.0; 8]);
+        return Ok(());
+    };
+    let tp = rm.fb.fillet_vertexuse(vu).map_err(|e| he(&e))?.tsect_pnt();
+    let c = tp.crv_pos();
+    let (a, b) = (tp.uv_pos(SrfIndex::First), tp.uv_pos(SrfIndex::Second));
+    o.extend([tp.curve_parameter, c.x, c.y, c.z, a.x, a.y, b.x, b.y]);
+    Ok(())
+}
+
+fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
+    let mut rm = RustModel::build(&ri.model)?;
+    for t in &ri.tsects {
+        let eu = rm.edgeuse(t.e, t.which)?;
+        let vu = rm
+            .fb
+            .brep()
+            .edgeuse(eu)
+            .map_err(|e| he(&e))?
+            .vertexuse
+            .ok_or_else(|| harness("edge use without vertex use"))?;
+        let tp = rm.fb.fillet_vertexuse_mut(vu).map_err(|e| he(&e))?.tsect_pnt_mut();
+        *tp.crv_pos_mut() = v3(t.pos);
+        *tp.crv_deriv_mut() = v3(t.deriv);
+        tp.curve_parameter = t.t;
+        *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
+        *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
+    }
+    let Ok(gi) = usize::try_from(ri.g) else {
+        return Ok(Output::rejected(NO_GEOM));
+    };
+    let geom = rm.geom(gi)?;
+    let k = Kernel::default();
+    let a = gp1_surface_of(&ri.a)?;
+    let b = gp1_surface_of(&ri.b)?;
+    let center = Curve::from(curve_of(&ri.center)?);
+    let reference = ri
+        .reference
+        .as_ref()
+        .map(|c| curve_of(c).map(Curve::from))
+        .transpose()?;
+
+    // the surfaces constructor's members, with the offsets the shim installs
+    let mut curve_based = CurveBasedFs::new(ri.tol, ri.ang, ri.tan);
+    let law_interval = center.natural_interval();
+    curve_based.original = Some(center);
+    curve_based.solver.orientations = ri.o;
+    let mut offs = Vec::new();
+    for (i, ((s, d), o)) in [a, b].into_iter().zip(ri.d).zip(ri.o).enumerate() {
+        let id = SurfaceId::Free(i as u32);
+        let mut off = offset_of(&k, d * o, s, id)?;
+        off.surface.set_allow_extension(true);
+        offs.push(off);
+    }
+    let mut offs = offs.into_iter();
+    let (Some(s0), Some(s1)) = (offs.next(), offs.next()) else {
+        return Err(harness("offsets"));
+    };
+    curve_based.solver.surfaces = [
+        Some(OffsetSurfaceSlot { key: 0, surface: s0 }),
+        Some(OffsetSurfaceSlot { key: 1, surface: s1 }),
+    ];
+    curve_based.solver.fillet_geoms.push(geom);
+    let mut vr = VariableRadiusFs {
+        curve_based,
+        law: FilletLaw::new(FilletLawKind::Linear {
+            start_radius: ri.r[0],
+            end_radius: ri.r[1],
+        }),
+        law_orientation: ri.law_orient,
+        law_interval,
+    };
+    let res = vr.re_calc_fillet_geom(&k, &mut rm.fb, false, None, reference.as_ref());
+    let st = match res {
+        Ok(()) => 0.0,
+        Err(e) => {
+            if let Some(out) = Output::unported(&e) {
+                return Ok(out);
+            }
+            status(&e)
+        }
+    };
+    let mut o = vec![
+        st,
+        flag(vr.curve_based.solver.extend_before),
+        flag(vr.curve_based.solver.extend_after),
+    ];
+    for e in 0..ri.model.edges.len() {
+        for which in 0..2 {
+            let eu = rm.edgeuse(e, which)?;
+            put_vu_tsect(&mut o, &rm, eu)?;
+        }
+    }
+    Ok(to_output(&o))
+}
+
+/// A fillet vertex at `point` (type and status set by the caller).
+fn vin(point: [f64; 3]) -> VertexIn {
+    VertexIn {
+        point,
+        vtype: 0,
+        status: 0,
+        corner: -1,
+        pc_class: 100,
+        pc_kind: 0,
+        pc_index: -1,
+        pc_sub: 0,
+        pc_face: -1,
+        t_param: 0.0,
+        uv: [0.0, 0.0],
+        mates: [-1, -1],
+    }
+}
+
+/// An edge use without UV curve or geometry.
+fn eu_none() -> EuIn {
+    EuIn {
+        uv_curve: None,
+        geom: -1,
+        vu_uv: [0.0, 0.0],
+    }
+}
+
+/// A point of the reference line `p0 + s * dir`.
+fn on_line(p0: [f64; 3], dir: [f64; 3], s: f64) -> [f64; 3] {
+    [p0[0] + s * dir[0], p0[1] + s * dir[1], p0[2] + s * dir[2]]
+}
+
+/// A degree-1 curve through `a` and `b` on `[0, 1]`.
+fn line_crv(a: [f64; 3], b: [f64; 3]) -> Crv {
+    Crv {
+        dim: 3,
+        cpts: vec![[a[0], a[1], a[2], NOW], [b[0], b[1], b[2], NOW]],
+        p: 1,
+        u: vec![0.0, 0.0, 1.0, 1.0],
+    }
+}
+
+/// A fillet geometry with two rail edges (vertices 0-1 and 2-3) along a reference line,
+/// the rail-end vertices of random type and status, intersection points at chosen
+/// fractions of the line (ends, duplicates within the dedup tolerance, interior) and
+/// sometimes a missing rail or no geometry.
+fn gen_recalc(rng: &mut Rng) -> Inputs {
+    let scale = gp1_scale_of(rng);
+    let p0 = [
+        rng.uniform(-1.0, 1.0) * scale,
+        rng.uniform(-1.0, 1.0) * scale,
+        rng.uniform(-1.0, 1.0) * scale,
+    ];
+    let dir = arr(unit_vec(rng) * scale * rng.uniform(0.5, 2.0));
+    let reference = if rng.below(10) == 0 {
+        None
+    } else if rng.below(4) == 0 {
+        Some(gen_curve(rng, 3, scale))
+    } else {
+        Some(line_crv(p0, on_line(p0, dir, 1.0)))
+    };
+    let center = if rng.below(3) == 0 {
+        gen_curve(rng, 3, scale)
+    } else {
+        line_crv(p0, on_line(p0, dir, 1.0))
+    };
+    // fractions of the line: ends, near-duplicates and interior points
+    let frac = |rng: &mut Rng| match rng.below(6) {
+        0 => 0.0,
+        1 => 1.0,
+        2 => 1.0e-10,
+        3 => 1.0 - 1.0e-9,
+        _ => rng.uniform(-0.2, 1.2),
+    };
+    let fr: Vec<f64> = (0..4).map(|_| frac(rng)).collect();
+    let vtype = |rng: &mut Rng| match rng.below(4) {
+        0 => 3,  // Mate: skipped
+        1 => 11, // RailXExtendedEdgeuse: skipped
+        _ => rng.below(14) as i64,
+    };
+    let vstatus = |rng: &mut Rng| if rng.below(4) == 0 { 0 } else { 1 + rng.below(12) as i64 };
+    let vertices = fr
+        .iter()
+        .map(|&f| {
+            let mut v = vin(on_line(p0, dir, f));
+            v.vtype = vtype(rng);
+            v.status = vstatus(rng);
+            v
+        })
+        .collect::<Vec<_>>();
+    let edge = |vs: usize, ve: usize| EdgeIn {
+        vs,
+        ve,
+        etype: 14,
+        status: 1,
+        corner: -1,
+        curve: None,
+        interval: None,
+        fbe: [-1, -1],
+        eus: [eu_none(), eu_none()],
+    };
+    let rails = match rng.below(12) {
+        0 => [-1, 1],
+        1 => [0, -1],
+        _ => [0, 1],
+    };
+    let model = Model {
+        targets: Vec::new(),
+        faces: Vec::new(),
+        fillet_brep: Vec::new(),
+        vertices,
+        geoms: vec![GeomIn {
+            gtype: 0,
+            status: 1,
+            center: None,
+            surface: None,
+            rails,
+            other1: Vec::new(),
+            other2: Vec::new(),
+            sides: Vec::new(),
+        }],
+        edges: vec![edge(0, 1), edge(2, 3)],
+    };
+    // the intersection points of the rail ends: on the line (perturbed off it)
+    let mut tsects = Vec::new();
+    for e in 0..2 {
+        for which in 0..2 {
+            if rng.below(8) == 0 {
+                continue;
+            }
+            let f = *fr.get(2 * e + which).unwrap_or(&0.0);
+            let mut pos = on_line(p0, dir, f);
+            let off = scale * rng.uniform(0.0, 0.3);
+            for c in &mut pos {
+                *c += off * rng.uniform(-1.0, 1.0);
+            }
+            // the edge's tangent, sometimes zero (DoLawIntersection unitizes it)
+            let deriv = if rng.below(5) == 0 { [0.0; 3] } else { dir };
+            tsects.push(TsectIn {
+                e,
+                which,
+                pos,
+                deriv,
+                t: rng.uniform(-1.0, 1.0),
+                uv0: [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
+                uv1: [rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0)],
+            });
+        }
+    }
+    let sign = |rng: &mut Rng| if rng.below(2) == 0 { 1.0 } else { -1.0 };
+    let radius = scale * rng.uniform(0.05, 0.5);
+    Inputs::Recalc(Box::new(RecalcIn {
+        model,
+        g: if rng.below(15) == 0 { -1 } else { 0 },
+        tsects,
+        a: gp1_gen_surface(rng, scale),
+        b: gp1_gen_surface(rng, scale),
+        center,
+        d: [radius, radius * rng.uniform(0.5, 1.5)],
+        o: [sign(rng), sign(rng)],
+        tol: 1.0e-6 * scale,
+        ang: 30.0 * DEG,
+        tan: 2.0 * DEG,
+        r: [radius, radius * rng.uniform(0.5, 2.0)],
+        law_orient: rng.below(2) == 0,
+        reference,
+    }))
 }
 
 // ---- generators ---------------------------------------------------------------------
@@ -1693,13 +2064,14 @@ fn gen_ss(rng: &mut Rng) -> Inputs {
 }
 
 fn gen_case(rng: &mut Rng) -> Inputs {
-    match rng.below(25) {
+    match rng.below(30) {
         0..=7 => gen_cr_init(rng),
         8..=12 => gen_plane_solve(rng, true),
         13..=14 => gen_plane_solve(rng, false),
         15..=18 => gen_ss(rng),
         19..=20 => gen_cd_eu(rng),
         22..=24 => gen_cr_eu(rng),
+        25..=29 => gen_recalc(rng),
         _ => Inputs::Types {
             kinds: type_kinds(rng),
         },
@@ -1744,7 +2116,10 @@ mod tests {
         for seed in 0..300u64 {
             let mut rng = Rng::new(0x5eed_1000 + seed);
             let i = gen_case(&mut rng);
-            let op = format!("{:?}", i.ffi());
+            let op = match &i {
+                Inputs::Recalc(_) => "Recalc".to_string(),
+                _ => format!("{:?}", i.ffi()),
+            };
             let out = rust(&i).expect("harness");
             let kind = if let Some(d) = &out.deferred {
                 format!("deferred:{}", d.symbol)
@@ -1770,12 +2145,19 @@ mod tests {
                 .sum::<usize>()
         };
         assert!(
-            count("CrInit", "status:0") > 40,
+            count("Some(CrInit)", "status:0") > 40,
             "too few successful CrInit cases"
         );
         assert!(
-            count("Guess", "status:0 first:1") > 20,
+            count("Some(Guess)", "status:0 first:1") > 20,
             "too few found Guess cases"
+        );
+        // ReCalcFilletGeom: compared statuses (the rail walk's and DoLawIntersection's
+        // early exits) and cases reaching the unported fillet law
+        assert!(count("Recalc", "status:") > 20, "too few compared Recalc cases");
+        assert!(
+            count("Recalc", "deferred:SmFilletLaw::Evaluate") > 3,
+            "too few Recalc cases reaching the fillet law"
         );
     }
 }

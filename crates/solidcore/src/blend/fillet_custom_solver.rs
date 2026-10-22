@@ -75,7 +75,9 @@
 //!   construction propagate the errors of their surface dispatchers.
 
 use crate::blend::fillet_intersector::FilletSolverOps as IntersectorOps;
-use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
+use crate::blend::fillet_solver::p1::{
+    FilletSolver, FilletSolverOps, FilletSolverType, OffsetSurfaceSlot,
+};
 use crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
@@ -834,6 +836,7 @@ impl EiffelTowerFs {
         // own offsets)
         let found = if rail_index == 0 {
             self.base.guess_point_on_plane_solve(
+                k,
                 s.plane_orig,
                 s.plane_normal,
                 &s.domain1,
@@ -844,6 +847,7 @@ impl EiffelTowerFs {
             )?
         } else {
             self.base.guess_point_on_plane_solve(
+                k,
                 s.plane_orig,
                 s.plane_normal,
                 &s.domain2,
@@ -1410,6 +1414,7 @@ impl SecantConstantRadiusFs {
         // own offsets)
         let found = if rail_index == 0 {
             self.base.guess_point_on_plane_solve(
+                k,
                 s.plane_orig,
                 s.plane_normal,
                 &s.domain1,
@@ -1420,6 +1425,7 @@ impl SecantConstantRadiusFs {
             )?
         } else {
             self.base.guess_point_on_plane_solve(
+                k,
                 s.plane_orig,
                 s.plane_normal,
                 &s.domain2,
@@ -1628,33 +1634,30 @@ macro_rules! fillet_solver_ops {
                 &mut self.base.solver
             }
 
-            /// `SmConstantRadiusFS::GetJacobianSize`.
+            /// `SmConstantRadiusFS::GetJacobianSize` (inherited).
             fn jacobian_size(&self) -> Result<usize> {
-                Ok(self.base.jacobian_size())
+                Ok(ConstantRadiusAssistedFs::jacobian_size(&self.base))
             }
 
-            /// `SmConstantRadiusFS::SetupOffsetValues`.
+            /// `SmConstantRadiusFS::SetupOffsetValues` (inherited).
             fn setup_offset_values(
                 &mut self,
                 tsect: &TsectPnt,
                 offset_dist: Option<&mut f64>,
             ) -> Result<()> {
-                let d = self.base.setup_offset_values(tsect)?;
-                if let Some(o) = offset_dist {
-                    *o = d;
-                }
-                Ok(())
+                constant_radius_setup_offset_values(&mut self.base, tsect, offset_dist)
             }
 
-            /// `SmConstantRadiusFS::OffsetRadiiCanChange`.
+            /// `SmConstantRadiusFS::OffsetRadiiCanChange` (inherited).
             fn offset_radii_can_change(&self) -> Result<bool> {
-                Ok(self.base.offset_radii_can_change())
+                Ok(ConstantRadiusAssistedFs::offset_radii_can_change(
+                    &self.base,
+                ))
             }
 
-            /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`: the derived solvers
-            /// declare none of their own).
+            /// `SmConstantRadiusAssistedFS::GetType` (inherited, `SM_COMMON`).
             fn type_code(&self) -> Result<i64> {
-                Ok(crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+                Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
             }
 
             /// `SmConstantRadiusAssistedFS::IsKindOf` (inherited).
@@ -1725,15 +1728,15 @@ fillet_solver_ops!(SecantConstantRadiusFs);
 macro_rules! fillet_intersector_ops {
     ($t:ty) => {
         impl crate::blend::fillet_intersector::FilletSolverOps for $t {
-            type FilletGeom = crate::blend::fillet_solver::p1::FilletGeomRef;
+            type FilletGeom = crate::blend::fillet_geom::p1::FilletGeomId;
 
             fn compute_surface_values(
                 &mut self,
-                _k: &Kernel,
+                k: &Kernel,
                 uv_values: [Point2; 2],
                 point: &mut TsectPnt,
             ) -> Result<()> {
-                FilletSolver::compute_surface_values(self, uv_values, point)
+                FilletSolver::compute_surface_values(k, self, uv_values, point)
             }
 
             fn compute_uv_vectors(&mut self, k: &Kernel, point: &mut TsectPnt) -> Result<()> {
@@ -1767,6 +1770,28 @@ macro_rules! fillet_intersector_ops {
                 )
             }
 
+            /// `SmFilletSolver::StepSolve` (non-virtual, unit `blend.fillet_solver_p3`):
+            /// it dispatches on this class's virtuals, so the derived solver is passed.
+            fn step_solve(
+                &mut self,
+                k: &Kernel,
+                point: &TsectPnt,
+                step_size: &mut f64,
+                uv_domain1: &Extent2d,
+                uv_domain2: &Extent2d,
+                flags: &mut crate::blend::fillet_intersector::StepSolve,
+                next: &mut TsectPnt,
+            ) -> Result<()> {
+                let mut out = crate::blend::fillet_solver::p3::StepSolveOutcome::default();
+                let r = FilletSolver::step_solve(
+                    self, k, None, point, step_size, uv_domain1, uv_domain2, next, &mut out,
+                );
+                flags.found_answer = out.found_good_point;
+                flags.clipped = out.clipped;
+                flags.boundary_hit = out.boundary_hit;
+                r
+            }
+
             fn set_surfaces_to_zero_offset(&mut self) -> Result<()> {
                 IntersectorOps::set_surfaces_to_zero_offset(&mut self.base)
             }
@@ -1777,10 +1802,11 @@ macro_rules! fillet_intersector_ops {
 
             fn rail_surface_evaluate_1st_derivatives(
                 &mut self,
+                k: &Kernel,
                 rail: usize,
                 uv: Point2,
             ) -> Result<(Point3, Vec3, Vec3)> {
-                IntersectorOps::rail_surface_evaluate_1st_derivatives(&mut self.base, rail, uv)
+                IntersectorOps::rail_surface_evaluate_1st_derivatives(&mut self.base, k, rail, uv)
             }
 
             fn set_status(
@@ -1841,6 +1867,44 @@ macro_rules! fillet_intersector_ops {
                     uv2,
                 )
             }
+
+            fn set_fillet_surface(
+                &mut self,
+                pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
+                geom: &Self::FilletGeom,
+                surface: Option<BSplineSurface>,
+            ) -> Result<()> {
+                IntersectorOps::set_fillet_surface(&mut self.base, pseudo, geom, surface)
+            }
+
+            fn set_center_line_curve(
+                &mut self,
+                pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
+                geom: &Self::FilletGeom,
+                center_line: BSplineCurve,
+            ) -> Result<()> {
+                IntersectorOps::set_center_line_curve(&mut self.base, pseudo, geom, center_line)
+            }
+
+            fn set_rail_curve(
+                &mut self,
+                pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
+                geom: &Self::FilletGeom,
+                rail: usize,
+                curve: BSplineCurve,
+            ) -> Result<()> {
+                IntersectorOps::set_rail_curve(&mut self.base, pseudo, geom, rail, curve)
+            }
+
+            fn set_rail_mate_uv_curve(
+                &mut self,
+                pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
+                geom: &Self::FilletGeom,
+                rail: usize,
+                uv_curve: BSplineCurve,
+            ) -> Result<()> {
+                IntersectorOps::set_rail_mate_uv_curve(&mut self.base, pseudo, geom, rail, uv_curve)
+            }
         }
     };
 }
@@ -1898,6 +1962,14 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`).
     fn type_code(&self) -> Result<i64> {
         Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
+    }
+
+    /// `GetSolverType`: `SM_FS_CONST_RADIUS` (`SmConstantRadiusFS::GetSolverType`,
+    /// `SmFilletStandardSolver.h:58`), the class the intersector shim builds; `StepSolve`
+    /// branches on it, and `SM_FS_CONST_RADIUS_ASSISTED` would send a clipped step down
+    /// the assisted branch the C++ does not take. Added by `blend.fillet_solver_p3`.
+    fn solver_type(&self) -> Result<FilletSolverType> {
+        Ok(FilletSolverType::ConstRadius)
     }
 
     /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`).

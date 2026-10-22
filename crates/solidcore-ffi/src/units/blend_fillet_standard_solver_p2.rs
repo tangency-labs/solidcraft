@@ -48,6 +48,22 @@
 //! step along the fillet and dereference the solver's `NULL` executive: the shim runs it
 //! only when the offset normals at the guesses are parallel (its first exit).
 //!
+//! [`recalc`] (shim `harness/cpp/shim/blend_fillet_standard_solver_p2_static.inc`, included by
+//! `blend_fillet_geom_p1.cpp`; `sc_blend_fillet_standard_solver_p2_recalc`) runs
+//! `SmVariableRadiusFS::ReCalcFilletGeom` on a pseudo B-rep block of unit
+//! `blend.fillet_geom_p1` ([`super::blend_fillet_geom_p1`]) followed by `g` (the geometry
+//! put into `m_vFilletGeoms`, `-1` none), `nt` intersection points `e which crv_pos[3]
+//! crv_deriv[3] t uv0[2] uv1[2]` set on the vertex use of edge use `which` of edge `e`, surfaces A and B,
+//! the centre curve (the block's encodings), `d0 d1 o0 o1 tol ang tan r0 r1`, `law_orient`
+//! and `has_ref [ref curve]`: an `SmVariableRadiusFS` over A, B, the centre curve and an
+//! `SmLinearFilletLaw(r0, r1)` whose offsets are then replaced by offsets of A and B at
+//! `d_i * o_i` (allowing extension) and whose first fillet geometry (the constructor's
+//! default) by geometry `g`. Output `-2` without geometry (upstream reads
+//! `m_vFilletGeoms[0]` out of bounds), else `status extend_before extend_after` and per
+//! edge of the block and edge use `which` its vertex use's intersection point `t crv_pos[3]
+//! uv0[2] uv1[2]`. [`recalc`] accepts what the block validator accepts, edge indices inside
+//! the block, finite values, `tol > 0` and well-formed curves and surfaces.
+//!
 //! [`eval_edgeuse`] (shim `harness/cpp/shim/blend_fillet_standard_solver_p2_eu.cpp`,
 //! `sc_blend_fillet_standard_solver_p2_eu_eval`) runs on a B-rep block of unit
 //! `topology.edgeuse_p1` ([`super::topology_edgeuse_p1`]) followed by `mode`:
@@ -124,6 +140,13 @@ mod sys {
     extern "C" {
         pub fn sc_blend_fillet_standard_solver_p2_eu_eval(
             path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_blend_fillet_standard_solver_p2_recalc(
             input: *const f64,
             n_in: i64,
             out: *mut f64,
@@ -466,6 +489,65 @@ pub fn eval_edgeuse(path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         unsafe {
             sys::sc_blend_fillet_standard_solver_p2_eu_eval(
                 cpath.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// Largest number of intersection points [`recalc`] sets.
+pub const MAX_TSECTS: usize = 64;
+
+fn validate_recalc(input: &[f64]) -> Result<(), FfiError> {
+    use super::blend_fillet_geom_p1::{
+        curve, surface, validate_block, Reader as P1Reader, MAX_MAGNITUDE,
+    };
+    let mut rd = P1Reader {
+        cursor: crate::reader::Cursor::new(input),
+        bound: MAX_MAGNITUDE,
+    };
+    let b = validate_block(&mut rd)?;
+    rd.opt_index(b.ng())?;
+    let nt = rd.index(MAX_TSECTS)?;
+    for _ in 0..nt {
+        rd.opt_index(b.ne())?
+            .ok_or_else(|| bad("intersection point: edge -1"))?;
+        rd.index(1)?;
+        rd.finites(11)?;
+    }
+    surface(&mut rd)?;
+    surface(&mut rd)?;
+    curve(&mut rd, 3, "centre curve")?;
+    let v = rd.finites(9)?;
+    if v.get(4).is_none_or(|&tol| tol <= 0.0) {
+        return Err(bad("approx tolerance not positive"));
+    }
+    rd.flag()?;
+    if rd.flag()? {
+        curve(&mut rd, 3, "reference curve")?;
+    }
+    rd.done()
+}
+
+/// Runs `SmVariableRadiusFS::ReCalcFilletGeom` (layout in the module docs).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
+/// for a shim failure.
+pub fn recalc(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_recalc(input)?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: input is valid for input.len() reads and holds exactly what the shim
+        // reads (validated above: the pseudo B-rep block, indices inside it, finite
+        // values, well-formed curves and surfaces); buf is valid for buf.len() writes and
+        // the shim honours the capacity; len is valid.
+        unsafe {
+            sys::sc_blend_fillet_standard_solver_p2_recalc(
                 input.as_ptr(),
                 input.len() as i64,
                 buf.as_mut_ptr(),

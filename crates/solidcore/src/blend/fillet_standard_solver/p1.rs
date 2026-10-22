@@ -775,10 +775,10 @@ impl SurfaceSurfaceFs {
         // Do not extend if periodic.
         let periodic_extension_factor = 0.0;
 
-        if boolean_status(surf.is_periodic(domain, SurfParamType::U))? {
+        if boolean_status(surf.is_periodic(k, domain, SurfParamType::U))? {
             size.x *= periodic_extension_factor;
         }
-        if boolean_status(surf.is_periodic(domain, SurfParamType::V))? {
+        if boolean_status(surf.is_periodic(k, domain, SurfParamType::V))? {
             size.y *= periodic_extension_factor;
         }
 

@@ -478,6 +478,29 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         )
     }
 
+    fn step_solve(
+        &mut self,
+        k: &Kernel,
+        point: &TsectPnt,
+        step_size: &mut f64,
+        uv_domain1: &Extent2d,
+        uv_domain2: &Extent2d,
+        flags: &mut StepSolve,
+        next: &mut TsectPnt,
+    ) -> Result<()> {
+        // non-virtual in the base; it dispatches on this solver's virtuals
+        // (GetSolverType, LoadInitialValues, ...), so the solver itself is passed. The
+        // flags are copied back on an error too: upstream sets them in place.
+        let mut out = StepSolveOutcome::default();
+        let r = FilletSolver::step_solve(
+            self, k, None, point, step_size, uv_domain1, uv_domain2, next, &mut out,
+        );
+        flags.found_answer = out.found_good_point;
+        flags.clipped = out.clipped;
+        flags.boundary_hit = out.boundary_hit;
+        r
+    }
+
     fn set_status(&mut self, status: FilStatus) -> Result<()> {
         self.solver.set_status(status);
         Ok(())
@@ -2020,15 +2043,20 @@ mod tests {
             .compute_next_point(&mut s, &Kernel::default(), p, 0.1, p)
             .unwrap();
         assert!(!r.found_good_point && !r.clipped && !r.boundary_hit);
-        // a crossing reaches StepSolve
+        // a crossing reaches StepSolve, whose Newton solve (through the
+        // SmConstantRadiusFS::LoadInitialValues override, blend.fillet_standard_solver_p2)
+        // finds no point on these surfaces
         let c = fi
             .base
             .base
             .alloc_point(pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0));
-        let e = fi
+        let r = fi
             .compute_next_point(&mut s, &Kernel::default(), c, 0.1, n)
-            .unwrap_err();
-        assert!(e.is_unported());
+            .unwrap();
+        assert!(
+            !r.found_good_point && !r.clipped && !r.boundary_hit,
+            "{r:?}"
+        );
     }
 
     /// A solver whose `StepSolve` clips the step to `clip` (rescaling it, as
@@ -2413,26 +2441,16 @@ mod tests {
 
         // StepSolve is the base's (unit blend.fillet_solver_p3) dispatched on this
         // solver: a clipped step finds no boundary point here and goes on to the Newton
-        // solve, which stops at the SmConstantRadiusFS::LoadInitialValues override
-        // (blend.fillet_standard_solver_p2); the clip it recorded first is kept
+        // solve (through the SmConstantRadiusFS::LoadInitialValues override,
+        // blend.fillet_standard_solver_p2), which finds no point; the clip it recorded
+        // first is kept
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let cur = pnt([0.9, 0.5], [0.9, 0.5], [1.0, 0.0, 0.0], 0.0);
         let mut step = 0.5;
         let mut flags = StepSolve::default();
         let mut next = TsectPnt::new();
-        let e = s
-            .step_solve(&k, &cur, &mut step, &d, &d, &mut flags, &mut next)
-            .unwrap_err();
-        assert!(
-            matches!(
-                e,
-                SolidError::Unported {
-                    unit: "blend.fillet_standard_solver_p2",
-                    ..
-                }
-            ),
-            "{e:?}"
-        );
+        s.step_solve(&k, &cur, &mut step, &d, &d, &mut flags, &mut next)
+            .unwrap();
         assert!(
             flags.clipped && !flags.found_answer && !flags.boundary_hit,
             "{flags:?}"
