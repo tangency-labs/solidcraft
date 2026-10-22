@@ -57,8 +57,8 @@ pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 ///
-/// The body is split where the tool meets it ([`crate::splitface::split_any`]) and the pieces
-/// not kept are taken away ([`crate::remove_faces`]); both carry their history, so the kept
+/// The body is split where the tool meets it ([`crate::splitface::split_any`]), each piece's side
+/// read at a point inside it ([`face_sides`]), and the pieces not kept are taken away ([`crate::remove_faces`]); both carry their history, so the kept
 /// faces are the body's own, cut.
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
     body.require_brep("trim")?;
@@ -95,23 +95,24 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     Ok(crate::record::after(trimmed, &split, &crate::record::counts(&[body])))
 }
 
-/// The side of the tool each face of `body` (in its face order) lies on: the tool's field at
-/// the centre of the face's mesh triangle where it is largest (a face lies on one side once
-/// the tool has cut it; on the tool's own surface the field is the rounding of zero).
+/// The side of the tool each face of `body` (in its face order) lies on: the tool's field at a
+/// point inside the face, on its surface and inside its trims (SMLib's
+/// `CalculateAnInternalPoint`). Once the tool has cut the body each piece lies on one side, so
+/// one such point says which.
 fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
-    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
-    let mut best = vec![0.0f64; body.face_count()];
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let x = side.at((a + b + c) / 3.0);
-        if let Some(slot) = best.get_mut(*f as usize)
-            && x.is_finite()
-            && x.abs() > slot.abs()
-        {
-            *slot = x;
-        }
+    let (sm, order) = crate::native::smlib_body_ordered(body)?;
+    let order = order.ok_or_else(|| KernelError::Failed("trim: SMLib numbers the pieces' faces differently from their record".into()))?;
+    let points = sm.face_points().map_err(|e| KernelError::Failed(format!("SMLib trim: a point inside each piece: {e}")))?;
+    let mut sides = vec![f64::NAN; points.len()];
+    for (i, p) in points.iter().enumerate() {
+        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
+        let slot = sides.get_mut(face).ok_or_else(|| KernelError::Failed("trim: a piece's face lies outside the body".into()))?;
+        *slot = side.at(Vec3::new(p[0], p[1], p[2]));
     }
-    Ok(best)
+    if sides.iter().any(|x| !x.is_finite()) {
+        return Err(KernelError::Failed("trim: the side of a piece can't be told".into()));
+    }
+    Ok(sides)
 }
 
 /// For each point, the face of `body` nearest it (over one tessellation).
