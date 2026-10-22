@@ -111,6 +111,57 @@ fn ruled(u_knots: &[f64], v_knots: &[f64], controls: &[Vec<[f64; 3]>], orientati
     None
 }
 
+/// How a face's outward normal along one of its straight edges is known: the two ruling
+/// boundaries of a ruled patch, or the closed form of a plane, cylinder or cone.
+enum Normals {
+    Ruled([Boundary; 2]),
+    Analytic { surface: Surface, orientation: bool },
+}
+
+/// The face's outward normal along the straight edge from `a` to `b`: a ruled patch's along its
+/// boundary ruling there, an analytic face's from its closed form at both ends (their difference
+/// is the uncertainty, so an edge that is no ruling, where the normal turns, certifies nothing).
+fn normal_along(normals: &Normals, a: Vec3, b: Vec3) -> Option<Boundary> {
+    match normals {
+        Normals::Ruled(boundaries) => on_boundary(boundaries, a, b),
+        Normals::Analytic { surface, orientation } => {
+            let sign = if *orientation { 1. } else { -1. };
+            let at = |p: Vec3| analytic_normal(surface, p).map(|n| n * sign);
+            let (na, nb) = (at(a)?, at(b)?);
+            let error = na.dist(nb) + roundoff(&[a, b]);
+            (na.dot(nb) > 0. && error.is_finite()).then_some(Boundary { a, b, normal: na, error })
+        }
+    }
+}
+
+/// The natural (unit) normal of a plane, cylinder or cone at a point on it: the plane's u × v;
+/// away from the axis for a cylinder; for a cone, away from the axis and back along it by its
+/// half angle (the record's (u, v): radius `radius_at_origin + v tan a` at height v).
+fn analytic_normal(surface: &Surface, p: Vec3) -> Option<Vec3> {
+    let v3 = |x: [f64; 3]| Vec3::new(x[0], x[1], x[2]);
+    let radial = |frame: &solidcraft_geom::brep::Frame| -> Option<(Vec3, Vec3)> {
+        let z = v3(frame.x_axis).cross(v3(frame.y_axis)).normalized()?;
+        let d = p - v3(frame.origin);
+        Some(((d - z * d.dot(z)).normalized()?, z))
+    };
+    match surface {
+        Surface::Plane { u_axis, v_axis, .. } => v3(*u_axis).cross(v3(*v_axis)).normalized(),
+        Surface::Cylinder { frame, .. } => radial(frame).map(|(r, _)| r),
+        Surface::Cone { frame, half_angle, .. } => radial(frame).and_then(|(r, z)| (r * half_angle.cos() - z * half_angle.sin()).normalized()),
+        _ => None,
+    }
+}
+
+/// A straight edge: a line, or a B-spline of degree 1 with two control points (as SMLib gives
+/// an extrusion's rulings).
+fn straight(c: &Curve) -> bool {
+    match c {
+        Curve::Line { .. } => true,
+        Curve::Spline { knots, points } => points.len() == 2 && knots.len() == 4,
+        _ => false,
+    }
+}
+
 fn on_boundary(boundaries: &[Boundary; 2], a: Vec3, b: Vec3) -> Option<Boundary> {
     boundaries.iter().find_map(|boundary| {
         let tolerance = roundoff(&[a, b, boundary.a, boundary.b]);
@@ -161,11 +212,14 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
             boundaries.push(None);
             continue;
         }
-        let ruling = match (&face.surface, orientation) {
-            (Surface::Spline { u_knots, v_knots, points }, Some(o)) => ruled(u_knots, v_knots, points, *o, &mut work),
+        let normals = match (&face.surface, orientation) {
+            (Surface::Spline { u_knots, v_knots, points }, Some(o)) => ruled(u_knots, v_knots, points, *o, &mut work).map(Normals::Ruled),
+            (s @ (Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. }), Some(o)) => {
+                Some(Normals::Analytic { surface: s.clone(), orientation: *o })
+            }
             _ => None,
         };
-        boundaries.push(ruling);
+        boundaries.push(normals);
     }
     let mut out = vec![false; mesh.edges.len()];
     let mut sharp = vec![false; mesh.edges.len()];
@@ -192,10 +246,12 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
         let (Some(Some(ba)), Some(Some(bb))) = (boundaries.get(*a as usize), boundaries.get(*b as usize)) else { continue };
         // Only exact straight rulings qualify; a bowed/twisted edge with matching endpoints
         // must remain visible.
-        let Curve::Line { .. } = edge.curve else { continue };
+        if !straight(&edge.curve) {
+            continue;
+        }
         let ends = |v: u32| rec.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
         let (Some(p), Some(q)) = (ends(edge.vertices[0]), ends(edge.vertices[1])) else { continue };
-        let (Some(na), Some(nb)) = (on_boundary(ba, p, q), on_boundary(bb, p, q)) else { continue };
+        let (Some(na), Some(nb)) = (normal_along(ba, p, q), normal_along(bb, p, q)) else { continue };
         let uncertainty = na.error + nb.error;
         let cross = na.normal.cross(nb.normal).len();
         if na.normal.dot(nb.normal) > 0.
@@ -252,7 +308,7 @@ mod tests {
             },
         )
         .unwrap();
-        let ring: Vec<Seg2> = circle(4., 8).segs;
+        let ring: Vec<Seg2> = Loop2::circle(Vec2::ZERO, 4.).segs;
         let tool = crate::SplitTool::Curves { plane: Plane::XY, curves: vec![ring], along: None };
         let holed = crate::trim(&sheet, &tool, Vec3::new(9., 9., 0.)).unwrap();
         assert!(crate::native::brep_record(&holed).unwrap().edges.iter().any(|e| e.vertices[0] == e.vertices[1]), "a closed edge");
@@ -369,3 +425,4 @@ mod tests {
         assert!(ruled_of(straight, true, &mut 0).is_none());
     }
 }
+

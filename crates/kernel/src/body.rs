@@ -1209,11 +1209,33 @@ impl Body {
         if self.is_mesh() || regions.len() < 2 {
             return Ok(vec![self.clone()]);
         }
+        self.parts(&(0..regions.len()).map(|k| vec![k]).collect::<Vec<_>>())
+    }
+
+    /// How the body's lumps meet (positions as in [`Body::lumps`]): each pair that shares a face,
+    /// an edge or a vertex, with the most it shares, read from the record. Pairs not listed are
+    /// apart. Empty for a mesh body or a body in one piece.
+    pub fn region_contacts(&self) -> Result<Vec<brep::part::RegionContact>> {
+        if self.is_mesh() {
+            return Ok(Vec::new());
+        }
+        self.record.region_contacts().map_err(|e| KernelError::Invalid(format!("region contacts: {e}")))
+    }
+
+    /// The body cut into parts: one per group of its lumps (positions as in [`Body::lumps`]),
+    /// each the lumps listed with the voids inside them. The parts carry their history over
+    /// `[self]`, as lumps do.
+    pub fn parts(&self, groups: &[Vec<usize>]) -> Result<Vec<Body>> {
+        let regions = self.record.material_regions();
         let counts = [(self.face_count(), self.edge_count())];
-        regions
-            .into_iter()
-            .map(|r| {
-                let part = self.record.part(&[r]).map_err(|e| KernelError::Failed(format!("lump: {e}")))?;
+        groups
+            .iter()
+            .map(|group| {
+                let picked = group
+                    .iter()
+                    .map(|&k| regions.get(k).copied().ok_or_else(|| KernelError::Invalid(format!("no lump {k}"))))
+                    .collect::<Result<Vec<_>>>()?;
+                let part = self.record.part(&picked).map_err(|e| KernelError::Failed(format!("lump: {e}")))?;
                 let sources = self
                     .face_sources
                     .as_ref()

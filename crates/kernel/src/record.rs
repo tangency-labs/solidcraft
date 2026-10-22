@@ -52,7 +52,8 @@ pub(crate) fn pieces_of(operand: usize, edges: impl IntoIterator<Item = usize>) 
 /// `faces` (an operand face shared by several result faces is marked Split), and whose edges come
 /// from `edges` (by result edge index) where the building code knows them: an operand edge it
 /// kept or re-made ([`pieces_of`]). Every other edge separates two faces that met nowhere before,
-/// so it comes from their meeting ([`meeting`]).
+/// so it comes from their meeting ([`meeting`]); an operation with no operands (a body built
+/// from a sketch) makes every face and edge new, so its edges have no origins.
 pub(crate) fn of_faces(result: &Brep, operands: usize, mut faces: Vec<FaceProv>, edges: &[Vec<EdgeOrigin>]) -> History {
     mark_shared_split(&mut faces);
     let edges = edge_faces(result)
@@ -61,6 +62,7 @@ pub(crate) fn of_faces(result: &Brep, operands: usize, mut faces: Vec<FaceProv>,
         .map(|(i, between)| {
             let origins = match edges.get(i) {
                 Some(known) if !known.is_empty() => known.clone(),
+                _ if operands == 0 => Vec::new(),
                 _ => meeting(&between, &faces),
             };
             EdgeProv { faces: between, origins }
