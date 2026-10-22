@@ -33,7 +33,7 @@ pub fn planar_regions_boolean(a: &[Region2], b: &[Region2], op: BoolOp, toleranc
             (false, true, _) => return Ok(a.to_vec()),
             _ => {}
         }
-        let r = sheets::combine(&sheets::sheet(a)?, &sheets::sheet(b)?, op)?;
+        let r = sheets::combine(&sheets::sheet(a, tolerance)?, &sheets::sheet(b, tolerance)?, op)?;
         Ok(match r {
             Some(sheet) => sheets::regions(&sheet, tolerance)?.regions,
             None => Vec::new(),
@@ -80,8 +80,8 @@ fn check_regions<'a>(regions: impl Iterator<Item = &'a Region2>, tol: f64) -> Re
 }
 
 /// Extrude normalized planar material as one logical compound, retaining every disjoint
-/// region and its holes. The regions are united in the plane first (each its own operand, so
-/// overlapping ones merge), and pieces of the union that touch each other are refused: apart,
+/// region and its holes. The regions are united in the plane first (overlapping ones merge),
+/// and pieces of the union that touch each other are refused: apart,
 /// each is extruded on its own and the solids joined as one body.
 pub fn extrude_planar_regions(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Body> {
     crate::guard("planar material extrusion", || {
@@ -89,20 +89,8 @@ pub fn extrude_planar_regions(plane: &Plane, regions: &[Region2], start: f64, en
         if regions.is_empty() {
             return Err(KernelError::Invalid("empty planar material extrusion".into()));
         }
-        // Balanced unions: each operand a sheet of regions apart from each other.
-        let mut level = regions.iter().map(|r| sheets::sheet(std::slice::from_ref(r))).collect::<Result<Vec<_>>>()?;
-        while level.len() > 1 {
-            let mut next = Vec::with_capacity(level.len().div_ceil(2));
-            let mut iter = level.into_iter();
-            while let Some(a) = iter.next() {
-                match iter.next() {
-                    Some(b) => next.push(sheets::combine(&a, &b, BoolOp::Union)?.ok_or_else(|| KernelError::Failed("empty planar union".into()))?),
-                    None => next.push(a),
-                }
-            }
-            level = next;
-        }
-        let union = level.pop().ok_or_else(|| KernelError::Invalid("empty planar material extrusion".into()))?;
+        // One sheet of all the regions: their material united, so overlapping ones merge.
+        let union = sheets::sheet(regions, 1e-7)?;
         let united = sheets::regions(&union, 1e-7)?;
         if united.touching {
             return Err(KernelError::Invalid("planar material pieces touch at a boundary".into()));
@@ -134,15 +122,72 @@ mod sheets {
         KernelError::Failed(format!("SMLib planar regions: {what}: {e}"))
     }
 
-    /// `regions` (in the plane's own coordinates) as a sheet of planar faces on z = 0.
-    pub(super) fn sheet(regions: &[Region2]) -> Result<Brep> {
-        let curves = regions
-            .iter()
-            .flat_map(|r| std::iter::once(&r.outer).chain(&r.holes))
-            .flat_map(|l| &l.segs)
-            .map(|s| crate::smlib_sweeps::curve(&Plane::XY, s))
-            .collect::<Result<Vec<_>>>()?;
+    /// `regions` (in the plane's own coordinates) as one sheet on z = 0. SMLib's face builder
+    /// refuses curves of which more than two meet at one end point (`CreatePlanarFacesWith3DCurves`,
+    /// SmBrep.cpp: "spine points"), as where pieces of material touch at a corner or an outline
+    /// passes a point twice. So each loop, oriented (outer counter-clockwise, holes clockwise), is
+    /// split where it passes a point twice into simple loops, and each simple loop is a face of its
+    /// own; those running counter-clockwise are material, the others holes. The sheet is the
+    /// material united less the holes united (SMLib's 2D boolean, which takes touching faces).
+    /// `tol` (mm): how close a loop's passes through one point are.
+    pub(super) fn sheet(regions: &[Region2], tol: f64) -> Result<Brep> {
+        let (mut material, mut holes) = (Vec::new(), Vec::new());
+        for r in regions {
+            let loops = std::iter::once(r.outer.ccw()).chain(r.holes.iter().map(|h| h.ccw().reversed()));
+            for piece in loops.flat_map(|lp| simple_loops(lp, tol * 10.0)) {
+                let face = face(&piece)?;
+                if piece.signed_area() > 0.0 { material.push(face) } else { holes.push(face) }
+            }
+        }
+        let material = united(material)?.ok_or_else(|| failed("sheet", "the regions hold no material"))?;
+        match united(holes)? {
+            Some(holes) => combine(&material, &holes, BoolOp::Cut)?.ok_or_else(|| failed("sheet", "the holes take all the material")),
+            None => Ok(material),
+        }
+    }
+
+    /// A simple closed loop as one planar face.
+    fn face(lp: &Loop2) -> Result<Brep> {
+        let curves = lp.segs.iter().map(|s| crate::smlib_sweeps::curve(&Plane::XY, s)).collect::<Result<Vec<_>>>()?;
         Brep::planar_faces(&curves).map_err(|e| failed("sheet", e))
+    }
+
+    /// `sheets` united in balanced rounds (each union of two sheets of about the same size);
+    /// `None` for none.
+    fn united(mut sheets: Vec<Brep>) -> Result<Option<Brep>> {
+        while sheets.len() > 1 {
+            let mut next = Vec::with_capacity(sheets.len().div_ceil(2));
+            let mut iter = sheets.into_iter();
+            while let Some(a) = iter.next() {
+                next.push(match iter.next() {
+                    Some(b) => combine(&a, &b, BoolOp::Union)?.ok_or_else(|| failed("sheet", "a union of faces is empty"))?,
+                    None => a,
+                });
+            }
+            sheets = next;
+        }
+        Ok(sheets.pop())
+    }
+
+    /// A closed loop split where it passes a point twice (its segments' starts within `near`)
+    /// into loops that pass every point once.
+    fn simple_loops(lp: Loop2, near: f64) -> Vec<Loop2> {
+        let mut todo = vec![lp.segs];
+        let mut out = Vec::new();
+        // Each split leaves two shorter loops, so the work is bounded by the segment count.
+        while let Some(segs) = todo.pop() {
+            let starts: Vec<Vec2> = segs.iter().map(Seg2::start).collect();
+            let repeat = (0..starts.len()).find_map(|i| (i + 1..starts.len()).find(|&j| starts[i].dist(starts[j]) < near).map(|j| (i, j)));
+            match repeat {
+                Some((i, j)) => {
+                    let (inner, rest) = (segs[i..j].to_vec(), [&segs[j..], &segs[..i]].concat());
+                    todo.push(inner);
+                    todo.push(rest);
+                }
+                None => out.push(Loop2 { segs }),
+            }
+        }
+        out
     }
 
     /// `a` and `b` combined by `op`; `None` when nothing is left.
@@ -171,9 +216,11 @@ mod sheets {
             if up.abs() < 1.0 - 1e-9 {
                 return Err(failed("face", format!("face {f} is not in the plane of the regions")));
             }
-            let mut outer = None;
-            let mut holes = Vec::new();
-            for (l, lp) in face.loops.iter().enumerate() {
+            // Each loop as it runs in the plane, then split where it passes a point twice (a
+            // cut-out touching the outline, material meeting at a corner): counter-clockwise
+            // pieces are material, the others holes in the material that holds them.
+            let mut pieces = Vec::new();
+            for lp in &face.loops {
                 let Loop::Edges { edges } = lp else { return Err(failed("face", format!("face {f} has a vertex loop"))) };
                 let mut segs = Vec::new();
                 for e in edges {
@@ -187,18 +234,23 @@ mod sheets {
                         touching |= *owner.entry(v).or_insert(f) != f;
                     }
                 }
-                let lp = Loop2 { segs };
-                // Seen from the face's normal the outer loop runs counter-clockwise.
-                if lp.signed_area() * up > 0.0 {
-                    if outer.replace(lp.ccw()).is_some() {
-                        return Err(failed("face", format!("face {f} has two outer loops (loop {l})")));
-                    }
-                } else {
-                    holes.push(lp.ccw().reversed());
-                }
+                // Seen from the face's normal, the outer loop runs counter-clockwise and holes clockwise.
+                let lp = if up > 0.0 { Loop2 { segs } } else { Loop2 { segs }.reversed() };
+                pieces.extend(simple_loops(lp, tol * 10.0));
             }
-            let outer = outer.ok_or_else(|| failed("face", format!("face {f} has no outer loop")))?;
-            out.push(Region2 { outer, holes });
+            let (outers, holes): (Vec<Loop2>, Vec<Loop2>) = pieces.into_iter().partition(|lp| lp.signed_area() > 0.0);
+            let first = out.len();
+            out.extend(outers.into_iter().map(|outer| Region2 { outer, holes: Vec::new() }));
+            for hole in holes {
+                // The smallest material piece of this face holding the hole's middle.
+                let mid = hole.segs.first().map(|s| s.point_at(0.5)).ok_or_else(|| failed("face", format!("face {f} has an empty loop")))?;
+                let owner = out[first..]
+                    .iter_mut()
+                    .filter(|r| r.outer.contains(mid))
+                    .min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()))
+                    .ok_or_else(|| failed("face", format!("face {f} has a hole outside its material")))?;
+                owner.holes.push(hole);
+            }
         }
         Ok(Regions { regions: out, touching })
     }
@@ -225,7 +277,7 @@ mod sheets {
     /// A sheet stands for nothing without SMLib.
     pub(super) enum Sheet {}
 
-    pub(super) fn sheet(_: &[Region2]) -> Result<Sheet> {
+    pub(super) fn sheet(_: &[Region2], _: f64) -> Result<Sheet> {
         refused()
     }
 
