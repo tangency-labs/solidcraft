@@ -151,15 +151,15 @@ impl Body {
         self_.map_planar_sources(&[input], None, Some(tool), &[], constructed)
     }
 
-    /// Retain exact construction and shell roles through a Union from both operands, only on
-    /// unchanged supports. Coplanar supports of the two operands carry distinct identities, so
-    /// a face merged from both stays without a role.
-    pub(crate) fn with_preserved_union_planar_sources(self, a: &Body, b: &Body) -> Result<Self> {
-        let self_ = self.inherit_regularization_protection(a).inherit_regularization_protection(b);
-        if ![a, b].iter().any(|input| input.face_sources().is_some_and(|sources| sources.iter().flatten().any(|s| boolean_source(s, true)))) {
+    /// Retain exact construction and shell roles through a Union from every operand, only on
+    /// unchanged supports. Coplanar supports of different operands carry distinct identities, so
+    /// a face merged from several stays without a role.
+    pub(crate) fn with_preserved_union_planar_sources(self, operands: &[&Body]) -> Result<Self> {
+        let self_ = operands.iter().fold(self, |body, operand| body.inherit_regularization_protection(operand));
+        if !operands.iter().any(|input| input.face_sources().is_some_and(|sources| sources.iter().flatten().any(|s| boolean_source(s, true)))) {
             return Ok(self_);
         }
-        self_.map_planar_sources(&[a, b], None, None, &[], true)
+        self_.map_planar_sources(operands, None, None, &[], true)
     }
 
     fn map_planar_sources(mut self, inputs: &[&Body], shell: Option<f64>, blocker: Option<&Body>, open: &[Vec3], constructed: bool) -> Result<Self> {
@@ -172,7 +172,8 @@ impl Body {
         if inputs.iter().all(|input| input.face_sources().is_none()) {
             return Ok(self);
         }
-        if inputs.len() > 2
+        // Each body at most 16 384 faces, and the inputs together at most two such bodies' worth.
+        if inputs.iter().fold(0usize, |n, input| n.saturating_add(input.face_count())) > 2 * 16_384
             || inputs.iter().any(|input| input.face_count() > 16_384)
             || self.face_count() > 16_384
             || blocker.is_some_and(|b| b.face_count() > 16_384)

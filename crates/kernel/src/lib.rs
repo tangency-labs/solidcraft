@@ -188,7 +188,7 @@ pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
-pub use ops::{BoolOp, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_apart};
+pub use ops::{BoolOp, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
 pub use point_path::{
     PathPiece, PointPath, SpaceBezier, curve_path, edge_path, face_section_along, iso_curves, project_onto_face, sketch_record_curve,
     sweep_point_path_with,
