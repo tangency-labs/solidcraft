@@ -720,7 +720,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
         for k in [
             "component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up",
-            "board_path",
+            "board_path", "board_solid",
         ] {
             if let Some(v) = r.get(k) {
                 out[k] = v.clone();
