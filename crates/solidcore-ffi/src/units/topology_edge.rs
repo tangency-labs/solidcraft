@@ -21,6 +21,18 @@
 //! `-2` in an output is "upstream would dereference null" (the shim did not call it).
 //! "state" is the mutable graph state of the shim's `put_state`. `e` is an edge index.
 //!
+//! Exported face surfaces use a different block from fixture inputs: `-1` for null,
+//! `1 O[3] X[3] Y[3] scale[2] analytic_domain[4]` for a plane, or
+//! `0 type oob form n m p q r s cpts(x y z w) u v` for the B-spline part. A lossless
+//! `SmSurfOfRevolution` export prefixes that regular B-spline block with
+//! `2 type version surf_oob gen_oob nbytes byte[nbytes]`, using
+//! `sc_analytic_export::put_exact_head`. The record preserves the analytic domain,
+//! generator and polar curve; the separate flags restore out-of-bounds state.
+//! The importer uses the shared record reader and requires the reconstructed base
+//! to match the regular block bitwise. Face ownership and tolerance metadata follow
+//! the surface block as before. Unsupported kinds keep their regular block and
+//! operation-specific deferrals; fixture input layouts are unchanged.
+//!
 //! | [`Op`]         | parameters after the block | outputs |
 //! |----------------|----------------------------|---------|
 //! | `Export`       |                            | the graph (see [`counts`] and the difftest runner) |
