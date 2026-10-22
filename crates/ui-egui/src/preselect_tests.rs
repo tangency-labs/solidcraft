@@ -1957,6 +1957,86 @@ fn surface_dialogs_make_their_commands() {
 }
 
 #[test]
+fn fair_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY};
+    let mut app = app_with(json!([]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    assert_eq!(d.inputs.len(), 1);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.fair");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "strength":1.0, "iterations":1, "keep_edges":true}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[0].items.push(Sel::Body { name: "Other".into() });
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[0].items.clear();
+    assert!(apply_commands(&app, &d).is_err());
+
+    let feature = FeatureKind::SurfaceFair {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        strength: 0.4,
+        iterations: 7,
+        keep_edges: false,
+        tolerance: "0.2 mm".into(),
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "strength":0.4, "iterations":7, "keep_edges":false, "tolerance":"0.2 mm"}));
+}
+
+#[test]
+fn match_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY, Position};
+    let mut app = app_with(json!([{"command":"solid.box", "params":{"length":10,"width":10,"height":10,"body_name":"Target"}}]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.match");
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[1].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[2].accept, crate::selection::EDGES);
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[1].items = vec![Sel::Body { name: "Target".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+    let point = Vec3::new(5.0, 0.0, 0.0);
+    d.inputs[2].items = vec![crate::dialogs::edge_sel(&app.session, point).unwrap()];
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.match");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g2"}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[1].items = vec![Sel::Face { body: "Target".into(), index: 0, point: Vec3::new(5.0, 5.0, 10.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["target"], json!("Target"));
+    d.inputs[1].items = vec![Sel::Body { name: "Other".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+
+    let face = Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) };
+    let preselected = start(&mut app, vec![face.clone()], "surface.match");
+    assert_eq!(preselected.inputs[0].items, vec![face]);
+    assert!(preselected.inputs[1].items.is_empty());
+
+    let feature = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        target: BodyName::from("Target"),
+        edges: vec![Position(point)],
+        order: Continuity::G3,
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g3"}));
+}
+
+#[test]
 fn surface_extrude_dialog_takes_profiles_and_curves() {
     // A rectangle and a free line in one sketch: the dialog sends both (the profile's walls
     // and the line's wall) as one surface extrude, and Edit Feature brings the picks back.

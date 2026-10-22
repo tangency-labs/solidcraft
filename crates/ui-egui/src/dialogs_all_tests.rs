@@ -106,6 +106,8 @@ fn representative(h: &Harness, command: &str) -> Dialog {
             vec![Sel::Axis { name: axis.into() }]
         } else if input.accept & (FACES | PLANAR_FACES) != 0 {
             vec![face_sel(s, point).unwrap()]
+        } else if command == "surface.match" && index == 2 {
+            vec![edge_sel(s, Vec3::new(40.0, 0.0, 5.0)).unwrap()]
         } else if input.accept & EDGES != 0 {
             vec![edge_sel(s, Vec3::new(10.0, 0.0, 5.0)).unwrap()]
         } else {
@@ -186,6 +188,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "solid.thread" => &["Modeled", "Full Length", "Automatic size"],
         "solid.boundary_fill" => &["Remove Tools"],
         "surface.offset" => &["Tangent chain"],
+        "surface.fair" => &["Keep edges"],
         "surface.trim" => &["Extend to meet", "Stitch the kept pieces"],
         "surface.ruled" => &["Flip"],
         "surface.untrim" => &["Restore outer boundary", "In place (surfaces)"],
@@ -234,6 +237,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss") => return None,
         "Direction" => return None, // segmented buttons, labelled by each choice
+        "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -1172,4 +1176,10 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     let (text, _, error) = h.app.status.clone().unwrap();
     assert!(!error, "{text}");
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
+}
+
+#[test]
+fn fair_and_match_surface_forms() {
+    check_form("surface.fair", &["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
+    check_form("surface.match", &["Continuity"]);
 }
