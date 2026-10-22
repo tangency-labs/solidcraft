@@ -1,28 +1,23 @@
 //! STEP import (ISO 10303-21 files, AP203/AP214/AP242 geometry).
 //!
 //! Our own reader, written from the public standards: [`p21`] parses the exchange structure,
-//! [`geom`] and [`brep`] turn geometry and topology into kernel solids, and this module walks
-//! the product structure (products, shape representations, assemblies with their placements,
-//! units, colours). STEP files are untrusted: every count and nesting depth is capped, every
-//! truck call runs under [`guard`], and what cannot be read becomes a warning rather than a
-//! failure wherever the rest of the file is still usable.
+//! [`solidcraft_step::topology`] reads each solid into its schema 4 record, which SMLib takes
+//! as the body ([`parallel`]), and this module walks the product structure (products, shape
+//! representations, assemblies with their placements, units, colours). STEP files are
+//! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
+//! warning rather than a failure wherever the rest of the file is still usable.
 
-mod brep;
-pub(crate) mod geom;
 pub(crate) mod p21;
 mod parallel;
-pub(crate) mod split;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use mt::EuclideanSpace as _;
 use serde::{Deserialize, Serialize};
-use truck_modeling as mt;
+use solidcraft_step::read::R;
 
 use crate::body::Body;
-use crate::{KernelError, Result, guard};
-use geom::R;
+use crate::{KernelError, Result};
 use p21::{Entity, Exchange, Param};
 
 /// Deepest assembly nesting followed.
@@ -99,48 +94,21 @@ struct Planned {
 
 /// Where the solids of a batch go: their placement and names.
 struct Batch {
-    m: mt::Matrix4,
+    m: M4,
     path: Vec<String>,
     product: String,
     instance: Option<String>,
 }
 
-/// Reading context: the file and the units of the representation being read.
-pub(crate) struct Ctx<'a> {
-    pub ex: &'a Exchange,
-    /// Millimetres per file length unit.
-    pub len: f64,
-    /// Radians per file angle unit.
-    pub ang: f64,
-    /// Vertex-on-curve tolerance (mm).
-    pub tol: f64,
-}
+/// The units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT) and its distance
+/// uncertainty (mm) as the file states it.
+type Units = solidcraft_step::units::Context;
 
-#[derive(Clone, Copy)]
-struct Units {
-    len: f64,
-    ang: f64,
-    tol: f64,
-    /// The context's own distance uncertainty (mm), as the file states it (SMLib's reads take it).
-    #[cfg_attr(not(feature = "smlib"), allow(dead_code))]
-    uncertainty: Option<f64>,
-}
-
-const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01, uncertainty: None };
-
-/// Units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT, uncertainty), read by
-/// [`solidcraft_step::units::context`]; the vertex-on-curve tolerance is ten times the
-/// uncertainty (at least 1e-3 mm), else a hundredth of the length unit, within [1e-4, 1] mm.
+/// Units of a representation context, read by [`solidcraft_step::units::context`] (millimetres
+/// and radians when the file names none).
 fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units>) -> Units {
-    let Some(id) = ctx else { return DEFAULT_UNITS };
-    if let Some(u) = cache.get(&id) {
-        return *u;
-    }
-    let c = solidcraft_step::units::context(ex, id);
-    let tol = c.uncertainty.map(|t| (t * 10.0).max(1e-3)).unwrap_or(c.units.len * 1e-2).clamp(1e-4, 1.0);
-    let u = Units { len: c.units.len, ang: c.units.ang, tol, uncertainty: c.uncertainty };
-    cache.insert(id, u);
-    u
+    let Some(id) = ctx else { return Units::default() };
+    *cache.entry(id).or_insert_with(|| solidcraft_step::units::context(ex, id))
 }
 
 /// Items and context of a representation entity.
@@ -157,18 +125,48 @@ fn representation(e: &Entity) -> Option<(Vec<u64>, Option<u64>)> {
     Some((items, p.get(2).and_then(Param::as_ref_id)))
 }
 
-fn mat_mul(a: &mt::Matrix4, b: &mt::Matrix4) -> mt::Matrix4 {
-    a * b
+/// A placement: a column-major 4×4 matrix (columns 0–2 the images of x, y and z, column 3 the
+/// translation), millimetres.
+type M4 = [[f64; 4]; 4];
+
+const IDENTITY: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+
+/// `a · b`.
+fn mat_mul(a: &M4, b: &M4) -> M4 {
+    let mut out = [[0.0; 4]; 4];
+    for (col, out_col) in out.iter_mut().enumerate() {
+        for (row, cell) in out_col.iter_mut().enumerate() {
+            *cell = (0..4).map(|k| a[k][row] * b[col][k]).sum();
+        }
+    }
+    out
 }
 
-fn to_array(m: &mt::Matrix4) -> [[f64; 4]; 4] {
-    [[m.x.x, m.x.y, m.x.z, m.x.w], [m.y.x, m.y.y, m.y.z, m.y.w], [m.z.x, m.z.y, m.z.z, m.z.w], [m.w.x, m.w.y, m.w.z, m.w.w]]
+/// The inverse of a rigid placement (an orthonormal rotation and a translation): the rotation
+/// transposed, and the translation taken back through it.
+fn rigid_inverse(m: &M4) -> M4 {
+    let mut out = IDENTITY;
+    for (i, col) in out.iter_mut().take(3).enumerate() {
+        for (j, cell) in col.iter_mut().take(3).enumerate() {
+            *cell = m[j][i];
+        }
+    }
+    for i in 0..3 {
+        out[3][i] = -(0..3).map(|k| m[i][k] * m[3][k]).sum::<f64>();
+    }
+    out
 }
 
-/// Inverse of a rigid placement matrix (orthonormal rotation + translation).
-fn rigid_inverse(m: &mt::Matrix4) -> mt::Matrix4 {
-    use mt::SquareMatrix;
-    m.invert().unwrap_or_else(mt::Matrix4::identity)
+fn translation(t: [f64; 3]) -> M4 {
+    let mut m = IDENTITY;
+    m[3] = [t[0], t[1], t[2], 1.0];
+    m
+}
+
+/// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
+fn frame_matrix(p: &solidcraft_step::geom::Placement) -> M4 {
+    let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
+    [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
 }
 
 struct Reader {
@@ -197,7 +195,7 @@ struct Reader {
     once: HashSet<u64>,
     /// An item placed more than once: its first instance's display, shared by every instance
     /// (with the placement that first instance had), so the part is meshed once.
-    shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, mt::Matrix4)>,
+    shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, M4)>,
     /// How many planned solids place each item.
     uses: HashMap<u64, usize>,
     /// An item placed more than once: read and oriented where the file defines it, so each
@@ -489,15 +487,16 @@ impl Reader {
         context_units(&self.ex, ctx, &mut self.units)
     }
 
-    fn placement_matrix(&mut self, item: u64, u: Units) -> R<mt::Matrix4> {
-        let cx = Ctx { ex: &self.ex, len: u.len, ang: u.ang, tol: u.tol };
-        let e = geom::entity(&cx, item)?;
+    /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D's origin.
+    fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
+        let reader = solidcraft_step::read::Reader::new(&self.ex, u.units);
+        let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if e.name() == "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
-            let p = e.params();
-            let o = geom::point(&cx, p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            return Ok(mt::Matrix4::from_translation(o.to_homogeneous().truncate()));
+            let o = reader.point(e.params().get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            return Ok(translation(o));
         }
-        Ok(geom::frame(&cx, item)?.matrix())
+        Ok(frame_matrix(&reader.frame(item)?))
     }
 
     /// Representations of a product (its own shape representations and those linked to them).
@@ -535,7 +534,7 @@ impl Reader {
     }
 
     /// Bodies of a representation's items (following mapped items), placed by `m`.
-    fn rep_bodies(&mut self, rep: u64, m: &mt::Matrix4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
+    fn rep_bodies(&mut self, rep: u64, m: &M4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
         if depth > MAX_ASSEMBLY_DEPTH {
             self.warn("mapped items nested too deeply");
             return;
@@ -660,7 +659,7 @@ impl Reader {
                 Some(part) => parallel::Source::Oriented(part.clone()),
                 None => parallel::Source::Item { item, units },
             };
-            let placement = self.batches.get(p.batch).map_or(mt::Matrix4::from_scale(1.0), |b| b.m);
+            let placement = self.batches.get(p.batch).map_or(IDENTITY, |b| b.m);
             sources.push((i, item));
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
@@ -715,11 +714,11 @@ impl Reader {
                     // Every instance of a part placed more than once shows its first instance's
                     // mesh, placed (the first one too: meshing its own would mesh the part twice).
                     let body = match self.shown.get(&item) {
-                        Some((shared, first)) => body.with_display_of(shared.clone(), to_array(&mat_mul(&m, &rigid_inverse(first)))),
+                        Some((shared, first)) => body.with_display_of(shared.clone(), mat_mul(&m, &rigid_inverse(first))),
                         None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
                             let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
                             self.shown.insert(item, (shared.clone(), m));
-                            body.with_display_of(shared, to_array(&mt::Matrix4::from_scale(1.0)))
+                            body.with_display_of(shared, IDENTITY)
                         }
                         None => body,
                     };
@@ -780,10 +779,10 @@ impl Reader {
     }
 
     /// Placement of a child occurrence in its parent.
-    fn occurrence_matrix(&mut self, nauo: u64, child_reps: &[u64]) -> mt::Matrix4 {
-        let Some(&rel) = self.placements.get(&nauo) else { return mt::Matrix4::from_scale(1.0) };
+    fn occurrence_matrix(&mut self, nauo: u64, child_reps: &[u64]) -> M4 {
+        let Some(&rel) = self.placements.get(&nauo) else { return IDENTITY };
         let ex = self.ex.clone();
-        let r = (|| -> R<mt::Matrix4> {
+        let r = (|| -> R<M4> {
             let e = ex.get(rel).ok_or("missing placement")?;
             let rr = e.record("REPRESENTATION_RELATIONSHIP").ok_or("placement without representations")?;
             let (r1, r2) =
@@ -814,23 +813,14 @@ impl Reader {
             Ok(m) => m,
             Err(e) => {
                 self.warn(format!("component placement #{rel}: {e} (placed at the origin)"));
-                mt::Matrix4::from_scale(1.0)
+                IDENTITY
             }
         }
     }
 
-    fn node(
-        &mut self,
-        pd: u64,
-        local: mt::Matrix4,
-        world: mt::Matrix4,
-        path: &[String],
-        instance: Option<&str>,
-        depth: usize,
-        stack: &mut Vec<u64>,
-    ) -> StepNode {
+    fn node(&mut self, pd: u64, local: M4, world: M4, path: &[String], instance: Option<&str>, depth: usize, stack: &mut Vec<u64>) -> StepNode {
         let name = self.product_name(pd);
-        let mut node = StepNode { name: name.clone(), transform: to_array(&local), bodies: Vec::new(), children: Vec::new() };
+        let mut node = StepNode { name: name.clone(), transform: local, bodies: Vec::new(), children: Vec::new() };
         if self.stop() {
             return node;
         }
@@ -869,96 +859,29 @@ impl Reader {
     }
 }
 
-/// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
-/// names a defined entity, nothing but root entities (relationships, definitions,
-/// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
-/// Faces whose boundary runs the wrong way round their normal, as a strict reader
-/// sees them: each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO
-/// 10303-42), reversed when `same_sense` is false, and the outer loop must run counter-clockwise
-/// seen from that side. Checked on faces whose loop spans a clear direction (patches, not bands
-/// around a closed surface). Returns one message per bad face.
+/// Faces whose boundary runs the wrong way round their normal, as a strict reader sees them:
+/// each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO 10303-42),
+/// reversed when `same_sense` is false, and the outer loop must run counter-clockwise seen from
+/// that side. These are the faces the STEP reader turns over ([`solidcraft_step::topology`]),
+/// numbered as the solid's body numbers them. Returns one message per bad face; an error when
+/// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
-    use mt::{BoundedCurve, InnerSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
-    let imp = step_import(text).map_err(|e| e.to_string())?;
+    let ex = p21::parse(text)?;
+    let read = solidcraft_step::topology::read_solids(&ex);
+    if read.solids.is_empty() {
+        return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
+    }
     let mut out = Vec::new();
-    for b in &imp.bodies {
-        let r = guard("orientation check", || {
-            let mut bad = Vec::new();
-            for (fi, f) in b.body.solid.face_iter().enumerate() {
-                let bounds = f.boundaries();
-                // Patches only: a face with several loops (a band between two rings, a face with
-                // holes) has no single loop direction to compare.
-                let [w] = bounds.as_slice() else { continue };
-                // Only revolutions (cylinders, cones, spheres, tori: closed surfaces, where a loop
-                // read the wrong way round silently gives the rest of the surface). On free-form
-                // strips the loop's normals vary too much for this test; the round trips' volume
-                // checks cover those.
-                if !matches!(f.surface(), mt::Surface::RevolutedCurve(_)) {
-                    continue;
-                }
-                // A loop through a vertex twice (a figure eight round a pole) has no single direction.
-                let fronts: std::collections::HashSet<_> = w.edge_iter().map(|e| e.front().id()).collect();
-                if fronts.len() != w.len() {
-                    continue;
-                }
-                let pts: Vec<mt::Point3> = w
-                    .edge_iter()
-                    .flat_map(|e| {
-                        let c = e.oriented_curve();
-                        let (t0, t1) = c.range_tuple();
-                        (0..16).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 16.0)).collect::<Vec<_>>()
-                    })
-                    .collect();
-                let n = pts.len();
-                if n < 3 {
-                    continue;
-                }
-                let mut newell = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut c = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut span: f64 = 0.0;
-                for i in 0..n {
-                    let (Some(a), Some(q)) = (pts.get(i), pts.get((i + 1) % n)) else { continue };
-                    newell += (a.to_vec()).cross(q.to_vec());
-                    c += a.to_vec();
-                    span = span.max((a - pts[0]).magnitude());
-                }
-                let c = mt::Point3::from_vec(c / n as f64);
-                // Bands round a closed surface have no clear loop direction.
-                if !(newell.magnitude() > 0.05 * span * span) {
-                    continue;
-                }
-                // The face normal averaged along the loop (each loop point is on the surface;
-                // the loop's centroid can be nearer the wrong side of a curved face).
-                let s = f.oriented_surface();
-                let mut normal = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut count = 0usize;
-                for p in &pts {
-                    if let Some(uv) = s.search_nearest_parameter(*p, None, 100) {
-                        let n = s.normal(uv.0, uv.1);
-                        if n.x.is_finite() && n.y.is_finite() && n.z.is_finite() {
-                            normal += n;
-                            count += 1;
-                        }
-                    }
-                }
-                let _ = c;
-                // Only patches clearly to one side of their loop are judged: a loop on a closed
-                // surface (a sphere's cube-face square) bounds either part.
-                if count == 0 || normal.magnitude() < 0.7 * count as f64 {
-                    continue;
-                }
-                if normal.dot(newell) < 0.0 {
-                    bad.push(format!("{}: face {fi} runs clockwise around its normal", b.name));
-                }
-            }
-            Ok(bad)
-        })
-        .map_err(|e| e.to_string())?;
-        out.extend(r);
+    for solid in &read.solids {
+        let name = if solid.name.trim().is_empty() { format!("solid #{}", solid.item) } else { solid.name.trim().to_string() };
+        out.extend(solid.turned.iter().map(|f| format!("{name}: face {f} runs clockwise around its normal")));
     }
     Ok(out)
 }
 
+/// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
+/// names a defined entity, nothing but root entities (relationships, definitions,
+/// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
 pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
     let ex = p21::parse(text)?;
     if let Some(d) = ex.duplicates.first() {
@@ -1129,7 +1052,7 @@ impl StepReading {
         let mut roots: Vec<u64> =
             ex.entities.iter().filter(|(id, e)| e.name() == "PRODUCT_DEFINITION" && !child_pds.contains(id)).map(|(id, _)| *id).collect();
         roots.sort();
-        let identity = mt::Matrix4::from_scale(1.0);
+        let identity = IDENTITY;
         let mut tree = Vec::new();
         for pd in roots {
             tree.push(rd.node(pd, identity, identity, &[], None, 0, &mut Vec::new()));
@@ -1155,7 +1078,7 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: to_array(&identity), bodies, children: Vec::new() });
+            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
         }
         let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })

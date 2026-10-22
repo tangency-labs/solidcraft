@@ -164,15 +164,14 @@ fn benchmark_independent_step_solids() {
     let start = std::time::Instant::now();
     let ex = p21::parse(&text).unwrap();
     let parse = start.elapsed();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 0.01 };
     let mut items: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
     items.sort();
     let start = std::time::Instant::now();
-    let solids: Vec<_> = items.iter().map(|id| guard("benchmark read", || brep::read_item(&cx, *id).map_err(KernelError::Failed)).unwrap()).collect();
+    let solids: Vec<_> = items.iter().map(|id| solidcraft_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
     let read = start.elapsed();
     let start = std::time::Instant::now();
     for solid in solids {
-        std::hint::black_box(Body::new(solid.solid).unwrap().unmeshed_faces());
+        std::hint::black_box(Body::from_record(solid.brep).unwrap().unmeshed_faces());
     }
     println!(
         "STEP_PHASE parse_ms={:.3} brep_ms={:.3} body_ms={:.3}",
@@ -266,8 +265,8 @@ fn parallel_body_preparation_reports_errors_in_place_and_preserves_placement() {
     let body = cylinder(Vec3::new(2.0, 2.0, 0.0), Vec3::Z, 2.0, 4.0).unwrap();
     let ex = p21::parse(&step_export(&[&body], "test").unwrap()).unwrap();
     let solid = *ex.entities.iter().find(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| id).unwrap();
-    let units = DEFAULT_UNITS;
-    let placement = mt::Matrix4::from_translation(mt::Vector3::new(10.0, 20.0, 30.0));
+    let units = Units::default();
+    let placement = translation([10.0, 20.0, 30.0]);
     // The second item is not in the file.
     let jobs: Vec<_> = [solid, 999_999_999, solid, solid]
         .into_iter()
@@ -329,7 +328,7 @@ fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_i
         reader.bodies = vec![seed.clone(); MAX_BODIES - 2];
         reader.node_items.insert(2000);
         let mut out = Vec::new();
-        reader.rep_bodies(60, &mt::Matrix4::from_scale(1.0), &[], "Budget", None, &mut out, 0);
+        reader.rep_bodies(60, &IDENTITY, &[], "Budget", None, &mut out, 0);
         assert!(reader.oriented.is_empty() && reader.unreadable.is_empty(), "the walk only plans the solids");
         while reader.convert_next(workers == 1) {}
         let out = reader.remap(&out);
@@ -355,8 +354,8 @@ fn round_trip(b: &Body) -> StepImport {
     let (m0, m1) = (measure(b).unwrap(), measure(&imp.bodies[0].body).unwrap());
     assert!(rel(m1.volume, m0.volume) < 1e-3, "volume {} vs {}", m1.volume, m0.volume);
     assert!(rel(m1.area, m0.area) < 1e-3, "area {} vs {}", m1.area, m0.area);
-    // Pieces of one analytic surface are written as one face (volume and area above check
-    // that nothing was lost).
+    // The file has no more faces than the body (volume and area above check that nothing was
+    // lost).
     assert!(imp.bodies[0].file_faces <= b.face_count());
     assert!(imp.bodies[0].closed);
     imp
@@ -383,11 +382,9 @@ fn round_trip_features() {
     round_trip(&donut[0]);
 }
 
-/// Robustness seed 17: a thin three-quarter tube shelled with its bottom open. truck writes each
-/// wall as three quarter-turn B-spline pieces; the export merges them into one 270° face and must
-/// write that face's cylinder, not the first piece's quarter sheet. The seam direction came from
-/// the mean direction of the face's vertices, which is zero at 0°, 90°, 180° and 270°, so the
-/// merged face kept the quarter sheet and read back about 7% short with no warning.
+/// Robustness seed 17: a thin three-quarter tube shelled with its bottom open reads back whole
+/// (an export once wrote a 270° wall on a quarter of its surface, and the part read back about
+/// 7% short with no warning).
 #[test]
 fn shelled_three_quarter_tube_round_trips() {
     let rect =
@@ -426,72 +423,6 @@ fn imported_bodies_take_features() {
 
 const HEAD: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n";
 const TAIL: &str = "ENDSEC;\nEND-ISO-10303-21;\n";
-
-/// Original fixtures: elementary basis surfaces plus offsets, with no external CAD files.
-fn offset_geometry(definition: &str, offset: &str, len: f64, sense: bool, points: &[mt::Point3]) -> crate::Result<mt::Surface> {
-    let text = format!(
-        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=AXIS2_PLACEMENT_3D('',#1,$,$);\n#3={definition};\n#4=OFFSET_SURFACE('',#3,{offset},.U.);\n{TAIL}"
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len, ang: 1.0, tol: 1e-6 };
-    crate::guard("test offset surface", || geom::surface(&cx, 4, points, &[], sense, 0).map_err(KernelError::Failed))
-}
-
-#[test]
-fn offset_surface_analytic_geometry_and_orientation() {
-    use mt::{InnerSpace, MetricSpace, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
-    let angle: f64 = 0.4;
-    let cases = [
-        ("PLANE('',#2)".to_string(), mt::Point3::new(2.0, 3.0, 1.0), mt::Vector3::unit_z()),
-        ("CYLINDRICAL_SURFACE('',#2,5.)".to_string(), mt::Point3::new(6.0, 0.0, 2.0), mt::Vector3::unit_x()),
-        ("SPHERICAL_SURFACE('',#2,5.)".to_string(), mt::Point3::new(6.0, 0.0, 0.0), mt::Vector3::unit_x()),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)".to_string(), mt::Point3::new(13.0, 0.0, 0.0), mt::Vector3::unit_x()),
-        (
-            format!("CONICAL_SURFACE('',#2,5.,{angle})"),
-            mt::Point3::new(5.0 + 1.0 / angle.cos() + 2.0 * angle.tan(), 0.0, 2.0),
-            mt::Vector3::new(angle.cos(), 0.0, -angle.sin()),
-        ),
-    ];
-    for (definition, point, normal) in cases {
-        for sense in [true, false] {
-            let extent = [point, point + mt::Vector3::unit_z()];
-            let surface = offset_geometry(&definition, "1.", 1.0, sense, &extent).unwrap();
-            let uv = surface.search_nearest_parameter(point, None, 100).unwrap();
-            assert!(surface.subs(uv.0, uv.1).distance(point) < 1e-6, "{definition}");
-            assert!(surface.normal(uv.0, uv.1).dot(normal) * if sense { 1.0 } else { -1.0 } > 0.99, "{definition}, sense {sense}");
-        }
-    }
-    let p = mt::Point3::new(40.0, 0.0, 2.0);
-    let surface = offset_geometry("CYLINDRICAL_SURFACE('',#2,5.)", "-1.", 10.0, true, &[p, p + mt::Vector3::unit_z()]).unwrap();
-    let uv = surface.search_nearest_parameter(p, None, 100).unwrap();
-    assert!(surface.subs(uv.0, uv.1).distance(p) < 1e-6);
-}
-
-#[test]
-fn offset_surfaces_nested_and_hostile() {
-    let points = [mt::Point3::new(0.0, 0.0, 0.0), mt::Point3::new(0.0, 0.0, 1.0)];
-    for (basis, offset) in [
-        ("CYLINDRICAL_SURFACE('',#2,5.)", "-5."),
-        ("SPHERICAL_SURFACE('',#2,5.)", "-6."),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)", "8."),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)", "-2."),
-        ("CONICAL_SURFACE('',#2,5.,0.4)", "-10."),
-        ("PLANE('',#2)", "1.E100"),
-        ("PLANE('',#2)", "$"),
-    ] {
-        assert!(offset_geometry(basis, offset, 1.0, true, &points).is_err(), "{basis}, {offset}");
-    }
-    let text = format!("{HEAD}#1=OFFSET_SURFACE('',#1,1.,.F.);{TAIL}");
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6 };
-    assert!(geom::surface(&cx, 1, &points, &[], true, 0).unwrap_err().contains("nested too deeply"));
-    let text = format!(
-        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));#2=AXIS2_PLACEMENT_3D('',#1,$,$);#3=CYLINDRICAL_SURFACE('',#2,5.);#4=OFFSET_SURFACE('',#3,-6.,.F.);#5=OFFSET_SURFACE('',#4,6.,.F.);{TAIL}"
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6 };
-    assert!(geom::surface(&cx, 5, &points, &[], true, 0).is_err());
-}
 
 #[test]
 fn offset_surface_cube_import_is_closed_and_editable() {
@@ -743,9 +674,7 @@ fn instanced_assembly_of(parts: u64, n: u64) -> String {
 fn instanced_parts_are_oriented_once() {
     let n = 24;
     let t = instanced_assembly(n);
-    crate::body::ORIENTED.with(|c| c.set(0));
     let imp = step_import_with_workers(&t, 1).unwrap();
-    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 1, "one distinct part");
     assert_eq!(imp.bodies.len(), n as usize);
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     for (k, b) in imp.bodies.iter().enumerate() {
@@ -776,9 +705,7 @@ fn distinct_parts_convert_together_across_instances() {
     let threaded = reading.finish().unwrap();
     assert_eq!(threaded.bodies.len(), n as usize);
     assert!(threaded.warnings.is_empty(), "{:?}", threaded.warnings);
-    crate::body::ORIENTED.with(|c| c.set(0));
     let serial = step_import_with_workers(&t, 1).unwrap();
-    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 2, "two parts");
     assert_same_import(&serial, &threaded);
     assert_eq!(threaded.bodies[1].name, "Cube1");
     assert_eq!(threaded.bodies[1].path, vec!["Assembly".to_string(), "Block1".to_string()]);
@@ -1108,7 +1035,7 @@ fn hostile_boundaries_mesh_in_bounded_time() {
 
 /// A cylinder written as a surface of revolution, oriented the ISO 10303-42 way (normal
 /// ∂S/∂angle × ∂S/∂profile, outward here, so `same_sense` .T.). Strict readers read such faces this
-/// way; reading them with truck's profile-first normal turned faces inside out.
+/// way; reading them with the profile's parameter first turned faces inside out.
 #[test]
 fn surface_of_revolution_sense_follows_iso() {
     let mut t = String::from(HEAD);
@@ -1156,7 +1083,7 @@ fn horn_torus_written_as_one_spline_face() {
 }
 
 /// Booleans and blends build the same body every time, so an export is byte-identical from
-/// run to run (truck used to emit a boolean's faces in hash order of their addresses). The
+/// run to run (an export once listed a boolean's faces in hash order of their addresses). The
 /// tee of oracle 35 with its rolling-ball fillet round the junction.
 #[test]
 fn tee_fillet_exports_byte_identical() {
@@ -1313,8 +1240,7 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
     };
     let read = |text: &str| {
         let ex = p21::parse(text).unwrap();
-        let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6 };
-        geom::curve(&cx, 3, 0)
+        solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
     let error = read(&curve(1_000_000, 64)).unwrap_err();
     // This diagnostic comes from the check before expansion; wall-clock time depends on CI load.
@@ -1559,46 +1485,6 @@ fn periodic_knot_tube(first: u64, x: f64, r: f64, h: f64) -> (String, u64) {
     (s, face)
 }
 
-/// A B-spline whose end knots repeat fewer than degree + 1 times (an unclamped knot vector,
-/// as OpenCascade writes closed curves and surfaces) is defined only between knot `degree`
-/// and knot `len - degree - 1`. Read over the whole knot range, the circle and the tube went
-/// on past their domain, and the rational ones divided by zero at the outermost knots.
-#[test]
-fn periodic_knot_bsplines_are_read_on_their_domain() {
-    use mt::{BoundedCurve, ParametricCurve, ParametricSurface};
-    let (r, h) = (1.7, 1.5);
-    let (tube, face) = periodic_knot_tube(100, 0.0, r, h);
-    let (circle, row) = circle_net(10, 0.0, r, 0.0);
-    let text = format!(
-        "{HEAD}{tube}{circle}#30=(BOUNDED_CURVE()B_SPLINE_CURVE(2,({}),.CIRCULAR_ARC.,.T.,.F.)B_SPLINE_CURVE_WITH_KNOTS(({PERIODIC_MULTS}),({PERIODIC_KNOTS}),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_CURVE(({CIRCLE_WEIGHTS}))REPRESENTATION_ITEM(''));\n{TAIL}",
-        row.join(",")
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6 };
-    let pi = std::f64::consts::PI;
-    let on_tube = |p: mt::Point3| (p.x.hypot(p.y) - r).abs() < 1e-9 && p.z > -1e-9 && p.z < h + 1e-9;
-
-    let surface_id = ex.get(face).and_then(|e| e.params().get(2)).and_then(Param::as_ref_id).unwrap();
-    let surface = geom::bspline_surface(&cx, ex.get(surface_id).unwrap()).unwrap();
-    let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() else { panic!("unbounded surface") };
-    assert!(u0.abs() < 1e-12 && (u1 - h / r).abs() < 1e-12, "u range {u0} .. {u1}");
-    assert!((v0 + pi).abs() < 1e-9 && (v1 - pi).abs() < 1e-9, "v range {v0} .. {v1}");
-    for i in 0..=8 {
-        for j in 0..=16 {
-            let (u, v) = (u0 + (u1 - u0) * i as f64 / 8.0, v0 + (v1 - v0) * j as f64 / 16.0);
-            assert!(on_tube(surface.subs(u, v)), "S({u}, {v}) = {:?}", surface.subs(u, v));
-        }
-    }
-
-    let geom::CurveGeo::Nurbs(curve) = geom::curve(&cx, 30, 0).unwrap() else { panic!("not a rational B-spline") };
-    let (t0, t1) = curve.range_tuple();
-    assert!((t0 + pi).abs() < 1e-9 && (t1 - pi).abs() < 1e-9, "curve range {t0} .. {t1}");
-    for j in 0..=16 {
-        let t = t0 + (t1 - t0) * j as f64 / 16.0;
-        assert!(on_tube(curve.subs(t)), "C({t}) = {:?}", curve.subs(t));
-    }
-}
-
 /// Two such tubes far apart in one body: the body's size sets a chord tolerance coarse beside
 /// the tubes, and meshing a face at it divided the surface's whole parameter box, whose
 /// corners lay outside the domain. The division never converged there (#1374's recursion),
@@ -1824,80 +1710,13 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
-/// A schema 4 record as truck's adapter builds it: truck holds a plane by three points, the
-/// same plane within a rounding.
-fn truck_ready(record: &solidcraft_geom::brep::Brep) -> solidcraft_geom::brep::Brep {
-    let mut record = record.clone();
-    for f in &mut record.faces {
-        if let solidcraft_geom::brep::Surface::Plane { origin, u_axis, v_axis } = f.surface {
-            let at = |d: [f64; 3]| [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]];
-            f.surface = solidcraft_geom::brep::Surface::PlaneThrough { origin, u_point: at(u_axis), v_point: at(v_axis) };
-        }
-    }
-    record
-}
-
 /// The volume of the one solid `solidcraft_step::topology` reads from `text` into schema 4,
-/// built back into a truck body: negative when its faces point into its material.
+/// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
     let ex = solidcraft_step::p21::parse(text).unwrap();
     let r = solidcraft_step::topology::read_solids(&ex);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
-    let solid = crate::native::solid_of_record(truck_ready(&r.solids[0].brep)).unwrap();
-    let sign = solid.boundaries().iter().map(crate::body::shell_volume).sum::<Option<f64>>().unwrap().signum();
-    sign * measure(&crate::body::Body::new(solid).unwrap()).unwrap().volume
-}
-
-/// Each STEP file in `SOLIDCRAFT_STEP_CORPUS`: bodies, faces, edges and volume as truck
-/// imports it and as `solidcraft_step::topology` reads it into schema 4 records (built back into
-/// truck solids for their volume, signed: negative means faces turned into the material).
-/// Counts may differ where truck splits faces (bands, balls) or edges and where schema 4 adds
-/// seams; volumes are coarse meshes' (1% of the size). This reports, it does not judge. Run
-/// with `--ignored --nocapture`.
-#[test]
-#[ignore = "needs SOLIDCRAFT_STEP_CORPUS"]
-fn corpus_truck_and_schema_4_counts() {
-    let Ok(dir) = std::env::var("SOLIDCRAFT_STEP_CORPUS") else { return };
-    let mut paths: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
-    paths.sort();
-    let volume = |s: &mt::Solid| s.boundaries().iter().map(crate::body::shell_volume).sum::<Option<f64>>();
-    for path in paths.iter().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"))) {
-        let text = std::fs::read_to_string(path).unwrap_or_default();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let truck = match step_import(&text) {
-            Ok(imp) => {
-                // A body per instance: count each STEP item once.
-                let mut seen = HashSet::new();
-                let once: Vec<&ImportedBody> = imp.bodies.iter().filter(|b| seen.insert(b.source_item)).collect();
-                let (f, e) = once.iter().fold((0, 0), |(f, e), b| (f + b.body.face_count(), e + b.body.edge_count()));
-                let v: f64 = once.iter().filter_map(|b| volume(&b.body.solid)).sum();
-                format!("{} bodies, {f} faces, {e} edges, volume {v:.4}", once.len())
-            }
-            Err(e) => format!("failed: {e}"),
-        };
-        let ex = match solidcraft_step::p21::parse(&text) {
-            Ok(ex) => ex,
-            Err(e) => {
-                println!("{name}: parse failed: {e}");
-                continue;
-            }
-        };
-        let r = solidcraft_step::topology::read_solids(&ex);
-        let (f, e) = r.solids.iter().fold((0, 0), |(f, e), s| (f + s.brep.faces.len(), e + s.brep.edges.len()));
-        let (mut v, mut unbuilt) = (0.0, Vec::new());
-        for s in &r.solids {
-            match crate::native::solid_of_record(truck_ready(&s.brep)) {
-                Ok(solid) => v += volume(&solid).unwrap_or(f64::NAN),
-                Err(err) => unbuilt.push(err.to_string()),
-            }
-        }
-        println!(
-            "{name}: truck {truck}; schema 4 {} solids ({} refused), {f} faces, {e} edges, volume {v:.4}{}",
-            r.solids.len(),
-            r.failures.len(),
-            if unbuilt.is_empty() { String::new() } else { format!(" ({} not built by truck: {})", unbuilt.len(), unbuilt[0]) }
-        );
-    }
+    measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
 
 /// The step-conformance parts read into SMLib (`SOLIDCRAFT_KERNEL=smlib`): the STEP reader's

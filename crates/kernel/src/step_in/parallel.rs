@@ -1,18 +1,13 @@
 //! Bounded desktop preparation of independent imported bodies, collected in file order.
 use std::sync::Arc;
 
-use super::{Body, Ctx, Exchange, KernelError, Units, brep, guard, mt};
+use super::{Body, Exchange, IDENTITY, KernelError, M4, Units};
 
 pub(super) struct Job {
     pub source: Source,
     /// Where the body goes (its instance's placement in the assembly).
-    pub placement: mt::Matrix4,
+    pub placement: M4,
     pub check_mesh: bool,
-    /// The file's point-on-surface tolerance (`super::Units::tol`) for the representation this
-    /// solid was read from: how far its boundaries may lie off their surfaces (mm). The body
-    /// keeps it, so the tessellator holds an imported boundary to the file's own uncertainty
-    /// rather than to a fraction of the part's size (see `crate::body::Body::boundary_tol`).
-    pub tol: f64,
 }
 
 /// What a job places: a solid item to read from the file (and orient), or a part an earlier
@@ -66,51 +61,31 @@ pub(super) fn workers() -> usize {
 fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
-        Source::Item { item, units } if smlib_backend() => {
+        Source::Item { item, units } => {
             let (part, read) = smlib_part(ex, *item, *units)?;
             (Arc::new(part), Some(read))
         }
-        Source::Item { item, units } => {
-            let cx = Ctx { ex, len: units.len, ang: units.ang, tol: units.tol, snap: units.snap };
-            let out = guard("step brep", || brep::read_item(&cx, *item).map_err(KernelError::Failed))
-                .map_err(|e| Failure { read: true, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() })?;
-            // Orient once where the file defines the solid; each placement then takes its
-            // orientation from the matrix instead of meshing the whole part again.
-            let body = guard("STEP body preparation", || Body::new(out.solid)).map_err(|e| Failure { read: false, msg: e.to_string() })?;
-            // The file's tolerance is set on the part itself, before anything meshes it: the
-            // unmeshed-face count below is the import's own warning and must judge the body by
-            // the file's uncertainty too, and every placement of the part carries the figure on.
-            let body = body.with_boundary_tol(Some(job.tol));
-            (Arc::new(Part { body, closed: out.closed, file_faces: out.file_faces, face_origin: out.face_origin }), Some(out.failed))
-        }
     };
-    guard("STEP body preparation", || {
-        let body = part.body.placed(&job.placement)?;
-        // Counted where the orientation mesh already counted them (a placement meshes the
-        // same faces), and on the part, which carries the file's tolerance.
-        let missing = if job.check_mesh { part.body.unmeshed_faces() } else { 0 };
-        Ok((body, missing))
-    })
-    .map(|(body, missing)| Made { body, missing, part, read })
-    .map_err(|e| Failure { read: false, msg: e.to_string() })
+    let body = placed(&part.body, &job.placement).map_err(|e| Failure { read: false, msg: e.to_string() })?;
+    // Counted on the part (a placement meshes the same faces).
+    let missing = if job.check_mesh { part.body.unmeshed_faces() } else { 0 };
+    Ok(Made { body, missing, part, read })
 }
 
-/// Whether solids are read into SMLib ([`crate::backend`]). A setting this build can't honour
-/// reads them on neither kernel: [`smlib_part`] then says why.
-fn smlib_backend() -> bool {
-    !matches!(crate::backend(), Ok(crate::Backend::Truck))
+/// The part's body where its instance goes: the very same body at the identity (it keeps the
+/// SMLib body the read made), else its record moved there.
+fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
+    if *m == IDENTITY {
+        return Ok(body.clone());
+    }
+    Ok(crate::ops::transform_matrix(body, *m)?.without_history())
 }
 
-/// A solid item read with the STEP reader into its schema 4 record, then into SMLib (healed
-/// where SMLib's check refuses it as given), and brought back as a body: the part SMLib made of
-/// the file. A solid the reader or SMLib refuses is not imported, with the reason; there is no
-/// other kernel to fall back on.
-#[cfg(feature = "smlib")]
+/// A solid item read with the STEP reader into its schema 4 record, then into SMLib as given,
+/// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
+/// refuses is not imported, with the reason.
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
-    crate::backend().map_err(|e| Failure { read: true, msg: e.to_string() })?;
-    let context =
-        solidcraft_step::units::Context { units: solidcraft_step::read::Units { len: units.len, ang: units.ang }, uncertainty: units.uncertainty };
-    let solid = solidcraft_step::topology::read_solid(ex, item, context).map_err(|msg| Failure { read: true, msg })?;
+    let solid = solidcraft_step::topology::read_solid(ex, item, units).map_err(|msg| Failure { read: true, msg })?;
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let (brep, smlib_order) = crate::native::smlib_record_ordered(&solid.brep).map_err(failed)?;
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
@@ -131,11 +106,6 @@ pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result:
     }
     let part = Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin };
     Ok((part, solid.notes))
-}
-
-#[cfg(not(feature = "smlib"))]
-pub(super) fn smlib_part(_: &Exchange, _: u64, _: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
-    Err(Failure { read: true, msg: crate::backend().err().map_or_else(|| "this build has no SMLib".into(), |e| e.to_string()) })
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow
