@@ -129,7 +129,7 @@ fn case_name(dir: &str) -> (String, String) {
     (name(p.parent()), name(Some(p)))
 }
 
-fn check_case(dir: &str) -> Value {
+fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     let (area, name) = case_name(dir);
     let mut out = json!({"case": name, "area": area, "kernel": kernel()});
     let want = match read_json(&format!("{dir}/expected.json")) {
@@ -167,6 +167,18 @@ fn check_case(dir: &str) -> Value {
     let outcome = want["outcome"].as_str().unwrap_or("solid");
     let refused = outcome == "refused";
     let may_refuse = refused || outcome == "solid_or_refused";
+    // The SMLib calls that fail in this case leave their inputs in its own folder.
+    if let Some(root) = dumps {
+        let folder = root.join(format!("{area}-{name}"));
+        if let Err(e) = std::fs::create_dir_all(&folder)
+            .map_err(|e| e.to_string())
+            .and_then(|()| solidcraft_engine::kernel::smlib_dump_dir(Some(&folder)).map_err(|e| e.to_string()))
+        {
+            out["status"] = json!("fail");
+            out["error"] = json!(format!("--dumps: {}: {e}", folder.display()));
+            return out;
+        }
+    }
     let mut s = solidcraft_engine::Session::default();
     let clock = std::time::Instant::now();
     let ran = s.run_script(&commands);
@@ -331,7 +343,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if dirs.is_empty() {
         return Err("kernel-cases: give one or more case directories (each with recipe.json and expected.json)".into());
     }
-    let results: Vec<Value> = dirs.iter().map(|d| check_case(d)).collect();
+    // `--dumps=DIR`: each case's failing SMLib calls leave their inputs in DIR/<area>-<case>.
+    let dumps = args.iter().find_map(|a| a.strip_prefix("--dumps=")).map(std::path::PathBuf::from);
+    if dumps.as_ref().is_some_and(|d| d.as_os_str().is_empty()) {
+        return Err("kernel-cases: --dumps= needs a folder".into());
+    }
+    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref())).collect();
+    if dumps.is_some() {
+        solidcraft_engine::kernel::smlib_dump_dir(None).map_err(|e| format!("kernel-cases: --dumps: {e}"))?;
+    }
     report(args, &results);
     let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();
     if bad > 0 { Err(format!("{bad} kernel case(s) failed")) } else { Ok(()) }

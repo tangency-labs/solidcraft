@@ -1,26 +1,20 @@
-//! 3D sketch curves from the model: curves projected onto faces, intersection curves of bodies
-//! and faces (on their display meshes), and spun profiles.
-
-use std::collections::BTreeMap;
-use std::sync::Arc;
+//! 3D sketch curves from the model: curves projected onto faces (on their display meshes), the
+//! bodies and faces an intersection curve is taken on, and spun profiles.
 
 use solidcraft_geom::{Mesh, Plane, Vec2, Vec3};
 use solidcraft_sketch::LinkSource;
 
 use crate::eval::ModelState;
 
-/// Most triangle pairs examined by one intersection.
-const MAX_PAIRS: usize = 20_000_000;
-
-/// The mesh (and face, for a face source) of a body or face reference.
-pub(crate) fn mesh_of(st: &ModelState, src: &LinkSource) -> Option<(Arc<Mesh>, Option<u32>)> {
+/// The body of a body or face reference, and the face (its index in the body's face order) for a
+/// face reference: the face nearest its point, on the named body or else the nearest body.
+pub(crate) fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<usize>)> {
     match src {
-        LinkSource::Body { body } => Some((st.body(body)?.mesh(), None)),
+        LinkSource::Body { body } => Some((st.body(body)?, None)),
         LinkSource::Face { body, at } => {
             let b = st.body(body).or_else(|| st.bodies.iter().min_by(|x, y| dist_to(&x.mesh(), *at).total_cmp(&dist_to(&y.mesh(), *at))))?;
-            let m = b.mesh();
-            let (f, _, _) = crate::project::nearest_face(&m, *at)?;
-            Some((m, Some(f)))
+            let (f, _, _) = crate::project::nearest_face(&b.mesh(), *at)?;
+            Some((b, usize::try_from(f).ok()))
         }
         _ => None,
     }
@@ -95,160 +89,6 @@ pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Ve
     }
     if cur.len() >= 2 {
         out.push(cur);
-    }
-    out
-}
-
-/// Segment where two triangles cross (None when they do not, or are coplanar).
-fn tri_tri(a: &[Vec3; 3], b: &[Vec3; 3]) -> Option<(Vec3, Vec3)> {
-    let nb = (b[1] - b[0]).cross(b[2] - b[0]).normalized()?;
-    let na = (a[1] - a[0]).cross(a[2] - a[0]).normalized()?;
-    // Points where one triangle's edges pass through the other's plane.
-    let cut = |t: &[Vec3; 3], n: Vec3, o: Vec3| -> Option<(Vec3, Vec3)> {
-        let h: Vec<f64> = t.iter().map(|p| (*p - o).dot(n)).collect();
-        if h.iter().all(|x| *x > 1e-12) || h.iter().all(|x| *x < -1e-12) {
-            return None;
-        }
-        let mut pts = Vec::new();
-        for (i, j) in [(0usize, 1usize), (1, 2), (2, 0)] {
-            let (hi, hj) = (h[i], h[j]);
-            if (hi > 0.0) != (hj > 0.0) {
-                pts.push(t[i].lerp(t[j], hi / (hi - hj)));
-            } else if hi == 0.0 {
-                pts.push(t[i]);
-            }
-        }
-        match pts[..] {
-            [p, q, ..] => Some((p, q)),
-            _ => None,
-        }
-    };
-    if na.cross(nb).len() < 1e-9 {
-        return None;
-    }
-    let (a0, a1) = cut(a, nb, b[0])?;
-    let (b0, b1) = cut(b, na, a[0])?;
-    // Overlap of the two segments on the common line.
-    let dir = na.cross(nb);
-    let pr = |p: Vec3| p.dot(dir);
-    let (sa0, sa1) = if pr(a0) <= pr(a1) { (a0, a1) } else { (a1, a0) };
-    let (sb0, sb1) = if pr(b0) <= pr(b1) { (b0, b1) } else { (b1, b0) };
-    let lo = if pr(sa0) >= pr(sb0) { sa0 } else { sb0 };
-    let hi = if pr(sa1) <= pr(sb1) { sa1 } else { sb1 };
-    (pr(hi) - pr(lo) > 1e-12).then_some((lo, hi))
-}
-
-/// Where two meshes (or faces of them) meet, as polylines.
-pub(crate) fn mesh_intersection(ma: &Mesh, fa: Option<u32>, mb: &Mesh, fb: Option<u32>) -> Vec<Vec<Vec3>> {
-    let (ta, tb) = (tris(ma, fa), tris(mb, fb));
-    let bbox = |t: &[Vec3; 3]| (t[0].min(t[1]).min(t[2]), t[0].max(t[1]).max(t[2]));
-    // Uniform grid over B.
-    let lo = tb.iter().fold(Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), |m, t| m.min(bbox(t).0));
-    let hi = tb.iter().fold(Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |m, t| m.max(bbox(t).1));
-    if !(lo.is_finite() && hi.is_finite()) {
-        return Vec::new();
-    }
-    let n = ((tb.len() as f64).cbrt().ceil() as usize).clamp(1, 48);
-    let ext = hi - lo;
-    let cell = |p: Vec3| -> [usize; 3] {
-        let f = |v: f64, l: f64, e: f64| if e > 1e-12 { (((v - l) / e) * n as f64).floor().clamp(0.0, (n - 1) as f64) as usize } else { 0 };
-        [f(p.x, lo.x, ext.x), f(p.y, lo.y, ext.y), f(p.z, lo.z, ext.z)]
-    };
-    let mut grid: BTreeMap<[usize; 3], Vec<usize>> = BTreeMap::new();
-    for (i, t) in tb.iter().enumerate() {
-        let (b0, b1) = bbox(t);
-        let (c0, c1) = (cell(b0), cell(b1));
-        for x in c0[0]..=c1[0] {
-            for y in c0[1]..=c1[1] {
-                for z in c0[2]..=c1[2] {
-                    grid.entry([x, y, z]).or_default().push(i);
-                }
-            }
-        }
-    }
-    let mut segs: Vec<(Vec3, Vec3)> = Vec::new();
-    let mut pairs = 0usize;
-    for t in &ta {
-        let (b0, b1) = bbox(t);
-        if b1.x < lo.x || b1.y < lo.y || b1.z < lo.z || b0.x > hi.x || b0.y > hi.y || b0.z > hi.z {
-            continue;
-        }
-        let (c0, c1) = (cell(b0), cell(b1));
-        let mut cand: Vec<usize> = Vec::new();
-        for x in c0[0]..=c1[0] {
-            for y in c0[1]..=c1[1] {
-                for z in c0[2]..=c1[2] {
-                    if let Some(v) = grid.get(&[x, y, z]) {
-                        cand.extend(v);
-                    }
-                }
-            }
-        }
-        cand.sort_unstable();
-        cand.dedup();
-        for j in cand {
-            pairs += 1;
-            if pairs > MAX_PAIRS {
-                break;
-            }
-            if let Some(u) = tb.get(j)
-                && let Some(sg) = tri_tri(t, u)
-            {
-                segs.push(sg);
-            }
-        }
-    }
-    chain3(&segs, ma.bounds().diagonal().max(mb.bounds().diagonal()).max(1e-9))
-}
-
-/// Chain 3D segments into polylines by shared end points.
-fn chain3(segs: &[(Vec3, Vec3)], size: f64) -> Vec<Vec<Vec3>> {
-    let q = size * 1e-7;
-    let key = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
-    let mut adj: BTreeMap<(i64, i64, i64), (Vec3, Vec<usize>)> = BTreeMap::new();
-    let mut uniq: Vec<((i64, i64, i64), (i64, i64, i64))> = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for (a, b) in segs {
-        let (ka, kb) = (key(*a), key(*b));
-        if ka == kb {
-            continue;
-        }
-        let k = if ka <= kb { (ka, kb) } else { (kb, ka) };
-        if !seen.insert(k) {
-            continue;
-        }
-        let i = uniq.len();
-        uniq.push(k);
-        adj.entry(ka).or_insert_with(|| (*a, Vec::new())).1.push(i);
-        adj.entry(kb).or_insert_with(|| (*b, Vec::new())).1.push(i);
-    }
-    let mut used = vec![false; uniq.len()];
-    let mut out = Vec::new();
-    let starts: Vec<(i64, i64, i64)> = adj.iter().filter(|(_, v)| v.1.len() != 2).map(|(k, _)| *k).chain(adj.keys().copied()).collect();
-    for s in starts {
-        while let Some(first) = adj.get(&s).and_then(|v| v.1.iter().copied().find(|e| !used.get(*e).copied().unwrap_or(true))) {
-            let mut chain = vec![adj.get(&s).map(|v| v.0).unwrap_or_default()];
-            let mut cur = s;
-            let mut e = first;
-            loop {
-                if let Some(u) = used.get_mut(e) {
-                    *u = true;
-                }
-                let Some(&(ka, kb)) = uniq.get(e) else { break };
-                cur = if ka == cur { kb } else { ka };
-                chain.push(adj.get(&cur).map(|v| v.0).unwrap_or_default());
-                let Some(next) = adj
-                    .get(&cur)
-                    .and_then(|v| if v.1.len() == 2 { v.1.iter().copied().find(|x| !used.get(*x).copied().unwrap_or(true)) } else { None })
-                else {
-                    break;
-                };
-                e = next;
-            }
-            if chain.len() >= 2 {
-                out.push(chain);
-            }
-        }
     }
     out
 }

@@ -47,6 +47,7 @@ mod helix;
 pub mod history;
 mod iges_in;
 mod iges_out;
+mod intersection;
 #[cfg(test)]
 mod intersection_curve_tests;
 #[cfg(test)]
@@ -178,6 +179,7 @@ pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned,
 pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
+pub use intersection::{MeetingEdge, meeting_edges};
 pub use lip::{raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
@@ -217,7 +219,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
-pub use validity::{SmlibCheck, Validity, smlib_built, validity};
+pub use validity::{SmlibCheck, Validity, smlib_built, smlib_dump_dir, validity};
 pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

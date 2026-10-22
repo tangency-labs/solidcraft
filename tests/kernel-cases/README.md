@@ -8,6 +8,7 @@ them. `cargo xtask kernel-cases` runs them and writes [`docs/kernel-cases.md`](.
 cargo xtask kernel-cases                        # the default kernel
 cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli   # and SMLib
 cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>     # one case
+cargo run -p solidcraft-cli --features smlib -- kernel-cases --dumps=/tmp/dumps <case-dir>  # failing SMLib calls leave replayable inputs
 ```
 
 For the `smlib` column, build `solidcraft-cli` with `--features smlib` (after

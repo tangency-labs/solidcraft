@@ -366,7 +366,7 @@ pub(crate) fn all_new(body: Body, operands: &[&Body]) -> Result<Body> {
 
 /// The faces `picked` of `body` (its record `r`; each with whether to turn it over) as their own
 /// body, each the body's face (Kept), every edge the body's.
-fn taken(body: &Body, r: &Brep, picked: &[(usize, bool)]) -> Result<Body> {
+pub(crate) fn taken(body: &Body, r: &Brep, picked: &[(usize, bool)]) -> Result<Body> {
     let c = Parts::of(r, picked)?.canonical()?;
     let faces = c.faces.iter().map(|p| picked.get(*p).map_or(0, |(f, _)| *f)).map(|f| record::from_face(0, f, Change::Kept)).collect();
     let h = record_history(&c.brep, 1, faces, |e, _, _| c.edges.get(e).map(|&edge| EdgeOrigin::Edge { operand: 0, edge }).into_iter().collect());
