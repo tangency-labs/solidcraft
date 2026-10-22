@@ -10,7 +10,9 @@
 //! B-rep cannot be built). A curve is `dim t0 t1 (x y z)*5` (samples at `t0 + i/4 (t1 -
 //! t0)`), or `-1`; a domain `u0 v0 u1 v1`. "orientation" is, per face, its upward face use;
 //! per face use its orientation, loop use count and loop uses; per loop its primary loop
-//! use. `-2` marks a call the shim skips because upstream would dereference null.
+//! use. `-2` marks a call the shim skips because upstream would dereference null. A seam
+//! call that can reach upstream's `SplitAtSeam` crash (UB-137) runs in a forked child:
+//! its record is `-4` when the child crashed, `-3` when the shim could not fork.
 //!
 //! | [`Op`]          | args | record |
 //! |-----------------|------|--------|
@@ -25,8 +27,8 @@
 //! | `SwapUv`        | - | `-2 \| status domain orientation curve*n_eu` (`SwapUV`) |
 //! | `Shrink`        | - | `status domain (surface_domain \| -1)` (`ShrinkGeometry`) |
 //! | `Probe`         | - | `-2 \| has crossed missing near_miss class_u class_v` (`HasSeamProblem`; a class is `tgt_only n mid_class*n`) |
-//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| status res_u res_v n_faces n_edges n_vertices` |
-//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| status n_faces n_edges n_vertices` |
+//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| status res_u res_v n_faces n_edges n_vertices` |
+//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| status n_faces n_edges n_vertices` |
 //!
 //! The seam ops classify the face's seams with `HasSeamProblem` first and pass its
 //! classifications and enums on; with `props` an `SmFaceProps` carrying the given

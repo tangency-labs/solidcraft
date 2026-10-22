@@ -22,6 +22,8 @@ pub trait UnitDiff {
     /// Return `Ok(Output::err(..))` when the *operation* fails and `Err` only
     /// for harness problems (bad inputs); `Err` always fails the case. Native fixture
     /// construction failures may use [`Output::rejected`], never operation errors.
+    /// [`Output::deferred`] marks a case the C++ side could not run (e.g. a shim's crash
+    /// trap caught an upstream crash): it is deferred, not compared.
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError>;
 
     /// Runs the solidcore Rust port on the same inputs. Return
@@ -87,7 +89,8 @@ pub struct CaseResult {
     pub both_errored: bool,
     /// Native fixture construction was rejected before running the operation.
     pub rejected: Option<String>,
-    /// The Rust side hit an unported callee (case deferred, nothing compared).
+    /// The Rust side hit an unported callee, or the C++ side could not run the case
+    /// (case deferred, nothing compared).
     pub deferred: Option<Deferred>,
     /// In perturb mode: what was perturbed (`value`, `int`, `topology`, `error`),
     /// or `None` if the case had nothing to perturb or was deferred.
@@ -551,6 +554,11 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 cr.harness_error =
                     Some("rust: fixture rejection must originate in the native constructor".into());
             }
+            // (a case the C++ side cannot run stays uncomparable once the Rust side's
+            // blocker is ported: its deferral wins)
+            (Ok(c), Ok(_)) if c.deferred.is_some() => {
+                cr.deferred = c.deferred;
+            }
             (Ok(_), Ok(r)) if r.deferred.is_some() => {
                 cr.deferred = r.deferred;
             }
@@ -994,5 +1002,49 @@ mod tests {
             },
         );
         assert_eq!(p.perturb_stats(), (2, 2));
+    }
+
+    /// Fake unit whose C++ side cannot run cases 1 and 2 (as a shim's crash trap reports).
+    struct CppDefers;
+
+    impl UnitDiff for CppDefers {
+        fn id(&self) -> &'static str {
+            "fake.cpp_defers"
+        }
+        fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+            let i: i64 = case.get("i")?;
+            if i == 1 || i == 2 {
+                return Ok(Output::deferred("cpp-crash-guard:UB-0", "SmFake::Crash"));
+            }
+            Ok(Output::new().int("i", i))
+        }
+        fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+            // (case 1 disagrees: a C++-side deferral must not become a failure; case 2 is
+            // deferred on both sides: the C++ side's label wins)
+            let i: i64 = case.get("i")?;
+            if i == 2 {
+                return Ok(Output::deferred("geom.curve", "SmCurve::Evaluate"));
+            }
+            Ok(Output::new().int("i", if i == 1 { -1 } else { i }))
+        }
+        fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+            Fake.cases(ctx)
+        }
+    }
+
+    #[test]
+    fn cpp_side_deferral_is_deferred() {
+        let ctx = CaseContext {
+            root: std::path::PathBuf::new(),
+            seeds: 0,
+        };
+        let r = run_unit(&CppDefers, &ctx, &RunOptions::default());
+        assert_eq!((r.passed(), r.failed(), r.deferred()), (2, 0, 2));
+        assert_eq!(r.deferred_by_unit().get("cpp-crash-guard:UB-0"), Some(&2));
+        assert_eq!(r.deferred_by_unit().get("geom.curve"), None);
+        assert_eq!(
+            r.cases[2].deferred.as_ref().map(|d| d.symbol.as_str()),
+            Some("SmFake::Crash")
+        );
     }
 }
