@@ -435,9 +435,11 @@ mod tests {
         let saved = crate::decode_native_body(&crate::encode_native_body(&r).unwrap()).unwrap();
         assert!(crate::validity(&saved).record.is_ok());
         assert!(
-            crate::validity(&crate::transform_matrix(&saved, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]]).unwrap())
-                .record
-                .is_ok()
+            crate::validity(
+                &crate::transform_matrix(&saved, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, 0.0, 0.0, 1.0]]).unwrap()
+            )
+            .record
+            .is_ok()
         );
     }
 
