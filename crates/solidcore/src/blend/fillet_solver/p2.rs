@@ -18,18 +18,18 @@
 //! | [`FilletSolver::record_fillet_error`]                    | `SmFilletSolver::RecordFilletError`          |
 //!
 //! Deviations:
-//! - **Stacked on `blend.fillet_solver_p1`.** Everything here is a method of p1's
-//!   [`FilletSolver`]; methods that call a virtual take the solver as
-//!   `&mut dyn FilletSolverOps` (as p1's `ComputeSurfaceValues`). The p1 function
-//!   objects are wrapped privately into [`EvalNFunctions`] for [`LocalSolveNd`].
+//! - **Methods of p1's solver.** Everything here is a method of p1's [`FilletSolver`];
+//!   methods that call a virtual take the solver as `&mut dyn FilletSolverOps` (as
+//!   p1's `ComputeSurfaceValues`). The p1 function objects are wrapped privately into
+//!   [`EvalNFunctions`] for [`LocalSolveNd`].
 //! - **Fillet geometries.** The ported `SmFilletGeom`, `SmFilletEdge`, `SmFilletVertex`
-//!   and the other pseudo-B-rep records (`blend.fillet_geom_p1`/`_p2`, partial) live in
-//!   a [`FilletBrep`], which the executive owns (`SmFilletExecutive::GetPseudoBrep`):
-//!   the methods that reach the pseudo B-rep take it as an argument (`fb`, `pseudo`),
-//!   and a solver's `SmFilletGeom*` ([`FilletGeomRef`]) names the geometry of the same
-//!   index in it. The members and constructors are wired; what is left is
-//!   [`SolidError::Unported`] at the call site (tagged `UNPORTED`, `plan/findings.md`,
-//!   "`blend.fillet_solver_p2`: fillet-geometry stubs need a `FilletBrep`"). The
+//!   and the other pseudo-B-rep records (`blend.fillet_geom_p1`/`_p2`) live in the
+//!   [`FilletBrep`] the executive owns (`SmFilletExecutive::GetPseudoBrep`): the
+//!   methods that reach it take it as `pseudo`, and the solver's `SmFilletGeom*`s are
+//!   [`FilletGeomId`]s of it (as in `blend.fillet_solver_p1`). The members and
+//!   constructors are wired; what is left is [`SolidError::Unported`] at the call site
+//!   (tagged `UNPORTED`, `plan/findings.md`, "`blend.fillet_solver_p2`:
+//!   fillet-geometry stubs need a `FilletBrep`"). The
 //!   analytic `Calc*FilletGeom` methods build the fillet surface, rail curves and centre
 //!   line first ([`FilletGeomParts`], `*_fillet_geom_parts`) and then store them into
 //!   the fillet geometry (`m_pFilletSurface`, `SmFilletEdge::SetCurve`, `SetInterval`,
@@ -38,8 +38,8 @@
 //!   part of the `SmLine` upstream builds.
 //! - **Arguments.** Out-params become return values (`rbFoundSolution` /
 //!   `rbFoundIntersection` the returned `bool` / `Option`); `SmContext` is the
-//!   [`Kernel`]; `SmFilletErrorType` is its raw value; `SmFilletCorner*` is an opaque
-//!   [`FilletCornerRef`].
+//!   [`Kernel`]; `SmFilletErrorType` is its raw value; `SmFilletCorner*` is
+//!   `blend.fillet_geom_p1`'s opaque [`FilletCornerId`].
 //! - **Undefined inputs.** Where upstream dereferences `NULL` (missing edge use, edge,
 //!   offset surface, surface generator, executive, UV trim curve), reads an
 //!   uninitialised `lSurf2Index`, indexes past an array (`rTsectPnts` empty, a rail
@@ -55,15 +55,15 @@
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_geom::p1::{
-    FilletBrep, FilletEdgeType, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId,
-    FilletVertex, FilletVertexType, FilletVertexuse,
+    FilletBrep, FilletCornerId, FilletEdgeType, FilletGeom, FilletGeomId, FilletGeomType,
+    FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p4::{set_edge_curve, set_vertex_point};
 use crate::blend::fillet_solver::p1::{
     check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity, FilStatus,
-    FilletGeomRef, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
-    FilletSurfaceGeneratorType, RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
+    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGeneratorType,
+    RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
 };
 use crate::blend::fillet_standard_solver::p1::VARIABLE_RADIUS_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -107,24 +107,10 @@ const OP: &str = "blend::fillet_solver::p2";
 /// `dAnalyticTol` of the `Calc*FilletGeom` methods.
 const ANALYTIC_TOL: f64 = 1.0e-8;
 
-/// The `FilletBrep` geometry a solver's `SmFilletGeom*` handle names: the geometry whose
-/// index in the pseudo B-rep is the handle's `index` (module notes).
-fn geom_id(fg: FilletGeomRef) -> Result<FilletGeomId> {
-    u32::try_from(fg.index)
-        .map(FilletGeomId)
-        .map_err(|_| invalid("fillet geometry index out of range"))
-}
-
-/// The solver handle of the pseudo B-rep's geometry `g`.
-fn geom_ref(g: FilletGeomId) -> FilletGeomRef {
-    FilletGeomRef {
-        index: g.0 as usize,
-    }
-}
-
 /// `pFilletGeom->GetRail(i)`, dereferenced (`NULL` is `SM_ERR_NULL_POINTER`).
-fn geom_rail(fb: &FilletBrep, g: FilletGeomId, i: usize) -> Result<EdgeId> {
-    fb.geom(g)?
+fn geom_rail(pseudo: &FilletBrep, g: FilletGeomId, i: usize) -> Result<EdgeId> {
+    pseudo
+        .geom(g)?
         .rail(i)
         .ok_or_else(|| SolidError::null_pointer(OP))
 }
@@ -155,10 +141,6 @@ fn invalid(reason: &'static str) -> SolidError {
 fn sm_err() -> SolidError {
     SolidError::sm_err(OP)
 }
-
-/// An `SmFilletCorner*` (unit `blend.fillet_corner_p1`, not modelled).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FilletCornerRef;
 
 /// The analytic fillet geometry a `Calc*FilletGeom` method builds before storing it into
 /// the fillet geometry: the fillet surface (`m_pFilletSurface`), the rail curves
@@ -335,32 +317,32 @@ fn offset_radius(ops: &mut dyn FilletSolverOps, t: &TsectPnt) -> Result<f64> {
 /// `m_pCenterLineCurve`.
 fn store_parts(
     s: &FilletSolver,
-    fb: &mut FilletBrep,
-    fillet_geom: Option<FilletGeomRef>,
+    pseudo: &mut FilletBrep,
+    fillet_geom: Option<FilletGeomId>,
     parts: FilletGeomParts,
 ) -> Result<()> {
     let fg = match fillet_geom {
         Some(fg) => fg,
         None => s.first_fillet_geom()?,
     };
-    let g = geom_id(fg)?;
+    let g = fg;
     let FilletGeomParts {
         surface,
         rails,
         rail_intervals,
         center_line,
     } = parts;
-    fb.geom_mut(g)?.set_fillet_surface(Some(surface));
+    pseudo.geom_mut(g)?.set_fillet_surface(Some(surface));
     for (i, (curve, ivl)) in rails.into_iter().zip(rail_intervals).enumerate() {
-        let rail = geom_rail(fb, g, i)?;
-        set_edge_curve(fb.brep_mut(), rail, Some(curve))?;
+        let rail = geom_rail(pseudo, g, i)?;
+        set_edge_curve(pseudo.brep_mut(), rail, Some(curve))?;
         if let Some(ivl) = ivl {
-            edge::set_interval(fb.brep_mut(), rail, &ivl)?;
+            edge::set_interval(pseudo.brep_mut(), rail, &ivl)?;
         }
     }
     if let Some(center_line) = center_line {
         // m_pCenterLineCurve is an SmBSplineCurve*: the part of the SmLine / SmCurve
-        fb.geom_mut(g)?.center_line_curve = Some(bspline_part(&center_line)?);
+        pseudo.geom_mut(g)?.center_line_curve = Some(bspline_part(&center_line)?);
     }
     Ok(())
 }
@@ -409,7 +391,7 @@ impl FilletSolver {
     /// Those of [`FilletSolver::vertex`]; [`SolidError::InvalidInput`] without an
     /// executive (upstream dereferences `NULL`); [`SolidError::Unported`] for the corner
     /// lookup (`SmFilletExecutive::GetFilletCornerOfVertex`).
-    pub fn fillet_corner(&self, b: &Brep, index: usize) -> Result<Option<FilletCornerRef>> {
+    pub fn fillet_corner(&self, b: &Brep, index: usize) -> Result<Option<FilletCornerId>> {
         if index > 1 {
             return Ok(None);
         }
@@ -428,24 +410,24 @@ impl FilletSolver {
     /// `CalcCylinderFilletGeom(rTsectPnts, pFilletGeom)`: builds the cylinder of a
     /// constant-radius circular fillet along a straight edge
     /// ([`FilletSolver::cylinder_fillet_geom_parts`]) and stores it into `fillet_geom`
-    /// (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `fb`; `b` is the B-rep being
+    /// (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `pseudo`; `b` is the B-rep being
     /// filleted.
     ///
     /// # Errors
     ///
     /// Those of [`FilletSolver::cylinder_fillet_geom_parts`]; then
     /// [`SolidError::InvalidInput`] / `SM_ERR_NULL_POINTER` for a geometry or rail that
-    /// is missing from `fb` (upstream dereferences `NULL`).
+    /// is missing from `pseudo` (upstream dereferences `NULL`).
     pub fn calc_cylinder_fillet_geom(
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
         b: &Brep,
-        fb: &mut FilletBrep,
+        pseudo: &mut FilletBrep,
         tsects: &[TsectPnt],
-        fillet_geom: Option<FilletGeomRef>,
+        fillet_geom: Option<FilletGeomId>,
     ) -> Result<()> {
         let parts = Self::cylinder_fillet_geom_parts(ops, k, b, tsects)?;
-        store_parts(ops.solver(), fb, fillet_geom, parts)
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
     }
 
     /// The geometry of [`FilletSolver::calc_cylinder_fillet_geom`]: the cylinder
@@ -613,7 +595,7 @@ impl FilletSolver {
     /// `CalcConeFilletGeom(rTsectPnts, pFilletGeom)`: builds the cone of a circular
     /// fillet along a straight edge ([`FilletSolver::cone_fillet_geom_parts`]) and
     /// stores it into `fillet_geom` (`m_vFilletGeoms[0]` for `None`) of the pseudo
-    /// B-rep `fb`.
+    /// B-rep `pseudo`.
     ///
     /// # Errors
     ///
@@ -623,12 +605,12 @@ impl FilletSolver {
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
         b: &Brep,
-        fb: &mut FilletBrep,
+        pseudo: &mut FilletBrep,
         tsects: &[TsectPnt],
-        fillet_geom: Option<FilletGeomRef>,
+        fillet_geom: Option<FilletGeomId>,
     ) -> Result<()> {
         let parts = Self::cone_fillet_geom_parts(ops, k, b, tsects)?;
-        store_parts(ops.solver(), fb, fillet_geom, parts)
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
     }
 
     /// The geometry of [`FilletSolver::calc_cone_fillet_geom`]: the first rail's line
@@ -775,7 +757,7 @@ impl FilletSolver {
     /// `CalcTorusFilletGeom(rTsectPnts, pFilletGeom)`: builds the torus of a
     /// constant-radius circular fillet along a circular edge
     /// ([`FilletSolver::torus_fillet_geom_parts`]) and stores it into `fillet_geom`
-    /// (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `fb`.
+    /// (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `pseudo`.
     ///
     /// # Errors
     ///
@@ -785,12 +767,12 @@ impl FilletSolver {
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
         b: &Brep,
-        fb: &mut FilletBrep,
+        pseudo: &mut FilletBrep,
         tsects: &[TsectPnt],
-        fillet_geom: Option<FilletGeomRef>,
+        fillet_geom: Option<FilletGeomId>,
     ) -> Result<()> {
-        let parts = Self::torus_fillet_geom_parts(ops, k, b, fb, tsects, fillet_geom)?;
-        store_parts(ops.solver(), fb, fillet_geom, parts)
+        let parts = Self::torus_fillet_geom_parts(ops, k, b, pseudo, tsects, fillet_geom)?;
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
     }
 
     /// The geometry of [`FilletSolver::calc_torus_fillet_geom`]: the cross-section arc
@@ -806,7 +788,7 @@ impl FilletSolver {
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
     /// of `SetupOffsetValues`, the evaluations and the constructors;
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (also a rail
-    /// missing from `fb` in the rail end checks of an open edge that does not extend
+    /// missing from `pseudo` in the rail end checks of an open edge that does not extend
     /// after).
     ///
     /// The rail end checks may set the solver's extend-after flag
@@ -815,9 +797,9 @@ impl FilletSolver {
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
         b: &Brep,
-        fb: &FilletBrep,
+        pseudo: &FilletBrep,
         tsects: &[TsectPnt],
-        fillet_geom: Option<FilletGeomRef>,
+        fillet_geom: Option<FilletGeomId>,
     ) -> Result<FilletGeomParts> {
         let s = ops.solver();
         let e = filleted_edge(s, b)?;
@@ -841,7 +823,7 @@ impl FilletSolver {
             Some(fg) => fg,
             None => s.first_fillet_geom()?,
         };
-        let fillet_geom_id = geom_id(fillet_geom)?;
+        let fillet_geom_id = fillet_geom;
         let null_ptr = || SolidError::null_pointer(OP);
 
         // Get rotation point and axis for surf-of-revolution creation
@@ -952,10 +934,10 @@ impl FilletSolver {
                 if orient == OrientType::Same && !s.extend_before {
                     // for both rail ends
                     for jj in 0..2 {
-                        let rail = geom_rail(fb, fillet_geom_id, jj)?;
-                        let rail_end_v = edge::vertex(fb.brep(), rail)?.ok_or_else(null_ptr)?;
+                        let rail = geom_rail(pseudo, fillet_geom_id, jj)?;
+                        let rail_end_v = edge::vertex(pseudo.brep(), rail)?.ok_or_else(null_ptr)?;
                         // skip redundant ends
-                        let rail_end = fb.fillet_vertex(rail_end_v)?;
+                        let rail_end = pseudo.fillet_vertex(rail_end_v)?;
                         if rail_end.fillet_vertex_type() != FilletVertexType::RailXEdgeuse
                             || !rail_end.is_processed()
                         {
@@ -963,7 +945,7 @@ impl FilletSolver {
                         }
 
                         // when rail endPoint is before start of edge - set m_bExtendAfter
-                        let pt = fb.vertex_point(rail_end_v)?;
+                        let pt = pseudo.vertex_point(rail_end_v)?;
                         let vector = pt - vertex::point(b, v)?;
                         let (_, tangent) = curve_pv(k, &curve, ivl.min())?;
                         let tangent = tangent.unitize()?;
@@ -978,12 +960,12 @@ impl FilletSolver {
                 if orient == OrientType::Opposite {
                     // for both rail endPoints
                     for jj in 0..2 {
-                        let rail = geom_rail(fb, fillet_geom_id, jj)?;
-                        let rail_start_v = edge::vertex(fb.brep(), rail)?;
-                        let rail_end_v = edge::other_vertex(fb.brep(), rail, rail_start_v)?
+                        let rail = geom_rail(pseudo, fillet_geom_id, jj)?;
+                        let rail_start_v = edge::vertex(pseudo.brep(), rail)?;
+                        let rail_end_v = edge::other_vertex(pseudo.brep(), rail, rail_start_v)?
                             .ok_or_else(null_ptr)?;
                         // skip redundant endPoints
-                        let rail_end = fb.fillet_vertex(rail_end_v)?;
+                        let rail_end = pseudo.fillet_vertex(rail_end_v)?;
                         if rail_end.fillet_vertex_type() != FilletVertexType::RailXEdgeuse
                             || !rail_end.is_processed()
                         {
@@ -991,7 +973,7 @@ impl FilletSolver {
                         }
 
                         // when rail EndPoint is beyond edge end - set m_bExtendAfter = TRUE
-                        let pt = fb.vertex_point(rail_end_v)?;
+                        let pt = pseudo.vertex_point(rail_end_v)?;
                         let vector = pt - vertex::point(b, v)?;
                         let (_, tangent) = curve_pv(k, &curve, ivl.max())?;
                         let tangent = tangent.unitize()?;
@@ -1543,7 +1525,7 @@ impl FilletSolver {
     /// executive's pseudo B-rep (`GetPseudoBrep()`) holding `rail_on_cliff`, the fillet
     /// vertices and the fillet geometries; `solver_id` is `this` in the caller's solver
     /// table (`SmFilletGeom::GetFilletSolver`). The new geometry is added to `pseudo`
-    /// and to this solver's geometries (as the [`FilletGeomRef`] of the same index).
+    /// and to this solver's geometries (as the [`FilletGeomId`] of the same index).
     ///
     /// # Errors
     ///
@@ -1568,7 +1550,7 @@ impl FilletSolver {
         side_face: FaceId,
         trim_side_faces: bool,
         extension_dist: f64,
-    ) -> Result<Option<FilletGeomRef>> {
+    ) -> Result<Option<FilletGeomId>> {
         const OP_C: &str = "blend::fillet_solver::p2::create_cliff_roll_over_side_fg";
         let nul = || SolidError::null_pointer(OP_C);
 
@@ -1770,8 +1752,7 @@ impl FilletSolver {
         let side_geom =
             FilletGeom::new(k, Some((solver_id, &*self)), FilletGeomType::CliffSidePatch)?;
         let side_fg = pseudo.add_geom(side_geom);
-        let side_fg_ref = geom_ref(side_fg);
-        self.fillet_geoms.push(side_fg_ref);
+        self.fillet_geoms.push(side_fg);
 
         let mut rail_eu = eu::primary_edgeuse(pseudo.brep(), rail_on_cliff)?
             .ok_or_else(|| invalid("rail without edge use"))?;
@@ -1868,7 +1849,7 @@ impl FilletSolver {
             "SmFilletEdge::CalcEdgeOnEdge",
             "blend.fillet_geom_p6",
         )?;
-        Ok(Some(side_fg_ref))
+        Ok(Some(side_fg))
     }
 
     /// `RecordFilletError(eType, rapTSPs, cComment)`: passes the error, with the
@@ -1883,7 +1864,7 @@ impl FilletSolver {
     pub fn record_fillet_error(
         &self,
         b: &Brep,
-        fb: &FilletBrep,
+        pseudo: &FilletBrep,
         error_type: i64,
         tsects: &[TsectPnt],
         comment: &str,
@@ -1895,9 +1876,8 @@ impl FilletSolver {
         let mut fil_surfs: Vec<FilletGeomId> = Vec::new();
         let mut fil_curvs: Vec<FilletGeomId> = Vec::new();
         let mut fil_edges: Vec<EdgeId> = Vec::new();
-        for fg in self.fillet_geoms() {
-            let g = geom_id(fg)?;
-            let this_geom = fb.geom(g)?;
+        for g in self.fillet_geoms() {
+            let this_geom = pseudo.geom(g)?;
             if this_geom.fillet_surface().is_some() && !fil_surfs.contains(&g) {
                 fil_surfs.push(g);
             }
@@ -1905,10 +1885,10 @@ impl FilletSolver {
                 fil_curvs.push(g);
             }
             for rail_index in 0..2 {
-                let rail = geom_rail(fb, g, rail_index)?;
-                if edge::curve(fb.brep(), rail)?.is_some() {
+                let rail = geom_rail(pseudo, g, rail_index)?;
+                if edge::curve(pseudo.brep(), rail)?.is_some() {
                     // WR-190: rail 1's test adds rail 0
-                    let added = geom_rail(fb, g, 0)?;
+                    let added = geom_rail(pseudo, g, 0)?;
                     if !fil_edges.contains(&added) {
                         fil_edges.push(added);
                     }
@@ -2282,10 +2262,10 @@ mod tests {
         end_processed: bool,
         with_face: bool,
     ) -> (FilletBrep, EdgeId) {
-        let mut fb = FilletBrep::new();
+        let mut pseudo = FilletBrep::new();
         let mut v = Vec::new();
         for (i, processed) in [start_processed, end_processed].into_iter().enumerate() {
-            let id = fb
+            let id = pseudo
                 .brep_mut()
                 .add_vertex(Point3::new(i as f64, 0.0, 0.0))
                 .unwrap();
@@ -2293,18 +2273,19 @@ mod tests {
             if processed {
                 fv.set_status(FilStatus::Processed);
             }
-            fb.insert_fillet_vertex(id, fv);
+            pseudo.insert_fillet_vertex(id, fv);
             v.push(id);
         }
-        let rail = fb.new_fillet_edge(v[0], v[1], None).unwrap();
-        fb.fillet_edge_mut(rail)
+        let rail = pseudo.new_fillet_edge(v[0], v[1], None).unwrap();
+        pseudo
+            .fillet_edge_mut(rail)
             .unwrap()
             .set_fillet_edge_type(FilletEdgeType::Rail);
-        let eu1 = fb
+        let eu1 = pseudo
             .brep_mut()
             .add_edgeuse_record(Edgeuse::default())
             .unwrap();
-        let eu2 = fb
+        let eu2 = pseudo
             .brep_mut()
             .add_edgeuse_record(Edgeuse::default())
             .unwrap();
@@ -2312,30 +2293,36 @@ mod tests {
             (eu1, v[0], OrientType::Same),
             (eu2, v[1], OrientType::Opposite),
         ] {
-            let vu = fb
+            let vu = pseudo
                 .brep_mut()
                 .add_vertexuse_record(Vertexuse::default())
                 .unwrap();
-            let r = fb.brep_mut().edgeuse_mut(eu).unwrap();
+            let r = pseudo.brep_mut().edgeuse_mut(eu).unwrap();
             r.edge = Some(rail);
             r.orientation = orient;
             r.vertexuse = Some(vu);
-            let u = fb.brep_mut().vertexuse_mut(vu).unwrap();
+            let u = pseudo.brep_mut().vertexuse_mut(vu).unwrap();
             u.vertex = Some(vert);
             u.owner = VertexuseOwner::Edgeuse(Some(eu));
-            fb.brep_mut().vertex_mut(vert).unwrap().vertexuses.push(vu);
-            fb.insert_fillet_edgeuse(eu, FilletEdgeuse::default());
-            fb.insert_fillet_vertexuse(vu, FilletVertexuse::new());
+            pseudo
+                .brep_mut()
+                .vertex_mut(vert)
+                .unwrap()
+                .vertexuses
+                .push(vu);
+            pseudo.insert_fillet_edgeuse(eu, FilletEdgeuse::default());
+            pseudo.insert_fillet_vertexuse(vu, FilletVertexuse::new());
         }
-        fb.brep_mut().edge_mut(rail).unwrap().edgeuses = vec![eu1, eu2];
+        pseudo.brep_mut().edge_mut(rail).unwrap().edgeuses = vec![eu1, eu2];
         if with_face {
-            let shell = fb.brep_mut().add_shell().unwrap();
-            let face = fb.brep_mut().add_face(shell).unwrap();
-            fb.fillet_edge_mut(rail)
+            let shell = pseudo.brep_mut().add_shell().unwrap();
+            let face = pseudo.brep_mut().add_face(shell).unwrap();
+            pseudo
+                .fillet_edge_mut(rail)
                 .unwrap()
                 .set_original_face(Some(face));
         }
-        (fb, rail)
+        (pseudo, rail)
     }
 
     /// A classification of `n` intervals whose ends take the given classes (an edge
@@ -2358,7 +2345,7 @@ mod tests {
 
     fn run(
         k: &Kernel,
-        fb: &FilletBrep,
+        pseudo: &FilletBrep,
         rail: EdgeId,
         cc: &CurveClassification<H>,
         io: &mut RolloverSideEdge,
@@ -2379,7 +2366,7 @@ mod tests {
         let edge_of = |h: H| Some(EdgeId::from_index(h.0));
         find_rollover_side_edge(
             k,
-            fb,
+            pseudo,
             &mut target,
             cc,
             rail,
@@ -2395,9 +2382,9 @@ mod tests {
     #[test]
     fn rollover_needs_the_rails_original_face() {
         let k = Kernel::default();
-        let (fb, rail) = pseudo_with_rail(&k, true, true, false);
+        let (pseudo, rail) = pseudo_with_rail(&k, true, true, false);
         let cc = classification(&k, &[(PointClassType::Edge, PointClassType::Unknown)]);
-        let r = run(&k, &fb, rail, &cc, &mut RolloverSideEdge::default());
+        let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
         // GetOriginalFace is NER'd: a null pointer, not an unported stub
         assert!(matches!(r, Err(SolidError::Upstream { code: 1006, .. })));
     }
@@ -2405,7 +2392,7 @@ mod tests {
     #[test]
     fn rollover_skips_the_unclassified_first_interval_of_an_unprocessed_start() {
         let k = Kernel::default();
-        let (fb, rail) = pseudo_with_rail(&k, false, true, true);
+        let (pseudo, rail) = pseudo_with_rail(&k, false, true, true);
         // interval 0 starts unclassified (skipped: IsProcessed false); the last one
         // does not start on an edge: SM_ERR, with the index advanced past the skip
         let cc = classification(
@@ -2416,38 +2403,38 @@ mod tests {
             ],
         );
         let mut io = RolloverSideEdge::default();
-        let r = run(&k, &fb, rail, &cc, &mut io);
+        let r = run(&k, &pseudo, rail, &cc, &mut io);
         assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
         assert_eq!(io.curr_index, 1);
         assert!(!io.trim_side_faces);
 
         // a processed start is not skipped: the first (last) interval is then judged
-        let (fb, rail) = pseudo_with_rail(&k, true, true, true);
+        let (pseudo, rail) = pseudo_with_rail(&k, true, true, true);
         let mut io = RolloverSideEdge::default();
-        assert!(run(&k, &fb, rail, &cc, &mut io).is_err());
+        assert!(run(&k, &pseudo, rail, &cc, &mut io).is_err());
         assert_eq!(io.curr_index, 0);
     }
 
     #[test]
     fn rollover_ending_on_an_unprocessed_end_vertex_returns_without_a_side_edge() {
         let k = Kernel::default();
-        let (fb, rail) = pseudo_with_rail(&k, true, false, true);
+        let (pseudo, rail) = pseudo_with_rail(&k, true, false, true);
         let cc = classification(&k, &[(PointClassType::Edge, PointClassType::Unknown)]);
         let mut io = RolloverSideEdge::default();
-        run(&k, &fb, rail, &cc, &mut io).unwrap();
+        run(&k, &pseudo, rail, &cc, &mut io).unwrap();
         assert!(io.side_edge.is_none() && !io.trim_side_faces);
 
         // a processed end vertex goes on to the side edge's tangency test, which needs
         // the side edge in the target B-rep (here: a dangling id)
-        let (fb, rail) = pseudo_with_rail(&k, true, true, true);
-        let r = run(&k, &fb, rail, &cc, &mut RolloverSideEdge::default());
+        let (pseudo, rail) = pseudo_with_rail(&k, true, true, true);
+        let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
         assert!(r.is_err() && !r.unwrap_err().is_unported());
     }
 
     #[test]
     fn rollover_before_the_last_interval_needs_an_edge_end() {
         let k = Kernel::default();
-        let (fb, rail) = pseudo_with_rail(&k, true, true, true);
+        let (pseudo, rail) = pseudo_with_rail(&k, true, true, true);
         let cc = classification(
             &k,
             &[
@@ -2455,21 +2442,21 @@ mod tests {
                 (PointClassType::Edge, PointClassType::Edge),
             ],
         );
-        let r = run(&k, &fb, rail, &cc, &mut RolloverSideEdge::default());
+        let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
         assert!(matches!(r, Err(SolidError::Upstream { code: 1001, .. })));
     }
 
     #[test]
     fn cliff_side_geometry_runs_until_its_unported_callees() {
         let k = Kernel::default();
-        let (mut fb, rail) = pseudo_with_rail(&k, true, true, true);
+        let (mut pseudo, rail) = pseudo_with_rail(&k, true, true, true);
         let mut s = FilletSolver::new(1e-6, 0.1, 0.01);
         // without an executive upstream dereferences NULL
         let target = Brep::new();
         let r = s.create_cliff_roll_over_side_fg(
             &k,
             &target,
-            &mut fb,
+            &mut pseudo,
             FilletSolverId(0),
             rail,
             EdgeId::from_index(0),
@@ -2484,7 +2471,7 @@ mod tests {
         let r = s.create_cliff_roll_over_side_fg(
             &k,
             &target,
-            &mut fb,
+            &mut pseudo,
             FilletSolverId(0),
             rail,
             EdgeId::from_index(0),
@@ -2493,13 +2480,5 @@ mod tests {
             0.0,
         );
         assert!(r.is_err() && !r.unwrap_err().is_unported());
-    }
-
-    #[test]
-    fn geometry_handles_name_the_pseudo_brep_geometry_of_the_same_index() {
-        let g = FilletGeomId(3);
-        let r = geom_ref(g);
-        assert_eq!(r.index, 3);
-        assert_eq!(geom_id(r).unwrap(), g);
     }
 }

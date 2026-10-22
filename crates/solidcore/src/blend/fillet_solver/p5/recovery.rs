@@ -91,7 +91,7 @@ pub(super) trait RecoveryOps {
     ) -> Result<bool> {
         p2::is_convex_radial_sector(c.k, c.target, edgeuse, samples, step_off, tolerance)
     }
-    fn find_side(&mut self, _c: &mut Recovery<'_>, search: SideSearch<'_>) -> Result<SideHit> {
+    fn find_side(&mut self, c: &mut Recovery<'_>, search: SideSearch<'_>) -> Result<SideHit> {
         let SideSearch {
             classification,
             index,
@@ -104,23 +104,44 @@ pub(super) trait RecoveryOps {
             corner_vertex,
             tangency_tolerance,
         } = search;
-        let _ = (
+        // pOrigRailCurve is unused by sm_FindRolloverSideEdge
+        let _ = original_curve;
+        // the side edge and the three flags are fresh for this pass; the index and the
+        // rollover corner are the caller's in/out values
+        let mut io = crate::blend::fillet_solver::p2::RolloverSideEdge {
+            curr_index: *index,
+            rollover_corner_eu: *corner_edgeuse,
+            rollover_corner_v: *corner_vertex,
+            ..Default::default()
+        };
+        let edge_of = |o: EntityRef| match o {
+            EntityRef::Edge(e) => Some(e),
+            _ => None,
+        };
+        let r = crate::blend::fillet_solver::p2::find_rollover_side_edge(
+            c.k,
+            c.fillets,
+            c.target,
             classification,
-            index,
             rail,
-            original_curve,
             original_uv_curve,
             original_surface,
             convex,
-            corner_edgeuse,
-            corner_vertex,
             tangency_tolerance,
+            &edge_of,
+            &mut io,
         );
-        // UNPORTED(blend.fillet_solver_p2): sm_FindRolloverSideEdge
-        Err(SolidError::unported(
-            "sm_FindRolloverSideEdge",
-            "blend.fillet_solver_p2",
-        ))
+        // the reference arguments are written in place, also on a failure
+        *index = io.curr_index;
+        *corner_edgeuse = io.rollover_corner_eu;
+        *corner_vertex = io.rollover_corner_v;
+        r?;
+        Ok(SideHit {
+            edge: io.side_edge,
+            tangent: io.is_tangential_side_edge,
+            trim: io.trim_side_faces,
+            opposite_normals: io.opposite_normals,
+        })
     }
     fn split_rail(
         &mut self,
@@ -177,20 +198,26 @@ pub(super) trait RecoveryOps {
         use super::super::p1::rails::{Missing, RailOps};
         Missing.make_edge(k, fb, start, end)
     }
+    #[allow(clippy::too_many_arguments)]
     fn cliff(
         &mut self,
-        _c: &mut Recovery<'_>,
-        _rail: EdgeId,
-        _side: EdgeId,
-        _adjacent_face: Option<FaceId>,
-        _trim: bool,
-        _extension: f64,
-    ) -> Result<FilletGeomId> {
-        // UNPORTED(blend.fillet_solver_p2): SmFilletSolver::CreateCliffRollOverSideFG
-        Err(SolidError::unported(
-            "SmFilletSolver::CreateCliffRollOverSideFG",
-            "blend.fillet_solver_p2",
-        ))
+        c: &mut Recovery<'_>,
+        geom: FilletGeomId,
+        rail: EdgeId,
+        side: EdgeId,
+        adjacent_face: Option<FaceId>,
+        trim: bool,
+        extension: f64,
+    ) -> Result<Option<FilletGeomId>> {
+        // `this` is the solver of the geometry being processed
+        let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
+        // upstream passes a NULL pAdjFace through; the side face is dereferenced there
+        let side_face = adjacent_face.ok_or_else(|| {
+            SolidError::invalid_input(OP, "CreateCliffRollOverSideFG: no adjacent face")
+        })?;
+        c.solver.create_cliff_roll_over_side_fg(
+            c.k, c.target, c.fillets, solver_id, rail, side, side_face, trim, extension,
+        )
     }
     fn corner_vertex(
         &mut self,
@@ -712,6 +739,7 @@ impl Recovery<'_> {
                         .abs();
                     ops.cliff(
                         self,
+                        current_geom,
                         rail,
                         side,
                         *get(&adjacent, which)?,

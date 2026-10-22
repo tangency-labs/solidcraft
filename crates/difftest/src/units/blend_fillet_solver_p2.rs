@@ -42,7 +42,7 @@ use solidcore::blend::fillet_geom::p1::{
     FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use solidcore::blend::fillet_solver::p1::{
-    FilletExecutiveRef, FilletGeomRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator,
+    FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator,
     OffsetSurfaceSlot,
 };
 use solidcore::curve::curve::Curve;
@@ -1147,9 +1147,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             // a fresh `SmFilletGeom` of the solver with two rails in a fresh pseudo B-rep
             let h = |e: SolidError| harness(e.to_string());
             let (mut fb, g) = fillet_geom_model(&k, rails.as_ref())?;
-            let fg = Some(FilletGeomRef {
-                index: g.0 as usize,
-            });
+            let fg = Some(g);
             let r = match which {
                 0 => {
                     FilletSolver::calc_cylinder_fillet_geom(&mut fs, &k, &target, &mut fb, &pts, fg)

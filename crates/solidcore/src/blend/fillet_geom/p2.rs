@@ -64,19 +64,16 @@
 //!   edges, type and `TestRailRailInterpolationCurve` are `UNPORTED(blend.fillet_corner_p1)`
 //!   stubs (the four vertex calculators stop at the filleted vertex, right after the
 //!   corner's null check; `CalcRailRailInterpolation` only with a corner).
-//! - **Solver class.** The `solvers` table holds [`ConstantRadiusAssistedFs`]es, the
-//!   only solver class with the virtuals ported (`RailRailIntersect`'s callees,
-//!   `PointOnPlaneSolve`) and the class `sm_CreateCubicRailRailInterpolant` takes. The
-//!   table is borrowed mutably where a virtual runs, so the radii are the solver's own
-//!   and offset or surface-extension changes stay in the table; a plain
-//!   `SmConstantRadiusFS` / `SmVariableRadiusFS` (or the same solver for both rails of
-//!   `RailRailIntersect`, one object upstream, which runs on a copy) is not modelled
-//!   (`plan/findings.md`, "`blend.fillet_solver_p2`: back-edges into the solver from
-//!   `blend.fillet_geom`").
-//! - **Unported callees.** `SmConstantRadiusAssistedFS::PointOnPlaneSolve`
-//!   (`blend.fillet_standard_solver_p2`); `SmFilletGeom::GetRailIndexOfSideEU`,
-//!   `RailEdgeuseIntersect` and `SmFilletEdge::ShouldSwapFaces`
-//!   (`blend.fillet_geom_p6`); `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
+//! - **Solver virtuals.** The `solvers` table holds base [`FilletSolver`]s, so
+//!   `RailRailIntersect` and the virtual `PointOnPlaneSolve` run with the base
+//!   `SmFilletSolver` virtuals (`impl FilletSolverOps for FilletSolver`), as for the
+//!   base `SmFilletSolver` the difftest shims build; the virtuals' changes to the
+//!   solver (offsets, surface extensions) stay in the table. When both solvers of
+//!   `RailRailIntersect` / `sm_CreateCubicRailRailInterpolant` are the same table entry
+//!   (one object upstream, which Rust cannot lend twice) the second runs on a copy and
+//!   its changes are dropped (`plan/findings.md`, "`blend.fillet_solver_p2`: back-edges
+//!   into the solver from `blend.fillet_geom`").
+//! - **Unported callees.** `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
 //!   for a solver (its set-up is a no-op for a `NULL` solver); `SmSurface::DropCurve`
 //!   (`intersect.surface_drop_lib_p3`) on anything but a plane (the `SmPlane` override
 //!   is ported). Each stub replaces only its call; the code behind it is ported.
@@ -91,7 +88,7 @@ use std::borrow::Cow;
 
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
-use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
@@ -178,48 +175,25 @@ fn rad2deg(rad: f64) -> f64 {
     rad * (180.0 / PI)
 }
 
-/// The index of solver `id` in the caller's table (index `id.0`).
-fn solver_index(
-    solvers: &[ConstantRadiusAssistedFs],
-    id: FilletSolverId,
-    op: &'static str,
-) -> Result<usize> {
-    usize::try_from(id.0)
-        .ok()
-        .filter(|&i| i < solvers.len())
-        .ok_or_else(|| SolidError::invalid_input(op, "fillet solver id not in the solver table"))
-}
-
-/// `solvers[i]` for an index from [`solver_index`].
-fn assisted_at<'s>(
-    solvers: &'s [ConstantRadiusAssistedFs],
-    i: usize,
-    op: &'static str,
-) -> Result<&'s ConstantRadiusAssistedFs> {
-    solvers
-        .get(i)
-        .ok_or_else(|| SolidError::invalid_input(op, "fillet solver id not in the solver table"))
+/// A co-ported `ConstantRadiusAssistedFs` view of a base [`FilletSolver`], for the
+/// `blend.fillet_geom_p1` helpers that take one (they read only base members).
+fn as_assisted(fs: &FilletSolver) -> ConstantRadiusAssistedFs {
+    ConstantRadiusAssistedFs {
+        solver: fs.clone(),
+        fillet_radii: [0.0; 2],
+    }
 }
 
 /// `solvers[i]` for an index from [`solver_index`], for writing (the virtuals change the
 /// solver: offsets, surface extensions).
-fn assisted_at_mut<'s>(
-    solvers: &'s mut [ConstantRadiusAssistedFs],
+fn solver_at_mut<'s>(
+    solvers: &'s mut [FilletSolver],
     i: usize,
     op: &'static str,
-) -> Result<&'s mut ConstantRadiusAssistedFs> {
+) -> Result<&'s mut FilletSolver> {
     solvers
         .get_mut(i)
         .ok_or_else(|| SolidError::invalid_input(op, "fillet solver id not in the solver table"))
-}
-
-/// The `SmFilletSolver` base of `solvers[i]` for an index from [`solver_index`].
-fn solver_at<'s>(
-    solvers: &'s [ConstantRadiusAssistedFs],
-    i: usize,
-    op: &'static str,
-) -> Result<&'s FilletSolver> {
-    Ok(&assisted_at(solvers, i, op)?.solver)
 }
 
 /// Runs `f` on solvers `i` and `j` of the table, the two `SmFilletSolver*` upstream
@@ -228,15 +202,15 @@ fn solver_at<'s>(
 /// are dropped (`plan/findings.md`, "`blend.fillet_solver_p2`: back-edges into the
 /// solver from `blend.fillet_geom`").
 fn with_solver_pair<R>(
-    solvers: &mut [ConstantRadiusAssistedFs],
+    solvers: &mut [FilletSolver],
     i: usize,
     j: usize,
     op: &'static str,
-    f: impl FnOnce(&mut ConstantRadiusAssistedFs, &mut ConstantRadiusAssistedFs) -> Result<R>,
+    f: impl FnOnce(&mut FilletSolver, &mut FilletSolver) -> Result<R>,
 ) -> Result<R> {
     if i == j {
-        let mut copy = assisted_at(solvers, j, op)?.clone();
-        return f(assisted_at_mut(solvers, i, op)?, &mut copy);
+        let mut copy = solver_at(solvers, j, op)?.clone();
+        return f(solver_at_mut(solvers, i, op)?, &mut copy);
     }
     let missing = || SolidError::invalid_input(op, "fillet solver id not in the solver table");
     let (lo, hi) = if i < j { (i, j) } else { (j, i) };
@@ -247,6 +221,92 @@ fn with_solver_pair<R>(
         f(a, b)
     } else {
         f(b, a)
+    }
+}
+
+/// The index of solver `id` in the caller's table (index `id.0`).
+fn solver_index(solvers: &[FilletSolver], id: FilletSolverId, op: &'static str) -> Result<usize> {
+    usize::try_from(id.0)
+        .ok()
+        .filter(|&i| i < solvers.len())
+        .ok_or_else(|| SolidError::invalid_input(op, "fillet solver id not in the solver table"))
+}
+
+/// `solvers[i]` for an index from [`solver_index`].
+fn solver_at<'s>(
+    solvers: &'s [FilletSolver],
+    i: usize,
+    op: &'static str,
+) -> Result<&'s FilletSolver> {
+    solvers
+        .get(i)
+        .ok_or_else(|| SolidError::invalid_input(op, "fillet solver id not in the solver table"))
+}
+
+// Preserve real solver ids when a caller owns one solver rather than an indexed
+// executive table. Missing adjacent solvers are resolver errors, never defaults.
+enum RailSolvers<'a> {
+    Indexed(&'a mut [FilletSolver]),
+    Single(FilletSolverId, &'a mut FilletSolver),
+}
+
+impl RailSolvers<'_> {
+    fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver> {
+        match self {
+            Self::Indexed(solvers) => {
+                solver_at(solvers, solver_index(solvers, id, OP_RAIL_EU)?, OP_RAIL_EU)
+            }
+            Self::Single(key, solver) if *key == id => Ok(solver),
+            Self::Single(..) => Err(SolidError::invalid_input(
+                OP_RAIL_EU,
+                "unresolved adjacent fillet solver",
+            )),
+        }
+    }
+
+    fn solver_mut(&mut self, id: FilletSolverId) -> Result<&mut FilletSolver> {
+        match self {
+            Self::Indexed(solvers) => {
+                let index = solver_index(solvers, id, OP_RAIL_EU)?;
+                solvers.get_mut(index).ok_or_else(|| {
+                    SolidError::invalid_input(
+                        OP_RAIL_EU,
+                        "fillet solver id not in the solver table",
+                    )
+                })
+            }
+            Self::Single(key, solver) if *key == id => Ok(solver),
+            Self::Single(..) => Err(SolidError::invalid_input(
+                OP_RAIL_EU,
+                "unresolved adjacent fillet solver",
+            )),
+        }
+    }
+
+    fn geom_solver(fb: &FilletBrep, g: FilletGeomId) -> Result<FilletSolverId> {
+        fb.geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))
+    }
+
+    fn offset_surface<'a>(
+        &'a self,
+        fb: &'a FilletBrep,
+        g: FilletGeomId,
+        i: usize,
+    ) -> Result<Option<&'a crate::surface::offset_surface::OffsetSurface>> {
+        let geom = fb.geom(g)?;
+        let own = geom
+            .off_surfs
+            .get(i)
+            .ok_or_else(|| SolidError::invalid_input(OP_RAIL_EU, "rail index past 1"))?;
+        if let Some(surface) = own {
+            return Ok(Some(&surface.surface));
+        }
+        Ok(self
+            .solver(Self::geom_solver(fb, g)?)?
+            .surface(i)?
+            .map(|slot| &slot.surface.surface))
     }
 }
 
@@ -481,16 +541,13 @@ fn corner_test_rail_rail_interpolation_curve(
 }
 
 /// `pFilSolver1->RailRailIntersect(sUVGuess, lRailIndex1, pFilSolver2, lRailIndex2,
-/// rbFound, rTsectPnt1, rTsectPnt2)`: whether the rails meet; the two intersection
-/// points are in/out. The table's solvers are the `ConstantRadiusAssistedFs` the
-/// virtuals `RailRailIntersect` calls dispatch on (`plan/findings.md`,
-/// "`blend.fillet_solver_p2`: back-edges into the solver from `blend.fillet_geom`");
-/// their changes (offsets, surface extensions) stay in the table.
+/// rbFound, rTsectPnt1, rTsectPnt2)` on solvers `solver_index1` and `solver_index2` of
+/// the table: whether the rails meet; the two intersection points are in/out.
 #[allow(clippy::too_many_arguments)]
 fn rail_rail_intersect(
     k: &Kernel,
     target: &Brep,
-    solvers: &mut [ConstantRadiusAssistedFs],
+    solvers: &mut [FilletSolver],
     solver_index1: usize,
     uv_guess: Point2,
     rail_index1: usize,
@@ -516,13 +573,13 @@ fn rail_rail_intersect(
 }
 
 /// `pFilSolver->PointOnPlaneSolve(crPlaneOrig, crPlaneNormal, crDomain1, crDomain2,
-/// crUV1, crUV2, rbFound, rTsectPnt)` (a virtual): whether a fillet point was found on
-/// the plane, and the point (in/out). Dispatched on the table's
-/// `ConstantRadiusAssistedFs` ([`rail_rail_intersect`]).
+/// crUV1, crUV2, rbFound, rTsectPnt)` (a virtual, here the base
+/// `SmFilletSolver::PointOnPlaneSolve` of the table's solver): whether a fillet point was
+/// found on the plane, and the point (in/out).
 #[allow(clippy::too_many_arguments)]
 fn point_on_plane_solve(
     k: &Kernel,
-    fs: &mut ConstantRadiusAssistedFs,
+    fs: &mut FilletSolver,
     plane_orig: Point3,
     plane_normal: Vec3,
     domain1: &Extent2d,
@@ -532,7 +589,8 @@ fn point_on_plane_solve(
     tsect_pnt: &TsectPnt,
 ) -> Result<(bool, TsectPnt)> {
     let mut tsect = tsect_pnt.clone();
-    let found = crate::blend::fillet_intersector::FilletSolverOps::point_on_plane_solve(
+    // the virtual: the base version for a base solver
+    let found = FilletSolverOps::point_on_plane_solve(
         fs,
         k,
         plane_orig,
@@ -547,23 +605,25 @@ fn point_on_plane_solve(
 }
 
 /// `SmFilletGeom::RailEdgeuseIntersect(lRailIndex, pSideEU, dGuess, rbFound,
-/// rTsectPnt, rdEdgeuseParameter)` (part 6) on geometry `g`'s solver in `solvers`:
-/// whether the rail meets the side edge use, the intersection point and the edge use
-/// parameter. While it runs the solver holds `g` as its geometry for surfaces, as upstream's `SetFilletGeomForSurfaces(this)`.
+/// rTsectPnt, rdEdgeuseParameter)` (part 6) on geometry `g`'s solver in `solvers`: the
+/// edge use parameter when the rail meets the side edge use; the intersection point
+/// `tsect` is in/out. While it runs the solver holds `g` as its geometry for surfaces,
+/// as upstream's `SetFilletGeomForSurfaces(this)`.
 #[allow(clippy::too_many_arguments)]
 fn rail_edgeuse_intersect(
     fb: &FilletBrep,
     k: &Kernel,
     g: FilletGeomId,
     solvers: &mut RailSolvers<'_>,
-    target: &Brep,
+    target: &mut Brep,
     rail_index: usize,
     side_eu: EdgeuseId,
     guess: f64,
-) -> Result<(bool, TsectPnt, f64)> {
+    tsect: &mut TsectPnt,
+) -> Result<Option<f64>> {
     let si = RailSolvers::geom_solver(fb, g)?;
     let fs = solvers.solver_mut(si)?;
-    fb.rail_edgeuse_intersect(k, g, fs, target, rail_index, side_eu, guess)
+    fb.rail_edgeuse_intersect(k, g, fs, target, rail_index, side_eu, guess, tsect)
 }
 
 /// `SmTemporaryRadiusChange(pFS, lRailIndex, pSideEU)` (unit
@@ -1012,7 +1072,7 @@ impl FilletBrep {
     fn geom_solver_index(
         &self,
         g: FilletGeomId,
-        solvers: &[ConstantRadiusAssistedFs],
+        solvers: &[FilletSolver],
         op: &'static str,
     ) -> Result<usize> {
         let id = self
@@ -1020,29 +1080,6 @@ impl FilletBrep {
             .fillet_solver()
             .ok_or_else(|| SolidError::null_pointer(op))?;
         solver_index(solvers, id, op)
-    }
-
-    /// `SmFilletGeom::GetOffsetSurface(i)`: the geometry's own offset surface, else its
-    /// solver's (dereferenced).
-    fn geom_offset_surface<'a>(
-        &'a self,
-        g: FilletGeomId,
-        i: usize,
-        solvers: &'a [ConstantRadiusAssistedFs],
-        op: &'static str,
-    ) -> Result<Option<&'a crate::surface::offset_surface::OffsetSurface>> {
-        let geom = self.geom(g)?;
-        let own = geom
-            .off_surfs
-            .get(i)
-            .ok_or_else(|| SolidError::invalid_input(op, "rail index past 1"))?;
-        if let Some(s) = own {
-            return Ok(Some(&s.surface));
-        }
-        let si = self.geom_solver_index(g, solvers, op)?;
-        Ok(solver_at(solvers, si, op)?
-            .surface(i)?
-            .map(|slot| &slot.surface.surface))
     }
 
     /// `GetVUAtRailEnd(pFG)->GetTsectPnt()`, dereferenced: the vertex use and a copy of
@@ -1088,7 +1125,7 @@ impl FilletBrep {
         &mut self,
         k: &Kernel,
         v: VertexId,
-        solvers: &mut [ConstantRadiusAssistedFs],
+        solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
         const OP: &str = OP_RAIL_RAIL;
@@ -1212,15 +1249,15 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, side edge use, curve, mate face or solver;
     /// `SM_ERR` without a fillet geometry and, for a blending corner, when no
     /// intersection is found; those of the evaluations and solves;
-    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`),
-    /// `SmFilletSolver::RailEdgeuseIntersect` (`blend.fillet_solver_p2`) and the
-    /// temporary radius change of a solver (`blend.fillet_executive_p2`).
+    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`), the
+    /// temporary radius change of a solver (`blend.fillet_executive_p2`) and those of
+    /// `SmFilletSolver::RailEdgeuseIntersect`.
     pub fn calc_rail_int_edgeuse(
         &mut self,
         k: &Kernel,
         v: VertexId,
         opt_fg: Option<FilletGeomId>,
-        solvers: &mut [ConstantRadiusAssistedFs],
+        solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
         self.calc_rail_int_edgeuse_with_solvers(
@@ -1372,33 +1409,55 @@ impl FilletBrep {
                 };
                 temporary_radius_change(fs_for_change, rail_index, side_eu1)?;
 
-                let (f, t, p) = rail_edgeuse_intersect(
-                    self, k, g1, solvers, target, rail_index, side_eu1, guess,
-                )?;
-                found = f;
-                tsect1 = t;
-                edgeuse_parameter = p;
-                if found {
+                // rTsectPnt1 is the vertex use's own point: written in place also on a
+                // failure
+                let r = rail_edgeuse_intersect(
+                    self,
+                    k,
+                    g1,
+                    solvers,
+                    target,
+                    rail_index,
+                    side_eu1,
+                    guess,
+                    &mut tsect1,
+                );
+                if r.is_err() {
+                    self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
+                }
+                if let Some(p) = r? {
+                    found = true;
+                    edgeuse_parameter = p;
                     break;
                 }
             }
 
             // Try once more with a bigger extension. [B465]
             if !found {
-                let si = self.geom_solver_index(g1, solvers, OP)?;
-                let fs = &mut assisted_at_mut(solvers, si, OP)?.solver;
+                let si = RailSolvers::geom_solver(self, g1)?;
+                let fs = solvers.solver_mut(si)?;
                 let ext_factor = fs.extension_factor();
                 fs.set_extension_factor(2.0 * ext_factor);
 
                 for &guess in &guess_edge_parameters {
                     temporary_radius_change(Some(solvers.solver(si)?), rail_index, side_eu1)?;
-                    let (f, t, p) = rail_edgeuse_intersect(
-                        self, k, g1, solvers, target, rail_index, side_eu1, guess,
-                    )?;
-                    found = f;
-                    tsect1 = t;
-                    edgeuse_parameter = p;
-                    if found {
+                    let r = rail_edgeuse_intersect(
+                        self,
+                        k,
+                        g1,
+                        solvers,
+                        target,
+                        rail_index,
+                        side_eu1,
+                        guess,
+                        &mut tsect1,
+                    );
+                    if r.is_err() {
+                        self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
+                    }
+                    if let Some(p) = r? {
+                        found = true;
+                        edgeuse_parameter = p;
                         break;
                     }
                 }
@@ -1504,7 +1563,7 @@ impl FilletBrep {
                 // Temporarily change this to a constant-radius function.
                 let si = RailSolvers::geom_solver(self, g2)?;
                 temporary_radius_change(Some(solvers.solver(si)?), other_rail_index, side_eu2)?;
-                let (f, t, p) = rail_edgeuse_intersect(
+                let r = rail_edgeuse_intersect(
                     self,
                     k,
                     g2,
@@ -1513,11 +1572,14 @@ impl FilletBrep {
                     other_rail_index,
                     side_eu2,
                     guess,
-                )?;
-                found = f;
-                tsect2 = t;
-                edgeuse_parameter2 = p;
-                if found {
+                    &mut tsect2,
+                );
+                if r.is_err() {
+                    self.fillet_vertexuse_mut(vu2)?.set_tsect_pnt(&tsect2);
+                }
+                if let Some(p) = r? {
+                    found = true;
+                    edgeuse_parameter2 = p;
                     break;
                 }
             }
@@ -1588,15 +1650,14 @@ impl FilletBrep {
     ///
     /// `SM_ERR_NULL_POINTER` without corner, solver, edge use, curve or surface; `SM_ERR`
     /// without a fillet geometry; those of the evaluations; [`SolidError::Unported`] for
-    /// the corner (`blend.fillet_corner_p1`) and `PointOnPlaneSolve`
-    /// (`blend.fillet_standard_solver_p2`).
+    /// the corner (`blend.fillet_corner_p1`).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_vert_on_cross_section(
         &mut self,
         k: &Kernel,
         v: VertexId,
         opt_edge_param: Option<f64>,
-        solvers: &mut [ConstantRadiusAssistedFs],
+        solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
         const OP: &str = OP_CROSS;
@@ -1692,13 +1753,7 @@ impl FilletBrep {
                 // May lead to potential failures, step off the boundary: along the
                 // edge first, then off the boundary edge
                 param = arc_length_param(k, &curve, param, 2.0 * curve_stepoff_dist, OP)?;
-                uvs = find_stepoff_uv(
-                    k,
-                    target,
-                    assisted_at(solvers, s1, OP)?,
-                    param,
-                    stepoff_dist,
-                )?;
+                uvs = find_stepoff_uv(k, target, fs1, param, stepoff_dist)?;
                 break;
             }
         }
@@ -1712,7 +1767,7 @@ impl FilletBrep {
             let [u0, u1] = uvs;
             let (found, t) = point_on_plane_solve(
                 k,
-                assisted_at_mut(solvers, s1, OP)?,
+                solver_at_mut(solvers, s1, OP)?,
                 plane_orig,
                 plane_normal,
                 &domain1,
@@ -1729,13 +1784,7 @@ impl FilletBrep {
 
             // No solution found there, step off the vertex along the edge and again
             param = arc_length_param(k, &curve, param, curve_stepoff_dist, OP)?;
-            uvs = find_stepoff_uv(
-                k,
-                target,
-                assisted_at(solvers, s1, OP)?,
-                param,
-                stepoff_dist,
-            )?;
+            uvs = find_stepoff_uv(k, target, solver_at(solvers, s1, OP)?, param, stepoff_dist)?;
         }
         self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect);
 
@@ -1803,14 +1852,13 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, solver, edge use, curve, surface or face;
     /// `SM_ERR` without exactly one fillet geometry and unless each surface has exactly
     /// one closest point; those of the evaluations and solves;
-    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`) and
-    /// `PointOnPlaneSolve` (`blend.fillet_standard_solver_p2`).
+    /// [`SolidError::Unported`] for the corner (`blend.fillet_corner_p1`).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_set_back_vert(
         &mut self,
         k: &Kernel,
         v: VertexId,
-        solvers: &mut [ConstantRadiusAssistedFs],
+        solvers: &mut [FilletSolver],
         target: &Brep,
     ) -> Result<()> {
         const OP: &str = OP_SETBACK;
@@ -1884,7 +1932,7 @@ impl FilletBrep {
         // find filletPoint on given plane that satisfies geometry requirements
         let (found, tsect) = point_on_plane_solve(
             k,
-            assisted_at_mut(solvers, si, OP)?,
+            solver_at_mut(solvers, si, OP)?,
             plane_orig,
             plane_normal,
             &domain1,
@@ -1963,7 +2011,7 @@ impl FilletBrep {
         k: &Kernel,
         e: EdgeId,
         opt_corner: Option<FilletCornerId>,
-        solvers: &mut [ConstantRadiusAssistedFs],
+        solvers: &mut [FilletSolver],
         target: &mut Brep,
     ) -> Result<()> {
         const OP: &str = OP_INTERP;
@@ -2353,16 +2401,17 @@ impl FilletBrep {
     }
 }
 
-/// `sm_FindStepoffUV(pFilSolver, dParam, dStepoffDist, sUVs)`: for each of the solver's
-/// edge uses, the step-off point dropped onto the edge use's face.
+/// `sm_FindStepoffUV(pFilSolver, dParam, dStepoffDist, sUVs)` over a base
+/// [`FilletSolver`]: for each of its edge uses, the step-off point dropped onto the
+/// edge use's face.
 fn find_stepoff_uv(
     k: &Kernel,
     target: &mut Brep,
-    fs: &ConstantRadiusAssistedFs,
+    fs: &FilletSolver,
     curve_param: f64,
     stepoff_dist: f64,
 ) -> Result<[Point2; 2]> {
-    super::p1::find_stepoff_uv(k, target, fs, curve_param, stepoff_dist)
+    super::p1::find_stepoff_uv(k, target, &as_assisted(fs), curve_param, stepoff_dist)
 }
 
 #[cfg(test)]
@@ -2471,41 +2520,6 @@ mod tests {
         assert!(fb.geom(g).unwrap().vertices.is_empty());
     }
 
-    fn table() -> Vec<ConstantRadiusAssistedFs> {
-        (0..3)
-            .map(|i| ConstantRadiusAssistedFs {
-                solver: FilletSolver::new(1e-6 * f64::from(i + 1), 0.1, 0.01),
-                fillet_radii: [f64::from(i); 2],
-            })
-            .collect()
-    }
-
-    #[test]
-    fn solver_pairs_keep_their_argument_order_and_their_changes() {
-        let mut solvers = table();
-        // (2, 0): the closure's first argument is solver 2, the second solver 0
-        with_solver_pair(&mut solvers, 2, 0, "t", |a, b| {
-            assert_eq!(a.fillet_radii, [2.0; 2]);
-            assert_eq!(b.fillet_radii, [0.0; 2]);
-            a.solver.extend_before = true;
-            b.solver.extend_after = true;
-            Ok(())
-        })
-        .unwrap();
-        // the changes stay in the table (no copies)
-        assert!(solvers[2].solver.extend_before && !solvers[2].solver.extend_after);
-        assert!(solvers[0].solver.extend_after && !solvers[0].solver.extend_before);
-        // the same solver twice: the first argument is the table's, the second a copy
-        with_solver_pair(&mut solvers, 1, 1, "t", |a, b| {
-            a.solver.extend_before = true;
-            b.solver.extend_after = true;
-            Ok(())
-        })
-        .unwrap();
-        assert!(solvers[1].solver.extend_before && !solvers[1].solver.extend_after);
-        assert!(with_solver_pair(&mut solvers, 0, 3, "t", |_, _| Ok(())).is_err());
-    }
-
     #[test]
     fn vertex_calculators_need_a_corner() {
         let k = Kernel::default();
@@ -2516,7 +2530,7 @@ mod tests {
             .unwrap();
         fb.insert_fillet_vertex(v, super::super::p1::FilletVertex::new(&k, None));
         let mut target = Brep::new();
-        let mut solvers: Vec<ConstantRadiusAssistedFs> = Vec::new();
+        let mut solvers: Vec<FilletSolver> = Vec::new();
         let null =
             |r: Result<()>| matches!(r, Err(SolidError::Upstream { code, .. }) if code == 1006);
         assert!(null(fb.calc_rail_int_rail(

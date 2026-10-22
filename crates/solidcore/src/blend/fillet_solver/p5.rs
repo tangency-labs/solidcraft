@@ -196,7 +196,7 @@ trait ClassificationOps {
         &mut self,
         solver: &mut FilletSolver,
         k: &Kernel,
-        target: &Brep,
+        target: &mut Brep,
         fillets: &mut FilletBrep,
         _geom: FilletGeomId,
         which: usize,
@@ -230,7 +230,7 @@ impl ClassificationOps for MissingClassification {}
 fn finish_classification(
     solver: &mut FilletSolver,
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     fillets: &mut FilletBrep,
     geom: FilletGeomId,
     which: usize,

@@ -1644,17 +1644,24 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     .ok_or_else(|| harness("solver"))?,
                 None => FilletSolver::new(1e-6, 1e-3, 1e-6),
             };
+            // the shim's SmTsectPnt t
+            let mut tsect = TsectPnt::default();
             let r = m.fb.rail_edgeuse_intersect(
                 &k,
                 g,
                 &mut solver,
-                &tg.brep,
+                &mut tg.brep,
                 *rail,
                 eu,
                 *guess,
+                &mut tsect,
             );
-            // on a failed status the out-params keep the shim's initial values
-            let (found, param) = r.as_ref().map_or((false, 0.0), |&(f, _, p)| (f, p));
+            // on a failed status, or without an intersection, the out-params keep the
+            // shim's initial values
+            let (found, param) = match &r {
+                Ok(Some(p)) => (true, *p),
+                _ => (false, 0.0),
+            };
             results.extend([b(found), param]);
             r.map(|_| ())
         }

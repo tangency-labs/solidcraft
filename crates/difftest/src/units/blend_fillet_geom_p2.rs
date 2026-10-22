@@ -35,7 +35,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
 use solidcore::blend::fillet_geom::p1::FilletSolverId;
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use solidcore::blend::fillet_solver::p1::FilletSolver;
@@ -50,7 +49,7 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_geom_p2::{self as ffi, Op};
 
 use super::blend_fillet_geom_p1::{
-    analytic_surface, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
+    analytic_surface, b_spline_part, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
     surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
 };
 use super::blend_fillet_geom_p4::{
@@ -466,16 +465,10 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
     }
     let h = |e: SolidError| harness(e.to_string());
     let mut rm = RustModel::build(&i.model)?;
-    // the table's solvers are the library's `SmConstantRadiusAssistedFS` (radii 0: no
-    // compared case reaches a virtual that reads them, every case stops at the corner
-    // first)
-    let mut solvers: Vec<ConstantRadiusAssistedFs> = i
+    let mut solvers: Vec<FilletSolver> = i
         .solvers
         .iter()
-        .map(|s| ConstantRadiusAssistedFs {
-            solver: FilletSolver::new(s.approx, s.ang, s.tang),
-            fillet_radii: [0.0; 2],
-        })
+        .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
         .collect();
     for g in 0..i.model.geoms.len() {
         if let Ok(si) = u32::try_from(geom_solver(i, g)) {
@@ -502,8 +495,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             let vid = rm.vertex(*v)?;
             let r = match &i.query {
                 Query::RailIntRail { .. } => {
-                    rm.fb
-                        .calc_rail_int_rail(&k, vid, &mut solvers, &mut rm.target)
+                    rm.fb.calc_rail_int_rail(&k, vid, &mut solvers, &mut rm.target)
                 }
                 Query::RailIntEdgeuse { g, .. } => {
                     let g = match usize::try_from(*g) {

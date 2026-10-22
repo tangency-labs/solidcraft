@@ -300,15 +300,16 @@ impl RecoveryOps for Script {
     fn cliff(
         &mut self,
         _: &mut Recovery<'_>,
+        _: FilletGeomId,
         _: EdgeId,
         _: EdgeId,
         _: Option<FaceId>,
         _: bool,
         extension: f64,
-    ) -> Result<FilletGeomId> {
+    ) -> Result<Option<FilletGeomId>> {
         assert_eq!(extension, 0.25);
         self.call("cliff")?;
-        Ok(FilletGeomId(999))
+        Ok(Some(FilletGeomId(999)))
     }
     fn make_edge(
         &mut self,
@@ -652,7 +653,7 @@ fn refinement_receives_rail_index_geom_and_short_list_and_preserves_warning_only
             &mut self,
             solver: &mut FilletSolver,
             k: &Kernel,
-            target: &Brep,
+            target: &mut Brep,
             fb: &mut FilletBrep,
             geom: FilletGeomId,
             which: usize,
@@ -678,7 +679,7 @@ fn refinement_receives_rail_index_geom_and_short_list_and_preserves_warning_only
     finish_classification(
         &mut f.solver,
         &f.k,
-        &f.target,
+        &mut f.target,
         &mut f.fb,
         id,
         1,
@@ -1141,7 +1142,7 @@ fn landed_p3_refinement_is_a_noop_without_small_intervals_and_restores_errors() 
         .refine(
             &mut f.solver,
             &f.k,
-            &f.target,
+            &mut f.target,
             &mut f.fb,
             f.geom,
             0,
@@ -1153,7 +1154,7 @@ fn landed_p3_refinement_is_a_noop_without_small_intervals_and_restores_errors() 
         .refine(
             &mut f.solver,
             &f.k,
-            &f.target,
+            &mut f.target,
             &mut f.fb,
             f.geom,
             0,
