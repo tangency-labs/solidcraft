@@ -234,7 +234,7 @@ fn nurbs(u_knots: &[f64], v_knots: &[f64], rows: &[Vec<[f64; 4]>]) -> Result<Eva
             ctrl.push(*row.get(j).ok_or_else(|| Error::Invalid("ragged surface".into()))?);
         }
     }
-    Ok(EvalSurface::Nurbs { degree: [pu, pv], knots: [u_knots.to_vec(), v_knots.to_vec()], count: [nu, nv], ctrl })
+    Ok(EvalSurface::nurbs([pu, pv], [u_knots.to_vec(), v_knots.to_vec()], [nu, nv], ctrl))
 }
 
 /// A curve record ready to evaluate.
