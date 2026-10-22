@@ -326,7 +326,6 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             json!({
                 "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": i >= marker,
                 "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()), "ms": r.map(|r| r.ms),
-                "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
             })
         })
         .collect();

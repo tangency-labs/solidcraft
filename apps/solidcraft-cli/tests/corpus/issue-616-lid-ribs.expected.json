@@ -54,10 +54,6 @@
   ],
   "timeline": [
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 1,
       "ms": 1.178957,
@@ -68,10 +64,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 2,
       "ms": 83.24342399999999,
@@ -82,10 +74,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 3,
       "ms": 0.150889,
@@ -96,10 +84,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 4,
       "ms": 94.465481,
@@ -110,10 +94,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 5,
       "ms": 50.426736,
@@ -124,10 +104,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 6,
       "ms": 40.383005,
@@ -138,10 +114,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 7,
       "ms": 59.041461000000005,
@@ -152,18 +124,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [
-          {
-            "face_shift_mm": 0.0,
-            "rotation_rad": 0.0,
-            "strategy": "planar_fallback",
-            "tolerance_mm": 0.0,
-            "translation_mm": 0.0
-          }
-        ],
-        "truncated": false
-      },
       "error": null,
       "id": 8,
       "ms": 562.5477970000001,
@@ -174,10 +134,6 @@
       "warning": "Boolean retry: exact planar fallback (no displacement)"
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 9,
       "ms": 89.56076,
@@ -188,10 +144,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 10,
       "ms": 65.330634,
@@ -202,10 +154,6 @@
       "warning": null
     },
     {
-      "boolean_diagnostics": {
-        "events": [],
-        "truncated": false
-      },
       "error": null,
       "id": 11,
       "ms": 97.229403,
