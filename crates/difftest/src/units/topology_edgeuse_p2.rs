@@ -409,11 +409,7 @@ fn output_of(op: &OpIn, body: &[f64]) -> Output {
 // ---- Rust side --------------------------------------------------------------------------
 
 /// The state of an edge use as the shim's `put_eu_state`.
-pub(super) fn put_eu_state(
-    o: &mut Vec<f64>,
-    b: &Brep,
-    eu: Option<EdgeuseId>,
-) -> Result<(), SolidError> {
+pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<EdgeuseId>) -> Result<(), SolidError> {
     let Some(eu) = eu else {
         o.push(-1.0);
         return Ok(());
@@ -427,7 +423,9 @@ pub(super) fn put_eu_state(
             let ivl = c.natural_interval();
             o.extend([ivl.min(), ivl.max()]);
             for t in [ivl.min(), ivl.mid(), ivl.max()] {
-                let p = c.evaluate_point(t).unwrap_or(solidcore::math::Vec3::UNDEF);
+                let p = c
+                    .evaluate_point(k, t)
+                    .unwrap_or(solidcore::math::Vec3::UNDEF);
                 o.extend([p.x, p.y, p.z]);
             }
         }

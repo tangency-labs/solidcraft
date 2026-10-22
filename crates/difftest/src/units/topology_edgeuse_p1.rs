@@ -1249,10 +1249,16 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
         b.add_shell_record(s).map_err(|e| harness(e.to_string()))?;
     }
     for (f, (surface, uv_domain, tolerance)) in surfaces.into_iter().enumerate() {
-        let shell = face_shells
-            .get(f)
-            .copied()
-            .unwrap_or(ShellId::from_index(0));
+        let shell = face_shells.get(f).copied().unwrap_or(ShellId::from_index(0));
+        // m_pFU, which the export does not carry: the primary face use is the face's
+        // upward one (SM_OT_SAME, SmFace::GetUpwardFaceuse)
+        let faceuse = faceuses
+            .iter()
+            .position(|fu| {
+                fu.face == Some(FaceId::from_index(f as u32))
+                    && fu.orientation == OrientType::Same
+            })
+            .map(|i| FaceuseId::from_index(i as u32));
         b.add_face_record(Face {
             surface,
             uv_domain,
@@ -1434,21 +1440,12 @@ fn inexact_geometry(b: &Brep, types: &ImportTypes, op: &OpIn) -> Option<Output> 
             // the DISPATCH GAP of `Surface::read_from_db` (issue #76) belongs to
             // `surface.surface_p2`, not to the analytic surface units (all green)
             15012 => ("surface.surface_p2", "SurfaceKind::Cone (SmCone dispatch)"),
-            15013 => (
-                "surface.surface_p2",
-                "SurfaceKind::Cone (SmCylinder dispatch)",
-            ),
-            15014 => (
-                "surface.surface_p2",
-                "SurfaceKind::Sphere (SmSphere dispatch)",
-            ),
-            15015 => (
-                "surface.surface_p2",
-                "SurfaceKind::Torus (SmTorus dispatch)",
-            ),
+            15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCylinder dispatch)"),
+            15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere dispatch)"),
+            15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus dispatch)"),
             15030 => (
-                "surface.surf_of_extrusion_p2",
-                "SurfaceKind::SurfOfExtrusion",
+                HARNESS_ANALYTIC_EXPORT,
+                "SmSurfOfExtrusion face surface not exported exactly",
             ),
             _ => (
                 HARNESS_ANALYTIC_EXPORT,
@@ -1864,8 +1861,7 @@ fn run_rust_geom(k: &Kernel, op: &OpIn) -> Result<Output, Fail> {
             jac,
         } => {
             let s = surface_of(surface)?;
-            let mut e =
-                eu1::FindStepOff::new(*dist, Vec3::from_array(*p), Vec3::from_array(*n), &s);
+            let mut e = eu1::FindStepOff::new(k, *dist, Vec3::from_array(*p), Vec3::from_array(*n), &s);
             let mut f = [UNDEF_DOUBLE; 2];
             let mut m = Matrix::new(2, 2);
             for r in 0..2 {

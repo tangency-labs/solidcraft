@@ -830,7 +830,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Closure { surface, dom } => {
             let s = surface_of(surface)?;
             let d = Extent2d::from_points(Point2::new(dom[0], dom[1]), Point2::new(dom[2], dom[3]));
-            match corner::set_surface_closure(&s, &d) {
+            match corner::set_surface_closure(&k, &s, &d) {
                 Ok(c) => Ok(Output::new().values("closure", vec![c as u64 as f64])),
                 Err(e) => Ok(rust_err(&e)),
             }
@@ -859,7 +859,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         return Ok(o);
                     }
                     let v = opt(a(0)?, VertexId::from_index)?;
-                    corner::test_g1_continuity(&t.brep, v, e1, e2, *tol)
+                    corner::test_g1_continuity(&k, &t.brep, v, e1, e2, *tol)
                         .map(|(f, ang)| vec![flag(f), flag(ang.is_some()), ang.unwrap_or(0.0)])
                 }
                 Inputs::FaceByTwo { .. } => {
@@ -1916,6 +1916,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     exec: &mut exec,
                     corner: None,
                     tsect_surfaces: &surfaces,
+                    solvers: &mut [],
                 };
                 match c.method {
                     CornerMethod::VertGeom => fc.calc_corner_vert_geom(&mut env, &mut []),
@@ -1948,6 +1949,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     exec: &mut exec,
                     corner: None,
                     tsect_surfaces: &surfaces,
+                    solvers: &mut [],
                 };
                 fc.check_and_fix_degeneracy(&mut env, &[])
             };

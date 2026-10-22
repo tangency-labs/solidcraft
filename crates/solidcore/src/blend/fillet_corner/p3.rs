@@ -546,7 +546,7 @@ impl FilletCorner {
                     match total_eus {
                         // Need to be G1-closed
                         1 => {
-                            if test_g1_continuity(b, vertex, e, e, tan_tol_deg)? {
+                            if test_g1_continuity(k, b, vertex, e, e, tan_tol_deg)? {
                                 Some(make(FilletCornerKind::OneByOne))
                             } else {
                                 None // MSG: Corner Case Not Implemented
@@ -574,7 +574,7 @@ impl FilletCorner {
                     2 => {
                         let e0 = edge_of(b, eu0)?;
                         let e1 = edge_of(b, eu1_)?;
-                        if test_g1_continuity(b, vertex, e0, e1, tan_tol_deg)? {
+                        if test_g1_continuity(k, b, vertex, e0, e1, tan_tol_deg)? {
                             Some(make(FilletCornerKind::TwoByTwo))
                         } else {
                             None // MSG: Corner Case Not Implemented
@@ -1817,13 +1817,14 @@ fn bspline_part_mut(kind: &mut CurveKind) -> Option<&mut BSplineCurve> {
 
 /// `sm_TestG1Continuity` (unit `blend.fillet_corner_p1`).
 fn test_g1_continuity(
+    k: &Kernel,
     b: &Brep,
     vertex: VertexId,
     edge1: EdgeId,
     edge2: EdgeId,
     ang_tol_deg: f64,
 ) -> Result<bool> {
-    Ok(p1::test_g1_continuity(b, Some(vertex), Some(edge1), Some(edge2), ang_tol_deg)?.0)
+    Ok(p1::test_g1_continuity(k, b, Some(vertex), Some(edge1), Some(edge2), ang_tol_deg)?.0)
 }
 
 /// `SmFilletNx1Corner::CheckNx1Degeneracy` as `Create` tests it

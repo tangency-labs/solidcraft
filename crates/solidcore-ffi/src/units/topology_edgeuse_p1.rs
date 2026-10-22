@@ -342,12 +342,8 @@ pub(crate) fn face_block(rd: &mut Reader<'_>, plane_domain_limit: f64) -> Result
     Ok(dom.is_some())
 }
 
-fn brep_block_with_plane_limit(
-    rd: &mut Reader<'_>,
-    path: &str,
-    plane_domain_limit: f64,
-) -> Result<(), FfiError> {
-    match rd.index(6)? {
+fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
+    match rd.index(8)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {

@@ -151,8 +151,8 @@ fn ignored<T>(r: Result<T>, fallback: T) -> Result<T> {
 
 /// `pCrv->Evaluate(t, 1, TRUE, aPV)` with the status ignored: position and tangent,
 /// `SM_UNDEF_DOUBLE` vectors when the evaluation fails.
-fn evaluate_tangent(curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
-    let pv = ignored(curve.evaluate(t, 1, true, true).map(Some), None)?;
+fn evaluate_tangent(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
+    let pv = ignored(curve.evaluate(k, t, 1, true, true).map(Some), None)?;
     Ok(match pv.as_deref() {
         Some([p, d, ..]) => [*p, *d],
         _ => [Vec3::UNDEF, Vec3::UNDEF],
@@ -195,6 +195,7 @@ fn edge_of(b: &Brep, eu: EdgeuseId, op: &'static str) -> Result<EdgeId> {
 /// [`SolidError::InvalidInput`] for an edge without a curve (upstream dereferences
 /// null); [`SolidError::Unported`] from the curve evaluations.
 pub fn test_g1_continuity(
+    k: &Kernel,
     b: &Brep,
     vert: Option<VertexId>,
     edge1: Option<EdgeId>,
@@ -216,7 +217,7 @@ pub fn test_g1_continuity(
     };
 
     // get Edge1 tangent at vertex
-    let pv1 = evaluate_tangent(crv1, param1)?;
+    let pv1 = evaluate_tangent(k, crv1, param1)?;
 
     let crv2 =
         edge::curve(b, edge2)?.ok_or_else(|| SolidError::invalid_input(OP_G1, NULL_DEREF))?;
@@ -228,7 +229,7 @@ pub fn test_g1_continuity(
     };
 
     // get Edge2 tangent at vertex
-    let pv2 = evaluate_tangent(crv2, param2)?;
+    let pv2 = evaluate_tangent(k, crv2, param2)?;
 
     if pv1[1].length_squared() > EFF_ZERO_SQ && pv2[1].length_squared() > EFF_ZERO_SQ {
         // get angle (degrees) between Edge1 and Edge2 endTangents (SE: 0 on failure)
@@ -453,7 +454,7 @@ pub fn create_srf_of_revolution(
     let major_arc = curves.get(major).ok_or_else(out_of_range)?;
 
     // no work - can't make SurfOfRevolution when MajorArc is not an Arc
-    let Some((frame, _rad, start_ang, end_ang)) = major_arc.is_arc(5, tol_3d)? else {
+    let Some((frame, _rad, start_ang, end_ang)) = major_arc.is_arc(k, 5, tol_3d)? else {
         return Err(SolidError::sm_err(OP_REVOLUTION));
     };
     let origin = frame.origin();
@@ -464,7 +465,7 @@ pub fn create_srf_of_revolution(
     // MajorCurve->AxisOfRevolution and have similar ArcAngle lengths
     if total == 4 {
         let other_arc = curves.get((major + 2) % 4).ok_or_else(out_of_range)?;
-        let Some((frame1, _rad1, start_ang1, end_ang1)) = other_arc.is_arc(5, tol_3d)? else {
+        let Some((frame1, _rad1, start_ang1, end_ang1)) = other_arc.is_arc(k, 5, tol_3d)? else {
             return Err(SolidError::sm_err(OP_REVOLUTION));
         };
         let origin1 = frame1.origin();
@@ -994,7 +995,7 @@ impl FilletCorner {
             .and_then(|s| s.start.parameters.first().copied())
             .ok_or_else(|| SolidError::sm_err(OP_RAIL_RAIL))?;
         // Find the 2nd deriv. of the curve at dT
-        let geom = curve2::evaluate_geometric(curve, t, 2, true)?;
+        let geom = curve2::evaluate_geometric(k, curve, t, 2, true)?;
         let (Some(pos), Some(curvature)) = (geom.first(), geom.get(2)) else {
             return Err(SolidError::sm_err(OP_RAIL_RAIL));
         };
@@ -1832,6 +1833,7 @@ mod tests {
                 exec: &mut exec,
                 corner: None,
                 tsect_surfaces: &surfaces,
+                solvers: &mut [],
             };
             c.check_and_fix_degeneracy(&mut env, &solvers)
         };
@@ -1882,8 +1884,9 @@ mod tests {
     #[test]
     fn missing_inputs() {
         let b = Brep::default();
+        let k = Kernel::default();
         assert_eq!(
-            test_g1_continuity(&b, None, None, None, 1.0).unwrap(),
+            test_g1_continuity(&k, &b, None, None, None, 1.0).unwrap(),
             (false, None)
         );
         assert_eq!(face_by_two_edgeuses(&b, None, None, None).unwrap(), None);
