@@ -41,6 +41,7 @@ use solidcore::topology::brep::p10::{
 use solidcore::topology::brep_cache::CacheObject;
 use solidcore::topology::brep_data::{BrepData, TopologyData};
 use solidcore::topology::database_io::FileType;
+use solidcore::topology::edge::NotifyEnv;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::topology::Topology;
@@ -506,11 +507,17 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     match i.op {
         OpIn::Make => {}
         OpIn::Closure { do_infinite } => {
-            // harness env: the runner holds no attribute state (default region
-            // records, empty store; see RegionNotifyState)
-            let mut state = solidcore::topology::brep::p2::RegionNotifyState::new(&b);
+            // the split names the B-rep's objects as the build did (`key_of`, the names
+            // its geometry owners carry, which its ray fires look up), over the build's
+            // records and attribute store
+            let mut env = NotifyEnv {
+                records: &mut records,
+                attributes: &mut store,
+                context: None,
+                key_of: &key_of,
+            };
             for &e in &g.edges.items {
-                match test_closure_split_region(&mut k, &mut b, &mut state.env(), do_infinite, e) {
+                match test_closure_split_region(&mut k, &mut b, &mut env, do_infinite, e) {
                     Ok(r) => {
                         out.push(Item::Int(0));
                         out.push(Item::Int(r.new_shells.len() as i64));

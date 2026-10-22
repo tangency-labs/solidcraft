@@ -756,10 +756,20 @@ impl ArenaNotifyState {
 
 /// The identities a rebuilt cache keys its edge/face owners by.
 fn cache_keys(env: &NotifyEnv<'_>, object: CacheObject) -> ObjectRef {
+    caller_cache_key(env.key_of, object)
+}
+
+/// The identity of a cache object under the caller's topology naming `key_of` (the
+/// names its edges, faces and vertices own their geometry under); other objects keep
+/// their [`brep_cache::arena_identity`].
+pub(crate) fn caller_cache_key(
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    object: CacheObject,
+) -> ObjectRef {
     match object {
-        CacheObject::Edge(e) | CacheObject::Curve(e) => (env.key_of)(EntityRef::Edge(e)),
-        CacheObject::Face(f) | CacheObject::Surface(f) => (env.key_of)(EntityRef::Face(f)),
-        CacheObject::Vertex(v) => (env.key_of)(EntityRef::Vertex(v)),
+        CacheObject::Edge(e) | CacheObject::Curve(e) => key_of(EntityRef::Edge(e)),
+        CacheObject::Face(f) | CacheObject::Surface(f) => key_of(EntityRef::Face(f)),
+        CacheObject::Vertex(v) => key_of(EntityRef::Vertex(v)),
         other => brep_cache::arena_identity(other),
     }
 }

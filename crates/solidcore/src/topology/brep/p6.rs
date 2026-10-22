@@ -12,12 +12,18 @@
 //! | [`test_closure_split_region_attempt`] | same, retaining native status and partial outputs |
 //!
 //! Deviations: pointers become arena ids; optional outputs become return values.
-//! Edits preserve the upstream mutations preceding an error. A closed-shell split stops at
-//! `CalculateBoundingBox` (`query.brep`) after its two `SmBrep::Notify` calls
-//! ([`crate::topology::brep::p2::notify`] with the caller's [`NotifyEnv`], statuses
-//! ignored; the new region gets its default `SmTopology` record when it is made, as
-//! `new SmRegion`), rather than approximating the infinite-region ray casting and the
-//! classification of the remaining faces, wires and shells.
+//! Edits preserve the upstream mutations preceding an error. A closed-shell split
+//! notifies through the caller's [`NotifyEnv`] ([`crate::topology::brep::p2::notify`],
+//! statuses ignored; the new region gets its default `SmTopology` record when it is
+//! made, as `new SmRegion`). Its ray fires (`FindAndSetInfiniteRegion`,
+//! `SmShell::RayFire`) read the B-rep's geometry under the caller's names
+//! ([`NotifyEnv::key_of`], the names its geometry owners carry). `IsInnerShell`'s
+//! ignored failure leaves `UNSURE`, which counts as inner. Upstream's face-use
+//! distribution loop reuses its index in the inner re-mark loop, so after each move the
+//! scan resumes past the count of distributed face uses; the port keeps that. A deleted
+//! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) is reset in its arena like a
+//! deleted shell, with the void flag `UNSURE`; the infinite region moves to the head
+//! of the region list.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -54,18 +60,27 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::geom::object::{NotifyOperation, ObjectRef};
+use crate::intersect::point_class::PointClassification;
 use crate::kernel::Kernel;
+use crate::math::{Point3, Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
+use crate::topology::brep::p1::SetRegionVoidType;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg};
+use crate::topology::brep::p5 as brep_p5;
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge::{NotifyEnv, NotifyState};
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::shell::{self, ShellMembers, ShellType};
+use crate::topology::edgeuse::p2::{self as eu2, StepOffOptions};
+use crate::topology::edgeuse::p3 as eu3;
+use crate::topology::shell::{
+    self, ShellMembers, ShellRayAttempt, ShellRayInput, ShellRayState, ShellType,
+};
 use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{self as tr, Entity, Marks};
 use crate::topology::{
-    Brep, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
+    Brep, BrepId, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
     Loopuse, LoopuseId, LoopuseStart, Region, RegionId, Shell, ShellId, VertexId, Vertexuse,
     VertexuseId, VertexuseOwner,
 };
@@ -1123,8 +1138,11 @@ fn assign_uv_curves(
 /// Split a region when the seed face use bounds a closed set of neighbors.
 /// Returns `(new_shell, new_region)`. Already separated mates, lamina faces and
 /// non-closed traversals succeed without creating either object. Closed sets move
-/// to a new solid region/shell, both notified through `env`, before the B-rep box
-/// defers on `query.brep`.
+/// to a new solid region/shell, both notified through `env`; with
+/// `do_infinite_region_testing` a split infinite region is found again. Face uses
+/// joined to the split only by a vertex, the old shell's wires and the old region's
+/// other shells go to the side a ray fired at the inner shell finds; emptied shells
+/// and regions are deleted (the outputs keep their ids, as upstream's pointers).
 /// The caller's marks and kernel context persist across calls. Every acquired
 /// mark lock is released on success and on error.
 pub fn test_closure_split_region(
@@ -1197,7 +1215,7 @@ fn test_closure_split_region_attempt_with_state(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
-    _do_infinite_region_testing: bool,
+    do_infinite_region_testing: bool,
     start: FaceuseId,
 ) -> Result<RegionSplitAttempt> {
     let mut attempt = RegionSplitAttempt {
@@ -1205,7 +1223,15 @@ fn test_closure_split_region_attempt_with_state(
         shell: None,
         region: None,
     };
-    let status = split_region_into(k, brep, marks, env, start, &mut attempt);
+    let status = split_region_into(
+        k,
+        brep,
+        marks,
+        env,
+        do_infinite_region_testing,
+        start,
+        &mut attempt,
+    );
     finish_split_attempt(attempt, status)
 }
 
@@ -1214,6 +1240,7 @@ fn split_region_into(
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
+    do_infinite_region_testing: bool,
     start: FaceuseId,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
@@ -1227,16 +1254,27 @@ fn split_region_into(
         return Ok(());
     }
     let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
-    let result = split_closed(k, brep, marks, env, start, &lock, attempt);
+    let result = split_closed(
+        k,
+        brep,
+        marks,
+        env,
+        do_infinite_region_testing,
+        start,
+        &lock,
+        attempt,
+    );
     lock.release(std::slice::from_mut(&mut k.context))?;
     result
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn split_closed(
     k: &mut Kernel,
     brep: &mut Brep,
     marks: &mut Marks,
     env: &mut NotifyState<'_>,
+    do_infinite_region_testing: bool,
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
@@ -1262,9 +1300,9 @@ fn split_closed(
     let old_region = split_link(brep.shell(old_shell)?.region)?;
     // Keep these native list queries in their upstream order; arena iteration
     // would include detached objects and change the traversal.
-    let _wires = shell::wire_edges(k, brep, old_shell)?;
-    let _faceuses = brep.shell(old_shell)?.get_faceuses()?;
-    let _shells = brep.region(old_region)?.shells.clone();
+    let wires = shell::wire_edges(k, brep, old_shell)?;
+    let faceuses = brep.shell(old_shell)?.get_faceuses()?;
+    let shells = brep.region(old_region)?.shells.clone();
     let mut replaced = Vec::new();
     tr::faceuse_shell_replacement(k, brep, marks, start, new_shell, &mut replaced, lock)?;
     let mut other = Vec::new();
@@ -1307,24 +1345,579 @@ fn split_closed(
     // just need a rough bound for the radius of the brep.
     let brep_bbox = qbrep::calculate_bounding_box(
         k,
-        brep,
+        &mut *brep,
         BoundingBoxOptions {
             approx: true,
             tight: false,
             expand_by_zone_tol_3d: true,
         },
     )?;
-    let _brep_sphere = brep_bbox.sphere_bound();
+    let brep_radius = brep_bbox.sphere_bound().radius;
+    // the B-rep's ray fires (SmShell::RayFire through FindAndSetInfiniteRegion and below)
+    // read its geometry under the caller's names, the ones its owners carry
+    let key_of = env.key_of;
+    let keys = |object| brep_p2::caller_cache_key(key_of, object);
+    let query = qbrep::BrepQuery::new(qbrep::BrepIdentity {
+        brep_id: BrepId::from_index(0),
+        keys: &keys,
+        owner_of: &|_| None,
+    });
 
-    // OMITTED SmBrep.cpp:27966-28583 (this unit's own remainder, not a callee):
-    // infinite-region testing (FindAndSetInfiniteRegion), the inner-shell choice
-    // (IsInnerShell), redistribution of faces, wires and shells joined only by
-    // vertices (SmShell::RayFire) and empty-shell/region cleanup. See
-    // plan/findings.md (topology.brep_p6).
-    Err(SolidError::unported(
-        "SmBrep::TestClosureSplitRegion (after CalculateBoundingBox, SmBrep.cpp:27966-28583)",
-        "topology.brep_p6",
-    ))
+    // If the oldRegion was the infiniteRegion,
+    // figure out which child is the new InfiniteRegion, if requested.
+    if do_infinite_region_testing && Some(old_region) == brep.infinite_region() {
+        // Find and set the actual InfiniteRegion (using the cached bbox).
+        brep_p5::find_and_set_infinite_region(
+            k,
+            brep,
+            &query,
+            Some(new_shell),
+            SetRegionVoidType::InfiniteRegionSwap,
+            Some(&brep_bbox),
+        )?;
+    }
+
+    // new_shell holds `replaced` (connected to start through edge uses, marked);
+    // old_shell holds `other` (connected to start's mate through edge uses, marked)
+    // and any faceuses connected to start only through vertex uses (not marked).
+    let mut replaced_all = replaced.clone();
+    replaced_all.extend_from_slice(&other);
+    let num_replaced = replaced_all.len();
+    let mut shells_for_rays = None;
+
+    // when faceuses or wires or nested shells remain to be distributed - find and
+    // remember an InnerShell for upcoming ray casting
+    if faceuses.len() != num_replaced || !wires.is_empty() || shells.len() > 1 {
+        // Use IsInnerShell, don't always trust Infinite region. Its status is
+        // ignored: a failure leaves UNSURE, which counts as inner.
+        let new_is_inner = native(tr::is_inner_shell(k, brep, &replaced))?.unwrap_or(true);
+        // For the raycasting to work we need to work with one InnerShell and the OtherShell
+        shells_for_rays = Some(if new_is_inner {
+            RayShells {
+                inner: new_shell,
+                other: old_shell,
+            }
+        } else {
+            RayShells {
+                inner: old_shell,
+                other: new_shell,
+            }
+        });
+    }
+    let split = SplitShells {
+        old_shell,
+        old_region,
+        new_shell,
+        new_region,
+        brep_radius,
+    };
+
+    // when faceuses remain to be distributed
+    if faceuses.len() != num_replaced {
+        let rays = split_link(shells_for_rays)?;
+        distribute_faceuses(
+            k,
+            brep,
+            marks,
+            lock,
+            &query,
+            &split,
+            rays,
+            &faceuses,
+            &mut replaced_all,
+        )?;
+    }
+
+    // Next, process all wire edges: classify by ray-firing again.
+    if !wires.is_empty() {
+        let rays = split_link(shells_for_rays)?;
+        distribute_wires(k, brep, marks, lock, &query, &split, rays, wires)?;
+    }
+
+    // Next do shell nesting: the other shells in the region of old_shell (wire and
+    // vertex shells too).
+    if shells.len() > 1 {
+        let rays = split_link(shells_for_rays)?;
+        nest_shells(k, brep, &query, &split, rays, &shells)?;
+    }
+
+    remove_empty_split_objects(k, brep, env, old_shell, new_shell)
+}
+
+// The shells and regions of a closed-shell split.
+struct SplitShells {
+    old_shell: ShellId,
+    old_region: RegionId,
+    new_shell: ShellId,
+    new_region: RegionId,
+    // radius of the B-rep's sphere bound, so the ray fires skip its box
+    brep_radius: f64,
+}
+
+// One inner shell and the other shell of the split, for the ray fires.
+#[derive(Clone, Copy)]
+struct RayShells {
+    inner: ShellId,
+    other: ShellId,
+}
+
+impl SplitShells {
+    // The shell for a point whose ray fire at the inner shell found `region`:
+    // none is the other shell.
+    fn move_shell(&self, rays: RayShells, region: Option<RegionId>) -> ShellId {
+        match region {
+            None => rays.other,
+            Some(r) if r == self.new_region => self.new_shell,
+            Some(_) => self.old_shell,
+        }
+    }
+}
+
+// A call whose native status the split ignores or handles itself: `Ok(None)` for a
+// native failure; only `Unported` and the port's representation failures propagate.
+fn native<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(value) => Ok(Some(value)),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::NotFound { .. }),
+        ) => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+// `pInnerShell->RayFire(pnt, vec, tol, rpRegion, sPointClass, &dBrepRadius)` under
+// `SmTemporaryChangeValue<SmBoolean> sChange(m_bEditingEnabled, FALSE)`.
+fn fire_at_inner_shell(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    query: &qbrep::BrepQuery<'_>,
+    split: &SplitShells,
+    rays: RayShells,
+    input: (Point3, Vec3, f64),
+    state: ShellRayState<CacheObject>,
+) -> ShellRayAttempt<CacheObject> {
+    let (start, direction, zone_tolerance) = input;
+    let editing = brep.editing_enabled();
+    brep.set_editing_enabled(false);
+    let attempt = shell::ray_fire(
+        k,
+        brep,
+        query.identity().brep_id,
+        rays.inner,
+        query,
+        ShellRayInput {
+            start,
+            direction,
+            zone_tolerance,
+            sphere_bound: Some(split.brep_radius),
+            state,
+        },
+    );
+    brep.set_editing_enabled(editing);
+    attempt
+}
+
+// `SmTol::GetZoneTol3d(pEdge)`: the `SmTopology` branch of the `SmObject` overload,
+// `pEdge->GetTolerance()`.
+fn edge_zone_tol_3d(brep: &Brep, edge: EdgeId) -> Result<f64> {
+    crate::topology::edge::tolerance(brep, edge)
+}
+
+// Distribute the old shell's faceuses joined to the split only by a vertex: a ray
+// fired from a point on each one at the inner shell finds its shell.
+#[allow(clippy::too_many_arguments)]
+fn distribute_faceuses(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    lock: &MarkLock,
+    query: &qbrep::BrepQuery<'_>,
+    split: &SplitShells,
+    rays: RayShells,
+    faceuses: &[FaceuseId],
+    replaced_all: &mut Vec<FaceuseId>,
+) -> Result<()> {
+    let mark = lock.mark_type();
+    let mut more_replaced = Vec::new();
+    // for every unmarked oldShell original faceuse - ray cast to find containing shell
+    let mut ii = 0;
+    while let Some(&fu) = faceuses.get(ii) {
+        // skip marked faceuses
+        if marks.is_marked(k, Entity::Faceuse(fu), mark) {
+            ii += 1;
+            continue;
+        }
+        // arrive here when a Faceuse was found that is not yet distributed.
+        // It will be a faceuse connected to start through a vertexuse not an edgeuse.
+        let edgeuses = eu::faceuse_edgeuses(brep, fu, false, None)?;
+        // get first edgeuse and its edge
+        let Some(&first_eu) = edgeuses.first() else {
+            return Err(SolidError::sm_err(OP));
+        };
+        let edge = split_link(brep.edgeuse(first_eu)?.edge)?;
+        let edge_zone_tol = edge_zone_tol_3d(brep, edge)?;
+
+        // classification point locals
+        let mut step_dist = 20.0 * edge_zone_tol;
+        let ray = Vec3::new(1.0, 0.0, 0.0);
+        let mut state = ShellRayState {
+            region: None,
+            classification: PointClassification::<CacheObject>::new(edge_zone_tol),
+        };
+
+        // find a point to classify somewhere on the current face, for 100 iterations
+        // with increasing stepOff distances, until the 1st successful rayfire (usually
+        // the 1st iteration) or until we step off a sliver surface (error)
+        for jj in 0..100 {
+            let mut last_try = false;
+            // pick a point on the Face (close to the edge)
+            let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
+            let stepped = native(eu2::evaluate_binormal_step_off(
+                k,
+                brep,
+                first_eu,
+                parameter,
+                step_dist,
+                &StepOffOptions::default(),
+            ))?;
+            let point = if let Some(eval) = stepped {
+                eval.point
+            } else {
+                // stepped off the surface (or it failed to evaluate): if not the 1st
+                // iteration cascade the error, else give classification one try at a
+                // zero stepOffDistance point
+                if jj > 0 {
+                    return Err(SolidError::sm_err(OP));
+                }
+                last_try = true;
+                eu3::evaluate_binormal(
+                    k,
+                    brep,
+                    first_eu,
+                    parameter,
+                    false,
+                    &eu3::BinormalOptions::default(),
+                )?
+                .point
+            };
+
+            // fire a ray from faceuse to the shell known to be an InnerShell
+            let attempt = fire_at_inner_shell(
+                k,
+                brep,
+                query,
+                split,
+                rays,
+                (point, ray, edge_zone_tol),
+                state,
+            );
+            state = attempt.state;
+            if native(attempt.status)?.is_none() {
+                // binormal stepoff failed (maybe a sliver surface) and classification
+                // of the point projected from the edge failed: cascade the error
+                if last_try {
+                    return Err(SolidError::sm_err(OP));
+                }
+                // else increase binormal step off distance and try again
+                step_dist *= 2.0;
+                continue;
+            }
+            break;
+        }
+
+        // The faceuse either classifies to the InnerShell or is in the OtherShell
+        let move_shell = split.move_shell(rays, state.region);
+
+        // mark and move faceuse and all faceuses connected to it through edgeuses to
+        // the MoveShell
+        tr::faceuse_shell_replacement(k, brep, marks, fu, move_shell, &mut more_replaced, lock)?;
+        // add MoreReplacedFaceuses to the list of distributed faceuses
+        replaced_all.extend_from_slice(&more_replaced);
+
+        // the mark has been incremented - so remark all ReplacedFaceuses so this loop
+        // can continue. Upstream's remark loop reuses this loop's index, so the scan
+        // resumes after index `replaced_all.len()`.
+        for &replaced in replaced_all.iter() {
+            marks.mark(k, Entity::Faceuse(replaced), mark);
+        }
+        ii = replaced_all.len() + 1;
+    }
+    Ok(())
+}
+
+// Distribute the old shell's wires: a ray fired from a point on each connected set of
+// wires at the inner shell finds its shell.
+#[allow(clippy::too_many_arguments)]
+fn distribute_wires(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    lock: &MarkLock,
+    query: &qbrep::BrepQuery<'_>,
+    split: &SplitShells,
+    rays: RayShells,
+    wires: Vec<EdgeId>,
+) -> Result<()> {
+    let mark = lock.mark_type();
+    let mut wire_list: Vec<Option<EdgeId>> = wires.into_iter().map(Some).collect();
+    // get the 1st oldShell->Wire
+    let mut wire = wire_list.first().copied().flatten();
+    let wire_zone_tol = edge_zone_tol_3d(brep, split_link(wire)?)?;
+    let mut connected = Vec::new();
+
+    // wires remain to classify and place
+    while let Some(current) = wire {
+        // increment Mark value
+        lock.new_mark(std::slice::from_mut(&mut k.context))?;
+        // mark and get all wire edges connected to the wire through edge-vertex
+        // connections
+        tr::collect_wire_edges(k, brep, marks, Some(current), mark, &mut connected, None)?;
+
+        // a point on the wire to classify against the Inner shell
+        let primary = split_link(eu::primary_edgeuse(brep, current)?)?;
+        let point = eu3::normalized_evaluate(k, brep, primary, 0.4567, false, false, true)?.point;
+
+        // Classify the point relative to InnerShell with RayFire
+        let state = ShellRayState {
+            region: None,
+            classification: PointClassification::<CacheObject>::new(wire_zone_tol),
+        };
+        let attempt = fire_at_inner_shell(
+            k,
+            brep,
+            query,
+            split,
+            rays,
+            (point, Vec3::new(1.0, 0.0, 0.0), wire_zone_tol),
+            state,
+        );
+        attempt.status?;
+        // the point's region decides, not its classification (which may be a face,
+        // an edge, ...)
+        let move_shell = split.move_shell(rays, attempt.state.region);
+
+        // for every connected wire: assign the shell to its edgeuses
+        for &moved in &connected {
+            let eu1 = split_link(eu::primary_edgeuse(brep, moved)?)?;
+            let eu2 = split_link(eu::mate(brep, eu1)?)?;
+            brep.edgeuse_mut(eu1)?.owner = EdgeuseOwner::Shell(Some(move_shell));
+            brep.edgeuse_mut(eu2)?.owner = EdgeuseOwner::Shell(Some(move_shell));
+        }
+
+        // remove all edges traversed from the wire edge list; the next wire is any
+        // remaining one, or none when no wires are left
+        wire = None;
+        for slot in &mut wire_list {
+            let Some(edge) = *slot else {
+                continue;
+            };
+            if marks.is_marked(k, Entity::Edge(edge), mark) {
+                *slot = None;
+            } else {
+                wire = Some(edge);
+            }
+        }
+    }
+    Ok(())
+}
+
+// Shell nesting: each other shell of the old region moves to the region a ray fired
+// from a point on it at the inner shell finds.
+fn nest_shells(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    query: &qbrep::BrepQuery<'_>,
+    split: &SplitShells,
+    rays: RayShells,
+    shells: &[ShellId],
+) -> Result<()> {
+    // Keep track of whether we move any shells around.
+    let mut moved_shell = false;
+    for &shell_id in shells {
+        // skip oldShell (and newShell should not be on the list)
+        if shell_id == split.old_shell || shell_id == split.new_shell {
+            continue;
+        }
+        let mut point = shell_point(k, brep, shell_id)?;
+
+        // Classify the point against InnerShell.
+        let brep_zone_tol = brep.tolerance();
+        let tol = EFF_ZERO_SQRT * (1.0 + point.max_dimension());
+        let ray = Vec3::new(1.0, 1.0, 1.0);
+        // (a unit diagonal: Unitize cannot fail; its status is not checked)
+        let ray = ray.unitize().unwrap_or(ray);
+        point += ray * tol;
+        let state = ShellRayState {
+            region: None,
+            classification: PointClassification::<CacheObject>::new(brep_zone_tol),
+        };
+        let attempt = fire_at_inner_shell(
+            k,
+            brep,
+            query,
+            split,
+            rays,
+            (point, ray, brep_zone_tol),
+            state,
+        );
+        attempt.status?;
+
+        // Default to OtherShell: if the ray-fire didn't hit anything, the shell is in
+        // the OtherShell region.
+        let found = match attempt.state.region {
+            Some(region) => region,
+            None => split_link(brep.shell(rays.other)?.region)?,
+        };
+        let old = split_link(brep.shell(shell_id)?.region)?;
+        // skip the move when they are the same: it might break 'the region's 1st
+        // shell is the outer shell' rule
+        if old != found {
+            native(region_remove(brep, old, shell_id))?;
+            shell::region_post_insert_shell(brep, found, shell_id)?;
+            moved_shell = true;
+        }
+    }
+
+    // If we moved any shells around, make sure that the first shell is an outside
+    // Faceuse shell (needed for every region but the infinite one, which is not
+    // known for sure yet).
+    if moved_shell {
+        native(shell::order_region_shells(k, brep, split.old_region))?;
+    }
+    Ok(())
+}
+
+// A point on a shell to classify: a point stepped off the first edge of its first
+// face use (or the vertex of its vertex loop), a point on its wire, or its vertex.
+fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3> {
+    let shell = brep.shell(shell_id)?;
+    if shell.is_faceuse_shell() {
+        let fu = shell
+            .first_faceuse()?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let edgeuses = eu::faceuse_edgeuses(brep, fu, false, None)?;
+        if let Some(&first_eu) = edgeuses.first() {
+            let edge = split_link(brep.edgeuse(first_eu)?.edge)?;
+            let step_dist = 20.0 * crate::topology::edge::tolerance(brep, edge)?;
+            let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
+            return Ok(eu2::evaluate_binormal_step_off(
+                k,
+                brep,
+                first_eu,
+                parameter,
+                step_dist,
+                &StepOffOptions::default(),
+            )?
+            .point);
+        }
+        let loopuses = eu::faceuse_loopuses(brep, fu, false, None)?;
+        let Some(&lu) = loopuses.first() else {
+            return Err(SolidError::sm_err(OP));
+        };
+        if !crate::topology::loopuse::is_vertex_loopuse(brep, lu)? {
+            return Err(SolidError::sm_err(OP));
+        }
+        let vu = split_link(crate::topology::loopuse::vertexuse(brep, lu)?)?;
+        let vertex = split_link(brep.vertexuse(vu)?.vertex)?;
+        return crate::topology::vertex::point(brep, vertex);
+    }
+    if shell.is_wire_shell() {
+        let edge = shell
+            .wire_edge(brep)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let primary = split_link(eu::primary_edgeuse(brep, edge)?)?;
+        return Ok(eu3::normalized_evaluate(k, brep, primary, 0.4567, false, false, true)?.point);
+    }
+    if shell.is_vertex_shell() {
+        let vertex = shell
+            .vertex(brep)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        return crate::topology::vertex::point(brep, vertex);
+    }
+    // a shell of no known type leaves the point as constructed
+    Ok(Point3::UNDEF)
+}
+
+// Delete the split's emptied shells and regions: the old shell, then its region, then
+// the new shell, then its region. A deleted region moves the infinite region to the
+// head of the region list.
+fn remove_empty_split_objects(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    env: &mut NotifyState<'_>,
+    old_shell: ShellId,
+    new_shell: ShellId,
+) -> Result<()> {
+    for shell_id in [old_shell, new_shell] {
+        let region = split_link(brep.shell(shell_id)?.region)?;
+        // When the shell is empty - delete it
+        if shell::shell_list_size(brep, shell_id)? == 0 {
+            native(region_remove(brep, region, shell_id))?;
+            delete_shell(k, brep, env, shell_id)?;
+        }
+        // When its region is empty - delete it
+        if brep.region(region)?.shells.is_empty() {
+            native(brep_remove_region(brep, region))?;
+            delete_region(k, brep, env, region)?;
+            // Make sure infinite region points where it should.
+            let head = crate::topology::brep::p1::regions(brep, None)?
+                .first()
+                .copied();
+            brep.set_infinite_region(head);
+        }
+    }
+    Ok(())
+}
+
+// `this->Remove(pRegion)` (the inline `SmOwningTopology::Remove`): takes the region
+// off the B-rep's region list; removing the head passes it to the next region, or
+// NULL when the list empties. `SM_ERR` when the region is not on the list.
+fn brep_remove_region(brep: &mut Brep, region: RegionId) -> Result<()> {
+    let list = crate::topology::brep::p1::regions(brep, None)?;
+    if !list.contains(&region) {
+        return Err(SolidError::sm_err(OP));
+    }
+    let head = list.first().copied();
+    let new_head = if head == Some(region) {
+        list.get(1).copied()
+    } else {
+        head
+    };
+    brep.region_mut(region)?.in_brep = false;
+    brep.set_region_list_head(new_head);
+    Ok(())
+}
+
+// `delete pRegion` of an emptied region: `~SmRegion` notifies `SM_NO_DESTRUCTION`
+// and sets the void flag to `UNSURE`. An arena record cannot be freed, so it is
+// reset (already off the B-rep's list, so unreachable).
+fn delete_region(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    env: &mut NotifyState<'_>,
+    region: RegionId,
+) -> Result<()> {
+    let this = (env.key_of)(EntityRef::Region(region));
+    env.with_env(k, |env| {
+        ignore_status(crate::topology::topology::notify(
+            env.records,
+            env.attributes,
+            env.context.as_deref_mut(),
+            NotifyOperation::Destruction,
+            this,
+            Some(this),
+            None,
+            None,
+        ))
+    })?;
+    *brep.region_mut(region)? = Region {
+        in_brep: false,
+        shells: Vec::new(),
+        is_void: crate::topology::brep_data::UNSURE,
+    };
+    Ok(())
 }
 
 /// A status upstream ignores: only [`SolidError::Unported`] and the port's
@@ -1350,7 +1943,7 @@ mod tests {
     use crate::topology::shell::ShellMembers;
 
     #[test]
-    fn split_releases_its_lock_and_preserves_the_callers_lock_on_dependency_error() {
+    fn a_closed_face_splits_off_and_releases_only_its_own_lock() {
         let mut k = Kernel::default();
         let mut b = Brep::new();
         let region = b
@@ -1402,15 +1995,11 @@ mod tests {
             true,
             first,
         );
-        // the B-rep box is ported (query.brep); the split stops where this unit's port
-        // ends (the OMITTED remainder after CalculateBoundingBox)
-        assert!(matches!(
-            result,
-            Err(SolidError::Unported {
-                unit: "topology.brep_p6",
-                ..
-            })
-        ));
+        // both uses were distributed by the traversals: no rays, no emptied shell
+        let attempt = result.unwrap();
+        assert!(attempt.status.is_ok());
+        assert_eq!(attempt.shell, Some(ShellId::from_index(1)));
+        assert_eq!(attempt.region, Some(RegionId::from_index(1)));
         // the new region got its (default) SmTopology record
         assert_eq!(state.records.len(), 2);
         assert!(k.context.is_mark_locked(MarkType::Mark));

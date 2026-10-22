@@ -896,9 +896,10 @@ mod tests {
         ] {
             assert_eq!(deferred_at(&r), Some("topology.brep_p4"));
         }
-        // the closed analytic face stops in MakeFaceTopology
+        // the closed analytic face gets through the region split, then stops at
+        // SmSurface::DropCurve
         for r in [create_sphere(k, o(), 5.0), create_torus(k, o(), 10.0, 2.0)] {
-            assert_eq!(deferred_at(&r), Some("topology.brep_p6"));
+            assert_eq!(deferred_at(&r), Some("intersect.surface_drop_lib_p3"));
         }
         // partial solids sweep a profile (topology sweep) past SmFace::FindVertexSector
         // until SmBrep::DeleteEdge
