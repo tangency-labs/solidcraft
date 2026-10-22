@@ -70,83 +70,68 @@ pub fn open(app: &mut SolveApp, path: &str) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.kicad_import.take() else { return };
 
-    let (closed, choice) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", crate::i18n::tr_label("Open KiCad PCB"))
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", crate::i18n::tr_label("Open KiCad PCB"))
         .cards(2.0)
         .fields()
-        .actions(crate::i18n::tr("ui.open"), crate::i18n::tr("ui.cancel"), None)
+        .actions(crate::i18n::tr("Open"), crate::i18n::tr("Cancel"), None)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, dialog.problem().is_none(), |ui| {
             ui.label(crate::i18n::tr_label("The board substrate always comes in, with its cutouts and drilled holes."));
-            ui.label(crate::i18n::tr_label("Choose what to build with it:"));
             ui.add_space(6.0);
-            // One column: each switch with its explanation indented under it, so a long
-            // translation wraps instead of squeezing a label column.
-            let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("3D component models"));
-            crate::scenario::publish_handle("kicad:components", r.rect.center());
-            ui.indent("kicad_components_hint", |ui| {
-                ui.label(crate::i18n::tr_label("STEP and VRML models referenced by footprints"));
-            });
-            ui.add_space(6.0);
+            egui::Grid::new("kicad_import_grid").num_columns(2).min_col_width(200.0).spacing([12.0, 6.0]).show(ui, |ui| {
+                let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("3D component models"));
+                crate::scenario::publish_handle("kicad:components", r.rect.center());
+                ui.end_row();
 
-            ui.label(crate::i18n::tr_label("Copper (traces, vias, zones, pads)"));
-            ui.indent("kicad_copper_choice", |ui| {
-                for (mode, label) in [
-                    (KicadCopper::None, "None"),
-                    (KicadCopper::Overlay, "Overlay on the board"),
-                    (KicadCopper::Mesh, "Modelled"),
-                ] {
-                    let r = ui.radio(dialog.copper == mode, crate::i18n::tr_label(label));
-                    crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
-                    if r.clicked() {
-                        dialog.copper = mode;
+                let copper_label = ui.label(crate::i18n::tr_label("Copper (traces, vias, zones, pads)"));
+                crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
+                ui.vertical(|ui| {
+                    for (mode, label) in [
+                        (KicadCopper::None, "None"),
+                        (KicadCopper::Overlay, "Overlay on the board"),
+                        (KicadCopper::Mesh, "Modelled"),
+                    ] {
+                        let r = ui.radio(dialog.copper == mode, crate::i18n::tr_label(label));
+                        crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
+                        if r.clicked() {
+                            dialog.copper = mode;
+                        }
                     }
-                }
-            });
-            ui.add_space(6.0);
+                });
+                ui.end_row();
 
-            let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Silkscreen"));
-            crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
-            ui.indent("kicad_silkscreen_hint", |ui| {
-                ui.label(crate::i18n::tr_label("Lines and filled shapes on the front and back silk layers"));
-            });
-            ui.add_space(6.0);
+                let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Silkscreen"));
+                crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
+                ui.end_row();
 
-            ui.horizontal(|ui| {
                 let r = ui.color_edit_button_srgb(&mut dialog.color);
                 crate::scenario::publish_handle("kicad:color", r.rect.center());
                 ui.label(crate::i18n::tr_label("Board colour"));
-            });
-            ui.add_space(4.0);
+                ui.end_row();
 
-            let r = ui.checkbox(&mut dialog.board_thickness, crate::i18n::tr_label("Use the board's thickness"));
-            crate::scenario::publish_handle("kicad:board_thickness", r.rect.center());
-            ui.indent("kicad_thickness", |ui| {
+                let r = ui.checkbox(&mut dialog.board_thickness, crate::i18n::tr_label("Use the board's thickness"));
+                crate::scenario::publish_handle("kicad:board_thickness", r.rect.center());
                 let t = ui.add_enabled(
                     !dialog.board_thickness,
                     egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3),
                 );
                 crate::scenario::publish_handle("kicad:thickness", t.rect.center());
+                ui.end_row();
             });
             if let Some(problem) = dialog.problem() {
                 ui.add_space(4.0);
                 ui.colored_label(crate::theme::Tokens::get().error, crate::i18n::tr_label(problem));
             }
         });
-    let action = match choice {
-        crate::ui_kit::Action::Ok if dialog.problem().is_none() => Some("import"),
-        crate::ui_kit::Action::Ok | crate::ui_kit::Action::Cancel => Some("cancel"),
-        _ if closed => Some("cancel"),
-        _ => None,
-    };
 
     match action {
-        Some("import") if dialog.problem().is_none() => {
+        crate::ui_kit::Action::Ok if dialog.problem().is_none() => {
             let params = dialog.params();
             app.open_path_async_with_options(&dialog.path, params);
             app.set_status(format!("{}: {}", crate::i18n::tr_label("Importing KiCad board"), dialog.path), false);
         }
-        Some("cancel") => {}
-        _ => app.kicad_import = Some(dialog),
+        crate::ui_kit::Action::None if !closed => app.kicad_import = Some(dialog),
+        _ => {}
     }
 }
 
@@ -239,6 +224,12 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         open(&mut h.app, "board.kicad_pcb");
         h.frames(2);
+        // The shared footer is the only button row, with Open as its primary action.
+        assert!(h.widget("Open").is_some() && h.widget("Cancel").is_some(), "the footer is missing its actions");
+        assert!(h.widget("Import").is_none(), "a second Import row is still drawn");
+        // A long switch label is not squeezed into a narrow column.
+        let label = crate::scenario::rect_of("kicad:copper_label").expect("the copper label was drawn");
+        assert!(label.width() > 150.0, "the copper label is squeezed: {label:?}");
         for label in [
             "3D component models",
             "Copper (traces, vias, zones, pads)",
