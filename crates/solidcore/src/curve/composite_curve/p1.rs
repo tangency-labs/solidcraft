@@ -106,6 +106,7 @@ use crate::curve::curve::p2::{
 };
 use crate::curve::curve::p3::compute_crvs_normal;
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::assert_array::ObjectKey;
@@ -1778,6 +1779,41 @@ pub fn curve_classify(
     orig_curves: &[&Curve],
     originator: Option<&Curve>,
 ) -> Result<bool> {
+    curve_classify_cached(
+        k,
+        trimmed_offset,
+        offset_distance,
+        xsect_tol_3d,
+        orig_curves,
+        originator,
+        &mut OrigCurveCaches::default(),
+    )
+}
+
+/// The curve caches of the original curves of [`curve_classify`]'s point solves,
+/// kept across calls for the same original curves (performance only: upstream keeps
+/// each cache on its curve; see [`Curve::global_point_solve_cached`]). Slot `i`
+/// belongs to `orig_curves[i]`, which must not change while the slots are used.
+#[derive(Debug, Default)]
+pub(crate) struct OrigCurveCaches(Vec<Option<CurveCache<OrigHandle>>>);
+
+/// [`curve_classify`] with the original curves' caches kept in `caches` (see
+/// [`OrigCurveCaches`]): a cache is built where a solve first needs it and reused by
+/// later calls with the same original curves (a cache's handle is the curve's
+/// natural interval, constant while the curve is).
+pub(crate) fn curve_classify_cached(
+    k: &Kernel,
+    trimmed_offset: &Curve,
+    offset_distance: f64,
+    xsect_tol_3d: f64,
+    orig_curves: &[&Curve],
+    originator: Option<&Curve>,
+    caches: &mut OrigCurveCaches,
+) -> Result<bool> {
+    if caches.0.len() < orig_curves.len() {
+        caches.0.resize_with(orig_curves.len(), || None);
+    }
+
     // locals
     let ivl = trimmed_offset.natural_interval();
 
@@ -1803,7 +1839,7 @@ pub fn curve_classify(
     let pnt = trimmed_offset.evaluate_point(k, ivl.evaluate(0.5))?;
     let samples = [pnt];
 
-    for orig in orig_curves {
+    for (orig, cache) in orig_curves.iter().zip(caches.0.iter_mut()) {
         for &p in &samples {
             let oi = orig.natural_interval();
             let opts = GlobalPointSolveOptions {
@@ -1811,7 +1847,7 @@ pub fn curve_classify(
                 handle: Some(OrigHandle(oi)),
                 ..GlobalPointSolveOptions::default()
             };
-            let sols = orig.global_point_solve(
+            let sols = orig.global_point_solve_cached(
                 k,
                 &oi,
                 SolverOperation::Minimize,
@@ -1819,6 +1855,7 @@ pub fn curve_classify(
                 xsect_tol_3d,
                 SolutionRequested::Single,
                 &opts,
+                cache,
             )?;
             if let Some(s) = sols.get(0) {
                 if s.start.solution_value < cutoff {

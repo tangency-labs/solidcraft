@@ -105,8 +105,8 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::geom::geom_utility::p2::ContinuityType;
 
 use super::p1::{
-    bspline_of, compute_bezier_approximation, invalid, BezierAux2d, BezierPatch, FaceContainment,
-    SurfaceCache, FACE_TYPE,
+    bspline_of, compute_bezier_approximation_memo, invalid, BezierAux2d, BezierPatch,
+    FaceContainment, SurfaceCache, FACE_TYPE,
 };
 use super::p2::{
     create_approximate_bezier_patch_block, create_bezier_patch_block, ToleranceTester,
@@ -597,11 +597,19 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 // (zero-filled memory with the parent patch's sizes)
                 let mut b1 = zeroed_like(&parent_bezier)?;
                 let mut b2 = zeroed_like(&parent_bezier)?;
-                let surface = self.surface().clone();
                 let d1 = self.aux(node1)?.uv_domain;
                 let d2 = self.aux(node2)?.uv_domain;
-                ignore(compute_bezier_approximation(k, &surface, &d1, &mut b1))?;
-                ignore(compute_bezier_approximation(k, &surface, &d2, &mut b2))?;
+                let (surface, mut memo) = self.surface_and_pole_memo();
+                ignore(compute_bezier_approximation_memo(
+                    k,
+                    surface,
+                    &d1,
+                    &mut b1,
+                    memo.as_deref_mut(),
+                ))?;
+                ignore(compute_bezier_approximation_memo(
+                    k, surface, &d2, &mut b2, memo,
+                ))?;
                 (b1, b2)
             };
 
@@ -800,6 +808,23 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// As [`SurfaceCache::subdivide_to_tolerances`], with `tester`'s errors.
     pub fn subdivide_to_tolerances_with(
+        &mut self,
+        k: &Kernel,
+        node: NodeId,
+        depth: u32,
+        tester: &mut ToleranceTester<'_, O>,
+    ) -> Result<()> {
+        // performance only: the outermost call memoises the singularity test's pole
+        // data for the splits below it (see the deviations of `surface_cache::p1`)
+        let owns_memo = self.begin_pole_memo();
+        let r = self.subdivide_to_tolerances_body(k, node, depth, tester);
+        if owns_memo {
+            self.end_pole_memo();
+        }
+        r
+    }
+
+    fn subdivide_to_tolerances_body(
         &mut self,
         k: &Kernel,
         node: NodeId,

@@ -17,7 +17,8 @@
 //! | [`PatchBoundaryBoundingPlanes::boundary_uv_end_points`] | `GetBoundaryUVEndPoints`                   |
 //! | [`check_bounding_plane_separating_halfspace`]     | `sm_CheckBoundingPlaneSeparatingHalfspace` (static) |
 //! | [`compute_plane_from_3_points`], [`PlaneFrom3Points`] | `sm_ComputePlaneFrom3Points` (static)        |
-//! | [`compute_bezier_approximation`]                  | `sm_ComputeBezierApproximation` (static)         |
+//! | [`compute_bezier_approximation`], `compute_bezier_approximation_memo` (crate) | `sm_ComputeBezierApproximation` (static) |
+//! | `PoleMemo`                                      | (none: see the singularity memo deviation)       |
 //! | [`cull_array`]                                    | `sm_CullArray` (static)                          |
 //! | [`BezierAux2d`], [`BezierAux2d::uv_domain`]       | `SmBezierAux2d`, `GetUVDomain`                   |
 //! | [`SurfaceCache::polar_box`], [`SurfaceCache::polar_box_unstored`] | `SmBezierAux2d::GetPolarBox`     |
@@ -114,6 +115,16 @@
 //!   form a cycle it never ends (its stack grows without bound). The port stops after
 //!   more pops than an acyclic tree allows (the initial stack length plus one, times
 //!   the node count plus one) with [`SolidError::InvalidInput`].
+//! - **Singularity memo (performance only).** `sm_ComputeBezierApproximation` calls
+//!   `IsSingularity` at every patch corner, which calls `GetSingularities` (36 surface
+//!   evaluations) whenever the corner is not singular by its own derivatives. That
+//!   result depends only on the surface and the kernel, so inside one
+//!   [`SurfaceCache::subdivide_to_tolerances_with`] call (one surface, one kernel) the
+//!   splits of [`SurfaceCache::subdivide_node_split`] compute it once (`PoleMemo`)
+//!   and pass it to [`Surface::is_singularity_with_poles`] (upstream's overload taking
+//!   the singular sides and pole points). The values are the ones the lazy call would
+//!   compute; when that call fails with [`SolidError::Unported`] the memo is not used.
+//!   Upstream also copies no surface per split (`subdivide_node_split` borrows it).
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
 //!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction
 //!   (`surface.surface_cache_p3`, [`crate::surface::surface_cache::p3`]),
@@ -142,6 +153,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::math::NOW;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::srf_basic::Surface as NurbSurface;
+use crate::surface::surface::p5::SS_NONE;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 /// `SmSurfaceCache_TYPE` (`SURF_BASE_TYPE + 100`).
@@ -326,9 +338,54 @@ pub(super) fn calculate_bounding_box(
     }
 }
 
+/// The `GetSingularities` outputs `SmSurface::IsSingularity(uv, eSingDir)` reads when a
+/// point is not singular by its own derivatives (`SM_SS_*` sides and the four pole
+/// points), memoised for one surface and one kernel (see the module deviations).
+/// Performance only: every use gives the values the lazy call would.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) enum PoleMemo {
+    /// Not computed yet.
+    #[default]
+    Empty,
+    /// The call failed with [`SolidError::Unported`]: the lazy path is used.
+    Unported,
+    /// The sides and pole points.
+    Poles(u64, Vec<Point3>),
+}
+
+impl PoleMemo {
+    /// The memoised sides and pole points of `surface`, computed on first use exactly
+    /// as [`Surface::is_singularity_with_poles`] computes them without pole points
+    /// (`GetSingularities(&poles)`, whose ignored failure leaves `SM_SS_NONE` and
+    /// undefined poles); `None` when that call is unported.
+    fn poles(&mut self, k: &Kernel, surface: &Surface) -> Option<(u64, &[Point3])> {
+        if *self == Self::Empty {
+            *self = match ignored(surface.get_singularities(k, true, false)) {
+                Ok(Some(r)) => Self::Poles(
+                    u64::from(r.singular),
+                    r.pole_points
+                        .map_or_else(|| vec![Vec3::UNDEF; 4], |p| p.to_vec()),
+                ),
+                Ok(None) => Self::Poles(SS_NONE, vec![Vec3::UNDEF; 4]),
+                Err(_) => Self::Unported,
+            };
+        }
+        match self {
+            Self::Poles(sides, poles) => Some((*sides, poles.as_slice())),
+            Self::Empty | Self::Unported => None,
+        }
+    }
+}
+
 /// `SmSurface::IsSingularity(uv, eSingDir)`: the `SmPlane` override (a plane has no
-/// singularity); the other ported kinds run the base class body.
-fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
+/// singularity); the other ported kinds run the base class body, with the pole data
+/// from `memo` when given (see `PoleMemo`).
+fn is_singularity(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    memo: Option<&mut PoleMemo>,
+) -> Result<bool> {
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity().0),
         SurfaceKind::Cone(_)
@@ -341,6 +398,11 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
+            if let Some((sides, poles)) = memo.and_then(|m| m.poles(k, surface)) {
+                return Ok(surface
+                    .is_singularity_with_poles(k, uv, sides, Some(poles), EFF_ZERO, false)?
+                    .singular);
+            }
             Ok(surface.is_singularity(k, uv, EFF_ZERO, false)?.singular)
         }
     }
@@ -792,6 +854,18 @@ pub fn compute_bezier_approximation(
     uv_domain: &Extent2d,
     bezier: &mut NurbSurface,
 ) -> Result<()> {
+    compute_bezier_approximation_memo(k, surface, uv_domain, bezier, None)
+}
+
+/// [`compute_bezier_approximation`] with the singularity test's pole data memoised in
+/// `memo` (computed for `surface` and `k`; see `PoleMemo`).
+pub(crate) fn compute_bezier_approximation_memo(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    bezier: &mut NurbSurface,
+    mut memo: Option<&mut PoleMemo>,
+) -> Result<()> {
     const OP: &str = "surface::surface_cache::p1::compute_bezier_approximation";
 
     // Load knot vectors with domain bounds
@@ -862,7 +936,7 @@ pub fn compute_bezier_approximation(
         };
         let p00 = d(&mat, 0, 0)?;
         let (du, dv, duv);
-        if is_singularity(k, surface, uv)? {
+        if is_singularity(k, surface, uv, memo.as_deref_mut())? {
             let uvu = Point2::new(uv.x + su * (size.x * EFF_ZERO_SQRT), uv.y);
             let uvv = Point2::new(uv.x, uv.y + sv * (size.y * EFF_ZERO_SQRT));
             let mu = surface.evaluate(k, uvu, 1, 1, flags)?;
@@ -1489,6 +1563,10 @@ pub struct SurfaceCache<O> {
     pub point_test_enabled: bool,
     /// `m_bFaceContainmentDone`.
     pub face_containment_done: FaceContainment,
+    /// The singularity memo of the running
+    /// [`SurfaceCache::subdivide_to_tolerances_with`] (performance only; `None`
+    /// outside it).
+    pole_memo: Option<PoleMemo>,
 }
 
 impl<O: Copy + PartialEq> SurfaceCache<O> {
@@ -1522,6 +1600,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             process_boundary_curves: true,
             point_test_enabled: false,
             face_containment_done: FaceContainment::NotDone,
+            pole_memo: None,
         }
     }
 
@@ -1634,6 +1713,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             process_boundary_curves: self.process_boundary_curves,
             point_test_enabled: self.point_test_enabled,
             face_containment_done: self.face_containment_done,
+            pole_memo: None,
         })
     }
 
@@ -1659,6 +1739,27 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     #[must_use]
     pub const fn surface(&self) -> &Surface {
         &self.surface
+    }
+
+    /// The cached surface and the singularity memo of the running
+    /// [`SurfaceCache::subdivide_to_tolerances_with`] (`None` outside it).
+    pub(crate) fn surface_and_pole_memo(&mut self) -> (&Surface, Option<&mut PoleMemo>) {
+        (&self.surface, self.pole_memo.as_mut())
+    }
+
+    /// Starts a singularity memo for `self.surface` when none is running; `true` when
+    /// this call started it (and must end it with [`SurfaceCache::end_pole_memo`]).
+    pub(crate) fn begin_pole_memo(&mut self) -> bool {
+        if self.pole_memo.is_some() {
+            return false;
+        }
+        self.pole_memo = Some(PoleMemo::default());
+        true
+    }
+
+    /// Drops the singularity memo.
+    pub(crate) fn end_pole_memo(&mut self) {
+        self.pole_memo = None;
     }
 
     /// The domain the cache covers (`GetUVDomain`).
@@ -3011,6 +3112,60 @@ mod tests {
         assert!(!c.match_cache(AltSrfCacheType::Silhouette, 0.1, 0.2, &other));
         assert!(c.copy_of_curves(true, false).is_err());
         assert!(c.copy_of_curves(false, false).is_ok());
+    }
+
+    /// One `PoleMemo` reused over many sub-domains gives the Bezier approximations
+    /// of the lazy singularity test, on a surface with a pole (a degenerate v-min
+    /// side) and without one.
+    #[test]
+    fn pole_memo_matches_lazy_singularity_test() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::nurbs_srf::allocate_nurb_surface;
+        let k = Kernel::default();
+        let net = |pole: bool| {
+            (0..3_i32)
+                .map(|i| {
+                    (0..3_i32)
+                        .map(|j| {
+                            let (x, y) = if pole && j == 0 {
+                                (0.0, 0.0)
+                            } else {
+                                (f64::from(i) - 1.0, f64::from(j))
+                            };
+                            CPoint::new(x, y, 0.1 * f64::from(i * j), NOW)
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        for pole in [true, false] {
+            let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+            let nurb = NurbSurface::new(net(pole), 2, 2, knots.clone(), knots).unwrap();
+            let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+            let mut memo = PoleMemo::default();
+            for (u0, v0, u1, v1) in [
+                (0.0, 0.0, 1.0, 1.0),
+                (0.0, 0.0, 0.5, 0.5),
+                (0.5, 0.0, 1.0, 0.25),
+                (0.25, 0.5, 0.75, 1.0),
+                (0.0, 0.75, 0.125, 1.0),
+            ] {
+                let dom = Extent2d::from_bounds(u0, v0, u1, v1);
+                let mut lazy = allocate_nurb_surface(3, 3, 3, 3, 7, 7).unwrap();
+                let mut memoised = allocate_nurb_surface(3, 3, 3, 3, 7, 7).unwrap();
+                let r1 = compute_bezier_approximation(&k, &surface, &dom, &mut lazy);
+                let r2 = compute_bezier_approximation_memo(
+                    &k,
+                    &surface,
+                    &dom,
+                    &mut memoised,
+                    Some(&mut memo),
+                );
+                assert_eq!(format!("{r1:?}"), format!("{r2:?}"));
+                assert_eq!(format!("{lazy:?}"), format!("{memoised:?}"));
+            }
+            assert!(matches!(memo, PoleMemo::Poles(sides, _) if (sides != SS_NONE) == pole));
+        }
     }
 
     fn bilinear_cache() -> SurfaceCache<i64> {

@@ -26,9 +26,11 @@
 //!   their natural intervals, so `IdenticalSolutions` merges within 1/10000th of
 //!   them and `sm_RefineCCSolutions` resolves each curve, as upstream.
 //! - **Caches.** The caches are built for the call with [`make_curve_cache`] (see
-//!   unit `curve.curve_p5`); the same curve (by identity, [`core::ptr::eq`]) shares
-//!   one cache and so one tree, which makes the intersection a self intersection, as
-//!   upstream's shared object cache. A cache that cannot be built is
+//!   unit `curve.curve_p5`), or kept across calls in slots the caller lends
+//!   (`global_curve_intersect_cached`, as upstream keeps them on the curves; the
+//!   composite curve offsetter uses it for its offset pairs); the same curve (by
+//!   identity, [`core::ptr::eq`]) shares one cache and so one tree, which makes the
+//!   intersection a self intersection, as upstream's shared object cache. A cache that cannot be built is
 //!   `SM_ERR_NULL_POINTER` (upstream `NER`).
 //! - **Leaf pair solve.** Upstream calls `LocalSolve` on the intersection test
 //!   solver directly, which appends to the solution array the solver still points
@@ -249,6 +251,71 @@ impl Curve {
                 .global_curve_intersect(k, interval, other, other_interval, dist_tol, &inner)?
                 .without_objects());
         }
+        self.global_curve_intersect_body(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            &mut None,
+            &mut None,
+        )
+    }
+
+    /// [`Curve::global_curve_intersect`] keeping the curves' caches in `cache1` (this
+    /// curve's) and `cache2` (the other curve's; unused when `other` is this curve)
+    /// across calls, as upstream keeps them on the curves (`GetOrCreateObjectCache`):
+    /// a cache is built where the intersection first needs it (with the same errors)
+    /// and reused by later calls given the same slot. A slot must belong to its curve,
+    /// unchanged since the cache was built, and to the same handle in `opts.handles`
+    /// (the cache names it in its solutions); the build is deterministic and the
+    /// intersection only adds the analytic replacement a fresh cache would make, so a
+    /// reused cache gives the same solutions as a fresh one. Without handles the slots
+    /// are not used.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_cached<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        cache1: &mut Option<CurveCache<O>>,
+        cache2: &mut Option<CurveCache<O>>,
+    ) -> Result<SolutionArray<O>> {
+        if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
+            return self.global_curve_intersect(k, interval, other, other_interval, dist_tol, opts);
+        }
+        self.global_curve_intersect_body(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            cache1,
+            cache2,
+        )
+    }
+
+    /// The body of [`Curve::global_curve_intersect`] for a caller giving handles, with
+    /// the cache slots of [`Curve::global_curve_intersect_cached`].
+    fn global_curve_intersect_body<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        cache1_slot: &mut Option<CurveCache<O>>,
+        cache2_slot: &mut Option<CurveCache<O>>,
+    ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
 
@@ -293,18 +360,31 @@ impl Curve {
             }
         }
 
-        // get target curves' caches
-        let mut cache1 = build_cache(k, self, h_this)?;
+        // get target curves' caches (kept in the caller's slots, see
+        // `global_curve_intersect_cached`)
+        if cache1_slot.is_none() {
+            *cache1_slot = Some(build_cache(k, self, h_this)?);
+        }
+        if !same_curve && cache2_slot.is_none() {
+            *cache2_slot = Some(build_cache(k, other, h_other)?);
+        }
+        let cache1 = cache1_slot
+            .as_mut()
+            .ok_or(SolidError::null_pointer(OP_GCI))?;
         let mut cache2_own = if same_curve {
             None
         } else {
-            Some(build_cache(k, other, h_other)?)
+            Some(
+                cache2_slot
+                    .as_mut()
+                    .ok_or(SolidError::null_pointer(OP_GCI))?,
+            )
         };
 
         // get curve spatial decomposition trees from each cache
         {
-            let tree1 = cache_tree(&cache1)?;
-            let tree2 = cache_tree(cache2_own.as_ref().unwrap_or(&cache1))?;
+            let tree1 = cache_tree(cache1)?;
+            let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
             // no work - topNode bounding boxes are disjoint
             let root1 = tree1.node(tree1.top_node().ok_or(SolidError::null_pointer(OP_GCI))?)?;
@@ -319,12 +399,12 @@ impl Curve {
         // special case: curves converted to Analytic/Analytic intersection by
         // SmCurve::CreateAnalyticCurve(). Note, GetAnalyticCurve() can be expensive,
         // so call it only as many times as necessary.
-        let analy1 = cache_analytic(k, &mut cache1)?;
+        let analy1 = cache_analytic(k, cache1)?;
         let mut analy2: Option<Curve> = None;
         if let Some(a1) = analy1.as_ref() {
             // (the same curve shares its cache, so its analytic curve is the same
             // object: a self intersection, which the line intersector skips)
-            if let Some(c2) = cache2_own.as_mut() {
+            if let Some(c2) = cache2_own.as_deref_mut() {
                 analy2 = cache_analytic(k, c2)?;
             }
             let a2_ref = if same_curve {
@@ -391,8 +471,8 @@ impl Curve {
             ..base_named
         };
 
-        let tree1 = cache_tree(&cache1)?;
-        let tree2 = cache_tree(cache2_own.as_ref().unwrap_or(&cache1))?;
+        let tree1 = cache_tree(cache1)?;
+        let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
         // arrive here after line/line and analytic/analytic special cases were skipped
         // execute general curve/curve intersection solver
@@ -1530,6 +1610,51 @@ mod tests {
         match a.global_curve_intersect(&k, &unit(), &b, &unit(), 1e-6, &opts()) {
             Ok(s) => assert!(!s.is_empty()),
             Err(e) => assert!(e.is_unported()),
+        }
+    }
+
+    /// Reused cache slots give the solutions of fresh caches, call after call, also
+    /// for a self intersection (one slot).
+    #[test]
+    fn cached_slots_match_fresh_caches() {
+        let k = Kernel::default();
+        let a = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            3,
+        ));
+        let b = polyline(&[[0.0, 0.2, 0.0], [1.0, 0.1, 0.0], [2.0, 0.3, 0.0]]);
+        let fresh = a.global_curve_intersect(&k, &unit(), &b, &unit(), 1e-6, &opts());
+        let fresh_self = a.global_curve_intersect(&k, &unit(), &a, &unit(), 1e-6, &opts());
+        let (mut slot_a, mut slot_b) = (None, None);
+        for _ in 0..3 {
+            let cached = a.global_curve_intersect_cached(
+                &k,
+                &unit(),
+                &b,
+                &unit(),
+                1e-6,
+                &opts(),
+                &mut slot_a,
+                &mut slot_b,
+            );
+            assert_eq!(format!("{cached:?}"), format!("{fresh:?}"));
+            let cached_self = a.global_curve_intersect_cached(
+                &k,
+                &unit(),
+                &a,
+                &unit(),
+                1e-6,
+                &opts(),
+                &mut slot_a,
+                &mut None,
+            );
+            assert_eq!(format!("{cached_self:?}"), format!("{fresh_self:?}"));
+        }
+        if fresh.is_ok() {
+            assert!(slot_a.is_some() && slot_b.is_some());
         }
     }
 }

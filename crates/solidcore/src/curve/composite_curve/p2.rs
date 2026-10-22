@@ -35,6 +35,12 @@
 //!   `IntersectAndTrimOffsets` trims its input curves in place, as upstream (it takes
 //!   them `&mut`). The raw offsets copy their base curve (upstream's `SmOffsetCurve`
 //!   points at the base curve without owning it).
+//! - **Curve caches.** Upstream keeps each curve's cache on the curve
+//!   (`GetOrCreateObjectCache`) until the curve changes; `IntersectAndTrimOffsets`
+//!   keeps each offset's cache across its offset pairs (dropped when the offset is
+//!   trimmed, rebuilt when its handle changes) and each original curve's cache across
+//!   the pieces it classifies, instead of building them per call. Performance only:
+//!   the build is deterministic, so the solutions are the same.
 //! - **Statuses ignored upstream.** `ReverseParameterization` of a reversed segment
 //!   copy, the bow-tie check and repair, each `GlobalCurveIntersect` and
 //!   `GlobalPropertyAnalysis` (a failed solve contributes no solutions: upstream would
@@ -68,6 +74,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, CurvePropertyType};
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve_cache::CurveCache;
 use crate::curve::offset_curve::OffsetCurve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::attribute::{self, ObjectKey};
@@ -85,9 +92,9 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 use super::p1::{
-    convert_to_bspline_curves_indexed, create_corner, curve_classify, insert_sorted_breaks,
+    convert_to_bspline_curves_indexed, create_corner, curve_classify_cached, insert_sorted_breaks,
     trim_first_break, trim_last_break, CompositeCurve, CompositeCurveSegment, OffsetCornerType,
-    OffsetMapAttribute,
+    OffsetMapAttribute, OrigCurveCaches,
 };
 
 const OP_SEG_READ: &str = "curve::composite_curve::p2::CompositeCurveSegment::read_from_db";
@@ -244,6 +251,29 @@ impl SolutionObject for PieceHandle {
 
     fn natural_interval(&self) -> Option<Extent1d> {
         Some(self.2)
+    }
+}
+
+/// The cache of offset `index` from `caches` when it was built for `handle` (a
+/// cache names its handle in its solutions), else `None` (a stale one is dropped).
+fn take_cache(
+    caches: &mut [Option<(PieceHandle, CurveCache<PieceHandle>)>],
+    index: usize,
+    handle: Option<PieceHandle>,
+) -> Option<CurveCache<PieceHandle>> {
+    let (built_for, cache) = caches.get_mut(index)?.take()?;
+    (Some(built_for) == handle).then_some(cache)
+}
+
+/// Puts the cache of offset `index`, built for `handle`, back into `caches`.
+fn put_cache(
+    caches: &mut [Option<(PieceHandle, CurveCache<PieceHandle>)>],
+    index: usize,
+    handle: Option<PieceHandle>,
+    cache: Option<CurveCache<PieceHandle>>,
+) {
+    if let (Some(slot), Some(h), Some(c)) = (caches.get_mut(index), handle, cache) {
+        *slot = Some((h, c));
     }
 }
 
@@ -1108,6 +1138,11 @@ impl CompositeCurve {
         let num_offs = offsets.len();
         let mut trimmed: Vec<OffsetPiece> = Vec::new();
         let mut breaks: Vec<Vec<f64>> = vec![Vec::new(); num_offs];
+        // every offset's curve cache with the handle it was built for (performance
+        // only: upstream keeps the cache on the curve until the curve changes; see
+        // `Curve::global_curve_intersect_cached`)
+        let mut caches: Vec<Option<(PieceHandle, CurveCache<PieceHandle>)>> =
+            (0..num_offs).map(|_| None).collect();
 
         // Intersect every offset curve with every offset curve, including itself.
         for ii in 0..num_offs {
@@ -1139,16 +1174,29 @@ impl CompositeCurve {
                     ],
                     ..CurveIntersectOptions::default()
                 };
+                // the slots of the two caches (built for these handles, or empty)
+                let mut slot1 = take_cache(&mut caches, ii, opts.handles[0]);
+                let mut slot2 = if jj == ii {
+                    None
+                } else {
+                    take_cache(&mut caches, jj, opts.handles[1])
+                };
                 // (status ignored upstream)
-                let sols = ignored(curr.curve.global_curve_intersect(
+                let result = curr.curve.global_curve_intersect_cached(
                     k,
                     &curr_ivl,
                     &other.curve,
                     &other_ivl,
                     xsect_tol_3d / 1000.0,
                     &opts,
-                ))?
-                .unwrap_or_else(SolutionArray::new);
+                    &mut slot1,
+                    &mut slot2,
+                );
+                put_cache(&mut caches, ii, opts.handles[0], slot1);
+                if jj != ii {
+                    put_cache(&mut caches, jj, opts.handles[1], slot2);
+                }
+                let sols = ignored(result)?.unwrap_or_else(SolutionArray::new);
 
                 // Record each intersection parameter value in the breaks in an ascending order
                 for kk in 0..sols.len() {
@@ -1194,6 +1242,10 @@ impl CompositeCurve {
                             }
                             // may snap the interval by tol to existing knots (status ignored)
                             if let Some(c) = offsets.get_mut(ii) {
+                                // the curve changes: its cache is rebuilt
+                                if let Some(slot) = caches.get_mut(ii) {
+                                    *slot = None;
+                                }
                                 let _ = ignored(c.curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
                             }
                             curr_ivl = trim_ivl;
@@ -1264,6 +1316,8 @@ impl CompositeCurve {
 
         // classify each trimmed offset to see which are kept
         let mut classified: Vec<OffsetPiece> = Vec::new();
+        // the original curves' caches, kept across the pieces (performance only)
+        let mut orig_caches = OrigCurveCaches::default();
         for piece in &trimmed {
             let originator = match piece.attribute.and_then(|a| a.originator) {
                 Some(r) => Some(
@@ -1282,13 +1336,14 @@ impl CompositeCurve {
             };
 
             // see if it's closer than dOffsetDistance to any of the OriginalCurves
-            let keep = curve_classify(
+            let keep = curve_classify_cached(
                 k,
                 &piece.curve,
                 offset_distance,
                 xsect_tol_3d,
                 orig_curves,
                 originator,
+                &mut orig_caches,
             )?;
 
             // place a copy of the keep intervals into the output
