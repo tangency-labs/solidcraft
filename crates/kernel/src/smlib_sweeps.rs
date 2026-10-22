@@ -72,7 +72,7 @@ pub(crate) struct Draft {
 
 #[cfg(feature = "smlib")]
 pub(crate) use imp::{
-    body_from_record, curve, extrude, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, sphere, sweep,
+    body_from_record, curve, extrude, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, sphere, sweep,
     sweep_controlled,
 };
 
@@ -93,6 +93,9 @@ mod stubs {
         Err(not_built())
     }
     pub(crate) fn project_onto_face(_: &Body, _: Vec3, _: &Plane, _: &[Seg2], _: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+        Err(not_built())
+    }
+    pub(crate) fn face_section(_: &Body, _: Vec3, _: Vec3, _: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
         Err(not_built())
     }
     pub(crate) fn extrude(_: &Plane, _: &[Piece], _: Option<&Region2>, _: f64, _: f64, _: f64, _: Option<Draft>) -> Result<Body> {
@@ -122,7 +125,7 @@ mod stubs {
 }
 #[cfg(not(feature = "smlib"))]
 pub(crate) use stubs::{
-    body_from_record, extrude, loft, loft_rails, loft_to_point, project_onto_face, revolve, screw, sphere, sweep, sweep_controlled,
+    body_from_record, extrude, face_section, loft, loft_rails, loft_to_point, project_onto_face, revolve, screw, sphere, sweep, sweep_controlled,
 };
 
 /// Refuses what no SMLib sweep does, before any work.
@@ -226,19 +229,51 @@ mod imp {
         direction: Vec3,
     ) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
         let c = segs.iter().map(|s| curve(plane, s)).collect::<Result<Vec<_>>>()?;
-        let size = body.size().max(1e-9);
-        let out = body.smlib()?.project_curves(p(face_at), size * 1e-3 + 1e-6, &c, p(direction), (size * 1e-6).max(1e-6)).map_err(|e| match e {
-            solidcraft_smlib::Error::Empty => KernelError::Invalid("the curve projects to nothing on the face".into()),
-            solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid("no face of the body at the projection's point".into()),
-            e => failed("curve projection", e),
-        })?;
+        let out = body
+            .smlib()?
+            .project_curves(p(face_at), pick_reach(body), &c, p(direction), curve_tolerance(body))
+            .map_err(|e| curves_error("curve projection", e))?;
+        record_curves(out, "curve projection")
+    }
+
+    /// The face of `body` at `face_at` cut by the plane through `plane_point` square to `normal`,
+    /// SMLib's section curves on that face, as record curves on their intervals.
+    pub(crate) fn face_section(body: &Body, face_at: Vec3, plane_point: Vec3, normal: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+        let out = body
+            .smlib()?
+            .face_section(p(face_at), pick_reach(body), p(plane_point), p(normal), curve_tolerance(body))
+            .map_err(|e| curves_error("face section", e))?;
+        record_curves(out, "face section")
+    }
+
+    /// How far a point may be from the face it picks: the kernel's picking reach.
+    fn pick_reach(body: &Body) -> f64 {
+        body.size().max(1e-9) * 1e-3 + 1e-6
+    }
+
+    /// How close a curve SMLib makes on a body's faces keeps to the true one: a millionth of the
+    /// body's size.
+    fn curve_tolerance(body: &Body) -> f64 {
+        (body.size() * 1e-6).max(1e-6)
+    }
+
+    fn curves_error(what: &str, e: solidcraft_smlib::Error) -> KernelError {
+        match e {
+            solidcraft_smlib::Error::Empty => KernelError::Invalid(format!("{what}: no curve on the face")),
+            solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid(format!("{what}: no face of the body at the point")),
+            e => failed(what, e),
+        }
+    }
+
+    /// SMLib's NURBS curves as record curves (rational splines) on their intervals.
+    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
         out.into_iter()
             .map(|(c, interval)| match c {
                 Curve::Nurbs { points, knots, .. } => {
                     let homogeneous = points.iter().map(|q| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]]).collect();
                     Ok((solidcraft_geom::brep::Curve::RationalSpline { knots, homogeneous }, interval))
                 }
-                _ => Err(failed("curve projection", "a projected curve is not a B-spline")),
+                _ => Err(failed(what, "a curve SMLib made is not a B-spline")),
             })
             .collect()
     }

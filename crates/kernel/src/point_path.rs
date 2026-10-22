@@ -171,6 +171,27 @@ pub fn project_onto_face(
     crate::smlib_sweeps::project_onto_face(body, face_at, plane, segs, direction)
 }
 
+/// The face `face` of `body` through `at` cut along `along` by the plane through `at` that holds
+/// the face's normal there (its exact normal from the record) and `along`: SMLib's section curves
+/// on that face, as record curves on their intervals.
+pub fn face_section_along(body: &Body, face: usize, at: Vec3, along: Vec3) -> Result<Vec<(brep::Curve, [f64; 2])>> {
+    use solidcraft_geom::brep::eval::SurfaceEval;
+    let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    let eval = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("face section: {e}")))?;
+    let [[u0, u1], [v0, v1]] = f.domain;
+    let size = body.size().max(1e-9);
+    let uv = eval
+        .project(at, Some([0.5 * (u0 + u1), 0.5 * (v0 + v1)]), size * 1e-3 + 1e-6)
+        .ok_or_else(|| KernelError::Invalid("face section: the point is not on the face".into()))?;
+    let (_, du, dv) = eval.derivs(uv[0], uv[1]).ok_or_else(|| KernelError::Failed("face section: the surface does not evaluate there".into()))?;
+    let normal = du
+        .cross(dv)
+        .cross(along)
+        .normalized()
+        .ok_or_else(|| KernelError::Invalid("face section: the direction runs along the face's normal".into()))?;
+    crate::smlib_sweeps::face_section(body, at, at, normal)
+}
+
 /// Samples per knot span (and at least this many per pcurve) where the iso curves look for the
 /// crossings of a face's loops and classify the face's inside.
 const ISO_SAMPLES: usize = 64;
