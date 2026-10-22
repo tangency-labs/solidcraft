@@ -25,22 +25,16 @@
 //! that folds, or a corner with no room, is refused rather than replaced by the G1 ball.
 
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::{self as b, eval::SurfaceEval};
 use solidcraft_geom::bspline::{HPoint, NurbsSurface};
-use truck_modeling::{self as mt, builder};
 
 use crate::blend::unsupported;
-use crate::body::{from_p3, p3};
 use crate::bridge::Frame;
-use crate::{KernelError, Result, guard};
+use crate::{KernelError, Result};
 
 /// A corner's name in an error.
 fn fail(m: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("G2 corner: {m}"))
-}
-
-/// One of the surface's own derivative vectors as ours.
-fn vec_of(v: mt::Vector3) -> Vec3 {
-    Vec3::new(v.x, v.y, v.z)
 }
 
 /// Conditions each end of a cross-section carries: position, tangent and curvature.
@@ -57,14 +51,24 @@ const MAX_STATIONS: usize = 512;
 /// leave the blend in at all.
 const ACROSS_ENOUGH: f64 = 0.2;
 
+/// A G2 corner patch: its surface, and its boundary as the section curves themselves, each an
+/// interval of the surface's own boundary curve (the `v = 0` line, `seam_curve`) from one corner of
+/// the vertex to the next, so that it lies on the patch exactly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornerPatch {
+    pub surface: b::Surface,
+    pub seam_curve: b::Curve,
+    /// Each side's interval of `seam_curve` (its parameter is the surface's u).
+    pub seams: Vec<[f64; 2]>,
+}
+
 /// The G2 corner patch over three blends' section curves: `sides[i]` is one blend's section curve,
 /// sampled in order from one corner of the vertex to the next, each side's last station the next
 /// side's first (the three close a loop). `apex` is a point inside the material the corner caps;
-/// the patch gathers there. The face's boundary edges are the section curves themselves (one edge
-/// per side, cut out of the patch's own boundary curve, so they lie on it exactly); the caller
-/// re-wraps the wire where it needs its own orientation.
-pub fn corner_g2_patch(sides: &[Vec<Frame>], apex: Vec3) -> Result<Vec<mt::Face>> {
-    guard("G2 corner patch", || build(sides, apex))
+/// the patch gathers there. Its boundary is the section curves themselves (one interval of the
+/// patch's own boundary curve per side); the caller orients the face where it sews it in.
+pub fn corner_g2_patch(sides: &[Vec<Frame>], apex: Vec3) -> Result<CornerPatch> {
+    build(sides, apex)
 }
 
 /// The seam's own direction at station `i` of a side, from a four-point central difference through
@@ -302,15 +306,11 @@ fn tensor(layers: &[[Vec3; ACROSS + 1]]) -> Result<(NurbsSurface, f64)> {
 
 /// The surface across its own domain: the patch must keep facing one way, or a blend would be met
 /// by a piece of the patch folded back on itself.
-fn no_fold(surface: &mt::Surface, loop_range: (f64, f64)) -> Result<()> {
-    use mt::ParametricSurface;
+fn no_fold(surface: &SurfaceEval, loop_range: (f64, f64), (v0, v1): (f64, f64)) -> Result<()> {
     // The u knots run past the loop at both ends (a closed curve has no clamped ends to name), so
     // the loop's own range is brought in rather than read off the knot vector.
     let (u0, u1) = loop_range;
-    let Some((v0, v1)) = surface.try_range_tuple().1 else {
-        return Err(fail("the corner patch has no parameter domain"));
-    };
-    let normal = |u: f64, v: f64| -> Option<Vec3> { vec_of(surface.uder(u, v)).cross(vec_of(surface.vder(u, v))).normalized() };
+    let normal = |u: f64, v: f64| -> Option<Vec3> { surface.derivs(u, v).and_then(|(_, su, sv)| su.cross(sv).normalized()) };
     let mid = normal((u0 + u1) * 0.5, v0 + (v1 - v0) * 0.5).ok_or_else(|| unsupported("the corner patch has no normal at its middle"))?;
     // Clear of the apex (v1), where the patch's parameter line along the seam collapses to a point
     // and the normal is read from the sections approaching it.
@@ -327,8 +327,8 @@ fn no_fold(surface: &mt::Surface, loop_range: (f64, f64)) -> Result<()> {
     Ok(())
 }
 
-/// Build the patch: sections, tensor surface, and the wire of the section curves themselves.
-fn build(sides: &[Vec<Frame>], apex: Vec3) -> Result<Vec<mt::Face>> {
+/// Build the patch: sections, tensor surface, and the intervals of the section curves themselves.
+fn build(sides: &[Vec<Frame>], apex: Vec3) -> Result<CornerPatch> {
     if !apex.is_finite() {
         return Err(KernelError::Invalid("the corner apex must be a finite point".into()));
     }
@@ -350,32 +350,27 @@ fn build(sides: &[Vec<Frame>], apex: Vec3) -> Result<Vec<mt::Face>> {
     }
     let layers: Vec<[Vec3; ACROSS + 1]> = frames.iter().map(|f| section(f, apex, n_apex, kappa)).collect::<Result<_>>()?;
     let (nurbs, m) = tensor(&layers)?;
-    let surface = crate::spline_conv::surface(&nurbs)?;
-    no_fold(&surface, (ALONG as f64, m + ALONG as f64))?;
-    // The boundary is the loop of section curves; each side is cut out of the patch's own boundary
-    // curve so that it lies on the patch exactly.
-    let nu = nurbs.count().first().copied().unwrap_or(0);
-    let row: Vec<HPoint> = (0..nu).map(|i| nurbs.point(i, 0)).collect();
-    let Some(knots_u) = nurbs.knots().first().cloned() else { return Err(fail("knots")) };
-    let loop_curve = crate::spline_conv::nurbs_curve(mt::KnotVec::from(knots_u), &row)?;
+    // Every weight is one (the sections are polynomial): the patch is a plain B-spline.
+    let [count_u, count_v] = nurbs.count();
+    let net = nurbs.net();
+    let point = |i: usize, j: usize| net.get(i, j).and_then(|h| h.project()).map(|p| [p.x, p.y, p.z]).ok_or_else(|| fail("the corner patch's net"));
+    let points = (0..count_u).map(|i| (0..count_v).map(|j| point(i, j)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
+    let [knots_u, knots_v] = nurbs.knots().clone();
+    let surface = b::Surface::Spline { u_knots: knots_u.clone(), v_knots: knots_v.clone(), points };
+    let eval = SurfaceEval::new(&surface).map_err(|e| fail(format!("the corner patch: {e}")))?;
+    let (v0, v1) = (knots_v.first().copied().unwrap_or(0.0), knots_v.last().copied().unwrap_or(1.0));
+    no_fold(&eval, (ALONG as f64, m + ALONG as f64), (v0, v1))?;
+    // The boundary is the loop of section curves, intervals of the patch's own `v = 0` line: its
+    // control points are the net's first column, on the same u knots.
+    let seam_points = (0..count_u).map(|i| point(i, 0)).collect::<Result<Vec<_>>>()?;
+    let seam_curve = b::Curve::Spline { knots: knots_u, points: seam_points };
     let mut cuts: Vec<f64> = starts.iter().map(|i| *i as f64 + ALONG as f64).collect();
     cuts.push(m + ALONG as f64);
-    let mut verts: Vec<mt::Vertex> = Vec::with_capacity(sides.len());
-    for side in sides {
-        let first = side.first().ok_or_else(|| fail("a section curve has no stations"))?;
-        verts.push(builder::vertex(p3(first.p)));
+    let seams = cuts.windows(2).filter_map(|w| Some([*w.first()?, *w.get(1)?])).collect::<Vec<_>>();
+    if seams.len() != sides.len() {
+        return Err(fail("the corner's seams"));
     }
-    let mut edges: Vec<mt::Edge> = Vec::with_capacity(sides.len());
-    for i in 0..sides.len() {
-        let (Some(&a), Some(&b)) = (cuts.get(i), cuts.get(i + 1)) else { return Err(fail("the corner's seams")) };
-        let mut piece = loop_curve.clone();
-        let _tail = mt::Cut::cut(&mut piece, b);
-        let piece = mt::Cut::cut(&mut piece, a);
-        let (Some(from), Some(to)) = (verts.get(i), verts.get((i + 1) % verts.len())) else { return Err(fail("the corner's vertices")) };
-        edges.push(mt::Edge::try_new(from, to, piece).map_err(|e| fail(format!("a corner seam: {e}")))?);
-    }
-    let face = mt::Face::try_new(vec![mt::Wire::from(edges)], surface).map_err(|e| fail(format!("the corner patch: {e}")))?;
-    Ok(vec![face])
+    Ok(CornerPatch { surface, seam_curve, seams })
 }
 
 /// What the patch achieves along the seams of `sides`: the largest distance from a seam station to
@@ -385,14 +380,21 @@ fn build(sides: &[Vec<Frame>], apex: Vec3) -> Result<Vec<mt::Face>> {
 /// removes. Measured on the built surface alone, by the same finite differences of its own samples
 /// that `crate::bridge`'s tests read a cross-section's shape with, so it is evidence about the
 /// geometry and not about the construction.
-pub fn seam_error(surface: &mt::Surface, sides: &[Vec<Frame>], reference: f64) -> Result<(f64, f64, f64)> {
-    use mt::{ParametricSurface, SearchNearestParameter};
+pub fn seam_error(surface: &b::Surface, sides: &[Vec<Frame>], reference: f64) -> Result<(f64, f64, f64)> {
     if !(reference.is_finite() && reference > 0.0) {
         return Err(KernelError::Invalid("a reference curvature must be finite and positive".into()));
     }
-    let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() else {
+    // The surface's parameter box: its natural one, a periodic direction one turn.
+    let range = |n: b::Natural| match n {
+        b::Natural::Periodic => Some((0.0, std::f64::consts::TAU)),
+        b::Natural::Range(a, z) => (a.is_finite() && z.is_finite()).then_some((a, z)),
+    };
+    let [nu, nv] = surface.natural();
+    let (Some((u0, u1)), Some((v0, v1))) = (range(nu), range(nv)) else {
         return Err(fail("the corner patch has no parameter domain"));
     };
+    let surface = SurfaceEval::new(surface).map_err(|e| fail(format!("the corner patch: {e}")))?;
+    let at = |u: f64, v: f64| surface.point([u, v]).ok_or_else(|| fail("the corner patch has no point there"));
     // Samples across the section for a five-point difference, as `bridge`'s tests use.
     const INWARDS: usize = 5;
     let hv = (v1 - v0).abs() * 1e-3;
@@ -405,22 +407,21 @@ pub fn seam_error(surface: &mt::Surface, sides: &[Vec<Frame>], reference: f64) -
         if side.len() < 5 {
             return Err(KernelError::Invalid("a seam needs at least five stations to measure its direction".into()));
         }
-        let mut hint: Option<(f64, f64)> = None;
+        let mut hint: Option<[f64; 2]> = None;
         for (i, f) in side.iter().enumerate() {
             let Some(t) = seam_tangent(side, i) else { continue };
             let found = surface
-                .search_nearest_parameter(p3(f.p), hint, 100)
-                .or_else(|| surface.search_nearest_parameter(p3(f.p), None, 200))
+                .project(f.p, hint, f64::INFINITY)
+                .or_else(|| surface.project(f.p, None, f64::INFINITY))
                 .ok_or_else(|| fail("a seam station is not on the corner patch"))?;
             hint = Some(found);
-            let (u, v) = found;
-            let at = from_p3(surface.subs(u, v));
-            gap = gap.max(at.dist(f.p));
+            let [u, v] = found;
+            gap = gap.max(at(u, v)?.dist(f.p));
             // The cross-section, sampled inwards from the seam (or from the other end of the patch,
             // with the odd differences turned round).
             let out = v <= (v0 + v1) * 0.5;
             let step = if out { hv } else { -hv };
-            let q: Vec<Vec3> = (0..INWARDS).map(|k| from_p3(surface.subs(u, v + step * k as f64))).collect();
+            let q: Vec<Vec3> = (0..INWARDS).map(|k| at(u, v + step * k as f64)).collect::<Result<_>>()?;
             let (Some(&f0), Some(&f1), Some(&f2), Some(&f3), Some(&f4)) = (q.first(), q.get(1), q.get(2), q.get(3), q.get(4)) else {
                 return Err(fail("the corner patch has no room for a sample"));
             };
@@ -429,10 +430,10 @@ pub fn seam_error(surface: &mt::Surface, sides: &[Vec<Frame>], reference: f64) -
             let d2 = (f0 * 35.0 + f1 * -104.0 + f2 * 114.0 + f3 * -56.0 + f4 * 11.0) * (1.0 / (12.0 * hv * hv));
             // Along the seam, to stand the tangent plane up.
             let du = if u - hu >= u0 && u + hu <= u1 {
-                (from_p3(surface.subs(u + hu, v)) - from_p3(surface.subs(u - hu, v))) * (0.5 / hu)
+                (at(u + hu, v)? - at(u - hu, v)?) * (0.5 / hu)
             } else {
                 let (a, b) = if u + hu <= u1 { (u, u + hu) } else { (u, u - hu) };
-                (from_p3(surface.subs(b, v)) - from_p3(surface.subs(a, v))) * (1.0 / hu)
+                (at(b, v)? - at(a, v)?) * (1.0 / hu)
             };
             let n = du.cross(d1).normalized().ok_or_else(|| fail("the corner patch has no normal at a seam"))?;
             let blend_n = t.cross(f.leave).normalized().ok_or_else(|| fail("a blend has no normal at a seam"))?;
