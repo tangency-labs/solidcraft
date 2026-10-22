@@ -72,6 +72,10 @@ SC_EXPORT int32_t sc_boolean_merge_p5_eval(
         }
     }
     for (size_t i=0;i<gb.vertices.size();++i) if(marked_b[gb.edges.size()+i]) gb.vertices[i]->Mark(mb);
+    // the caller's state: SmMerge enables editing on both B-reps around the merge
+    // (SmMerge.cpp:2645-2646, SmTemporaryChangeValue), so DeleteEdge / DeleteVertex run
+    aa.brep->m_bEditingEnabled = TRUE;
+    bb.brep->m_bEditingEnabled = TRUE;
     SmTArray<SmEdge*> keep;
     std::vector<int64_t> ids;
     for (int iteration=0;iteration<repeat;++iteration) {

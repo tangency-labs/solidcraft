@@ -341,6 +341,9 @@ impl UnitDiff for Runner {
         ffi::validate_mates(&edge_mates, ac[7], bc[7]).map_err(|e| err(&e))?;
         let mut a = import(&aa)?;
         let mut b = import(&bb)?;
+        // the shim's caller state: editing on for both B-reps (SmMerge.cpp:2645-2646)
+        a.set_editing_enabled(true);
+        b.set_editing_enabled(true);
         let mut k = Kernel::default();
         let la = MarkLock::new(std::slice::from_mut(&mut k.context), 0, i.marks[0])
             .map_err(|e| err(&e))?;

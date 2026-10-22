@@ -517,8 +517,12 @@ fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
         rec.l(6, &lb.ids(6, &e.edgeuses));
         rec.i(i64::from(e.curve.is_some()));
         let ni = e.curve.as_ref().map(CurveEvaluate::natural_interval);
-        rec.f(ni.as_ref().map_or(0.0, |i| i.min()));
-        rec.f(ni.as_ref().map_or(0.0, |i| i.max()));
+        rec.f(ni
+            .as_ref()
+            .map_or(0.0, solidcore::geom::extent1d::Extent1d::min));
+        rec.f(ni
+            .as_ref()
+            .map_or(0.0, solidcore::geom::extent1d::Extent1d::max));
         edges.push(rec);
     }
     for (id, v) in b.vertexuses().iter() {
