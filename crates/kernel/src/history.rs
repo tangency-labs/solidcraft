@@ -1,8 +1,8 @@
 //! Exact face and edge history: for each face and edge of an operation's result, what it came
 //! from among the operation's operands, recorded by the code that built it (never sampled).
 //!
-//! Indices are positions in a body's face order (`face_iter`) and edge order (`unique_edges`,
-//! the order of [`Body::edges`] and of a tessellation's edges). Operand numbers are positions in
+//! Indices are positions in a body's record (canonical face and edge order, the order of
+//! [`Body::edges`] and of a mesh's edges). Operand numbers are positions in
 //! the operation's own operand list, which each operation documents. A body made by an
 //! operation carries its history (see [`Body::history`]); [`History::substitute`] composes an
 //! operation with one that made one of its operands.
@@ -17,7 +17,8 @@
 
 pub use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
 
-use crate::body::{Body, FaceSource, Solid};
+use crate::body::{Body, FaceSource};
+use solidcraft_geom::brep::{Brep, part::Part};
 use crate::{KernelError, Result};
 
 impl From<solidcraft_geom::brep::history::Failed> for KernelError {
@@ -47,7 +48,7 @@ impl BodyHistory for History {
     fn identity(body: &Body) -> History {
         let faces =
             (0..body.face_count()).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        let edges = edge_faces(&body.solid)
+        let edges = edge_faces(body.record())
             .into_iter()
             .enumerate()
             .map(|(edge, faces)| EdgeProv { faces, origins: vec![EdgeOrigin::Edge { operand: 0, edge }] })
@@ -84,9 +85,56 @@ impl BodyHistory for History {
     }
 }
 
-/// The faces each edge separates, in the body's edge order.
-pub(crate) fn edge_faces(solid: &Solid) -> Vec<Vec<usize>> {
-    crate::body::edge_order(solid.face_iter()).1
+/// The faces each edge separates, in the record's edge order: each face it bounds, once, in the
+/// order of the edge's uses.
+pub(crate) fn edge_faces(record: &Brep) -> Vec<Vec<usize>> {
+    record
+        .edges
+        .iter()
+        .map(|e| {
+            let mut faces: Vec<usize> = Vec::with_capacity(e.uses.len());
+            for u in &e.uses {
+                if !faces.contains(&(u.face as usize)) {
+                    faces.push(u.face as usize);
+                }
+            }
+            faces
+        })
+        .collect()
+}
+
+/// The history of a part cut from, or a compound joined of, records numbered one after another
+/// (`counts`: each operand's faces and edges, in order): every face and edge of the part is its
+/// operand's own, kept.
+pub(crate) fn of_part(part: &Part, counts: &[(usize, usize)]) -> History {
+    // Operand and local index of an item numbered across the operands one after another.
+    let locate = |mut i: usize, pick: fn(&(usize, usize)) -> usize| {
+        for (operand, c) in counts.iter().enumerate() {
+            if i < pick(c) {
+                return (operand, i);
+            }
+            i -= pick(c);
+        }
+        (counts.len(), i)
+    };
+    let faces = part
+        .faces
+        .iter()
+        .map(|&f| {
+            let (operand, face) = locate(f as usize, |c| c.0);
+            FaceProv { origins: vec![FaceOrigin::Face { operand, face }], change: Change::Kept }
+        })
+        .collect();
+    let edges = part
+        .edges
+        .iter()
+        .zip(edge_faces(&part.brep))
+        .map(|(&e, faces)| {
+            let (operand, edge) = locate(e as usize, |c| c.1);
+            EdgeProv { faces, origins: vec![EdgeOrigin::Edge { operand, edge }] }
+        })
+        .collect();
+    History { operands: counts.len(), faces, edges }
 }
 
 #[cfg(test)]
