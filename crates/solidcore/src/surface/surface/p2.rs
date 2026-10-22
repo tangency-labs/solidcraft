@@ -200,7 +200,8 @@ use crate::surface::plane::Plane;
 use crate::surface::sphere::Sphere;
 use crate::surface::srf_in_volume::SrfInVolume;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
-use crate::surface::surf_of_revolution::SurfOfRevolution;
+use crate::surface::surf_of_revolution::p3::intersect_revolved;
+use crate::surface::surf_of_revolution::{Revolved, SurfOfRevolution};
 use crate::surface::surface::p1::StepSurface;
 use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::torus::Torus;
@@ -1330,8 +1331,9 @@ impl Surface {
 
     /// `DropPointFast`: the plane and surface of revolution overrides (their
     /// solutions name no object; the surface of revolution's are merged as
-    /// upstream's, which name the surface); the other ported kinds run the base
-    /// default, which fails.
+    /// upstream's, which name the surface; the cone, sphere and torus inherit the
+    /// revolution's with their own `EvaluateSTEPPoint`); the other ported kinds run
+    /// the base default, which fails.
     ///
     /// # Errors
     ///
@@ -1357,16 +1359,30 @@ impl Surface {
                 target_distance,
                 None,
             ),
-            SurfaceKind::Cone(_s) => {
-                // DISPATCH GAP (#76): inherited solver still needs cone virtual callbacks.
-                Err(SolidError::unported(
-                    "SurfaceKind::Cone::DropPointFast callbacks",
-                    "surface.surface_p2",
-                ))
-            }
             // the inherited SmSurfOfRevolution::DropPointFast, its virtual
-            // EvaluateSTEPPoint and LocalPointSolve those of the sphere/torus; the
+            // EvaluateSTEPPoint and LocalPointSolve those of the cone/sphere/torus; the
             // solutions name a stand-in for this surface, as for the revolution below
+            SurfaceKind::Cone(s) => Ok(s
+                .rev()
+                .drop_point_fast_using(
+                    k,
+                    uv_domain,
+                    operation,
+                    test_point,
+                    in_pointing_vector,
+                    distance_tolerance,
+                    target_distance,
+                    requested,
+                    Some(OperandObject::Surface(0, self.natural_uv_domain())),
+                    &|_, uv| s.evaluate_step_point(uv),
+                    &|k, domain, operation, point, guess| {
+                        let r = self.local_point_solve::<OperandObject>(
+                            k, domain, operation, point, guess,
+                        )?;
+                        Ok((r.found, r.solution))
+                    },
+                )?
+                .without_objects()),
             SurfaceKind::Sphere(s) => Ok(s
                 .base()
                 .drop_point_fast_using(
@@ -2135,61 +2151,68 @@ impl Surface {
             ),
             // the inherited SmSurfOfRevolution::GlobalSurfaceIntersect: the plane
             // special case runs the inherited IntersectWithPlane with the torus's iso
-            // circles, then the general intersection when it needs more (its curves
-            // follow: upstream appends to the same arrays); the other special cases
-            // (sphere, cone, surface of revolution) run through the torus's virtual
-            // iso curves and conversions (DISPATCH GAP, #76); any other surface takes
-            // the general intersection
-            SurfaceKind::Torus(t) => match other.kind() {
-                SurfaceKind::Plane(p) => {
+            // circles, the sphere, cone and surface of revolution cases the inherited
+            // intersections with the torus's domain conversion; each then takes the
+            // general intersection when it needs more (its curves follow: upstream
+            // appends to the same arrays); any other surface takes the general
+            // intersection
+            SurfaceKind::Torus(t) => {
+                // IntersectWithSphere / IntersectWithCone: a planar generator, else
+                // the general intersection
+                let revolved = |other: &dyn Revolved| -> Result<(bool, SurfaceIntersection)> {
+                    if !t.base().planar_generator {
+                        return Ok((true, SurfaceIntersection::default()));
+                    }
+                    intersect_revolved(
+                        t.as_ref(),
+                        k,
+                        uv_domain,
+                        other,
+                        other_uv_domain,
+                        approx_tol_3d,
+                    )
+                };
+                let (more, mut out) = match other.kind() {
                     // the plane's boxes take its face's tolerance
-                    let (more, mut out) = t.intersect_with_plane_owned(
+                    SurfaceKind::Plane(p) => t.intersect_with_plane_owned(
                         k,
                         p,
                         crate::surface::plane::p2::PlaneOwner::of(other)?,
                         other_uv_domain,
                         approx_tol_3d,
+                    )?,
+                    SurfaceKind::Sphere(o) => revolved(o.as_ref())?,
+                    SurfaceKind::Cone(o) if o.type_code() == CONE_TYPE => revolved(o.as_ref())?,
+                    // (IntersectWithSurfOfRevolution checks the generator itself)
+                    SurfaceKind::SurfOfRevolution(o) => intersect_revolved(
+                        t.as_ref(),
+                        k,
+                        uv_domain,
+                        o.as_ref(),
+                        other_uv_domain,
+                        approx_tol_3d,
+                    )?,
+                    _ => (true, SurfaceIntersection::default()),
+                };
+                if more {
+                    let more = base_global_surface_intersect(
+                        k,
+                        self,
+                        uv_domain,
+                        other,
+                        other_uv_domain,
+                        use_surface_edges,
+                        approx_tol_3d,
+                        ang_tol_rad,
                     )?;
-                    if more {
-                        let more = base_global_surface_intersect(
-                            k,
-                            self,
-                            uv_domain,
-                            other,
-                            other_uv_domain,
-                            use_surface_edges,
-                            approx_tol_3d,
-                            ang_tol_rad,
-                        )?;
-                        out.curves_3d.extend(more.curves_3d);
-                        out.surface1_uv_curves.extend(more.surface1_uv_curves);
-                        out.surface2_uv_curves.extend(more.surface2_uv_curves);
-                        out.curve_types.extend(more.curve_types);
-                        out.deviations.extend(more.deviations);
-                    }
-                    Ok(out)
+                    out.curves_3d.extend(more.curves_3d);
+                    out.surface1_uv_curves.extend(more.surface1_uv_curves);
+                    out.surface2_uv_curves.extend(more.surface2_uv_curves);
+                    out.curve_types.extend(more.curve_types);
+                    out.deviations.extend(more.deviations);
                 }
-                SurfaceKind::Sphere(_) | SurfaceKind::SurfOfRevolution(_) => {
-                    Err(SolidError::unported(
-                        "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
-                        "surface.surface_p2",
-                    ))
-                }
-                SurfaceKind::Cone(c) if c.type_code() == CONE_TYPE => Err(SolidError::unported(
-                    "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
-                    "surface.surface_p2",
-                )),
-                _ => base_global_surface_intersect(
-                    k,
-                    self,
-                    uv_domain,
-                    other,
-                    other_uv_domain,
-                    use_surface_edges,
-                    approx_tol_3d,
-                    ang_tol_rad,
-                ),
-            },
+                Ok(out)
+            }
             SurfaceKind::SurfOfRevolution(s) => s.global_surface_intersect(
                 self,
                 k,
@@ -6019,17 +6042,11 @@ mod kernel_dispatch_tests {
                 Curve::from(iso).evaluate_point(&kernel, uv.y).unwrap(),
                 expected
             );
-            // Part 9's B-spline storage cannot retain analytic iso overrides yet.
-            let gap = surface
+            // Part 9 builds the boundaries through the cone's own iso curves.
+            assert!(surface
                 .create_iso_boundaries(&kernel, SurfParamType::U, 0.0)
-                .unwrap_err();
-            assert!(matches!(
-                gap,
-                SolidError::Unported {
-                    unit: "surface.surface_p9",
-                    ..
-                }
-            ));
+                .unwrap()
+                .is_some());
             let step = StepSurface::new(surface, true);
             let step_uv = Point2::new(90.0, 1.0);
             assert_eq!(

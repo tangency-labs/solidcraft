@@ -12,7 +12,11 @@
 //! recurses once with maximum length zero; an explicit depth limit of two guards
 //! that invariant. Split arrays are limited to 1,000,000 entries before allocation
 //! or concatenation. Unsupported surface virtuals return `Unported`, never an
-//! approximate replacement. Iso extraction is exact for B-splines, so the public
+//! approximate replacement (the diagonal curves of a cone, sphere or torus, which
+//! the port's B-spline-only `SmCrvOnSurf` cannot carry). Iso curves come from the
+//! kind's own `CreateIsoParametricCurve`, and implicit iso curves evaluate the plane,
+//! cone, sphere and torus through their own evaluation, as upstream's virtuals. Iso
+//! extraction is exact for B-splines, so the public
 //! approximation tolerance has no numerical effect for that supported kind.
 //! Failed tessellations retain the empty parameter array;
 //! unported errors are propagated even where upstream ignores a status.
@@ -23,7 +27,7 @@ use super::p1::CsiGlobalSolver;
 use super::p2::{merge_double_arrays, Surface, SurfaceKind};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::{local_curve_intersect, PointSolveOptions};
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -51,28 +55,14 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
-        SurfaceKind::Cone(_) => {
-            // DISPATCH GAP: these helpers still store BSplineCurve/BsplineSurface.
-            // A cone needs its own iso-curve and evaluation overrides retained.
-            // UNPORTED(surface.surface_p9): SmCone iso/tessellation callbacks
+        SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
+            // DISPATCH GAP: only the diagonal `SmCrvOnSurf` of `FindTessellationSplits`
+            // gets here (iso curves dispatch to the kinds' own overrides; the kernel
+            // asks for diagonals only for B-spline and extrusion surfaces): the port's
+            // `CrvOnSurf` holds a B-spline surface, upstream's the analytic one.
+            // UNPORTED(surface.surface_p9): SmCrvOnSurf over an analytic surface
             Err(SolidError::unported(
-                "SurfaceKind::Cone iso/tessellation callbacks",
-                "surface.surface_p9",
-            ))
-        }
-        SurfaceKind::Sphere(_) => {
-            // DISPATCH GAP: as the cone, a sphere needs its own iso-curve overrides.
-            // UNPORTED(surface.surface_p9): SmSphere iso/tessellation callbacks
-            Err(SolidError::unported(
-                "SurfaceKind::Sphere iso/tessellation callbacks",
-                "surface.surface_p9",
-            ))
-        }
-        SurfaceKind::Torus(_) => {
-            // DISPATCH GAP: as the cone, a torus needs its own iso-curve overrides.
-            // UNPORTED(surface.surface_p9): SmTorus iso/tessellation callbacks
-            Err(SolidError::unported(
-                "SurfaceKind::Torus iso/tessellation callbacks",
+                "SmCrvOnSurf::SmCrvOnSurf(analytic surface)",
                 "surface.surface_p9",
             ))
         }
@@ -92,42 +82,57 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
     }
 }
 
+/// The `SmBSplineCurve` part of an iso curve as upstream types it: the B-spline
+/// itself, a circle's B-spline or a line's NURB.
+fn iso_base(curve: &Curve) -> Result<BSplineCurve> {
+    match curve.kind() {
+        CurveKind::BSpline(c) => Ok(c.copy()),
+        CurveKind::Ellipse(c) => Ok(c.base().copy()),
+        CurveKind::Line(c) => Ok(c.base_with_nurb()?.into_owned()),
+        _ => Err(SolidError::invalid_input(OP, "unexpected iso curve kind")),
+    }
+}
+
 /// `CreateIsoParametricCurve` through the surface virtual: the B-spline view
 /// used for lengths and point spacing, and the curve as upstream types it
-/// (`SmLine` for planes, `SmCircle` for revolution sweeps), whose own
-/// `IsDegenerate` override upstream calls.
+/// (`SmLine` for planes and cone rulings, `SmCircle` for revolution sweeps), whose
+/// own `IsDegenerate` and `ApproximateLength` overrides upstream calls.
 fn typed_iso_curve(
     k: &Kernel,
     surface: &Surface,
     direction: SurfParamType,
     value: f64,
 ) -> Result<(BSplineCurve, Curve)> {
-    if let SurfaceKind::Plane(p) = surface.kind() {
-        let line = p
-            .create_iso_parametric_curve(direction, value, None, false)?
-            .curve;
-        let base = line.base_with_nurb()?.into_owned();
-        return Ok((base, Curve::from(line)));
-    }
-    if let SurfaceKind::SurfOfRevolution(s) = surface.kind() {
-        let iso = s.create_iso_parametric_curve(k, direction, value, None)?;
-        let base = match iso.curve.kind() {
-            crate::curve::curve::CurveKind::BSpline(c) => c.copy(),
-            crate::curve::curve::CurveKind::Ellipse(c) => c.base().copy(),
-            _ => {
-                return Err(SolidError::invalid_input(
-                    OP,
-                    "unexpected revolution iso curve kind",
-                ))
-            }
-        };
-        return Ok((base, iso.curve));
-    }
-    let base = bss(surface)?
-        .create_iso_parametric_curve(k, direction, value, IsoCurveOptions::default())?
-        .curve;
-    let typed = Curve::from(base.clone());
-    Ok((base, typed))
+    let typed = match surface.kind() {
+        SurfaceKind::Plane(p) => Curve::from(
+            p.create_iso_parametric_curve(direction, value, None, false)?
+                .curve,
+        ),
+        SurfaceKind::SurfOfRevolution(s) => {
+            s.create_iso_parametric_curve(k, direction, value, None)?
+                .curve
+        }
+        SurfaceKind::Cone(s) => {
+            s.create_iso_parametric_curve(k, direction, value, None, false)?
+                .curve
+        }
+        SurfaceKind::Sphere(s) => {
+            s.create_iso_parametric_curve(k, direction, value, None, false)?
+                .curve
+        }
+        SurfaceKind::Torus(s) => {
+            s.create_iso_parametric_curve(k, direction, value, None, false)?
+                .curve
+        }
+        _ => {
+            let base = bss(surface)?
+                .create_iso_parametric_curve(k, direction, value, IsoCurveOptions::default())?
+                .curve;
+            let typed = Curve::from(base.clone());
+            return Ok((base, typed));
+        }
+    };
+    Ok((iso_base(&typed)?, typed))
 }
 
 fn iso_curve(
@@ -140,7 +145,7 @@ fn iso_curve(
 }
 
 /// `SmIsoCurve(surface, direction, value, left)` (clamped input): over the B-spline
-/// view of `surface`, or over the plane itself for a plane.
+/// view of `surface`, or over the surface itself for a plane, cone, sphere or torus.
 pub(super) fn implicit_iso(
     surface: &Surface,
     direction: SurfParamType,
@@ -149,8 +154,13 @@ pub(super) fn implicit_iso(
 ) -> Result<Curve> {
     // upstream's SmIsoCurve evaluates through the surface's virtual Evaluate: for an
     // SmPlane that is the analytic evaluation, not the NURB (whose bilinear
-    // interpolation over the plane's +-1234567 analytic domain differs in the last bits)
-    if let SurfaceKind::Plane(_) = surface.kind() {
+    // interpolation over the plane's +-1234567 analytic domain differs in the last bits),
+    // likewise SmCone's; the sphere and torus dispatch to their inherited evaluation
+    if let SurfaceKind::Plane(_)
+    | SurfaceKind::Cone(_)
+    | SurfaceKind::Sphere(_)
+    | SurfaceKind::Torus(_) = surface.kind()
+    {
         return Ok(Curve::from(IsoCurve::from_surface(
             surface.clone_for_evaluation()?,
             direction,
@@ -285,8 +295,15 @@ impl Surface {
                 if typed.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
                 }
-                let generic = Curve::from(curve.clone());
-                length = generic.approximate_length(k, &interval, 30, false)?.0;
+                // (`ApproximateLength` is virtual: `SmLine` overrides it, the other
+                // iso curve kinds run the B-spline's)
+                length = if let CurveKind::Line(_) = typed.kind() {
+                    typed.approximate_length(k, &interval, 30, false)?.0
+                } else {
+                    Curve::from(curve.clone())
+                        .approximate_length(k, &interval, 30, false)?
+                        .0
+                };
                 if length > max_length {
                     max_length = length;
                     longest = Some(curve);

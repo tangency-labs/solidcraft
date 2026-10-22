@@ -107,12 +107,27 @@
         "verdict": "PASS"
       },
       "id": "c1_cyl_cyl_two_loops",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone iso/tessellation callbacks",
-          "unit": "surface.surface_p9"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.187366638047003e-7,
+        "hausdorff_truth_to_out": 1.2858711061682403e-6,
+        "max_dist_3d": 7.540947578599244e-7,
+        "max_dist_uv": 6.452715584082114e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
       },
       "surfaces": ["cylinder", "cylinder"]
     },
@@ -264,12 +279,27 @@
         "verdict": "PASS"
       },
       "id": "c1_sphere_cyl_two_loops",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.131154848125374e-7,
+        "hausdorff_truth_to_out": 6.536142481956682e-7,
+        "max_dist_3d": 3.6454279428443925e-7,
+        "max_dist_uv": 6.597380129980124e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "PASS"
       },
       "surfaces": ["sphere", "cylinder"]
     },
@@ -593,12 +623,27 @@
         "verdict": "PASS"
       },
       "id": "c2_cones_tangent_ruling",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 2.220446049250313e-16,
+        "hausdorff_truth_to_out": 4.965068306494546e-16,
+        "max_dist_3d": 4.440892098500626e-16,
+        "max_dist_uv": 5.551115123125783e-16,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["cone", "cone"]
     },
@@ -621,12 +666,27 @@
         "verdict": "PASS"
       },
       "id": "c2_cyl_cyl_external",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone iso/tessellation callbacks",
-          "unit": "surface.surface_p9"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=2)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": 0.0,
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=2)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["cylinder", "cylinder"]
     },
@@ -692,12 +752,27 @@
         "verdict": "PASS"
       },
       "id": "c2_sphere_in_cyl",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.675562912360382e-7,
+        "hausdorff_truth_to_out": 8.754806643704731e-7,
+        "max_dist_3d": 7.964608840227427e-7,
+        "max_dist_uv": 6.050715484207103e-14,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["sphere", "cylinder"]
     },
@@ -920,12 +995,27 @@
         "verdict": "PASS"
       },
       "id": "c2n_sphereN_in_cyl",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.01,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 8.67561810153339e-7,
+        "hausdorff_truth_to_out": 8.754861303711644e-7,
+        "max_dist_3d": 7.964608839117204e-7,
+        "max_dist_uv": 6.050715484207103e-14,
+        "n_curves": 1,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["TANGENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["nurbs", "cylinder"]
     },
@@ -991,12 +1081,27 @@
         "verdict": "INCOMPLETE"
       },
       "id": "c3_sphere_torus_outer",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.01,
+        "expected_topology": ["point"],
+        "flags": ["isolated point 0 not found (nearest output inf)", "topology [], expected ['point']"],
+        "hausdorff_out_to_truth": 0.0,
+        "hausdorff_truth_to_out": "inf",
+        "max_dist_3d": 0.0,
+        "max_dist_uv": 0.0,
+        "n_curves": 0,
+        "n_out_points": 0,
+        "output_topology": [],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": [],
+        "verdict": "INCOMPLETE"
       },
       "surfaces": ["torus", "sphere"]
     },
@@ -1277,12 +1382,27 @@
         "verdict": "WRONG TOPOLOGY"
       },
       "id": "c4_steinmetz",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone iso/tessellation callbacks",
-          "unit": "surface.surface_p9"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 1 not identified (no curve end/point within 1.0e-03; nearest 1.73e+00)"],
+        "hausdorff_out_to_truth": 8.003521570613705e-7,
+        "hausdorff_truth_to_out": 1.282963327523242e-6,
+        "max_dist_3d": 7.736384517453843e-7,
+        "max_dist_uv": 4.704406859623589e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
       },
       "surfaces": ["cylinder", "cylinder"]
     },
@@ -1305,12 +1425,27 @@
         "verdict": "WRONG TOPOLOGY"
       },
       "id": "c4_viviani_figure8",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": ["singular point 0 not identified (no curve end/point within 1.0e-03; nearest 2.00e+00)"],
+        "hausdorff_out_to_truth": 3.1488503257056116e-6,
+        "hausdorff_truth_to_out": 3.1091351880308025e-6,
+        "max_dist_3d": 9.816759278802323e-7,
+        "max_dist_uv": 8.638921151771228e-7,
+        "n_curves": 2,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING"],
+        "verdict": "WRONG TOPOLOGY"
       },
       "surfaces": ["sphere", "cylinder"]
     },
@@ -1593,8 +1728,8 @@
       "id": "c5_cyl_quilt_seam",
       "rust": {
         "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
+          "symbol": "SmSurface::DropCurve",
+          "unit": "intersect.surface_drop_lib_p3"
         },
         "verdict": "DEFERRED"
       },
@@ -1791,12 +1926,27 @@
         "verdict": "PASS"
       },
       "id": "c6_cyl_overlap",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone iso/tessellation callbacks",
-          "unit": "surface.surface_p9"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.08424717913947e-7,
+        "hausdorff_truth_to_out": 2.143703162466649e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 1.1102230246251565e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["cylinder", "cylinder"]
     },
@@ -1933,12 +2083,27 @@
         "verdict": "PASS"
       },
       "id": "c6n_cyl_vs_nurbscyl",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 3.08424717913947e-7,
+        "hausdorff_truth_to_out": 2.1437031544696387e-8,
+        "max_dist_3d": 2.220446049250313e-16,
+        "max_dist_uv": 3.3306690738754696e-16,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["COINCIDENT", "COINCIDENT", "COINCIDENT", "COINCIDENT"],
+        "verdict": "PASS"
       },
       "surfaces": ["cylinder", "nurbs"]
     },
@@ -3150,12 +3315,27 @@
         "verdict": "PASS"
       },
       "id": "c8_sphere_cyl_through_poles",
+      "parity": {
+        "first": null,
+        "max_rel_err": 0.0,
+        "mismatches": 0,
+        "pass": true
+      },
       "rust": {
-        "deferred": {
-          "symbol": "SurfaceKind::Cone::DropPointFast callbacks",
-          "unit": "surface.surface_p2"
-        },
-        "verdict": "DEFERRED"
+        "cov_tol": 0.001,
+        "expected_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "flags": [],
+        "hausdorff_out_to_truth": 9.087458201135374e-7,
+        "hausdorff_truth_to_out": 9.831830301390318e-7,
+        "max_dist_3d": 9.394760920877765e-7,
+        "max_dist_uv": 6.741459460668509e-7,
+        "n_curves": 4,
+        "n_out_points": 0,
+        "output_topology": ["curve(free_ends=0)", "curve(free_ends=0)"],
+        "status": 1000,
+        "status_name": "SM_SUCCESS",
+        "types": ["CROSSING", "CROSSING", "CROSSING", "CROSSING"],
+        "verdict": "PASS"
       },
       "surfaces": ["sphere", "cylinder"]
     },
@@ -4819,17 +4999,17 @@
       "WRONG TOPOLOGY": 11
     },
     "parity": {
-      "compared": 98,
-      "identical": 98,
+      "compared": 110,
+      "identical": 110,
       "mismatched": 0,
-      "same_verdict": 98
+      "same_verdict": 110
     },
     "rust": {
-      "DEFERRED": 21,
+      "DEFERRED": 9,
       "ERROR": 1,
-      "INCOMPLETE": 20,
-      "PASS": 69,
-      "WRONG TOPOLOGY": 8
+      "INCOMPLETE": 21,
+      "PASS": 78,
+      "WRONG TOPOLOGY": 10
     }
   }
 }

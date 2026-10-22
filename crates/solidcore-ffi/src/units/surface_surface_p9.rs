@@ -1,7 +1,7 @@
 //! Safe wrappers for `surface.surface_p9`; shim: `surface_surface_p9.cpp`.
 //! Upstream: `source/SMLib/src/SmSurface.cpp` (tessellation, iso boundaries and CSI).
-//! Inputs are one non-rational quadratic 3x3 Bezier patch, a real unit plane or a
-//! canonical revolution, finite values (a split/iso domain within [0,1]^2) and,
+//! Inputs are one non-rational quadratic 3x3 Bezier patch, a real unit plane, a
+//! canonical revolution, a cylinder or a canonical cone, finite values (a split/iso domain within [0,1]^2) and,
 //! for CSI, a non-degenerate line. No counts cross the FFI.
 use crate::{call_with_buffer, FfiError};
 
@@ -51,8 +51,10 @@ pub fn eval(
     )
 }
 
-/// Evaluates a surface kind: 0 quadratic B-spline, 1 plane, 2 canonical revolution.
-/// Revolution fixtures cover splits and iso boundaries; CSI uses kind 0 only.
+/// Evaluates a surface kind: 0 quadratic B-spline, 1 plane, 2 canonical revolution,
+/// 3 cylinder, 4 canonical cone (for 3 and 4 the domain holds fractions of the
+/// natural domain). Revolution and cone kinds cover splits and iso boundaries; CSI
+/// uses kinds 0 and 1 only.
 ///
 /// # Errors
 /// Invalid bounded records or C++ setup failures.
@@ -70,10 +72,10 @@ pub fn eval_surface_kind(
     // Only finite values are required: scale, chord height, maximum side and
     // the CSI domain (disjoint, touching or sliver) are all defined in C++.
     // The angle range and the [0,1] split/iso domain stay bounded as before.
-    if !(0..=2).contains(&surface_kind)
+    if !(0..=4).contains(&surface_kind)
         // The one-node Rust CSI harness tree does not model `BuildTree`, which
-        // subdivides a revolution; keep revolution CSI out of the comparison.
-        || (surface_kind == 2 && op == 2)
+        // subdivides a revolution (or cone); keep those CSI out of the comparison.
+        || (surface_kind >= 2 && op == 2)
         || !(0..=2).contains(&op)
         || !(0..=9).contains(&direction)
         || net.iter().flatten().any(|v| !v.is_finite())
@@ -93,7 +95,9 @@ pub fn eval_surface_kind(
     // control polygon (< 7 * max |net|), so this keeps the count finite and below
     // the Rust port's documented 1,000,000-split limit.
     let net_max = net.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
-    if op == 0 && controls[2] > 0.0 && net_max / controls[2] > 1e5 {
+    // The cone kinds' iso curves are shorter than 10 (sweep circle of radius 1.5).
+    let size = if surface_kind >= 3 { 10.0 } else { net_max };
+    if op == 0 && controls[2] > 0.0 && size / controls[2] > 1e5 {
         return Err(invalid());
     }
     if op == 0 && direction > 1 {

@@ -87,8 +87,9 @@ use crate::nurbs::nurbs_crv::to_euclid;
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
 use crate::surface::surf_of_revolution::{
-    test_for_iso_circles, RevolutionIsoCurve, SurfOfRevolution,
+    test_for_iso_circles, RevolutionIsoCurve, Revolved, SurfOfRevolution,
 };
+use crate::surface::surface::p1::convert_domain_from_nurbs_to_step_with;
 use crate::surface::surface::p2::{
     scale_step_angular_derivatives, SurfaceIntersection, TORUS_TYPE,
 };
@@ -1138,6 +1139,24 @@ impl Torus {
 
         // all done
         Ok(torus)
+    }
+}
+
+/// The torus is a surface of revolution (an operand of the inherited
+/// intersections, converting its domains through its own `ConvertUVFromNURBSToSTEP`).
+impl Revolved for Torus {
+    fn as_surf_of_revolution(&self) -> &SurfOfRevolution {
+        &self.base
+    }
+
+    fn convert_domain_from_nurbs_to_step(
+        &self,
+        k: &Kernel,
+        nurb_domain: &Extent2d,
+    ) -> Result<Extent2d> {
+        convert_domain_from_nurbs_to_step_with(nurb_domain, |uv| {
+            self.convert_uv_from_nurbs_to_step(k, uv)
+        })
     }
 }
 
