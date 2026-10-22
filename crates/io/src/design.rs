@@ -45,7 +45,7 @@ fn max_mesh_part() -> usize {
 fn max_part() -> usize {
     max_design()
 }
-fn max_expanded() -> usize {
+pub(crate) fn max_expanded() -> usize {
     max_step_part().saturating_add(max_design())
 }
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
