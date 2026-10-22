@@ -299,15 +299,28 @@ double p3_check_concave(SmFilletCorner* c)
 }
 
 // SmFilletCorner::UpdateSplitFace: a fillet edge whose original face is the split face calls
-// SmFilletEdge::ShouldSwapFaces (blend.fillet_geom_p6, a stub on the Rust side), after the
-// fillet vertices are updated: -3. A vertex's point classification object of another kind
-// than a face is compared as a pointer only (well defined).
+// SmFilletEdge::ShouldSwapFaces (blend.fillet_geom_p6, ported), after the fillet vertices are
+// updated. It dereferences the edge's curve (with an interval or a classification) or its
+// corner's vertex: refused (-2) where those are NULL, as blend.fillet_geom_p6's own guard. A
+// vertex's point classification object of another kind than a face is compared as a pointer
+// only (well defined).
 double p3_check_split(SmFilletCorner* c, SmFace* orig)
 {
     SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
     for (ULONG ii = 0; ii < E.GetSize(); ++ii)
-        if (E[ii]->GetOriginalFace() == orig)
-            return P3C_NOT_RUN; // SmFilletEdge::ShouldSwapFaces
+    {
+        SmFilletEdge* e = E[ii];
+        if (e->GetOriginalFace() != orig)
+            continue;
+        SmExtent1d ivl = e->GetInterval();
+        if (!(ivl.IsInit() || ivl.HasNegativeLength()) || e->GetCurveClass() != NULL)
+        {
+            if (e->GetCurve() == NULL)
+                return P3C_REFUSE;
+        }
+        else if (e->GetFilletCorner() != NULL && e->GetFilletCorner()->GetFilletedVertex() == NULL)
+            return P3C_REFUSE;
+    }
     return 0.0;
 }
 

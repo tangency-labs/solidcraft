@@ -16,7 +16,8 @@
 //! - `update_split_face`: `UpdateSplitFace(orig, split)` on target faces, some fillet
 //!   vertices classified on (or with their other face) a target face and some fillet
 //!   edges with an original face. A fillet edge on `orig` reaches
-//!   `SmFilletEdge::ShouldSwapFaces` (`blend.fillet_geom_p6`: deferred, not run in C++).
+//!   `SmFilletEdge::ShouldSwapFaces` (`blend.fillet_geom_p6`); the shim refuses the
+//!   edges it would dereference `NULL` on (no curve, or a corner without a vertex).
 //!
 //! Compared: the status, the corner's members and the model's whole export. 80 built-in
 //! corner cases (a fixed seed) plus generated ones.
@@ -380,18 +381,19 @@ fn corner_cpp(
 }
 
 fn corner_rust(
+    k: &Kernel,
     method: CornerMethod,
     model: &Model,
     c: &CornerIn,
     split: [usize; 2],
 ) -> Result<Output, HarnessError> {
-    corner_rust_with(model, c, |c, env, faces| match method {
-        CornerMethod::AdjustConcave => c.adjust_topology(env),
+    corner_rust_with(k, model, c, |c, env, faces| match method {
+        CornerMethod::AdjustConcave => c.adjust_topology(k, env),
         CornerMethod::UpdateSplitFace => {
             let (Some(&orig), Some(&new)) = (faces.get(split[0]), faces.get(split[1])) else {
                 return Err(SolidError::invalid_input("difftest", "split face index"));
             };
-            c.update_split_face(env, orig, new)
+            c.update_split_face(env, orig, new, std::slice::from_ref(c))
         }
     })
 }
@@ -476,7 +478,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         split,
     } = i
     {
-        return corner_rust(*method, model, corner, *split);
+        return corner_rust(&Kernel::default(), *method, model, corner, *split);
     }
     let mut t = match topo(i)? {
         Ok(t) => t,

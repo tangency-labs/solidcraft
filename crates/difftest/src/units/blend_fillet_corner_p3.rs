@@ -674,18 +674,19 @@ pub(super) fn corner_cpp_op(
     corner_output(&flat)
 }
 
-fn corner_rust(op: CornerOp, model: &Model, ci: &CornerIn) -> Result<Output, HarnessError> {
-    corner_rust_with(model, ci, |c, env, _| match op {
-        CornerOp::CalcGeom => c.calc_corner_geom(env),
-        CornerOp::Patch => c.create_corner_patch(env),
-        CornerOp::AdjustTopology => c.adjust_topology(env),
-        CornerOp::AdjustTangent => c.adjust_tangent_corner(env),
+fn corner_rust(k: &Kernel, op: CornerOp, model: &Model, ci: &CornerIn) -> Result<Output, HarnessError> {
+    corner_rust_with(k, model, ci, |c, env, _| match op {
+        CornerOp::CalcGeom => c.calc_corner_geom(k, env),
+        CornerOp::Patch => c.create_corner_patch(k, env),
+        CornerOp::AdjustTopology => c.adjust_topology(k, env),
+        CornerOp::AdjustTangent => c.adjust_tangent_corner(k, env),
     })
 }
 
 /// The Rust side of a corner case running `run` on the corner (with the model's target
 /// faces, by index).
 pub(super) fn corner_rust_with(
+    k: &Kernel,
     model: &Model,
     ci: &CornerIn,
     run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<()>,

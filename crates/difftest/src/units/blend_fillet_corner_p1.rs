@@ -1793,7 +1793,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         .map_or_else(|| Output::err("error"), |o| *o))
                 }
             };
-            let tangent = match fc.tangent_fillet_solver(&rm.target, &exec, fs) {
+            let tangent = match fc.tangent_fillet_solver(&rm.k, &rm.target, &exec, fs) {
                 Ok(t) => t,
                 Err(e) => {
                     return Ok(corner_err(&e)

@@ -28,9 +28,10 @@
 //! - **`UpdateSplitFace`** reads `m_vVertices` / `m_vEdges` directly (the inline
 //!   `GetFilletVertices` / `GetFilletEdges` of unit `blend.fillet_corner_p1` append
 //!   them). Its callees always return `SM_SUCCESS` upstream (ignored); their ports'
-//!   errors (lookups, `SmFilletEdge::ShouldSwapFaces` and face classification
-//!   unported) propagate. The faces are ids (upstream compares and dereferences the
-//!   pointers).
+//!   errors (lookups, and the `NULL` dereferences of `SmFilletEdge::ShouldSwapFaces` and
+//!   face classification) propagate. The faces are ids (upstream compares and
+//!   dereferences the pointers); a fillet edge's corner is resolved in the caller's
+//!   `corners` (upstream's `GetFilletCorner()` pointer).
 //! - **`GetTangentFilletSolver`** overrides take the executive's edge-use-to-solver map
 //!   ([`FilletExecutiveData`]) and the B-rep being filleted (for `sm_TestG1Continuity`)
 //!   explicitly; `SM_ASSERT_ERR` (a debug assertion) is not reproduced, the `NULL` it
@@ -109,6 +110,7 @@ impl FilletCorner {
     /// it); those of [`test_g1_continuity`].
     pub fn tangent_fillet_solver_nx1_closed(
         &self,
+        k: &Kernel,
         b: &Brep,
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
@@ -129,7 +131,7 @@ impl FilletCorner {
         // We have to test its continuity.
         let edge = eu1::edge(b, *edge_use)?;
         let tangency_tol_deg = rad_to_deg(self.tangency_tol_radians);
-        if test_g1_continuity(b, self.vertex, edge, edge, tangency_tol_deg)?.0 {
+        if test_g1_continuity(k, b, self.vertex, edge, edge, tangency_tol_deg)?.0 {
             return Ok(fil_solver);
         }
 
@@ -147,6 +149,7 @@ impl FilletCorner {
     /// it); those of [`test_g1_continuity`].
     pub fn tangent_fillet_solver_nx2(
         &self,
+        k: &Kernel,
         b: &Brep,
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
@@ -164,7 +167,7 @@ impl FilletCorner {
         let edge1 = eu1::edge(b, *eu1_)?;
 
         let tangency_tol_deg = rad_to_deg(self.tangency_tol_radians);
-        if !test_g1_continuity(b, self.vertex, edge0, edge1, tangency_tol_deg)?.0 {
+        if !test_g1_continuity(k, b, self.vertex, edge0, edge1, tangency_tol_deg)?.0 {
             return Ok(None); // not an error.
         }
 
@@ -183,7 +186,9 @@ impl FilletCorner {
 
     /// `SmFilletCorner::UpdateSplitFace`: the target face `orig_face` was split, making
     /// `split_face`; every fillet vertex of the corner (then every fillet edge) moves to
-    /// the face it now lies in.
+    /// the face it now lies in. `corners` resolves the fillet corner of a fillet edge
+    /// (upstream's `SmFilletEdge::GetFilletCorner()` pointer), as
+    /// [`FilletBrep::should_swap_faces`] does.
     ///
     /// # Errors
     ///
@@ -194,14 +199,21 @@ impl FilletCorner {
         env: &mut CornerEnv<'_>,
         orig_face: FaceId,
         split_face: FaceId,
+        corners: &[FilletCorner],
     ) -> Result<()> {
         for &v in &self.vertices {
             env.pseudo
                 .update_split_face(env.k, v, env.target, orig_face, split_face)?;
         }
         for &e in &self.edges {
-            env.pseudo
-                .update_edge_split_face(e, Some(orig_face), Some(split_face))?;
+            env.pseudo.update_edge_split_face(
+                env.k,
+                e,
+                Some(orig_face),
+                Some(split_face),
+                env.target,
+                corners,
+            )?;
         }
         Ok(())
     }
@@ -267,8 +279,8 @@ impl FilletCorner {
             .curve
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
-        let pnt1 = unchecked_point(side_edge_curve.evaluate_point(edge_param1))?;
-        let pnt2 = unchecked_point(side_edge_curve.evaluate_point(edge_param2))?;
+        let pnt1 = unchecked_point(side_edge_curve.evaluate_point(env.k, edge_param1))?;
+        let pnt2 = unchecked_point(side_edge_curve.evaluate_point(env.k, edge_param2))?;
 
         // See if we have coincident geometry, i.e. two rails intersect at this vertex.
         let gap_dist = pnt1.distance(pnt2);

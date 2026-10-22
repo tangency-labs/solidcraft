@@ -736,6 +736,7 @@ impl FilletCorner {
     /// [`FilletCorner::tangent_fillet_solver_nx2`].
     pub fn tangent_fillet_solver(
         &self,
+        k: &Kernel,
         b: &Brep,
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
@@ -774,8 +775,8 @@ impl FilletCorner {
                 }
                 Ok(None)
             }
-            FilletCornerKind::NByOneClosed => self.tangent_fillet_solver_nx1_closed(b, exec, fs),
-            FilletCornerKind::NByTwo => self.tangent_fillet_solver_nx2(b, exec, fs),
+            FilletCornerKind::NByOneClosed => self.tangent_fillet_solver_nx1_closed(k, b, exec, fs),
+            FilletCornerKind::NByTwo => self.tangent_fillet_solver_nx2(k, b, exec, fs),
             _ => Ok(None),
         }
     }
