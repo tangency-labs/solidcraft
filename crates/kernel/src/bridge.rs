@@ -186,7 +186,7 @@ impl ChainLine {
             }
             curves.push((c, [a, z]));
         }
-        let closed = closes(&r, chain);
+        let closed = closes(r, chain);
         if closed && let Some(first) = samples.first().copied() {
             push(&mut samples, first.p, chain.len().saturating_sub(1), first.t);
         }
@@ -322,7 +322,7 @@ pub fn frames(body: &Body, face: usize, chain: &Chain, leave: Vec3, count: usize
     let line = ChainLine::of(body, chain)?;
     let stations = line.stations(count, 0.0, false)?;
     let r = body.record();
-    frames_on(&r, &vec![face; chain.len()], &stations, &line, leave)
+    frames_on(r, &vec![face; chain.len()], &stations, &line, leave)
 }
 
 /// The frames at `stations` (points on `line`, each with the index of the chain edge it is on),
@@ -392,7 +392,7 @@ pub fn frames_across(body: &Body, face: usize, stations: &[(Vec3, Vec3)], length
         return Err(KernelError::Invalid("frames across a boundary need at most 65536 stations on a boundary of finite size".into()));
     }
     let r = body.record();
-    let support = Support::of(&r, face, length)?;
+    let support = Support::of(r, face, length)?;
     let outward = if support.forward { 1.0 } else { -1.0 };
     let mut walk = Walk::new(length);
     let mut out = Vec::with_capacity(stations.len());
@@ -917,13 +917,13 @@ pub fn blend_between(
             (mid_a - mid_b).normalized().ok_or_else(|| KernelError::Invalid("the two boundaries coincide: there is nothing to blend".into()))?,
         ),
     };
-    let faces_a = support_faces(&record_a, &chain_a, leave_a, a.size())?;
-    let faces_b = support_faces(&record_b, &chain_b, leave_b, b.size())?;
+    let faces_a = support_faces(record_a, &chain_a, leave_a, a.size())?;
+    let faces_b = support_faces(record_b, &chain_b, leave_b, b.size())?;
     let (start_a, backwards_a) = seam.map_or((0.0, false), |[p, _]| line_a.start_at_seam(p));
     let stations_a = line_a.stations(samples, start_a, backwards_a)?;
     let stations_b = pair_with(&stations_a, &line_b, seam.map(|[_, q]| q))?;
-    let frames_a = frames_on(&record_a, &faces_a, &stations_a, &line_a, leave_a)?;
-    let frames_b = frames_on(&record_b, &faces_b, &stations_b, &line_b, leave_b)?;
+    let frames_a = frames_on(record_a, &faces_a, &stations_a, &line_a, leave_a)?;
+    let frames_b = frames_on(record_b, &faces_b, &stations_b, &line_b, leave_b)?;
     let made = bridge(&frames_a, &frames_b, orders, crown)?;
     let gap = boundary_gap(&made, &line_a, false)?.max(boundary_gap(&made, &line_b, true)?);
     // The blend's face is new to the operation over `[a, b]`.
