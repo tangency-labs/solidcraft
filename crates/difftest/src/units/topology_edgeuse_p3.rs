@@ -110,12 +110,24 @@ impl OpIn {
 
 /// The case's B-rep: the C++ export, the imported Rust B-rep and the selected edge
 /// use; `Err(output)` when the B-rep cannot be built or has no edge use.
-fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
+type CaseSetup = (Setup, Option<ffi::PreparedBrep>);
+
+fn setup(i: &Inputs, prepare: bool) -> Result<Result<CaseSetup, Output>, HarnessError> {
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
-    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
-        ffi1::eval(ffi1::Op::Export, &path, &block)
-    })
+    let prepared = prepare
+        .then(|| ffi::PreparedBrep::new(&path, &block))
+        .transpose()
+        .map_err(|e| harness(format!("c++ export: {e}")))?;
+    let ex = crate::export_memo::export(
+        "topology_edgeuse_p1",
+        &[&path],
+        &block,
+        || match &prepared {
+            Some(prepared) => Ok(prepared.export().to_vec()),
+            None => ffi1::eval(ffi1::Op::Export, &path, &block),
+        },
+    )
     .map_err(|e| harness(format!("c++ export: {e}")))?;
     let Some(c) = ffi1::counts(&ex) else {
         let st = ex.get(1).copied().unwrap_or(0.0);
@@ -128,24 +140,26 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     }
     let (brep, types) = import_with_types(&ex)?;
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
-    Ok(Ok(Setup {
-        path,
-        block,
-        brep,
-        eu,
-        types,
-    }))
+    Ok(Ok((
+        Setup {
+            path,
+            block,
+            brep,
+            eu,
+            types,
+        },
+        prepared,
+    )))
 }
 
 // ---- C++ side ---------------------------------------------------------------------------
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    let s = match setup(i)? {
+    let (s, prepared) = match setup(i, true)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    let mut input = s.block.clone();
-    input.push(f64::from(s.eu.index()));
+    let mut input = vec![f64::from(s.eu.index())];
     let op = match &i.op {
         OpIn::Create {
             want_dev, has_fail, ..
@@ -187,7 +201,10 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
             Op::GetOrCreate
         }
     };
-    let out = ffi::eval(op, &s.path, &input).map_err(|e| harness(format!("c++: {e}")))?;
+    let prepared = prepared
+        .as_ref()
+        .ok_or_else(|| harness("missing prepared fixture"))?;
+    let out = ffi::eval_prepared(op, prepared, &input).map_err(|e| harness(format!("c++: {e}")))?;
     let body = out.get(1..).ok_or_else(|| harness("c++: empty output"))?;
     Ok(output_of(i, body.to_vec()))
 }
@@ -379,7 +396,7 @@ fn run_rust_op(
 const SUBDIVIDE_OP: &str = "surface::surface_cache::p3::SurfaceCache::subdivide_to_tolerances";
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut s = match setup(i)? {
+    let (mut s, _) = match setup(i, false)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };

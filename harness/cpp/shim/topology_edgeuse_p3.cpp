@@ -76,7 +76,7 @@ void put_edge_state(std::vector<double>& o, SmEdgeuse* p)
     o.push_back((double)e->GetTolerance());
 }
 
-void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
+int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     SmStatus bst;
     Built b;
@@ -85,12 +85,18 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     {
         o.push_back(-1.0);
         o.push_back(st(bst));
-        return;
+        return SC_OK;
     }
     o.push_back(0.0);
     Graph g;
     walk(b.brep, g);
-    SmEdgeuse* p = g.edgeuses[(size_t)rd.idx()];
+    const int64_t selected = rd.idx();
+    // A file fixture can change after the validating export. Refuse a stale
+    // selector instead of indexing beyond the freshly rebuilt graph. Ordinary
+    // malformed selectors are already rejected by the Rust wrapper.
+    if (selected < 0 || (uint64_t)selected >= g.edgeuses.size())
+        return SC_ERR_ARG;
+    SmEdgeuse* p = g.edgeuses[(size_t)selected];
     switch (op)
     {
     case OP_CREATE:
@@ -255,6 +261,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     default:
         break;
     }
+    return SC_OK;
 }
 } // namespace
 
@@ -266,7 +273,9 @@ SC_EXPORT int32_t sc_topology_edgeuse_p3_eval(int32_t op, const char* path, cons
     SC_TRY
     Rd rd{in, 0};
     std::vector<double> o;
-    run_op(op, rd, path, o);
+    const int32_t status = run_op(op, rd, path, o);
+    if (status != SC_OK)
+        return status;
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

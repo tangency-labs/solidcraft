@@ -611,3 +611,242 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     rd.done()?;
     raw(op, path, input)
 }
+
+/// An immutable fixture block and the genuine native export used to validate it.
+///
+/// Construct once for one case, then use it with the edge-use p2/p3 prepared
+/// entry points. Each operation still rebuilds and destroys its own native body;
+/// only an export is retained. Fields are private so callers cannot supply counts
+/// or an unchecked export. File-backed fixtures must remain unchanged during a case.
+#[derive(Debug)]
+pub(crate) struct PreparedBrep {
+    path: String,
+    block: Vec<f64>,
+    export: Vec<f64>,
+}
+
+impl PreparedBrep {
+    /// Validate and export exactly this B-rep block through the ordinary native API.
+    ///
+    /// # Errors
+    /// The same malformed-block and native errors as [`eval`] with [`Op::Export`].
+    pub(crate) fn new(path: &str, block: &[f64]) -> Result<Self, FfiError> {
+        let export = eval(Op::Export, path, block)?;
+        Ok(Self {
+            path: path.to_owned(),
+            block: block.to_vec(),
+            export,
+        })
+    }
+
+    /// The original immutable fixture path.
+    #[must_use]
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The original immutable fixture block, compared bit for bit by runner memos.
+    #[must_use]
+    pub(crate) fn block(&self) -> &[f64] {
+        &self.block
+    }
+
+    /// The native export produced by construction (including a build-failure record).
+    #[must_use]
+    pub(crate) fn export(&self) -> &[f64] {
+        &self.export
+    }
+}
+
+#[cfg(test)]
+mod prepared_tests {
+    use super::super::{topology_edgeuse_p2 as p2, topology_edgeuse_p3 as p3};
+    use super::*;
+
+    fn bits(r: Result<Vec<f64>, FfiError>) -> Result<Vec<u64>, String> {
+        r.map(|v| v.into_iter().map(f64::to_bits).collect())
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    fn same(block: &[f64], tail: &[f64]) {
+        let prepared = p2::PreparedBrep::new("", block).unwrap();
+        let mut input = block.to_vec();
+        input.extend_from_slice(tail);
+        assert_eq!(
+            bits(p2::eval(p2::Op::Tangent, "", &input)),
+            bits(p2::eval_prepared(p2::Op::Tangent, &prepared, tail))
+        );
+    }
+
+    #[test]
+    fn prepared_validation_matches_default_and_owns_exact_block_bits() {
+        let block = [3.0, 0.0, 0.0];
+        same(&block, &[0.0, 1.0, 0.0, 0.0]);
+        for tail in [
+            vec![],
+            vec![-1.0],
+            vec![0.5],
+            vec![f64::NAN],
+            vec![1e30],
+            vec![10000.0],
+            vec![0.0, 1.0, 2.0, 0.0],
+            vec![0.0, f64::INFINITY, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0, 0.0, 99.0],
+        ] {
+            same(&block, &tail);
+        }
+        // A genuine empty graph still rejects every selector, as ordinary eval does.
+        same(&[4.0, 0.0, 0.0, 0.0], &[0.0, 1.0, 0.0, 0.0]);
+        let mut path = String::from("fixture");
+        let owned_path = PreparedBrep::new(&path, &block).unwrap();
+        path.clear();
+        assert_eq!(owned_path.path(), "fixture");
+        let mut source = vec![3.0, -0.0, 0.0];
+        let prepared = PreparedBrep::new("", &source).unwrap();
+        source[1] = 1.0;
+        assert_eq!(prepared.block()[1].to_bits(), (-0.0f64).to_bits());
+        let positive = PreparedBrep::new("", &[3.0, 0.0, 0.0]).unwrap();
+        assert_ne!(prepared.block()[1].to_bits(), positive.block()[1].to_bits());
+        for block in [
+            vec![],
+            vec![3.0],
+            vec![3.0, 2.0, 0.0],
+            vec![3.0, 0.0, 0.0, 1.0],
+            vec![f64::NAN],
+        ] {
+            assert_eq!(
+                bits(eval(Op::Export, "", &block)),
+                bits(PreparedBrep::new("", &block).map(|p| p.export().to_vec()))
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_operations_rebuild_independent_bodies_and_validate_p3_arguments() {
+        let block = [
+            2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0,
+        ];
+        let prepared = p3::PreparedBrep::new("", &block).unwrap();
+        let tail = [0.0, 0.5, 0.0, 1.0, 0.0];
+        let mut input = block.to_vec();
+        input.extend(tail);
+        let original = bits(p3::eval(p3::Op::Normalized, "", &input));
+        assert_eq!(
+            bits(p3::eval_prepared(p3::Op::Normalized, &prepared, &tail)),
+            original
+        );
+        // GetOrCreate may create a UV curve, but no native body survives the call.
+        let create = [0.0, 1.0, 1.0, 1.0];
+        let mut create_input = block.to_vec();
+        create_input.extend(create);
+        assert_eq!(
+            bits(p3::eval_prepared(p3::Op::GetOrCreate, &prepared, &create)),
+            bits(p3::eval(p3::Op::GetOrCreate, "", &create_input))
+        );
+        assert_eq!(
+            bits(p3::eval_prepared(p3::Op::Normalized, &prepared, &tail)),
+            original
+        );
+        for tail in [
+            vec![],
+            vec![-1.0],
+            vec![0.0, f64::NAN, 0.0, 1.0, 0.0],
+            vec![0.0, 0.5, 0.0, 2.0, 0.0],
+            vec![0.0, 0.5, 0.0, 1.0, 0.0, 9.0],
+        ] {
+            let mut input = block.to_vec();
+            input.extend_from_slice(&tail);
+            assert_eq!(
+                bits(p3::eval(p3::Op::Normalized, "", &input)),
+                bits(p3::eval_prepared(p3::Op::Normalized, &prepared, &tail))
+            );
+        }
+    }
+
+    #[test]
+    fn prepared_file_change_refuses_stale_index_and_missing_file() {
+        // Each test invocation owns one unique scratch directory; only copies change.
+        let dir = std::env::temp_dir().join(format!("solidcore-prepared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("fixture.smb");
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/TestFiles/pt_TestFiles");
+        std::fs::copy(root.join("Mouse.smb"), &file).unwrap();
+        let path = file.to_str().unwrap();
+        let block = [0.0, 0.0, 0.0, 0.0];
+        let prepared = p2::PreparedBrep::new(path, &block).unwrap();
+        let prepared_p3 = p3::PreparedBrep::new(path, &block).unwrap();
+        let old_count = counts(prepared.export()).unwrap()[6];
+        std::fs::copy(root.join("plane_square.smb"), &file).unwrap();
+        let current = eval(Op::Export, path, &block).unwrap();
+        let new_count = counts(&current).unwrap()[6];
+        assert!(old_count > new_count);
+        let tail = [(old_count - 1) as f64, 1.0, 0.0, 0.0];
+        assert!(matches!(
+            p2::eval_prepared(p2::Op::Tangent, &prepared, &tail),
+            Err(FfiError::Status(crate::SC_ERR_ARG))
+        ));
+        let tail = [(old_count - 1) as f64, 0.5, 0.0, 1.0, 0.0];
+        assert!(matches!(
+            p3::eval_prepared(p3::Op::Normalized, &prepared_p3, &tail),
+            Err(FfiError::Status(crate::SC_ERR_ARG))
+        ));
+        // A missing file is still refused by the ordinary block parser, before
+        // the prepared export or operation selector can be used.
+        std::fs::remove_file(&file).unwrap();
+        let tail = [f64::NAN];
+        let mut input = block.to_vec();
+        input.extend(tail);
+        assert_eq!(
+            bits(p2::eval(p2::Op::Tangent, path, &input)),
+            bits(p2::eval_prepared(p2::Op::Tangent, &prepared, &tail))
+        );
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepared_native_open_failure_keeps_original_early_return() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "solidcore-prepared-unreadable-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("fixture.smb");
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/TestFiles/pt_TestFiles");
+        std::fs::copy(root.join("plane_square.smb"), &file).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o0)).unwrap();
+        if std::fs::File::open(&file).is_ok() {
+            // A privileged runner may ignore mode bits; do not pretend its native
+            // open-failure path was exercised, and never use malformed contents.
+            eprintln!("native open-failure branch not exercised: privileged file access");
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            std::fs::remove_file(file).unwrap();
+            std::fs::remove_dir(dir).unwrap();
+            return;
+        }
+        let path = file.to_str().unwrap();
+        let block = [0.0, 0.0, 0.0, 0.0];
+        let prepared2 = p2::PreparedBrep::new(path, &block).unwrap();
+        let prepared3 = p3::PreparedBrep::new(path, &block).unwrap();
+        assert!(counts(prepared2.export()).is_none());
+        assert!(counts(prepared3.export()).is_none());
+        let tail = [f64::NAN];
+        let mut input = block.to_vec();
+        input.extend(tail);
+        // The failed build is returned before operation arguments are inspected.
+        assert_eq!(
+            bits(p2::eval(p2::Op::Tangent, path, &input)),
+            bits(p2::eval_prepared(p2::Op::Tangent, &prepared2, &tail))
+        );
+        assert_eq!(
+            bits(p3::eval(p3::Op::Normalized, path, &input)),
+            bits(p3::eval_prepared(p3::Op::Normalized, &prepared3, &tail))
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+}
