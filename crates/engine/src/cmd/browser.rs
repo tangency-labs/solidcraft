@@ -196,7 +196,8 @@ fn is_construction(k: &FeatureKind) -> bool {
     matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
 }
 
-fn shown_item(s: &Session, key: &str) -> Option<Shown> {
+/// The item `key` names; bodies are looked for in the placed model `world`.
+fn shown_item(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
     if let Some(f) = s.doc.find_feature(key) {
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
             return Some(Shown::Sketch(f.id));
@@ -205,7 +206,7 @@ fn shown_item(s: &Session, key: &str) -> Option<Shown> {
             return Some(Shown::Origin(f.name.clone()));
         }
     }
-    if s.world_state().bodies.iter().any(|b| b.name == key) {
+    if world.bodies.iter().any(|b| b.name == key) {
         return Some(Shown::Body(key.to_string()));
     }
     if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.name == key) {
@@ -333,7 +334,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             list.iter().map(|j| super::joints::joint_id(s, Some(j), cmd).map(Shown::Joint)).collect::<Result<_>>()?
         }
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
-        (Some("bodies"), None) => s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("bodies"), None) => s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
@@ -355,8 +356,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "`items` must list sketches, bodies or construction geometry"));
             }
             // Every item is found before anything changes.
+            let world = s.world_state()?;
             keys.iter()
-                .map(|k| shown_item(s, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
+                .map(|k| shown_item(s, &world, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
                 .collect::<Result<_>>()?
         }
         (None, None) => return Err(bad(cmd, "`items` or `folder` is required")),
@@ -712,9 +714,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         // Standard view names come first, as in the browser's Named Views folder.
         (Some(name), None) => match crate::render::StandardView::parse(name) {
             Some(sv) => {
-                let mut c = crate::view::home_camera(s);
+                let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s));
+                c.fit(&crate::view::bounds(s)?);
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
@@ -1603,7 +1605,7 @@ mod tests {
         let body = s.model.state().bodies[0].name.clone();
         let drain_name = s.doc.feature(drain).unwrap().name.clone();
         let cam = solidcraft_render::Camera::default();
-        let lines = |s: &Session| crate::view::scene(s, &cam).lines.len();
+        let lines = |s: &Session| crate::view::scene(s, &cam).unwrap().lines.len();
         let shown = |s: &mut Session| {
             let d = run(s, "document.inspect", json!({}));
             d["sketches"].as_array().unwrap().iter().filter(|x| x["visible"] == true).count()
@@ -1631,7 +1633,7 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": true}));
         // Bodies (following a rename) and construction planes.
         run(&mut s, "browser.visibility", json!({"items": [body.clone(), "Floor", "xy"], "visible": false}));
-        assert!(crate::view::scene(&s, &cam).meshes.is_empty());
+        assert!(crate::view::scene(&s, &cam).unwrap().meshes.is_empty());
         assert_eq!(s.visibility.hidden_origin, vec!["Floor".to_string(), "XY".to_string()]);
         run(&mut s, "body.rename", json!({"body": body, "name": "Tray"}));
         assert_eq!(s.visibility.hidden_bodies, vec!["Tray".to_string()]);

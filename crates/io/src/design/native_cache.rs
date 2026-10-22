@@ -295,7 +295,7 @@ fn matrix_of(numbers: &[f64]) -> Result<[[f64; 4]; 4]> {
 
 pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<DesignPreview> {
     let doc = Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?);
+    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?)?;
     let mut preview = DesignPreview::default();
     let mut triangles = 0usize;
     let mut display_bytes = 0usize;

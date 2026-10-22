@@ -262,7 +262,11 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
-            o.transform = solidcraft_doc::mat_mul(&m, &o.transform);
+            let placed = solidcraft_doc::mat_mul(&m, &o.transform);
+            if !solidcraft_doc::is_placement(&placed) {
+                return Err(bad(cmd, "`matrix` moves the import out of a rigid placement within 1e9 mm"));
+            }
+            o.transform = placed;
             out["transform"] = json!(o.transform);
         }
         s.refresh();
@@ -610,7 +614,7 @@ fn export_to(s: &Session, path: &str, format: Format, bodies: &[String], quality
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_quality(&s.doc.painted(&s.world_state()), bodies, format, &name, &s.doc.metadata, quality)?
+        solidcraft_io::export_with_quality(&s.doc.painted(&*s.world_state()?), bodies, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -972,7 +976,7 @@ mod tests {
         let input = target.join("issue303-step.json");
         let doc = solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap();
         let mut session = Session::new(doc);
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let mut samples = [Vec::new(), Vec::new()];
@@ -1011,7 +1015,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         assert!(saved_preview(&s).is_none(), "save must not triangulate a cold body");
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         for body in &state.bodies {
             body.mesh();
         }
@@ -1062,19 +1066,19 @@ mod tests {
         assert!(saved_preview(&s).is_none());
         assert!(saved_geometry(&s, &s.doc).is_some(), "the timeline's bodies need no placement");
         assert!(s.world_cache.lock().unwrap().is_none(), "saving must not prepare cold placements");
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(saved_preview(&s).is_some());
         s.execute("occurrence.move", &json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(!s.pending_moves.is_empty());
         assert!(saved_preview(&s).is_none(), "uncaptured positions are not in the saved document");
         assert!(saved_geometry(&s, &s.doc).is_none());
         s.execute("component.capture_position", &json!({})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         let preview = saved_preview(&s).unwrap();
@@ -1082,7 +1086,7 @@ mod tests {
         assert!((min_x - 10.0).abs() < 1e-9);
         let mut editing = s.scratch();
         editing.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
-        for body in &editing.world_state().bodies {
+        for body in &editing.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(editing.active_sketch.is_some());
@@ -1096,7 +1100,7 @@ mod tests {
         crate::capture::install_test_renderer();
         let mut session = Session::new(Document::new("Cache opt-in"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             body.mesh();
         }
@@ -1150,7 +1154,7 @@ mod tests {
     fn saved_model_needs_no_meshes_and_is_adopted_only_for_its_document() {
         let mut session = Session::new(Document::new("Saved model"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
         let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
@@ -1230,7 +1234,7 @@ mod tests {
         let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("target"));
         let input = std::env::var_os("SOLIDCRAFT_BENCH_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| target.join("issue303-step.json"));
         let mut session = Session::new(solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap());
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let modes = [("json", false, "fast"), ("container", false, "fast"), ("container", true, "fast"), ("container", true, "compact")];
@@ -1272,7 +1276,7 @@ mod tests {
         assert_eq!(result["errors"], 0);
         let reconstructed = start.elapsed().as_secs_f64() * 1000.;
         let mut triangles = 0;
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             triangles += body.mesh().triangles.len();
         }
@@ -1410,14 +1414,14 @@ mod tests {
         let mut opened = Session::default();
         watch(progress.clone(), || opened.execute("doc.open", &json!({"path":path}))).unwrap();
         assert_eq!(progress.features(), (3, 3));
-        assert_eq!(opened.world_state().bodies.len(), 3);
+        assert_eq!(opened.world_state().unwrap().bodies.len(), 3);
 
         let progress = Arc::new(Progress::default());
         progress.cancel();
         let mut stopped = Session::default();
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
-        assert!(stopped.world_state().bodies.is_empty());
+        assert!(stopped.world_state().unwrap().bodies.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -21,8 +21,8 @@ fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joi
     let path = vec![second];
     let placement = session.occurrence_placement(&path).unwrap();
     let name = placement.bodies[0].world.clone();
-    let world = session.world_state();
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    let world = session.world_state().unwrap();
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     let source_state = session.model.state();
     let source = source_state.body("Block").unwrap();
     let placed = world.body(&name).unwrap();
@@ -38,10 +38,10 @@ fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joi
     let top = placed.body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap().index;
     run(&mut session, "select.set", json!({"items":[{"type":"face","body":name,"index":top,"point":[pick.x,pick.y,pick.z]}]}));
     assert!(matches!(&session.selection[0], crate::Sel::Face { body, index, .. } if body == &name && *index == top));
-    assert!(Arc::ptr_eq(&world, &session.world_state()), "selection changes must not discard prepared placements");
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()), "selection changes must not discard prepared placements");
     let scratch = session.scratch();
     assert_eq!(scratch.pending_moves, pending);
-    let scratch_world = scratch.world_state();
+    let scratch_world = scratch.world_state().unwrap();
     assert!(Arc::ptr_eq(&world, &scratch_world));
     let scratch_body = scratch_world.body(&name).unwrap();
     assert!(scratch_body.mesh().bounds().min.dist(bounds.min) < 1e-9);
@@ -53,7 +53,7 @@ fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joi
     let before_joint = crate::doc::mat_mul(&crate::doc::joints::occurrence_world(&session.doc, second), &local_frame);
     assert!(crate::doc::apply_point(&before_joint, Vec3::ZERO).dist(pick) < 1e-9);
     run(&mut session, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":true}));
-    let moved = session.world_state();
+    let moved = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&world, &moved), "a changed transform must invalidate placed meshes");
     assert!(moved.body(&name).unwrap().mesh().bounds().min.dist(bounds.min + Vec3::new(5., 0., 0.)) < 1e-9);
     assert!(world.body(&name).unwrap().mesh().bounds().min.dist(bounds.min) < 1e-9, "prior snapshots must remain immutable");
@@ -62,7 +62,7 @@ fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joi
     let after_joint = crate::doc::mat_mul(&crate::doc::joints::occurrence_world(&session.doc, second), &local_frame);
     assert!(crate::doc::apply_point(&after_joint, Vec3::ZERO).dist(pick + Vec3::new(5., 0., 0.)) < 1e-9);
     let reopened = Session::new(crate::doc::Document::from_json(&session.doc.to_json()).unwrap());
-    assert!(reopened.world_state().body(&name).unwrap().mesh().bounds().min.dist(bounds.min + Vec3::new(5., 0., 0.)) < 1e-9);
+    assert!(reopened.world_state().unwrap().body(&name).unwrap().mesh().bounds().min.dist(bounds.min + Vec3::new(5., 0., 0.)) < 1e-9);
     assert_eq!(reopened.model.results.iter().filter(|r| r.error.is_some()).count(), 0);
 }
 
@@ -71,22 +71,22 @@ fn selection_visibility_section_and_view_revisions_reuse_world_geometry() {
     let mut session = Session::default();
     run(&mut session, "component.create", json!({"name":"Part"}));
     run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Block","operation":"new"}));
-    let world = session.world_state();
+    let world = session.world_state().unwrap();
     let revision = session.revision;
     run(&mut session, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
     assert!(session.revision > revision);
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     run(&mut session, "select.clear", json!({}));
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     run(&mut session, "browser.visibility", json!({"items":["Block"],"visible":false}));
     assert!(!session.body_visible("Block"));
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     run(&mut session, "inspect.section", json!({"plane":{"origin":[0,0,2],"normal":[0,0,1]}}));
     assert!(session.section.is_some());
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
     session.invalidate_view(session.revision + 10);
-    assert!(Arc::ptr_eq(&world, &session.world_state()));
-    assert!(Arc::ptr_eq(&world, &session.scratch().world_state()));
+    assert!(Arc::ptr_eq(&world, &session.world_state().unwrap()));
+    assert!(Arc::ptr_eq(&world, &session.scratch().world_state().unwrap()));
 }
 
 #[test]
@@ -99,50 +99,53 @@ fn world_cache_requires_exact_design_model_pending_and_author_context() {
     let sketch = run(&mut session, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
     run(&mut session, "sketch.finish", json!({}));
     let second = run(&mut session, "occurrence.copy", json!({"occurrence":first}))["occurrence"].as_u64().unwrap();
-    let initial = session.world_state();
+    let initial = session.world_state().unwrap();
     run(&mut session, "occurrence.move", json!({"occurrence":second,"translate":[10,20,0],"capture":false}));
-    let pending = session.world_state();
+    let pending = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&initial, &pending));
     let name = session.occurrence_placement(&[second]).unwrap().bodies[0].world.clone();
     assert!(pending.body(&name).unwrap().mesh().bounds().min.dist(Vec3::new(10., 20., 0.)) < 1e-9);
     run(&mut session, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
-    let authored = session.world_state();
+    let authored = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&pending, &authored));
     assert!(authored.sketch(sketch).unwrap().plane.origin.dist(Vec3::new(10., 20., 0.)) < 1e-9);
     let mut scratch = session.scratch();
-    assert!(Arc::ptr_eq(&authored, &scratch.world_state()));
+    assert!(Arc::ptr_eq(&authored, &scratch.world_state().unwrap()));
     scratch.active_occurrence_path = Some(vec![first]);
-    let scratch_world = scratch.world_state();
+    let scratch_world = scratch.world_state().unwrap();
     assert!(!Arc::ptr_eq(&authored, &scratch_world));
     assert!(scratch_world.sketch(sketch).unwrap().plane.origin.dist(Vec3::ZERO) < 1e-9);
-    assert!(Arc::ptr_eq(&authored, &session.world_state()), "scratch context must not replace the source cache");
+    assert!(Arc::ptr_eq(&authored, &session.world_state().unwrap()), "scratch context must not replace the source cache");
     // Evaluation and placement never read appearances: an appearance edit, its undo and its redo
     // keep the evaluated model and the placed world (the cache follows the new document).
     let model = session.model.state();
     run(&mut session, "appearance.assign", json!({"bodies":["Block"],"color":"#ff0000"}));
-    let painted = session.world_state();
+    let painted = session.world_state().unwrap();
     assert!(Arc::ptr_eq(&authored, &painted), "an appearance edit keeps the placed world");
     assert!(Arc::ptr_eq(&model, &session.model.state()), "and the evaluated model");
     assert_ne!(session.doc.model_body_look(painted.body("Block").unwrap()), None);
     run(&mut session, "edit.undo", json!({}));
-    let undone = session.world_state();
+    let undone = session.world_state().unwrap();
     assert!(Arc::ptr_eq(&painted, &undone), "undoing it too");
     assert_eq!(session.doc.model_body_look(undone.body("Block").unwrap()), None);
     run(&mut session, "edit.redo", json!({}));
-    let redone = session.world_state();
+    let redone = session.world_state().unwrap();
     assert!(Arc::ptr_eq(&undone, &redone), "and redoing it");
     assert!(session.doc.model_body_look(redone.body("Block").unwrap()).is_some());
-    let before_edit = session.world_state();
+    let before_edit = session.world_state().unwrap();
     run(&mut session, "solid.box", json!({"length":5,"width":6,"height":7,"body_name":"Other","operation":"new"}));
-    let edited = session.world_state();
+    let edited = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&before_edit, &edited));
     assert!(edited.body("Other").is_some());
     session.doc = Arc::new(crate::doc::Document::from_json(&session.doc.to_json()).unwrap());
-    let replaced = session.world_state();
+    let replaced = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&edited, &replaced), "equal contents in a different document cannot share the cache key");
     session.model = crate::doc::Model::default();
     session.model.evaluate(&session.doc);
-    assert!(!Arc::ptr_eq(&replaced, &session.world_state()), "a new evaluated model must invalidate even when the document Arc is unchanged");
+    assert!(
+        !Arc::ptr_eq(&replaced, &session.world_state().unwrap()),
+        "a new evaluated model must invalidate even when the document Arc is unchanged"
+    );
 }
 
 #[test]
@@ -150,35 +153,35 @@ fn adopted_scratch_keeps_its_warm_geometry_and_history_stages_invalidate_it() {
     let mut session = Session::default();
     run(&mut session, "component.create", json!({"name":"Part"}));
     run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Block","operation":"new"}));
-    let source = session.world_state();
+    let source = session.world_state().unwrap();
     let source_json = session.doc.to_json();
     let mut scratch = session.scratch();
     run(&mut scratch, "solid.box", json!({"length":5,"width":6,"height":7,"body_name":"Draft","operation":"new"}));
-    let warmed = scratch.world_state();
+    let warmed = scratch.world_state().unwrap();
     assert!(!Arc::ptr_eq(&source, &warmed));
     assert_eq!(session.doc.to_json(), source_json);
-    assert!(Arc::ptr_eq(&source, &session.world_state()));
+    assert!(Arc::ptr_eq(&source, &session.world_state().unwrap()));
     assert!(source.body("Draft").is_none());
     let feature = warmed.body("Draft").unwrap().feature;
     session.accept_computed(scratch);
-    assert!(Arc::ptr_eq(&warmed, &session.world_state()), "adoption/view revision must retain the worker's prepared geometry");
+    assert!(Arc::ptr_eq(&warmed, &session.world_state().unwrap()), "adoption/view revision must retain the worker's prepared geometry");
     session.invalidate_view(session.revision + 20);
-    assert!(Arc::ptr_eq(&warmed, &session.world_state()));
+    assert!(Arc::ptr_eq(&warmed, &session.world_state().unwrap()));
     run(&mut session, "timeline.rollback", json!({"position":1}));
-    let rolled = session.world_state();
+    let rolled = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&warmed, &rolled));
     assert!(rolled.body("Block").is_some());
     assert!(rolled.body("Draft").is_none());
     run(&mut session, "timeline.rollback", json!({}));
-    let restored = session.world_state();
+    let restored = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&rolled, &restored));
     assert!(restored.body("Draft").is_some());
     run(&mut session, "timeline.suppress", json!({"feature":feature,"suppressed":true}));
-    let suppressed = session.world_state();
+    let suppressed = session.world_state().unwrap();
     assert!(!Arc::ptr_eq(&restored, &suppressed));
     assert!(suppressed.body("Draft").is_none());
     run(&mut session, "timeline.suppress", json!({"feature":feature,"suppressed":false}));
-    assert!(session.world_state().body("Draft").is_some());
+    assert!(session.world_state().unwrap().body("Draft").is_some());
 }
 
 /// A moved component's bodies keep their placed geometry and display mesh while the design
@@ -192,26 +195,26 @@ fn moved_component_bodies_are_not_placed_again_when_something_else_changes() {
     run(&mut session, "solid.box", json!({"length":60,"width":60,"height":5,"body_name":"Rim"}));
     run(&mut session, "component.activate", json!({"component":"root"}));
     run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[100,0,0]}));
-    let placed = session.world_state();
+    let placed = session.world_state().unwrap();
     let rim = placed.bodies.iter().find(|b| b.source_name.as_deref() == Some("Rim")).unwrap().clone();
     let mesh = rim.mesh();
     assert!(mesh.bounds().min.dist(Vec3::new(100., 0., 0.)) < 1e-6);
     // A body added elsewhere: the rim is the same placed body, already meshed.
     run(&mut session, "solid.box", json!({"length":5,"width":6,"height":7,"body_name":"Frame"}));
-    let after = session.world_state();
+    let after = session.world_state().unwrap();
     let again = after.body(&rim.name).unwrap();
     assert!(Arc::ptr_eq(&mesh, &again.mesh()), "an unchanged placed body keeps its mesh");
     assert!(again.body.same(&rim.body));
     // The placement moves: new world coordinates, reusing the definition's triangulation.
     run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,50,0]}));
-    let moved = session.world_state();
+    let moved = session.world_state().unwrap();
     let moved_rim = moved.bodies.iter().find(|b| b.source_name.as_deref() == Some("Rim")).unwrap();
     assert!(!Arc::ptr_eq(&mesh, &moved_rim.mesh()));
     assert!(moved_rim.mesh().bounds().min.dist(Vec3::new(100., 50., 0.)) < 1e-6);
     // The body itself changes: placed again too, and the old snapshot is untouched.
     run(&mut session, "body.rename", json!({"body":"Frame","name":"Frame tube"}));
     let source = session.model.state().body("Rim").unwrap().clone();
-    let world = session.world_state();
+    let world = session.world_state().unwrap();
     let kept = world.bodies.iter().find(|b| b.source_name.as_deref() == Some("Rim")).unwrap();
     assert!(Arc::ptr_eq(&moved_rim.mesh(), &kept.mesh()));
     assert_eq!(kept.source_transform, moved_rim.source_transform);
@@ -233,14 +236,14 @@ fn joint_drive_reuses_reference_tessellation_across_rigid_poses() {
         json!({"type":"revolute","name":"Crank","a":0,"b":"Crank","at":{"occurrence":0,"point":[0,0,0],"z":[0,0,1]}}),
     );
     let definitions = session.model.state();
-    let original = session.world_state();
+    let original = session.world_state().unwrap();
     let local = original.body("Crank").unwrap().mesh();
     let bounds = local.bounds();
     for angle in [37., 91., 37., 0.] {
         let driven = run(&mut session, "joint.drive", json!({"joint":"Crank","value":angle}));
         assert_eq!(driven["moved"], true);
         assert!(Arc::ptr_eq(&definitions, &session.model.state()));
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         let body = world.body("Crank").unwrap();
         let (mesh, work) = crate::kernel::profile::capture(|| body.mesh());
         assert_eq!(work.tessellate_ms, 0., "a warm definition must not enter the kernel mesher at a new pose: {work:?}");

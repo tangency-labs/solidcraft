@@ -36,7 +36,7 @@ fn manual_projection_captures_the_requested_coincident_body_producer() {
         assert!(matches!(&sk.links[0].source,solidcraft_sketch::LinkSource::Face{body,at} if body=="Target" && (at.z-20.).abs()<1e-6));
         assert!(sk.points.iter().any(|point| point.pos.x > 19.));
         assert!(sk.points.iter().any(|point| point.pos.y > 19.));
-        assert!((session.world_state().body("Control").unwrap().mesh().bounds().max.z - 10.).abs() < 1e-6);
+        assert!((session.world_state().unwrap().body("Control").unwrap().mesh().bounds().max.z - 10.).abs() < 1e-6);
     };
     verify(&s);
     verify(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));

@@ -113,7 +113,7 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
         run(&mut s, "edit.redo", json!({}));
         assert_eq!(s.doc.to_json(), after_cut);
         check(&mut s, area * height, hole, height);
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let occupied = Vec3::new(35.0, 21.0 - height, 15.0);
         let absent = Vec3::new(35.0, 19.0 - height, 15.0);
         assert!(world.bodies.iter().any(|body| body.body.contains(occupied)));
@@ -124,7 +124,7 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
         let before_volume: f64 = world.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         let before_bounds: Vec<_> = world.bodies.iter().map(|body| (body.name.clone(), body.mesh().bounds())).collect();
         let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-        let after = reopened.world_state();
+        let after = reopened.world_state().unwrap();
         assert!(after.bodies.iter().any(|body| body.body.contains(occupied)));
         let v: f64 = after.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         assert!((v - area * height).abs() < area * height * 1e-4);
@@ -191,7 +191,7 @@ fn repeated_source_face_profile_requires_and_uses_the_exact_active_occurrence() 
     assert_eq!(s.doc.to_json(), before);
     run(&mut s, "component.activate", json!({"component":cid,"occurrence":occurrence}));
     run(&mut s, "solid.extrude", json!({"face":[55,5,10],"distance":5,"operation":"new"}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     for x in [5.0, 55.0] {
         assert!(state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 14.0))));
         assert!(!state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 16.0))));

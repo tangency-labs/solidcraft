@@ -59,7 +59,7 @@ fn session(script: &[(&str, serde_json::Value)]) -> Session {
 }
 
 fn picture(c: &Capturer, s: &Session, cam: &Camera, w: u32, h: u32) -> Vec<u8> {
-    c.rgba(&view::scene_with_guides(s, cam, None, Guides { grid: false, axes: false }), cam, w, h).unwrap()
+    c.rgba(&view::scene_with_guides(s, cam, None, Guides { grid: false, axes: false }).unwrap(), cam, w, h).unwrap()
 }
 
 fn differing(a: &[u8], b: &[u8]) -> usize {
@@ -114,7 +114,7 @@ fn at_ten_metres_a_thin_label_is_whole_and_a_washer_behind_stays_hidden() {
             continue;
         }
         // The label's front face (y = -0.3), sampled inside its outline.
-        let radius = view::scene(&with, &cam).radius;
+        let radius = view::scene(&with, &cam).unwrap().radius;
         let mut grey = Vec::new();
         for i in 1..20 {
             for j in 1..20 {
@@ -271,12 +271,12 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
     s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
     for (mode, c) in capturers() {
         for fov in [0.0, 0.6] {
-            let mut cam = view::home_camera(&s);
+            let mut cam = view::home_camera(&s).unwrap();
             cam.fov = fov;
             let count = |on_top: bool| {
                 // The session's section (`scene_with_guides` takes its own). The line is 2 µm on
                 // the kept side: exactly on the plane, rounding cuts parts of it away with the rest.
-                let mut sc = view::scene(&s, &cam);
+                let mut sc = view::scene(&s, &cam).unwrap();
                 sc.lines.push(red_line(Vec3::new(5.0, 15.002, 10.0), Vec3::new(35.0, 15.002, 10.0), on_top));
                 pixels(&c.rgba(&sc, &cam, 300, 220).unwrap()).filter(|p| red(*p)).count()
             };

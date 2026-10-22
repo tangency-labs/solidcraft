@@ -216,7 +216,8 @@ impl Evaluation {
         if !due {
             return;
         }
-        let world = Arc::new(crate::world_state(doc, state));
+        // A world that cannot be placed is shown with the evaluation's own error, at its end.
+        let Ok(world) = crate::world_state(doc, state).map(Arc::new) else { return };
         if let Ok(mut p) = progress.partial.lock() {
             *p = (Some(Partial { features, world }), Some(web_time::Instant::now()));
         }

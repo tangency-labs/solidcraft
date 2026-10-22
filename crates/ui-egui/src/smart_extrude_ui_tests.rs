@@ -16,13 +16,13 @@ fn state(h: &Harness) -> (usize, usize, bool) {
 }
 
 fn bounds_z(h: &Harness) -> (f64, f64) {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let b = st.bodies.last().expect("a body").mesh().bounds();
     (b.min.z, b.max.z)
 }
 
 fn volume(h: &Harness) -> f64 {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum()
 }
 

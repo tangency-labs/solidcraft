@@ -199,7 +199,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "appearance.assign").then(|| {
         let faces = app.session.selection.iter().any(|s| matches!(s, Sel::Face { .. }))
             && !app.session.selection.iter().any(|s| matches!(s, Sel::Body { .. }));
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         let body_look = |body: &solidcraft_engine::doc::ModelBody| {
             app.session.doc.model_body_look(body).or_else(|| {
                 (body.body.paint().is_some() || body.imported.is_some() || body.body.color().is_some()).then(|| {

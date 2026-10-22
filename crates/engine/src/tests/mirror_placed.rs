@@ -9,7 +9,7 @@ use super::run;
 use crate::*;
 
 fn world_box(s: &Session, body: &str) -> (Vec3, Vec3) {
-    let b = s.world_state().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
+    let b = s.world_state().unwrap().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
     (b.min, b.max)
 }
 
@@ -56,7 +56,7 @@ fn a_further_instance_is_mirrored_at_its_own_placement() {
     let mut s = Session::default();
     let (component, _) = moved_arm(&mut s);
     run(&mut s, "occurrence.copy", json!({"component": component, "translate": [0, 0, 40]}));
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     let instance = names.iter().find(|n| n.starts_with("ArmBody (")).cloned().unwrap();
     let r = run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody", instance], "plane": "YZ"}));
     let copies: Vec<String> = r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();

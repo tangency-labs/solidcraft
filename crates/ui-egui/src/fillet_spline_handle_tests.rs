@@ -28,7 +28,7 @@ fn open(h: &mut Harness) {
 }
 
 fn volume(h: &Harness) -> f64 {
-    kernel::measure(&h.app.session.world_state().body("Plate").unwrap().body).unwrap().volume
+    kernel::measure(&h.app.session.world_state().unwrap().body("Plate").unwrap().body).unwrap().volume
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn double_clicks_add_and_remove_control_radii() {
         panic!("a spline fillet")
     };
     assert_eq!(radii.len() + 1, law.radii.len());
-    assert!(h.app.session.world_state().body("Box").is_some());
+    assert!(h.app.session.world_state().unwrap().body("Box").is_some());
 }
 
 #[test]

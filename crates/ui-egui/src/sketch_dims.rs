@@ -172,7 +172,7 @@ fn on_curve_axis(app: &SolveApp, t: &Tool, p: &(Vec2, Option<String>)) -> Option
     if ang == v.angle() {
         return None;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sk = &st.sketch(app.session.active_sketch?)?.sketch;
     let shape = sk.shape(sk.curve_index(curve)?)?;
     let dir = Vec2::from_angle(ang);
@@ -443,7 +443,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
     let tk = Tokens::get();
     let sid = app.session.active_sketch?;
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(sid)?.plane;
     let e = shown(app, t, t.hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));

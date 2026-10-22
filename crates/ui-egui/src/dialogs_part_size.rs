@@ -58,7 +58,7 @@ impl std::fmt::Debug for Resize {
 
 /// Resolve a whole definition, including bodies displayed through an occurrence path.
 pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut component = None;
     for name in bodies {
         let body = state.bodies.iter().find(|b| b.name == *name)?;
@@ -362,7 +362,7 @@ mod tests {
         apply(&mut app);
         assert_eq!(app.session.doc.assembly.joints, joints);
         assert_eq!(app.session.doc.occurrences, occurrences);
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let body = state.bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap();
         let bounds = body.mesh().bounds();
         assert!((bounds.max.z - 18.0).abs() < 1e-6 && (bounds.min.z + 15.0).abs() < 1e-6);
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn part_size_resolves_body_face_and_occurrence_contexts_and_rejects_mixed_targets() {
         let (mut app, id) = part("hex_nut", "M5", None);
-        let body = app.session.world_state().bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap().name.clone();
+        let body = app.session.world_state().unwrap().bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap().name.clone();
         menu(&mut app, Target::Body { name: body.clone() });
         assert_eq!(editor(&app).component, id);
         crate::dialogs::cancel(&mut app);

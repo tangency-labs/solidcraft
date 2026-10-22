@@ -110,7 +110,7 @@ fn a_body_the_sketch_sits_on_stays_shown() {
     let mut s = Session::default();
     block(&mut s, "Gone", 0.0);
     let top = {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let face = world
             .body("Gone")
             .and_then(|body| body.body.faces(0.01).ok())
@@ -143,7 +143,7 @@ fn every_placement_of_a_component_body_is_left_out() {
     run(&mut s, "occurrence.copy", json!({"component": component, "translate": [50, 0, 0]}));
     run(&mut s, "timeline.roll_to", json!({"feature": "Edited"}));
     run(&mut s, "sketch.edit", json!({"sketch": "Edited"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 2, "one body, placed twice");
     for body in &world.bodies {
         assert!(!s.body_visible(&body.name), "{} is deleted later", body.name);

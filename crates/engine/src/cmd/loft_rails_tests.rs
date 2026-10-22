@@ -56,7 +56,7 @@ fn setup() -> Session {
 }
 
 fn measure(s: &Session, body: &str) -> solidcraft_kernel::BodyMeasure {
-    solidcraft_kernel::measure(&s.world_state().body(body).unwrap().body).unwrap()
+    solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap()
 }
 
 fn loft(s: &mut Session, body: &str, extra: Value) -> Result<Value, String> {

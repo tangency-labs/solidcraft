@@ -441,7 +441,7 @@ fn insert_two_mesh_cubes(s: &mut Session, tag: &str) -> Vec<String> {
         run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     }
     let _ = std::fs::remove_dir_all(&dir);
-    s.world_state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
+    s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
 }
 
 /// #3249: mesh bodies are not measured, and used to vanish from the answer (`bodies: 0`, nothing

@@ -1061,7 +1061,7 @@ impl SolveApp {
                     self.cancel_view_animation();
                     self.cam = to;
                 } else if v.get("fit").and_then(Value::as_bool).unwrap_or(false) {
-                    let bounds = solidcraft_engine::view::bounds(&self.session);
+                    let bounds = solidcraft_engine::view::bounds(&self.session).map_err(|e| e.to_string())?;
                     self.animate_to(self.fitted(to));
                     self.pending_fit = Some((to, bounds, true));
                 } else {
@@ -1722,7 +1722,7 @@ impl SolveApp {
     /// Insert CAD bodies, meshes or sketch drawing geometry into the current design.
     pub fn insert_path(&mut self, path: &str) {
         let cmd = file_load::insert_command(path);
-        let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let before: Vec<String> = crate::open_meshing::session_world(&self.session).bodies.iter().map(|b| b.name.clone()).collect();
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));

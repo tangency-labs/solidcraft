@@ -48,7 +48,7 @@ fn key(v: Vec3) -> [i64; 3] {
 fn straight_edges_are_one_edge_after_many_cuts() {
     for (what, s) in [("as saved", open(&design())), ("built from scratch", rebuilt())] {
         assert_eq!(errors(&s), vec![], "{what}: every feature evaluates");
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let bodies: Vec<_> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
         assert_eq!(bodies.len(), 1, "{what}: one body");
         let body = &bodies[0].body;

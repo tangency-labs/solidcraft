@@ -236,7 +236,7 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(
             (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap().dist(sk.point(sk.resolve_point("l1.end").unwrap()).unwrap()) - 30.).abs()
@@ -310,7 +310,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         place(&mut h, &picks, [10., 5.]);
         type_value(&mut h, "30 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.point(sk.resolve_point("l1.start").unwrap()).unwrap().len() < 1e-8, "fixed origin remains fixed");
         assert!((sk.point(sk.resolve_point("l1.end").unwrap()).unwrap().x - 30.).abs() < 1e-6);
@@ -334,7 +334,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         place(&mut h, &picks, at);
         type_value(&mut h, "12 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         // The sketch's first dimension scales it (#1365): 20 × 10 becomes 24 × 12.
         assert!((solved.profiles[0].area - 288.).abs() < 1e-5, "the first dimension scales the rectangle: {}", solved.profiles[0].area);
@@ -366,7 +366,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     h.app.run("occurrence.move", json!({"occurrence":second,"translate":[25,32,40],"axis":[1,0,0],"angle":"35 deg","capture":false})).unwrap();
     h.call("ui.view", json!({"view":"top"}));
     h.app.cam.distance = 90.;
-    let plane = h.app.session.world_state().sketch(sid).unwrap().plane;
+    let plane = h.app.session.world_state().unwrap().sketch(sid).unwrap().plane;
     h.app.cam.target = plane.to_world(Vec2::new(10., 0.));
     h.settle();
     let baseline = h.app.session.doc.to_json();
@@ -447,7 +447,7 @@ fn dimension_to_fillet_virtual_sharp_keeps_the_arc_and_fixed_origin() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let sk = &solved.sketch;
@@ -495,23 +495,23 @@ fn inch_dimension_entry_survives_unit_changes_undo_and_reopen() {
     h.settle();
     type_value(&mut h, "1.3456");
     h.step(&json!({"key":"Enter"})).unwrap();
-    let edited = h.app.session.world_state();
+    let edited = h.app.session.world_state().unwrap();
     let edited = &edited.sketch(sketch).unwrap().sketch;
     assert!(edited.constraints.iter().any(|c| c.kind.value().is_some_and(|v| (v - 1.3456 * 25.4).abs() < 1e-6)));
     h.app.run("edit.undo", json!({})).unwrap();
-    let before = h.app.session.world_state().sketch(sketch).unwrap().sketch.clone();
+    let before = h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch.clone();
     let c = before.constraints.iter().find(|c| c.param.is_some()).unwrap();
     let p = h.app.session.doc.param(c.param.as_deref().unwrap()).unwrap();
     assert_eq!(crate::dim_view::label(&c.kind, Some(&p.expr), false, "in", 2), "1.2345 in");
     assert!((c.kind.value().unwrap() - 31.3563).abs() < 1e-6);
     h.app.run("document.units", json!({"units":"mm"})).unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sketch).unwrap().sketch, before);
+    assert_eq!(h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch, before);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.units, "in");
     let doc = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
     let reopened = solidcraft_engine::Session::new(doc);
     assert_eq!(reopened.doc.units, "in");
-    assert_eq!(reopened.world_state().sketch(sketch).unwrap().sketch, before);
+    assert_eq!(reopened.world_state().unwrap().sketch(sketch).unwrap().sketch, before);
     crate::dim_view::cancel();
 }
 
@@ -527,7 +527,7 @@ fn placing_a_two_point_dimension_picks_horizontal_vertical_or_aligned() {
         type_value(&mut h, "10 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
@@ -562,7 +562,7 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert_eq!(h.app.session.doc.params.len(), params, "a driven dimension adds no parameter");
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
     let dims: Vec<_> = solved.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).collect();
@@ -609,7 +609,7 @@ fn keys(h: &mut Harness, text: &str) {
 }
 
 fn solved(h: &Harness) -> solidcraft_engine::sketch::Sketch {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.clone()
 }
 

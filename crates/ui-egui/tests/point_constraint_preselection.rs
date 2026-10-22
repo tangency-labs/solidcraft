@@ -36,7 +36,7 @@ fn clicked_point_constraint_preselection_applies_and_undoes_once() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "coincident" => matches!(c.kind, ConstraintKind::Coincident { .. } | ConstraintKind::PointOnCurve { .. }),

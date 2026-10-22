@@ -564,9 +564,12 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         }
         (None, None) => {}
     }
-    let cam = s.camera.unwrap_or_else(|| solidcraft_engine::view::home_camera(&s));
+    let cam = match s.camera {
+        Some(cam) => cam,
+        None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
+    };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides);
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides).map_err(|e| e.to_string())?;
     let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
@@ -803,7 +806,7 @@ fn bench_ops(mut s: Session, script: &str) -> Result<Session, String> {
         let r = s.execute(id, p).map_err(|e| format!("{id}: {e}"))?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         let t = std::time::Instant::now();
-        s.world_state().warm_meshes(|| true);
+        s.world_state().map_err(|e| e.to_string())?.warm_meshes(|| true);
         let view_ms = t.elapsed().as_secs_f64() * 1000.0;
         println!("{}", json!({"step": "op", "command": id, "ms": ms, "view_ms": view_ms}));
         Ok(r)
@@ -859,7 +862,7 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         println!("{}", json!({"step": "feature", "id": r.id, "name": r.name, "ms": r.ms, "error": r.error}));
     }
     let t = std::time::Instant::now();
-    let st = s.world_state();
+    let st = s.world_state().map_err(|e| e.to_string())?;
     let place_ms = t.elapsed().as_secs_f64() * 1000.0;
     // As the desktop app prepares a design it opened.
     st.warm_meshes(|| true);
@@ -929,7 +932,7 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         let t = std::time::Instant::now();
         s.execute("parameters.change", &json!({"name": name, "expression": expr})).map_err(|e| e.to_string())?;
         let eval_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let st = s.world_state();
+        let st = s.world_state().map_err(|e| e.to_string())?;
         let t = std::time::Instant::now();
         st.warm_meshes(|| true);
         let mesh_ms = t.elapsed().as_secs_f64() * 1000.0;

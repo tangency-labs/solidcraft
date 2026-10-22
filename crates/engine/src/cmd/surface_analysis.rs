@@ -133,7 +133,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         curvature_per_mm: tolerance(p, "curvature_tolerance_per_mm", DEFAULT_CURVATURE_PER_MM)?,
     };
     let picks = edge_picks(p)?;
-    let st = s.world_state();
+    let st = s.world_state()?;
     let named = str_(p, "body");
     let candidates: Vec<&solidcraft_doc::ModelBody> = match named {
         Some(name) => vec![st.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?],

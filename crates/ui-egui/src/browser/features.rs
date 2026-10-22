@@ -18,7 +18,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     }
     let component = feature.component;
     let state = app.session.model.state();
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let Some(source) = world.body(body).map(|selected| selected.definition_name()) else { return };
     let Some((_, path, _)) = app
         .session
@@ -234,7 +234,7 @@ mod tests {
     }
 
     fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let model_body = state.body(body).unwrap();
         let names = solidcraft_engine::doc::naming::face_names(model_body);
         let index = names.iter().position(|name| name.starts_with(&format!("F{feature}:"))).unwrap();
@@ -416,7 +416,7 @@ mod tests {
         let inserted = h.app.run("component.insert_design", json!({"path":source.0.to_string_lossy()})).unwrap();
         let path = vec![inserted["occurrence"].as_u64().unwrap()];
         let name = h.app.session.occurrence_bodies(&path, false).unwrap()[0].clone();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let owner = state.body(&name).unwrap().feature;
         assert_ne!(owner, base);
         h.app.session.selection = vec![Sel::Face { body: name, index: 0, point: solidcraft_engine::geom::Vec3::ZERO }];

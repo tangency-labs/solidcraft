@@ -40,7 +40,7 @@ fn ms(f: impl FnOnce()) -> f64 {
 fn frame_and_cheap_command_cost_by_body_count() {
     for n in [50, 500, 5000] {
         let mut h = grid(n);
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         let scene_cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let scene_again = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let idle = ms(|| h.frames(10)) / 10.0;
@@ -378,7 +378,7 @@ fn frame_cost_of_a_design_file() {
     let doc = solidcraft_engine::io::read_design(&bytes).unwrap();
     let mut h = Harness::new();
     h.app.session = solidcraft_engine::Session::new(doc);
-    h.app.session.world_state().warm_meshes(|| true);
+    h.app.session.world_state().unwrap().warm_meshes(|| true);
     h.frames(3);
     let idle = ms(|| h.frames(5)) / 5.0;
     let keys: Vec<String> =
@@ -388,7 +388,7 @@ fn frame_cost_of_a_design_file() {
     let expanded = ms(|| h.frames(5)) / 5.0;
     let scene = ms(|| drop(crate::viewport::build_scene(&h.app)));
     let scene_again = ms(|| drop(crate::viewport::build_scene(&h.app)));
-    let bodies = h.app.session.world_state().bodies.len();
+    let bodies = h.app.session.world_state().unwrap().bodies.len();
     let rename = ms(|| {
         h.app.run("body.rename", json!({"body": "Body1", "name": "Renamed"})).unwrap();
         h.frame();

@@ -88,7 +88,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
 
-    let st = s.world_state();
+    let st = s.world_state()?;
     let (mesh_bodies, solid): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) = st.bodies.iter().partition(|b| b.body.is_mesh());
     // Mesh bodies are not measured. A mesh body named in `bodies` or `against` is left out of the
     // pairs and listed as unchecked, rather than refused as "no solid body".

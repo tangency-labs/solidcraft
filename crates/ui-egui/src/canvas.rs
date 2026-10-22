@@ -19,7 +19,7 @@ use crate::viewport::{Proj, projected_polygon};
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let first = d.inputs.first()?.items.first()?;
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
@@ -205,7 +205,7 @@ fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcraft_
     let point = crate::dialogs::object_point(&d.inputs, label)?;
     let p = point.as_array()?;
     let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    Some(solidcraft_engine::doc::object_height(&app.session.world_state(), plane, centre, p))
+    Some(solidcraft_engine::doc::object_height(&crate::open_meshing::session_world(&app.session), plane, centre, p))
 }
 
 /// The two faces at an edge, near `p`: for each, the normal and centroid of its triangle nearest
@@ -256,7 +256,7 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
     let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
     let Some(Sel::Edge { body, index, .. }) = d.inputs.first()?.items.first() else { return None };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
     let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
@@ -481,7 +481,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     });
     let all_span = if matches!(d.kind, Kind::Extrude { all: true, .. }) {
         dir.and_then(|n| {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let plane = match d.inputs.first()?.items.first()? {
                 Sel::Profile { sketch, .. } => profile_plane(app, *sketch)?,
                 _ => solidcraft_engine::geom::Plane::from_normal(base, n)?,
@@ -611,7 +611,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             let px = 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
             let ang = crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).ok().filter(|v| v.is_finite()).unwrap_or(0.0);
             let before = taper.clone();
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let regions: Vec<&solidcraft_engine::geom::Region2> = d
                 .inputs
                 .first()
@@ -1070,7 +1070,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
     }
     let t = Tokens::get();
     let Kind::Fillet { chamfer: false, .. } = d.kind else { return false };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let edges: Vec<(std::sync::Arc<Mesh>, usize, Vec3, Vec3)> = d
         .inputs
         .first()
@@ -1596,7 +1596,7 @@ fn revolve_convention(d: &Dialog) -> solidcraft_engine::doc::RevolveConvention {
 
 fn revolve_display_extent(app: &SolveApp, d: &Dialog, axis: (Vec3, Vec3)) -> Option<solidcraft_engine::doc::RevolveExtent> {
     let Sel::Profile { sketch, .. } = d.inputs.first()?.items.first()? else { return None };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(*sketch)?;
     let regions: Vec<_> = d
         .inputs

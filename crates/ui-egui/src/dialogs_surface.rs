@@ -364,7 +364,7 @@ fn sheet_picks(app: &SolveApp, picks: &[Sel]) -> Result<Value, String> {
 
 /// A surface builder's stored picks as selections again: its profiles, then its curves.
 fn sheet_sels(app: &SolveApp, sketch: u64, profiles: Option<&ProfileSel>, curves: &[String]) -> Vec<Sel> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mut sels: Vec<Sel> = match (profiles, st.sketch(sketch)) {
         (Some(sel), Some(ss)) => crate::dialogs::profile_indices(ss, sel).into_iter().map(|index| Sel::Profile { sketch, index }).collect(),
         _ => Vec::new(),
@@ -397,7 +397,7 @@ enum Chain {
 /// The picks grouped into curves: picks of one sketch (or one body) whose ends meet run on into
 /// one chain, in the order they were first picked; anything else is a curve of its own.
 fn chains(app: &SolveApp, picks: &[Sel]) -> Result<Vec<Chain>, String> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     // Each pick: what it belongs to (a sketch or a body), its ends, and how it joins a chain.
     let mut parts: Vec<(Chain, [Vec3; 2])> = Vec::with_capacity(picks.len());
     for x in picks {
@@ -939,7 +939,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         FeatureKind::Patch { sketch, edges, crown, continuity, points, .. } => {
             let mut sels: Vec<Sel> = edges.iter().filter_map(edge).collect();
             if let Some(sk) = sketch {
-                let st = s.world_state();
+                let st = crate::open_meshing::session_world(s);
                 if let Some(ss) = st.sketch(sk.0) {
                     sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: sk.0, index }));
                 }
@@ -1041,7 +1041,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let tools: Vec<Sel> = match (with, curves) {
                 (Some(_), _) => Vec::new(),
                 (None, Some(c)) if c.curves.is_empty() => {
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     st.sketch(c.sketch.0)
                         .map(|ss| {
                             ss.sketch

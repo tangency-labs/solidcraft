@@ -67,7 +67,7 @@ fn screen(h: &mut Harness, x: f64, y: f64) -> egui::Pos2 {
 
 fn point(h: &Harness, id: &str) -> Vec2 {
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(sid).expect("the sketch").sketch;
     sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap_or_else(|| panic!("no point {id}"))
 }
@@ -237,7 +237,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     h.app.cam.distance = 65.0;
     h.frames(3);
     let sid = h.app.session.active_sketch.unwrap();
-    let original = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let original = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     let source = original.curve_index("s1").unwrap();
     let derived = original.curve_index(&output).unwrap();
     let source_points = original.curves[source].kind.point_ids();
@@ -280,7 +280,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
         play(&mut h);
         assert!(h.app.viewport.point_drag.is_some());
         assert!(h.app.session.model.is_stale(), "the drag has not been released");
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(sid).unwrap().sketch;
         assert!(sk.points[source_points[1]].pos.dist(target) < 0.1, "source follows the held pointer: {:?}", sk.points[source_points[1]].pos);
         assert_ne!(sk.exact_segs(derived), original.exact_segs(derived), "the offset follows before release");
@@ -303,11 +303,11 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     assert_eq!(h.app.session.doc.to_json(), before);
     run(&mut h, "edit.redo", json!({}));
     run(&mut h, "sketch.offset.break", json!({"curve":output}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(sid).unwrap().sketch;
     assert!(sk.curves[derived].kind.point_ids().iter().all(|i| solidcraft_engine::view::sketch_point_visible(sk, *i)));
     run(&mut h, "edit.undo", json!({}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(sid).unwrap().sketch;
     assert!(sk.curves[derived].kind.point_ids().iter().all(|i| !solidcraft_engine::view::sketch_point_visible(sk, *i)));
 }
@@ -324,7 +324,7 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     run(&mut h, "sketch.dimension", json!({"entities": ["l4"], "value": 5}));
     run(&mut h, "sketch.line", json!({"points": [[80, 10], [80, 30]], "connect": false}));
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let before = h.app.session.world_state().sketch(sid).expect("the sketch").sketch.clone();
+    let before = h.app.session.world_state().unwrap().sketch(sid).expect("the sketch").sketch.clone();
     let lines = ["l1", "l2", "l3", "l4"];
     let mut selected: Vec<usize> = lines.iter().flat_map(|l| before.curves[before.curve_index(l).unwrap()].kind.point_ids()).collect();
     selected.sort_unstable();
@@ -340,7 +340,7 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     path.extend(steps(a, b, 8));
     press_and_move(&mut h, &path);
     release(&mut h, b);
-    let after = &h.app.session.world_state().sketch(sid).expect("the sketch").sketch.clone();
+    let after = &h.app.session.world_state().unwrap().sketch(sid).expect("the sketch").sketch.clone();
     for &p in &selected {
         let moved = after.points[p].pos - before.points[p].pos;
         assert!(moved.dist(Vec2::new(10.0, -10.0)) < 0.05, "{} moved by {moved:?}", before.points[p].id);
@@ -369,7 +369,7 @@ fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
     release(&mut h, b);
     assert!(point(&h, "c1.center").dist(Vec2::new(20.0, 20.0)) < 1e-9);
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(sid).expect("the sketch").sketch;
     let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
     assert!((r - 15.0).abs() < 0.05, "{r}");

@@ -196,7 +196,10 @@ fn a_resident_mesh_matches_the_cpu() {
 #[test]
 fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let Some(gpu) = gpu() else { return };
-    let plans: Vec<TessPlan> = bodies().iter().map(|(_, b)| ok(b.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }))).collect();
+    let plans: Vec<TessPlan> = bodies()
+        .iter()
+        .map(|(_, b)| ok(b.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) })))
+        .collect();
     let refs: Vec<&TessPlan> = plans.iter().collect();
     let mesh = ok(gpu.prepare_many(&refs));
     assert_eq!(mesh.parts.len(), plans.len());

@@ -40,7 +40,7 @@ fn wire_frame_second_occurrence_world_inputs_move_and_reopen() {
     }
     near(sk.wires[sk.wire_index(&a).unwrap()].fit[0], Vec3::new(2.0, 3.0, 5.0));
     near(sk.wires[sk.wire_index(&point).unwrap()].fit[0], Vec3::new(2.0, 3.0, 5.0));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let ws = &world.sketch(sketch).unwrap().sketch;
     let sw = &ws.wires[ws.wire_index(&spline).unwrap()];
     near(sw.fit[0], Vec3::new(14.0, 32.0, 55.0));
@@ -61,9 +61,9 @@ fn wire_frame_second_occurrence_world_inputs_move_and_reopen() {
     assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
     // Same definition at the first placement has the local geometry; selected second is exact.
     run(&mut s, "component.activate", json!({"component":component,"occurrence":first,"path":[first]}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(3.0, 2.0, 6.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(3.0, 2.0, 6.0));
     run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(18.0, 33.0, 46.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(18.0, 33.0, 46.0));
 }
 
 #[test]
@@ -77,10 +77,10 @@ fn wire_frame_pending_moves_other_owner_and_legacy_world_do_not_join() {
     run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false}));
     let point = run(&mut s, "sketch.point3d", json!({"point":[22,32,45]}))["point"].as_str().unwrap().to_string();
     near(s.doc.sketch(sketch).unwrap().wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == legacy).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == legacy).unwrap().fit[0], Vec3::new(2.0, 3.0, 5.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
     run(&mut s, "component.capture_position", json!({}));
-    near(s.world_state().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
+    near(s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|w| w.id == point).unwrap().fit[0], Vec3::new(22.0, 32.0, 45.0));
     // Explicit target in root must not inherit the unrelated active component frame.
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "component.activate", json!({"component":0}));
@@ -138,7 +138,7 @@ fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
     let sk = s.doc.sketch(sketch).unwrap();
     assert_eq!(sk.wires[0], initial);
     assert!(!sk.link(&link).unwrap().lost);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(world.sketch(sketch).unwrap().sketch.wires[0].pts.iter().all(|p| (p.x - 10.0).abs() < 1e-7));
     let before = s.doc.to_json();
     run(&mut s, "sketch.break_link", json!({"link":link}));
@@ -179,7 +179,7 @@ fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position()
         };
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         // Property measurement uses fine adaptive tessellation; the viewport mesh alone
         // undershoots a small circular profile by about 0.64% at its display chord tolerance.
@@ -188,7 +188,7 @@ fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position()
         let bounds = body.mesh().bounds();
         near((bounds.min + bounds.max) / 2.0, Vec3::new(17.0, 32.0, 50.0));
         run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         let bounds = body.mesh().bounds();
         near((bounds.min + bounds.max) / 2.0, Vec3::new(if space == WireSpace::Component { 22.0 } else { 17.0 }, 32.0, 50.0));
@@ -242,7 +242,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
     let check = |s: &Session, length: f64| {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.bodies.last().unwrap();
         let measure = solidcraft_kernel::measure(&body.body).unwrap();
         assert!((measure.volume - 4.0 * std::f64::consts::PI * length).abs() < 0.05, "{}", measure.volume);
@@ -284,7 +284,7 @@ fn wire_frame_three_owner_sweep_profile_move_invalidates_warm_cache() {
     run(&mut s, "occurrence.move", json!({"occurrence":consumer_occurrence,"axis":[0,0,1],"angle":"90 deg","translate":[100,-30,20]}));
     run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
     let measure = |session: &Session, x: f64| {
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let body = state.bodies.last().unwrap();
         assert_eq!(body.component, consumer["component"].as_u64().unwrap());
         let result = solidcraft_kernel::measure(&body.body).unwrap();

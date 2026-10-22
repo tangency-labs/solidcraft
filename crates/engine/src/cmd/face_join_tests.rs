@@ -81,13 +81,13 @@ fn face_join_maps_the_picked_instance_body_and_point_together() {
     run(&mut s, "component.activate", json!({"component":0}));
     let occurrence = run(&mut s, "occurrence.copy", json!({"component":component,"translate":[100,0,0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "component.activate", json!({"component":component,"occurrence":occurrence}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let body = world.bodies.iter().find(|body| body.body.contains(Vec3::new(139.0, 15.0, 10.0))).unwrap().name.clone();
     assert_ne!(body, "Wall", "exercise an instance body name");
     let result = run(&mut s, "solid.extrude", json!({"face":[140,15,10],"face_body":body,"distance":10,"operation":"join"}));
     let FeatureKind::Extrude { targets, .. } = &s.doc.feature(result["feature"].as_u64().unwrap()).unwrap().kind else { panic!("extrude") };
     assert_eq!(targets, &["Wall"]);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 2);
     for point in [Vec3::new(49.0, 15.0, 10.0), Vec3::new(149.0, 15.0, 10.0)] {
         assert!(world.bodies.iter().any(|body| body.body.contains(point)), "{point:?}");

@@ -396,7 +396,7 @@ fn deleting_sheet_material_prunes_cosmetic_threads_and_undo_restores_them() {
     assert!(s.model.state().bodies.is_empty());
     assert!(s.model.state().sheets.is_empty());
     assert!(s.model.state().threads.is_empty());
-    assert!(solidcraft_doc::world_state(&s.doc, &s.model.state()).threads.is_empty());
+    assert!(solidcraft_doc::world_state(&s.doc, &s.model.state()).unwrap().threads.is_empty());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.model.state().threads.len(), 1);
 }
@@ -419,7 +419,7 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
         let floor = sh.frame.to_world(solidcraft_geom::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 1.5;
         assert!(!mb.body.contains(cut));
         assert!(mb.body.contains(floor));
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = &world.body(name).unwrap().body;
         let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds();
         assert!(bounds.min.dist(Vec3::ZERO) < 1e-6, "{bounds:?}");
@@ -2629,7 +2629,7 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "RetainDepth", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":1,"start_offset":0.5,"operation":"intersect","name":"RetainSlab"}));
-    let before = s.world_state().bodies[0].mesh().bounds();
+    let before = s.world_state().unwrap().bodies[0].mesh().bounds();
     let name = s.model.state().sheets[0].body.clone();
     let destination = run(&mut s, "component.create", json!({"name":"Destination","parent":0,"grounded":false}));
     let owner = destination["component"].as_u64().unwrap();
@@ -2648,7 +2648,7 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
         assert_eq!(sh.pockets.len(), 2);
         assert_eq!(state.body(&name).unwrap().component, owner);
         assert!(state.body(&name).unwrap().transferred);
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = &world.body(&name).unwrap().body;
         assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
         assert!(!body.contains(Vec3::new(25.0, 25.0, 0.25)));
@@ -2658,12 +2658,12 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-6);
     }
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    let reopened_world = reopened.world_state();
+    let reopened_world = reopened.world_state().unwrap();
     let body = &reopened_world.body(&name).unwrap().body;
     assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-6);
     run(&mut reopened, "timeline.edit", json!({"feature":"RetainSlab","set":{"extent":{"distance":"1.5"}}}));
-    let world = reopened.world_state();
+    let world = reopened.world_state().unwrap();
     let body = &world.body(&name).unwrap().body;
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 150.0).abs() < 1e-6);
     assert!(body.contains(Vec3::new(25.0, 25.0, 1.75)));
@@ -2715,7 +2715,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
                 run(&mut s, command, json!({}));
             }
             assert!(s.model.state().sheets[0].pockets.is_empty(), "full gauge must not acquire roundoff-depth pockets");
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             assert!((solidcraft_kernel::measure(body).unwrap().volume - 250.0).abs() < 1e-5);
             assert!(body.contains(Vec3::new(25.0, 25.0, 0.1)));
@@ -2731,7 +2731,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
                 run(&mut s, command, json!({}));
             }
             assert_eq!(s.model.state().sheets[0].pockets.len(), 2);
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             let measured = solidcraft_kernel::measure(body).unwrap().volume;
             assert!((measured - 100.0).abs() < 1e-5, "retained volume {measured}");
@@ -2740,7 +2740,7 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
             assert!(!body.contains(Vec3::new(25.0, 25.0, 2.4)));
         }
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-        let world = cold.world_state();
+        let world = cold.world_state().unwrap();
         let body = &world.body(&name).unwrap().body;
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-5);
         assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
@@ -2875,7 +2875,7 @@ fn partial_depth_intersect_sub_extrusion_resolution_layers_refuse_atomically() {
         assert!(error.contains("resolution") || error.contains("distance is zero") || error.contains("sheet machining"), "{error}");
         assert_eq!(s.doc.to_json(), before);
         assert!(s.model.state().sheets[0].pockets.is_empty());
-        assert!((solidcraft_kernel::measure(&s.world_state().body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-5);
+        assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-5);
     }
 }
 

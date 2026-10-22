@@ -648,7 +648,7 @@ fn exploded_views_show_without_changing_the_design() {
     run(&mut s, "explode.show", json!({"view": "Apart"}));
     // Centres at x 5 and 25 → middle 15: each moves 10 mm further out.
     let bb = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["min"][0].as_f64().unwrap_or(f64::NAN);
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!((bb(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{names:?}");
     assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6);
     assert_eq!(s.doc.occurrences, before, "shown only");

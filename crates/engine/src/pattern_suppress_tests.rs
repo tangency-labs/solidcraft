@@ -52,7 +52,7 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
         s.doc.features.iter().find(|feature| feature.name == "USB" && matches!(feature.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap();
     assert!((s.model.state().sketch(usb.id).unwrap().plane.origin.y + 35.5).abs() < 1e-6);
     let assert_material = |session: &Session| {
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let case = state.body("Case").unwrap().mesh();
         let lid = state.body("Lid").unwrap().mesh();
         assert!(case.contains(solidcraft_geom::Vec3::new(-24.5, -21.5, 7.)));

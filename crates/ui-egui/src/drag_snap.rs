@@ -217,7 +217,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some(s) = current() else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|i| st.sketch(i)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();

@@ -466,6 +466,9 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         );
         let mut m = m;
         m[3] = [pt.x, pt.y, pt.z, 1.0];
+        if !solidcraft_doc::is_placement(&m) {
+            return Err(bad(cmd, "`point` must be within 1e9 mm and `direction` finite"));
+        }
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
             o.transform = m;
         }
@@ -564,7 +567,7 @@ mod tests {
     }
 
     fn bbox(s: &Session, prefix: &str) -> (solidcraft_geom::Vec3, solidcraft_geom::Vec3) {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let comp = s.doc.components.iter().find(|c| c.name.starts_with(prefix)).map(|c| c.id).unwrap_or(0);
         let b = st
             .bodies

@@ -28,7 +28,7 @@ fn discs() -> SolveApp {
 /// A pick of the round wall a point of the exact geometry lies on (the facets of the wall's mesh
 /// cut inside it, so the nearest face of any body).
 fn wall(app: &SolveApp, p: Vec3) -> Sel {
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let mut best: Option<(f64, Sel)> = None;
     for b in &st.bodies {
         let m = b.mesh();

@@ -155,7 +155,7 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let max_points = number(cmd, p, "max_points", 8e6, 1e4..=5e7)? as usize;
     let max_regions = number(cmd, p, "max_regions", 50.0, 1.0..=1000.0)? as usize;
     let colors = colours(cmd, p)?;
-    let st = s.world_state();
+    let st = s.world_state()?;
     let (na, nb) = pair(s, &st, p, cmd)?;
     let (Some(ba), Some(bb)) = (st.body(&na), st.body(&nb)) else { return Err(bad(cmd, "no such body")) };
     // Meshed within a quarter of the tolerance (the kernel goes no finer than a millionth of a

@@ -179,8 +179,12 @@ const START_PROBE_MM: f64 = 0.1;
 /// "Goes into a body" is decided where the extrude starts: just past the profile in the
 /// direction it grows, or halfway along it. With the halfway point alone, a cut dragged far
 /// past a body's far side read as a Join (#1257).
-pub fn auto_operation(s: &Session, p: &Value) -> Option<&'static str> {
-    auto_operation_in(s, p, true)
+///
+/// Faces picked in the world are probed in the placed model; one that cannot be placed is the
+/// error.
+pub fn auto_operation(s: &Session, p: &Value) -> Result<Option<&'static str>> {
+    let st = if grouped_face(p).is_some() { s.world_state()? } else { s.model.state() };
+    Ok(auto_operation_in(s, p, &st))
 }
 
 impl Session {
@@ -193,17 +197,22 @@ impl Session {
     }
 }
 
-fn auto_operation_in(s: &Session, p: &Value, world_faces: bool) -> Option<&'static str> {
+/// The first of an extrude's grouped face picks.
+fn grouped_face(p: &Value) -> Option<Vec3> {
+    p.get("faces").and_then(Value::as_array).and_then(|faces| faces.first()).and_then(vec3)
+}
+
+/// [`auto_operation`] probing the model `st`.
+fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) -> Option<&'static str> {
     let symmetric = p.get("to").is_none() && str_(p, "direction").is_some_and(|d| d.eq_ignore_ascii_case("symmetric"));
     // Imported face groups can belong to a child of an empty active component.
     // Probe in the same coordinate frame as the face picks.
-    let grouped = p.get("faces").and_then(Value::as_array).and_then(|faces| faces.first()).and_then(vec3);
-    let st = if grouped.is_some() && world_faces { s.world_state() } else { s.model.state() };
+    let grouped = grouped_face(p);
     // The body the extrude starts on, when it is in a component inside the active one: it takes
     // part as the active component's own bodies do (#5679).
     let mut started_on = None;
     let (base, n) = if let Some(point) = grouped {
-        let (mesh, index, distance, name) = super::face::face_at_state(&st, point, str_(p, "face_body")).ok().flatten()?;
+        let (mesh, index, distance, name) = super::face::face_at_state(st, point, str_(p, "face_body")).ok().flatten()?;
         if distance > (mesh.bounds().diagonal() * 1e-3).max(1e-3) * 10.0 {
             return None;
         }
@@ -663,7 +672,7 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         } else if pts.is_empty() {
             Vec::new()
         } else {
-            solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)
+            solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)?
         }
     };
     // Primitives have no `targets` of their own: their `targets` are the bodies taking part (#259).
@@ -820,7 +829,9 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
         _ => None,
     };
     let operation = match str_(p, "operation") {
-        Some(o) if o.eq_ignore_ascii_case("auto") => Operation::parse(auto_operation_in(s, p, false).unwrap_or("new")).unwrap_or(Operation::NewBody),
+        Some(o) if o.eq_ignore_ascii_case("auto") => {
+            Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody)
+        }
         _ => operation(p, cmd)?,
     };
     let mut targets = string_list(p, "targets");
@@ -3079,8 +3090,8 @@ mod corner_tests {
         let (default, reply) = cornered(None);
         assert_eq!(reply["warning"], json!(null), "{reply}");
         let (rolling, _) = cornered(Some("rolling"));
-        let ball = default.world_state().body("B").unwrap().body.clone();
-        let same = rolling.world_state().body("B").unwrap().body.clone();
+        let ball = default.world_state().unwrap().body("B").unwrap().body.clone();
+        let same = rolling.world_state().unwrap().body("B").unwrap().body.clone();
         // `corner: rolling` is the default: the same body, to the last bit of its area.
         assert_eq!(solidcraft_kernel::measure(&ball).unwrap().area, solidcraft_kernel::measure(&same).unwrap().area);
         assert!(solidcraft_kernel::measure(&ball).unwrap().volume > 7000.0);

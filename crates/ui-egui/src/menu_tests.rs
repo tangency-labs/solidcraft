@@ -143,7 +143,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
     app.run("sketch.finish", json!({})).unwrap();
     let (sketch, curve) = {
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         let ss = st.sketches.first().expect("the design has one sketch");
         (ss.feature, ss.sketch.curves.first().expect("the rectangle drew curves").id.clone())
     };
@@ -171,7 +171,7 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
 fn a_selected_face_keeps_the_body_menu_beside_a_sketch_curve() {
     let mut app = sample_app();
     let b = body(&app);
-    let sketch = app.session.world_state().sketches.first().expect("the sample design has sketches").feature;
+    let sketch = app.session.world_state().unwrap().sketches.first().expect("the sample design has sketches").feature;
     let items = json!([
         {"type": "face", "body": b, "index": 0, "point": [0, 0, 0]},
         {"type": "external_sketch_curve", "sketch": sketch, "id": "l1"},
@@ -639,7 +639,7 @@ fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
 fn menu_delete_items_use_the_same_path() {
     let mut app = sample_app();
     let b = body(&app);
-    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().body(&b).unwrap().body).unwrap().volume;
+    let original_volume = solidcraft_engine::kernel::measure(&app.session.world_state().unwrap().body(&b).unwrap().body).unwrap().volume;
     let created = app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
     let c = app.session.doc.components[0].id;
     let transfer = created["components"][0]["feature"].as_u64().unwrap();
@@ -654,7 +654,7 @@ fn menu_delete_items_use_the_same_path() {
     assert!(crate::delete::confirm(&mut app, true));
     assert!(app.session.doc.components.is_empty());
     assert!(app.session.doc.feature(transfer).is_none());
-    let restored = app.session.world_state();
+    let restored = app.session.world_state().unwrap();
     assert_eq!(restored.bodies.len(), 1, "the original joined plate stays intact");
     let plate = restored.body(&b).unwrap();
     assert_eq!(plate.component, 0);
@@ -662,7 +662,7 @@ fn menu_delete_items_use_the_same_path() {
     assert!(plate.mesh().contains(solidcraft_engine::geom::Vec3::new(40.0, 35.0, 12.0)));
     let mut reopened = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
     reopened.refresh();
-    let reopened_state = reopened.world_state();
+    let reopened_state = reopened.world_state().unwrap();
     assert_eq!(reopened_state.bodies.len(), 1);
     assert_eq!(reopened_state.body(&b).unwrap().component, 0);
     assert!((solidcraft_engine::kernel::measure(&reopened_state.body(&b).unwrap().body).unwrap().volume - original_volume).abs() < 1e-6);
@@ -1026,7 +1026,7 @@ fn construction_plane_row_opens_its_menu() {
 #[test]
 fn right_click_on_a_plane_offers_a_sketch_on_it() {
     use solidcraft_engine::geom::Vec3;
-    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
+    let normal = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().sketches.first().map(|s| s.plane.normal()).unwrap_or_default();
     for (plane, axis) in [("XY", Vec3::Z), ("XZ", Vec3::Y), ("YZ", Vec3::X)] {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -1073,7 +1073,7 @@ fn right_click_on_a_plane_offers_a_sketch_on_it() {
     let id = h.app.session.doc.find_feature("Cut").map(|f| f.id).unwrap();
     act(&mut h.app, &Target::Plane { id }, "Create Sketch");
     h.frames(3);
-    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.origin.z));
+    let sketch = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().unwrap().sketch(s).map(|s| s.plane.origin.z));
     assert_eq!(sketch, Some(25.0), "the sketch is on the construction plane");
 }
 
@@ -1205,7 +1205,7 @@ fn contribution_picked_faces_open_their_own_feature_after_later_modifiers() {
         app.run("solid.hole", json!({"position":[20,15,20],"diameter":8})).unwrap();
         app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2})).unwrap();
         app.run("solid.hole", json!({"position":[32,20,20],"diameter":4})).unwrap();
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let b = state.body("Plate").unwrap();
         let names = solidcraft_engine::doc::naming::face_names(b);
         let index = names.iter().position(|n| n.starts_with(&format!("F{expected}:"))).unwrap();

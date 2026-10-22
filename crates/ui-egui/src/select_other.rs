@@ -312,7 +312,7 @@ fn point_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
 
 /// A row's name: "Line 3", "Point (arc 2 centre)", "Edge 4 · Body1", "XY Plane"…
 pub fn label(app: &SolveApp, sel: &Sel) -> String {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let in_sketch =
         |sketch: u64, f: &dyn Fn(&solidcraft_engine::sketch::Sketch) -> String| st.sketch(sketch).map(|ss| f(&ss.sketch)).unwrap_or_default();
     match sel {
@@ -338,7 +338,7 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
 }
 
 fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let curve = |sketch: Option<u64>, id: &str| {
         let kind = sketch.and_then(|s| st.sketch(s)).and_then(|ss| ss.sketch.curves.iter().find(|c| c.id == id).map(|c| c.kind.clone()));
         match kind {

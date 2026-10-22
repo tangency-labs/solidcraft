@@ -104,7 +104,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return super::measure_sel::measure_items(s, items);
     }
     let want = string_list(p, "bodies");
-    let st = s.world_state();
+    let st = s.world_state()?;
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     // Each body is measured on its own: on all cores, in body order.
     let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
@@ -168,11 +168,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn sketch_json(s: &Session, id: u64) -> Option<Value> {
+/// Sketch `id`, placed where the placed model `world` has it (its component's placement).
+fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Option<Value> {
     let state = s.model.state();
     let ss = state.sketch(id)?;
-    // Where the sketch is in the world (its component's placement).
-    let world = s.world_state();
     let plane = world.sketch(id).map(|w| w.plane).unwrap_or(ss.plane);
     let sk = &ss.sketch;
     let curves: Vec<Value> = sk
@@ -250,7 +249,7 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
         _ => s.active_sketch,
     }
     .ok_or_else(|| bad("sketch.inspect", "no such sketch (and none is active)"))?;
-    sketch_json(s, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
+    sketch_json(s, &*s.world_state()?, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
 }
 
 /// Revisions of every design of this run (#6646).
@@ -369,7 +368,7 @@ fn body_of<'a>(st: &'a solidcraft_doc::ModelState, p: &Value, cmd: &str) -> Resu
 }
 
 fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     let b = body_of(&st, p, "model.edges")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let names = solidcraft_doc::naming::edge_names(b);
@@ -383,7 +382,7 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     let b = body_of(&st, p, "model.faces")?;
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
@@ -436,7 +435,7 @@ fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     Ok(json!({ "threads": st.threads }))
 }
 

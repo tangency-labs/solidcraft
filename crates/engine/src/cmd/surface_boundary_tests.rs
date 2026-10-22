@@ -114,7 +114,7 @@ fn a_network_of_3d_lines_is_a_hyperbolic_paraboloid() {
     // The face's own area comes from the coarse reference mesh (a chord of a fiftieth of a per
     // cent of the body); the measuring mesh is refined onto the surface.
     assert!((face - want).abs() < 1e-2 * want && (total - want).abs() < 1e-3 * want, "{face} / {total} vs {want}");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let mesh = st.body(&body).map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01))).and_then(Result::ok).unwrap_or_default();
     assert!(!mesh.positions.is_empty());
     for p in &mesh.positions {
@@ -194,13 +194,13 @@ fn hostile_networks_are_refused() {
     let mut s = Session::default();
     let (sheet, top) = cylinder_and_line(&mut s);
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 40, 0]}));
-    let boxed = s.world_state().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
+    let boxed = s.world_state().unwrap().bodies.last().map(|b| b.name.clone()).unwrap_or_default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
     let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
     let b = line(&mut s, [0.0, 5.0], [10.0, 5.0]);
     let far = line(&mut s, [0.0, 20.0], [10.0, 20.0]);
     let ring = first(&run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 3}))["created"]["curves"]);
-    let bodies = s.world_state().bodies.len();
+    let bodies = s.world_state().unwrap().bodies.len();
     let edge = |g: &str| json!({"body": sheet, "edges": [[5.0, 10.0, 0.0]], "continuity": g});
     let many: Vec<Value> = (0..33).map(|_| json!(a)).collect();
     let cases: Vec<(Value, &str)> = vec![
@@ -240,7 +240,7 @@ fn hostile_networks_are_refused() {
         assert!(!matches!(e, crate::EngineError::Internal(..)), "{params}: {e}");
         assert!(e.to_string().contains(want), "{params}: {e}");
     }
-    assert_eq!(s.world_state().bodies.len(), bodies, "a refused network left a body behind");
+    assert_eq!(s.world_state().unwrap().bodies.len(), bodies, "a refused network left a body behind");
 }
 
 /// An edit (`timeline.redefine`) may turn a loop of sketch curves into the network of the same
@@ -259,7 +259,7 @@ fn an_edit_turns_a_loop_into_a_network_and_back() {
     run(&mut s, "timeline.redefine", json!({"feature": "Patch", "command": "surface.boundary", "params": network}));
     let kind = |s: &Session| s.doc.find_feature("Patch").map(|f| f.kind.clone());
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceNetwork { .. })), "{:?}", kind(&s));
-    let body = s.world_state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let body = s.world_state().unwrap().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
     assert!((areas(&mut s, &body).0 - 100.0).abs() < 1e-6);
     run(&mut s, "timeline.redefine", json!({"feature": "Patch", "command": "surface.boundary", "params": {"sketch": "Square", "curves": sides}}));
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceBoundary { .. })), "{:?}", kind(&s));
