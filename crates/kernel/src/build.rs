@@ -1,11 +1,14 @@
-//! Building bodies: extrude and revolve planar regions, primitives.
+//! Building bodies: extrude and revolve planar regions, primitives, lofts and sweeps, each
+//! through SMLib ([`crate::smlib_sweeps`]). The wire, face and curve helpers below (chain and
+//! profile wires, ruled and smooth loft faces, cubic interpolation, sphere patch faces) are kept
+//! only for the modules that still build on them (surfaces, blends, loft rails, the STEP
+//! reader); they go when those are ported.
 
 use mt::builder;
-use solidcraft_geom::{Grid, Loop2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Grid, Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use truck_modeling as mt;
 
-use crate::body::{Body, Solid, from_p3, p3, v3};
-use crate::history::FaceProv;
+use crate::body::{Body, from_p3, p3, v3};
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
 use crate::record::{self, Side};
 use crate::sweep_path::RailFit;
@@ -132,11 +135,6 @@ fn wires_of(profile: &[ProfileWire]) -> Vec<mt::Wire> {
     profile.iter().map(|p| p.wire.clone()).collect()
 }
 
-/// The profile edges as sweep seeds: each edge with the profile segments under it.
-fn seeds(profile: &[ProfileWire]) -> Vec<(mt::EdgeID, Vec<usize>)> {
-    profile.iter().flat_map(|p| &p.edges).map(|e| (e.edge.id(), e.numbers.clone())).collect()
-}
-
 /// A region numbered on its own, as given.
 fn numbered_region(r: &Region2) -> Result<NumberedRegion> {
     numbered::number_regions(std::slice::from_ref(r)).pop().ok_or_else(|| KernelError::Invalid("profile".into()))
@@ -215,111 +213,15 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
     if regions.is_empty() {
         return Err(KernelError::Invalid("no profile selected".into()));
     }
-    if crate::backend()? == crate::Backend::Smlib {
-        return regions
-            .iter()
-            .map(|r| {
-                region_ok(r)?;
-                let pieces = oriented(r)?;
-                let numbered = if whole_sides { pieces.map_loops(|l| l.merged_lines(continues_straight)) } else { pieces.clone() };
-                crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&numbered, &pieces), Some(r), lo, hi - lo, 1.0, None)
-            })
-            .collect();
-    }
-    let n = plane.normal();
-    let mut out = Vec::new();
-    for r in regions {
-        region_ok(r)?;
-        let base = plane.offset(lo);
-        let pieces = oriented(r)?;
-        let numbered = if whole_sides { pieces.map_loops(|l| l.merged_lines(continues_straight)) } else { pieces.clone() };
-        // A joined side's source is its first piece, a segment of the profile as drawn (the side
-        // lies along it): the sketch curve it is certified and named by, as when it stood alone.
-        let first_piece = |side: &ProfileEdge| {
-            pieces
-                .loops()
-                .flat_map(|l| l.lp.segs.iter())
-                .copied()
-                .find(|piece| side.numbers.len() > 1 && piece.start() == side.segment.start())
-                .unwrap_or(side.segment)
-        };
-        let profile = region_wires(&base, &numbered)?;
-        let wires = wires_of(&profile);
-        let f = guard("extrude profile", || builder::try_attach_plane(&wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))?;
-        let solid: Solid = guard("extrude", || Ok(builder::tsweep(&f, v3(n * (hi - lo)))))?;
-        let body = Body::new(solid)?;
-        // tsweep retains each actual input boundary edge on its generated side: one pass over
-        // the faces matches topology identity (never face order, surface samples or
-        // centroids) for both the face sources and the history. The profile face is the start
-        // cap, the one face holding no profile edge the end cap.
-        let (sources, history) = guard("extrude source identities", || {
-            let by_edge: std::collections::HashMap<mt::EdgeID, &ProfileEdge> =
-                profile.iter().flat_map(|p| &p.edges).map(|e| (e.edge.id(), e)).collect();
-            let mut faces: Vec<(mt::FaceID, Vec<&ProfileEdge>)> = Vec::new();
-            let mut visits = 0usize;
-            for generated in body.solid.face_iter() {
-                let mut matching = Vec::new();
-                for edge in generated.absolute_boundaries().iter().flatten() {
-                    visits += 1;
-                    if let Some(e) = by_edge.get(&edge.id()) {
-                        matching.push(*e);
-                    }
-                }
-                faces.push((generated.id(), matching));
-            }
-            let mut ends = faces.iter().filter(|(id, matching)| *id != f.id() && matching.is_empty()).map(|(id, _)| *id);
-            let end = match (ends.next(), ends.next()) {
-                (Some(id), None) => Some(id),
-                _ => None,
-            };
-            let upper = end.filter(|_| faces.len() <= 50_000 && visits <= 200_000);
-            let small = r.outer.segs.len() + r.holes.iter().map(|hole| hole.segs.len()).sum::<usize>() <= 4096;
-            let mut sources = Vec::with_capacity(faces.len());
-            let mut history = Some(Vec::with_capacity(faces.len()));
-            for (id, matching) in &faces {
-                let (source, prov) = if *id == f.id() {
-                    let source = upper.and_then(|_| {
-                        small.then(|| crate::FaceSource::ExtrudeCap {
-                            high: false,
-                            region: r.clone(),
-                            plane: Plane { origin: base.origin, x: plane.x, y: -plane.y },
-                        })
-                    });
-                    (source, Some(record::cap(false)))
-                } else if Some(*id) == upper {
-                    (small.then(|| crate::FaceSource::ExtrudeCap { high: true, region: r.clone(), plane: plane.offset(hi) }), Some(record::cap(true)))
-                } else if let [side] = matching.as_slice() {
-                    let basis = match side.segment {
-                        Seg2::Line { a, b } => {
-                            let d = b - a;
-                            d.normalized().and_then(|direction| {
-                                let foot = a - direction * a.dot(direction);
-                                Plane::new(plane.to_world(foot), plane.dir_to_world(direction), n)
-                            })
-                        }
-                        _ => None,
-                    };
-                    (
-                        Some(crate::FaceSource::ExtrudeSide { segment: first_piece(side), plane: basis, coalesced: false }),
-                        Some(record::profile(&side.numbers)),
-                    )
-                } else if Some(*id) == end {
-                    (None, Some(record::cap(true)))
-                } else {
-                    (None, None)
-                };
-                sources.push(source);
-                history = history.zip(prov).map(|(mut h, p)| {
-                    h.push(p);
-                    h
-                });
-            }
-            Ok((sources, history))
-        })?;
-        let body = body.with_face_sources(Some(std::sync::Arc::new(sources)));
-        out.push(record::attach(body, &[], history, Default::default())?);
-    }
-    Ok(out)
+    regions
+        .iter()
+        .map(|r| {
+            region_ok(r)?;
+            let pieces = oriented(r)?;
+            let numbered = if whole_sides { pieces.map_loops(|l| l.merged_lines(continues_straight)) } else { pieces.clone() };
+            crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::region_pieces(&numbered, &pieces), Some(r), lo, hi - lo, 1.0, None)
+        })
+        .collect()
 }
 
 /// `t` carries on from `s` in the same straight line: the turn at their meeting point is within
@@ -350,18 +252,18 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// Revolve each region about the sketch axis by `angle` radians.
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
-    revolved(plane, regions, axis_origin, axis_dir, angle, false)
+    revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
-/// [`revolve`] for bodies that are final (new bodies, not a boolean's tools): a partial turn's
-/// planar faces come out whole too, as a full turn's always do (#726). A tool is left as swept:
-/// healed, its planar faces meet a target exactly where they are tangent to it, and the
-/// boolean leaves pieces there that touch. The boolean heals its own result anyway.
+/// [`revolve`] for bodies that are final (new bodies, not a boolean's tools), with each planar
+/// face whole (#726): SMLib's revolution makes one face of each profile segment and of each
+/// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
-    revolved(plane, regions, axis_origin, axis_dir, angle, true)
+    revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
-fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64, whole: bool) -> Result<Vec<Body>> {
+/// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
+fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
     if angle.abs() < 1e-6 {
         return Err(KernelError::Invalid("revolve angle is zero".into()));
@@ -398,43 +300,6 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
                 arc => arc,
             })
         };
-        // Full circles start at an odd angle: their seam points then don't lie in the planes
-        // through the profile's centre that other bodies tend to cut along. Each new arc comes
-        // from every given arc it overlaps.
-        let reseam = |nl: NumberedLoop| -> NumberedLoop {
-            let l = &nl.lp;
-            let c = match l.segs.first() {
-                Some(Seg2::Arc { center, radius, .. }) => Some((*center, *radius)),
-                _ => None,
-            };
-            // (A circle touching the axis keeps its vertex there.)
-            let touches = c.is_some_and(|(center, radius)| (d.cross(center - axis_origin).abs() - radius).abs() < 1e-7);
-            match c {
-                Some((center, radius))
-                    if !touches
-                        && l.segs.iter().all(
-                            |s| matches!(s, Seg2::Arc { center: c2, radius: r2, .. } if c2.dist(center) < 1e-9 && (r2 - radius).abs() < 1e-9),
-                        )
-                        && (l
-                            .segs
-                            .iter()
-                            .map(|s| match s {
-                                Seg2::Arc { sweep, .. } => *sweep,
-                                _ => 0.0,
-                            })
-                            .sum::<f64>()
-                            .abs()
-                            - std::f64::consts::TAU)
-                            .abs()
-                            < 1e-6 =>
-                {
-                    let ccw = l.signed_area() > 0.0;
-                    let n = Loop2::circle_from(center, radius, 0.4142);
-                    nl.resplit_circle(if ccw { n } else { n.reversed() })
-                }
-                _ => nl,
-            }
-        };
         // Adjacent profiles revolved together leave the axis edge split where they met: one
         // edge again, so the builders for a profile with an edge on the axis take it (swept
         // pieces of the axis are zero-area faces that booleans fail on).
@@ -443,95 +308,15 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
             let (a, b, c) = (s.start(), s.end(), t.end());
             on_axis(a) && on_axis(b) && on_axis(c) && (b - a).dot(c - b) > 0.0
         };
-        if crate::backend()? == crate::Backend::Smlib {
-            // Partial turns go toward the side the sketch normal points to, as below.
-            let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
-            let c = plane.to_world(r.centroid());
-            let radial = (c - o) - axis * (c - o).dot(axis);
-            let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
-            out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
-            continue;
-        }
-        let given = numbered_region(r)?.map_loops(|l| reseam(snap_loop(l).merged_lines(axis_run)));
-        let r = &given.region();
-        if angle.abs() >= std::f64::consts::TAU - 1e-9
-            && r.holes.is_empty()
-            && let Some(b) = full_turn_on_axis(plane, &given.outer, axis_origin, d, angle)?
-        {
-            out.push(b);
-            continue;
-        }
-        let profile = region_wires(plane, &given.oriented())?;
-        let f = attach_profile(&wires_of(&profile))?;
-        // Partial revolves sweep toward the side the sketch normal points to (as features
-        // extrude toward it).
+        // Partial turns go toward the side the sketch normal points to (as features extrude
+        // toward it).
+        let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
         let c = plane.to_world(r.centroid());
         let radial = (c - o) - axis * (c - o).dot(axis);
-        let toward = axis.cross(radial).dot(plane.normal());
-        let angle = if toward < 0.0 { -angle } else { angle };
-        // A profile with an edge on the axis: no zero-area face where that edge turns on itself.
-        if r.holes.is_empty()
-            && let Some(b) = revolve_on_axis(plane, &given.outer, axis_origin, d, angle)?
-        {
-            out.push(b);
-            continue;
-        }
-        // Edges on the axis (a spherical shell's two radial lines, say) sweep into degenerate faces
-        // there, which truck only tessellates reliably with the axis through the world origin. Off
-        // it, the body measured too large and booleans with it failed or removed the wrong side.
-        // Build such a profile there and move it into place, as `revolve_touching_axis` does.
-        let axis_edges = r.outer.segs.iter().filter(|s| matches!(**s, Seg2::Line { a, b } if on_axis(a) && on_axis(b))).count();
-        let shift = if axis_edges > 0 { o } else { Vec3::ZERO };
-        let (profile, f) = if shift.len() > 0.0 {
-            let local = Plane { origin: plane.origin - shift, ..*plane };
-            let profile = region_wires(&local, &given.oriented())?;
-            let f = attach_profile(&wires_of(&profile))?;
-            (profile, f)
-        } else {
-            (profile, f)
-        };
-        let solid: Solid = guard("revolve", || Ok(builder::rsweep(&f, p3(o - shift), v3(axis), mt::Rad(angle))))?;
-        let closed = angle.abs() >= std::f64::consts::TAU;
-        let history = guard("revolve history", || Ok(record::swept_face(&solid, &f, &seeds(&profile), closed)))?;
-        let solid = if shift.len() > 0.0 { builder::translated(&solid, v3(shift)) } else { solid };
-        let (solid, history) = if closed || whole { turned_whole(solid, history) } else { (solid, history) };
-        out.push(record::attach(Body::new(solid)?, &[], history, Default::default())?);
+        let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
+        out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
     }
     Ok(out)
-}
-
-/// A revolved solid with its planar faces whole (#726): the sweep turns each profile edge into
-/// two or three patches, the planar ones on revolved surfaces, which stayed apart until a later
-/// feature healed the body, so a pick on one took part of the face. Healed as booleans heal
-/// their results, each face is still generated, from the profile edges of the patches merged
-/// into it. The solid as it was when healing fails or can't be followed.
-fn turned_whole(solid: Solid, faces: Option<Vec<FaceProv>>) -> (Solid, Option<Vec<FaceProv>>) {
-    let Some(given) = faces.as_ref() else { return (solid, faces) };
-    let Ok(size) = Body::new(solid.clone()).map(|b| b.size()) else { return (solid, faces) };
-    let healed = guard("heal revolve", || {
-        let (healed, map) = crate::heal::heal_traced(solid.clone(), size, &[]);
-        let failed = || KernelError::Failed("heal revolve".into());
-        if !crate::boolean_record::edges_evaluate(&healed) {
-            return Err(failed());
-        }
-        let carried = map
-            .ok_or_else(failed)?
-            .faces
-            .iter()
-            .map(|under| {
-                let mut origins: Vec<_> = under.iter().map(|i| given.get(*i).map(|f| f.origins.clone())).collect::<Option<Vec<_>>>()?.concat();
-                origins.sort();
-                origins.dedup();
-                Some(FaceProv { origins, change: crate::history::Change::Generated })
-            })
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(failed)?;
-        Ok((healed, carried))
-    });
-    match healed {
-        Ok((healed, carried)) => (healed, Some(carried)),
-        Err(_) => (solid, faces),
-    }
 }
 
 /// Axis-aligned box between two corners.
@@ -595,9 +380,14 @@ pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body
     v.pop().ok_or_else(|| KernelError::Failed("cylinder".into()))
 }
 
-/// Sphere: revolve a half disc.
+/// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
+/// disc a sphere revolves.
 pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
-    sphere_patches(center, radius)
+    let radius = finite(radius, "radius")?;
+    if radius <= 1e-6 || !center.is_finite() || center.len() >= 1e7 {
+        return Err(KernelError::Invalid("radius must be positive".into()));
+    }
+    crate::smlib_sweeps::sphere(center, radius)
 }
 
 /// Torus about the Z axis through `center`.
@@ -767,7 +557,7 @@ fn true_offset(s: &Seg2, t: f64, d: f64) -> Option<Vec2> {
 /// higher Bézier moves its control polygon ([`offset_polygon`]), its middle then put on the true
 /// offset. Its ends then go to `a` and `b`, along its end tangents (where moved neighbours meet
 /// it), their handles kept pointing the same way. Close for a curve that turns little against
-/// `d`; [`offset_splits`] cuts the others into such pieces first.
+/// `d`.
 fn offset_curve(s: &Seg2, a: Vec2, b: Vec2, d: f64) -> Option<Seg2> {
     let (n0, n1) = (true_offset(s, 0.0, d)?, true_offset(s, 1.0, d)?);
     let (t0, t3) = (s.start_tangent(), s.end_tangent());
@@ -868,79 +658,6 @@ fn offset_curve(s: &Seg2, a: Vec2, b: Vec2, d: f64) -> Option<Seg2> {
         }
         _ => return None,
     })
-}
-
-/// How far a moved free curve strays from the free curve `s`'s true offset by `d`: the largest
-/// distance from its points to the true offset's (on polylines of [`OFFSET_SAMPLES`] spans).
-pub(crate) fn offset_error(s: &Seg2, d: f64) -> Option<f64> {
-    let (a, b) = (true_offset(s, 0.0, d)?, true_offset(s, 1.0, d)?);
-    let moved = offset_curve(s, a, b, d)?;
-    let n = OFFSET_SAMPLES * 2;
-    let truth: Vec<Vec2> = (0..=n).map(|k| true_offset(s, k as f64 / n as f64, d)).collect::<Option<_>>()?;
-    let near = |p: Vec2| {
-        truth
-            .iter()
-            .zip(truth.iter().skip(1))
-            .map(|(x, y)| Seg2::Line { a: *x, b: *y })
-            .map(|l| l.point_at(l.closest_param(p)).dist(p))
-            .fold(f64::INFINITY, f64::min)
-    };
-    Some((0..=n).map(|k| near(moved.point_at(k as f64 / n as f64))).fold(0.0, f64::max))
-}
-
-/// How close a moved free curve is kept to its true offset by `d`: 2 % of it, or 10 µm (a
-/// slope's offset is a fraction of a millimetre on text: finer would cut letters into many
-/// pieces, and every piece a face the booleans meet).
-pub(crate) fn offset_tolerance(d: f64) -> f64 {
-    (d.abs() * 2e-2).max(1e-2)
-}
-
-/// Deepest halving of a free curve in [`offset_splits`] (at most 2^6 pieces).
-const MAX_OFFSET_DEPTH: u32 = 6;
-
-/// Whether the free curve `s` bends anywhere tighter than `d` (its radius of curvature below
-/// |d|, on [`OFFSET_SAMPLES`] points): moved that far towards its centre, its true offset folds
-/// over itself there.
-fn tighter_than(s: &Seg2, d: f64) -> bool {
-    let h = 1e-4;
-    (0..=OFFSET_SAMPLES).any(|k| {
-        let t = (k as f64 / OFFSET_SAMPLES as f64).clamp(h, 1.0 - h);
-        let (v, a) = (s.derivative(t), (s.derivative(t + h) - s.derivative(t - h)) * (0.5 / h));
-        let speed = v.len();
-        speed > 1e-12 && v.cross(a).abs() * d.abs() >= speed.powi(3)
-    })
-}
-
-/// The loop `lp` with each free curve cut into pieces whose offset by up to `d` (either way)
-/// [`offset_curve`] fits within a small part of `d`, and the segment of `lp` each piece comes
-/// from. Lines and arcs stay whole, and so does a piece bending tighter than `d`
-/// ([`tighter_than`]): its true offset folds there, and a piece following it would carry the
-/// fold, where one moved piece smooths it over.
-pub(crate) fn offset_splits(lp: &Loop2, d: f64) -> (Loop2, Vec<usize>) {
-    let tol = offset_tolerance(d);
-    let mut segs = Vec::with_capacity(lp.segs.len());
-    let mut from = Vec::with_capacity(lp.segs.len());
-    for (i, s) in lp.segs.iter().enumerate() {
-        if s.is_line_or_arc() || d == 0.0 {
-            segs.push(*s);
-            from.push(i);
-            continue;
-        }
-        // Spans still to check, the last pushed checked first: the right half goes in first.
-        let mut todo = vec![(*s, 0u32)];
-        while let Some((piece, depth)) = todo.pop() {
-            let close = |d: f64| offset_error(&piece, d).is_some_and(|e| e <= tol);
-            if depth < MAX_OFFSET_DEPTH && !tighter_than(&piece, d) && !(close(d) && close(-d)) {
-                let (left, right) = piece.split_at(0.5);
-                todo.push((right, depth + 1));
-                todo.push((left, depth + 1));
-                continue;
-            }
-            segs.push(piece);
-            from.push(i);
-        }
-    }
-    (Loop2 { segs }, from)
 }
 
 /// [`offset_loop`] for a loop of lines, arcs and free curves. Each arc keeps its centre and
@@ -1079,8 +796,7 @@ fn offset_segments(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
 ///
 /// Its limit: curves are sampled at [`MEET_SAMPLES`] points, so two that cross twice within one
 /// sample span (a tight curve against its neighbour) can be missed. The corner then gets the
-/// mitre of the end tangents instead, and the loop that makes, if it crosses itself, is refused
-/// by [`offset_crosses`] rather than built.
+/// mitre of the end tangents instead.
 fn meet(p: &Seg2, q: &Seg2) -> Option<(f64, f64, Vec2)> {
     const SAMPLES: usize = MEET_SAMPLES;
     let samples = |s: &Seg2| -> Vec<(f64, Vec2)> {
@@ -1158,140 +874,6 @@ fn with_start(s: &Seg2, x: Vec2) -> Seg2 {
 /// Points a free curve is sampled at by [`meet`].
 const MEET_SAMPLES: usize = 48;
 
-/// Most pairs of polyline pieces [`offset_crosses`] compares before it gives up.
-const CROSSING_BUDGET: usize = 20_000_000;
-
-/// Whether the offset loops of a region cross themselves or each other, on polylines within
-/// `tol` of them: the taper is too steep for the profile's details (a stroke thinner than the
-/// taper, a curve tighter than it, two loops it brings together). `None` when there is too
-/// much to compare within [`CROSSING_BUDGET`]: then the offset is not known to be sound.
-fn offset_crosses(loops: &[Vec<Option<Seg2>>], tol: f64) -> Option<bool> {
-    let lines: Vec<Vec<Vec2>> = loops
-        .iter()
-        .map(|l| {
-            let mut pts: Vec<Vec2> = Vec::new();
-            for s in l.iter().flatten() {
-                let p = s.polyline(tol);
-                pts.extend(p.iter().skip(if pts.is_empty() { 0 } else { 1 }));
-            }
-            pts
-        })
-        .collect();
-    // Each piece: its loop, its place in the loop, its ends.
-    let mut pieces: Vec<(usize, usize, usize, Vec2, Vec2)> = Vec::new();
-    for (k, pts) in lines.iter().enumerate() {
-        for (i, (a, b)) in pts.iter().zip(pts.iter().skip(1)).enumerate() {
-            pieces.push((k, i, pts.len() - 1, *a, *b));
-        }
-    }
-    pieces.sort_by(|p, q| p.3.x.min(p.4.x).total_cmp(&q.3.x.min(q.4.x)));
-    let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
-    let mut work = 0usize;
-    for (n, &(k, i, len, a, b)) in pieces.iter().enumerate() {
-        let right = a.x.max(b.x);
-        for &(k2, i2, _, c, d) in pieces.iter().skip(n + 1) {
-            if c.x.min(d.x) > right {
-                break;
-            }
-            work += 1;
-            if work > CROSSING_BUDGET {
-                return None;
-            }
-            // Neighbours in one loop share an end.
-            if k == k2 && (i.abs_diff(i2) <= 1 || i.abs_diff(i2) == len.saturating_sub(1)) {
-                continue;
-            }
-            if a.y.max(b.y) < c.y.min(d.y) || c.y.max(d.y) < a.y.min(b.y) {
-                continue;
-            }
-            let (d1, d2, d3, d4) = (side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d));
-            if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
-                return Some(true);
-            }
-        }
-    }
-    Some(false)
-}
-
-/// The side faces of one loop of a tapered extrude through `levels` of it, bottom to top (the
-/// loop offset in a plane, one entry per profile segment, `None` where the offset swallowed a
-/// line), with the bottom and top wires. Between two levels each side is ruled between a
-/// segment's two offsets, through straight edges shared with its neighbours; a line swallowed
-/// at one level makes a flat triangle up to where its neighbours meet. `numbers`: the profile
-/// segments under each segment.
-fn taper_loop(levels: &[(Plane, &[Option<Seg2>])], numbers: impl Fn(usize) -> Vec<usize>) -> Result<(Vec<Side>, mt::Wire, mt::Wire)> {
-    let bad = || KernelError::Failed("taper: profile loop".into());
-    let n = levels.first().map_or(0, |(_, segs)| segs.len());
-    if levels.len() < 2 || levels.iter().any(|(_, segs)| segs.len() != n) {
-        return Err(bad());
-    }
-    // Each level's vertices (each segment's start: its own, or for a swallowed one the next kept
-    // one's) and each kept segment's edges.
-    type Level = (Vec<mt::Vertex>, Vec<Option<Vec<mt::Edge>>>);
-    let built: Vec<Level> = levels
-        .iter()
-        .map(|(plane, segs)| {
-            let own: Vec<Option<mt::Vertex>> = segs.iter().map(|s| s.map(|s| builder::vertex(p3(plane.to_world(s.start()))))).collect();
-            let v: Vec<mt::Vertex> =
-                (0..n).map(|i| (0..n).find_map(|k| own.get((i + k) % n).cloned().flatten()).ok_or_else(bad)).collect::<Result<_>>()?;
-            let edges = (0..n)
-                .map(|i| match (segs.get(i).copied().flatten(), v.get(i), v.get((i + 1) % n)) {
-                    (Some(s), Some(a), Some(b)) => seg_edges(plane, &s, a, b).map(Some),
-                    _ => Ok(None),
-                })
-                .collect::<Result<_>>()?;
-            Ok((v, edges))
-        })
-        .collect::<Result<_>>()?;
-    let mut rulings: std::collections::HashMap<(mt::VertexID, mt::VertexID), mt::Edge> = std::collections::HashMap::new();
-    let mut ruling = |a: &mt::Vertex, b: &mt::Vertex| rulings.entry((a.id(), b.id())).or_insert_with(|| builder::line(a, b)).clone();
-    let flat = |wire: mt::Wire| builder::try_attach_plane(&[wire]).map_err(|e| KernelError::Failed(format!("taper sides: {e}")));
-    let mut sides = Vec::new();
-    for (((bv, bottom), (tv, top)), (low_segs, high_segs)) in
-        built.iter().zip(built.iter().skip(1)).zip(levels.iter().map(|(_, s)| s).zip(levels.iter().skip(1).map(|(_, s)| s)))
-    {
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let (Some(b0), Some(b1), Some(t0), Some(t1)) = (bv.get(i), bv.get(j), tv.get(i), tv.get(j)) else { return Err(bad()) };
-            let prov = Some(record::profile(&numbers(i)));
-            match (bottom.get(i).and_then(Option::as_ref), top.get(i).and_then(Option::as_ref)) {
-                (Some(low), Some(high)) => {
-                    if low.len() != high.len() {
-                        return Err(bad());
-                    }
-                    // A line and its moved copy run side by side: their side is a plane, kept
-                    // one (a flat side the booleans meet exactly, however slight the taper).
-                    let lines = matches!(
-                        (low_segs.get(i).copied().flatten(), high_segs.get(i).copied().flatten()),
-                        (Some(Seg2::Line { .. }), Some(Seg2::Line { .. }))
-                    );
-                    for (e, t) in low.iter().zip(high) {
-                        let wire: mt::Wire = vec![e.clone(), ruling(e.back(), t.back()), t.inverse(), ruling(e.front(), t.front()).inverse()].into();
-                        if lines {
-                            sides.push((flat(wire)?, prov.clone()));
-                            continue;
-                        }
-                        let surface = mt::BSplineSurface::homotopy(e.oriented_curve().lift_up(), t.oriented_curve().lift_up());
-                        sides.push((mt::Face::new(vec![wire], mt::Surface::NurbsSurface(mt::NurbsSurface::new(surface))), prov.clone()));
-                    }
-                }
-                (Some(low), None) => {
-                    let [e] = &low[..] else { return Err(bad()) };
-                    sides.push((flat(vec![e.clone(), ruling(e.back(), t1), ruling(e.front(), t0).inverse()].into())?, prov));
-                }
-                (None, Some(high)) => {
-                    let [t] = &high[..] else { return Err(bad()) };
-                    sides.push((flat(vec![ruling(b1, t.back()), t.inverse(), ruling(b0, t.front()).inverse()].into())?, prov));
-                }
-                (None, None) => {}
-            }
-        }
-    }
-    let wire =
-        |level: Option<&Level>| -> mt::Wire { level.map(|(_, edges)| edges.iter().flatten().flatten().cloned().collect()).unwrap_or_default() };
-    Ok((sides, wire(built.first()), wire(built.last())))
-}
-
 /// Extrude one region by `length` along `dir_sign` × the plane normal with a taper angle
 /// (radians; positive grows the profile).
 pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64) -> Result<Body> {
@@ -1316,69 +898,7 @@ pub fn extrude_tapered_between(plane: &Plane, region: &Region2, from: f64, to: f
         return Err(KernelError::Invalid("taper must be between −90° and 90°".into()));
     }
     region_ok(region)?;
-    if crate::backend()? == crate::Backend::Smlib {
-        return smlib_tapered(plane, region, from, to, foot, dir_sign.signum(), taper);
-    }
-    let (t, sign) = (taper.tan(), dir_sign.signum());
-    let (bottom_plane, top_plane) = (plane.offset(from * sign), plane.offset(to * sign));
-    // A side drawn in collinear pieces slopes as one face over all of them, as a straight
-    // extrude's does (#1788).
-    let loops0 = oriented(region)?.map_loops(|l| l.merged_lines(continues_straight));
-    let split: Vec<(Loop2, Vec<usize>)> = loops0.loops().map(|l| offset_splits(&l.lp, from.abs().max(to.abs()) * t)).collect();
-    let ends = |h: f64| split.iter().map(|(lp, _)| offset_loop(lp, h * t)).collect::<Result<Vec<_>>>();
-    let (bottoms, tops) = (ends(from)?, ends(to)?);
-    // Polylines within a small part of the larger offset of it.
-    let tol = (from.abs().max(to.abs()) * t.abs() * 0.02).max(1e-6);
-    if t != 0.0 {
-        match (offset_crosses(&bottoms, tol), offset_crosses(&tops, tol)) {
-            (Some(false), Some(false)) => {}
-            (Some(true), _) | (_, Some(true)) => {
-                return Err(KernelError::Invalid(
-                    "the taper closes the profile: at this distance its sides would cross (a stroke, a curve or a gap narrower than the taper); try a smaller taper or distance".into(),
-                ));
-            }
-            _ => {
-                return Err(KernelError::TooLarge(
-                    "the tapered profile has too many details to check that its sides stay apart; taper fewer profiles at a time".into(),
-                ));
-            }
-        }
-    }
-    guard("tapered extrude", || {
-        let mut sides: Vec<Side> = Vec::new();
-        let (mut w0, mut w1): (Vec<mt::Wire>, Vec<mt::Wire>) = (Vec::new(), Vec::new());
-        for (((l, (_, origin)), b), t) in loops0.loops().zip(&split).zip(&bottoms).zip(&tops) {
-            let mut levels = vec![(bottom_plane, &b[..])];
-            if foot > 0.0 {
-                levels.push((plane.offset((from + foot) * sign), &b[..]));
-            }
-            levels.push((top_plane, &t[..]));
-            let (s, below, above) = taper_loop(&levels, |i| origin.get(i).map(|&k| l.numbers(k).to_vec()).unwrap_or_default())?;
-            sides.extend(s);
-            w0.push(below);
-            w1.push(above);
-        }
-        let (faces, prov): (Vec<mt::Face>, Vec<Option<FaceProv>>) = sides.into_iter().unzip();
-        // The sides, then the bottom and top as pushed below.
-        let history: Option<Vec<FaceProv>> = prov.into_iter().chain([Some(record::cap(false)), Some(record::cap(true))]).collect();
-        let bottom = builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>())
-            .map_err(|e| KernelError::Failed(format!("taper bottom: {e}")))?;
-        let top = builder::try_attach_plane(&w1).map_err(|e| KernelError::Failed(format!("taper top: {e}")))?;
-        let mut tries: Vec<(mt::Face, mt::Face)> = vec![(bottom.clone(), top.clone())];
-        tries.push((bottom.inverse(), top.inverse()));
-        let mut last = String::new();
-        for (b, t) in tries {
-            let mut all = faces.clone();
-            all.push(b);
-            all.push(t);
-            let shell: mt::Shell = all.into();
-            match Solid::try_new(vec![shell]) {
-                Ok(s) => return record::attach(Body::new(s)?, &[], history, Default::default()),
-                Err(e) => last = e.to_string(),
-            }
-        }
-        Err(KernelError::Failed(format!("tapered extrude: {last}")))
-    })
+    smlib_tapered(plane, region, from, to, foot, dir_sign.signum(), taper)
 }
 
 /// [`extrude_tapered_between`] through SMLib's draft extrusion: one loop (SMLib's takes no
@@ -1400,468 +920,6 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
     crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::pieces([&bottom]), Some(region), from * sign, to - from, sign, draft)
 }
 
-/// Revolve 360° a loop that has exactly one line segment on the axis, without degenerate faces.
-/// A loop made of a half circle and its diameter on the axis: (centre, radius).
-fn half_disc(lp: &Loop2, axis_origin: Vec2, d: Vec2) -> Option<(Vec2, f64)> {
-    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-7 * (1.0 + p.len());
-    let mut arcs = Vec::new();
-    for s in &lp.segs {
-        match *s {
-            Seg2::Line { a, b } if on_axis(a) && on_axis(b) => {}
-            Seg2::Arc { center, radius, sweep, .. } if on_axis(center) => arcs.push((center, radius, sweep)),
-            _ => return None,
-        }
-    }
-    let (c, r, _) = *arcs.first()?;
-    let total: f64 = arcs.iter().map(|a| a.2.abs()).sum();
-    let same = arcs.iter().all(|(c2, r2, _)| c2.dist(c) < 1e-7 * (1.0 + r) && (r2 - r).abs() < 1e-7 * (1.0 + r));
-    (same && (total - std::f64::consts::PI).abs() < 1e-6).then_some((c, r))
-}
-
-/// A full turn of a loop with edges on the axis, built without the zero-area faces truck sweeps
-/// from them (booleans can't handle those). `None` when no builder here takes the loop.
-fn full_turn_on_axis(plane: &Plane, nl: &NumberedLoop, axis_origin: Vec2, d: Vec2, angle: f64) -> Result<Option<Body>> {
-    let lp = &nl.lp;
-    // A half disc on the axis revolved fully is a sphere: build it without poles. Every
-    // patch is swept from the half disc's arcs.
-    if let Some((c, rad)) = half_disc(lp, axis_origin, d) {
-        let arcs: Vec<usize> =
-            lp.segs.iter().enumerate().filter(|(_, s)| matches!(s, Seg2::Arc { .. })).flat_map(|(i, _)| nl.numbers(i).to_vec()).collect();
-        return sphere_solid(plane.to_world(c), rad, [Vec3::X, Vec3::Y, Vec3::Z], &arcs).map(Some);
-    }
-    // A full turn of a profile that comes back to the axis along a curve (a half slot about
-    // its centreline, a dome at the far end): truck's cone gives the faces
-    // swept from it the wrong region (their pole is at the end of their curve), and cuts with
-    // such a body failed (#1853). It is built as part turns are, a third of a turn at a time.
-    if pole_at_end(lp, axis_origin, d)
-        && let Some(b) = revolve_on_axis(plane, nl, axis_origin, d, angle)?
-    {
-        return Ok(Some(b));
-    }
-    // A full revolution of a profile with one edge on the axis: sweep the rest of the loop
-    // as a cone-like shell (no zero-area faces, which booleans can't handle).
-    if let Some(b) = revolve_touching_axis(plane, nl, axis_origin, d)? {
-        return Ok(Some(b));
-    }
-    // Several edges on the axis (a spherical shell's two radial lines): each run of the loop
-    // from the axis back to it, closed along the axis, turns into a shell of its own, a solid
-    // where it runs the way the loop does and a void where it runs the other way. Swept whole,
-    // the edges on the axis became zero-area faces joining the shells, and a cut through a pole
-    // there failed (#451).
-    let on_axis = |s: &Seg2| matches!(*s, Seg2::Line { a, b } if d.cross(a - axis_origin).abs() < 1e-9 && d.cross(b - axis_origin).abs() < 1e-9);
-    let n = lp.segs.len();
-    let axis_segs: Vec<usize> = (0..n).filter(|i| lp.segs.get(*i).is_some_and(on_axis)).collect();
-    let [k0, _, ..] = axis_segs[..] else { return Ok(None) };
-    let mut parts = Vec::new();
-    for (i, &k) in axis_segs.iter().enumerate() {
-        let run: Vec<usize> = (k + 1..axis_segs.get(i + 1).copied().unwrap_or(k0 + n)).map(|j| j % n).collect();
-        let mut segs: Vec<Seg2> = run.iter().filter_map(|j| lp.segs.get(*j).copied()).collect();
-        let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Ok(None) };
-        segs.push(Seg2::Line { a: last.end(), b: first.start() });
-        let sub = NumberedLoop { lp: Loop2 { segs }, from: run.iter().map(|j| nl.numbers(*j).to_vec()).chain([Vec::new()]).collect() };
-        let void = sub.lp.is_ccw() != lp.is_ccw();
-        let Some(b) = full_turn_on_axis(plane, &if void { sub.reversed() } else { sub }, axis_origin, d, angle)? else { return Ok(None) };
-        parts.push((b, void));
-    }
-    let faces: Option<Vec<FaceProv>> =
-        parts.iter().map(|(b, _)| b.history().map(|h| h.faces.clone())).collect::<Option<Vec<_>>>().map(|f| f.concat());
-    let solid = guard("revolve", || {
-        let mut shells = Vec::new();
-        for (b, void) in &parts {
-            let mut s = b.solid.as_ref().clone();
-            if *void {
-                s.not();
-            }
-            shells.extend(s.boundaries().iter().cloned());
-        }
-        Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("revolve: {e}")))
-    })?;
-    record::attach(Body::new(solid)?, &[], faces, Default::default()).map(Some)
-}
-
-/// Whether the loop has one edge on the axis and comes back to it along a curve (the segment
-/// before the axis edge is not a line). A line there (a drill point) sweeps a cone, which
-/// truck's cone builds right.
-fn pole_at_end(lp: &Loop2, axis_origin: Vec2, d: Vec2) -> bool {
-    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-9;
-    let n = lp.segs.len();
-    let axis_segs: Vec<usize> =
-        (0..n).filter(|i| lp.segs.get(*i).is_some_and(|s| matches!(s, Seg2::Line { a, b } if on_axis(*a) && on_axis(*b)))).collect();
-    let [k] = axis_segs[..] else { return false };
-    lp.segs.get((k + n - 1) % n).is_some_and(|s| !on_axis(s.start()) && !matches!(s, Seg2::Line { .. }))
-}
-
-/// The edge from `a` to `b` along the profile segment `sg` (in `plane`), for a revolve's sweep.
-/// One that ends on the axis (`ends_on_axis`) is built from there and turned round, so that the
-/// surface swept from its curve has its pole at the curve's start. truck's revolved surface
-/// reads a point on its axis at the start of its curve with the angle of the point before it,
-/// but one at the end with an angle of 2π when it has no hint, past a part turn's span: the face
-/// came out as another region (#1853).
-fn swept_edge(plane: &Plane, sg: &Seg2, a: &mt::Vertex, b: &mt::Vertex, ends_on_axis: bool) -> mt::Edge {
-    if ends_on_axis {
-        return swept_edge(plane, &sg.reversed(), b, a, false).inverse();
-    }
-    match *sg {
-        Seg2::Line { .. } => builder::line(a, b),
-        Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(sg.mid()))),
-        Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
-            crate::freeform::edge(plane, sg, a, b).unwrap_or_else(|| builder::line(a, b))
-        }
-    }
-}
-
-/// Where [`revolve_on_axis`]'s full turns start, from the profile: an angle no plane a part is
-/// commonly cut along lies at (as full circles start, see `reseam`).
-const FULL_TURN_START: f64 = 0.4142;
-
-/// A revolve of a loop with one edge on the axis: the other edges sweep their faces, a third of a
-/// turn at most each. A partial turn is closed by two caps (the profile at the start and at the
-/// end), which share the axis edge; a full turn ends where it started. `None` when the loop
-/// isn't like that.
-fn revolve_on_axis(plane: &Plane, numbered: &NumberedLoop, axis_origin: Vec2, d: Vec2, angle: f64) -> Result<Option<Body>> {
-    use mt::{BoundedCurve, ParametricCurve, ParametricSurface3D, SearchNearestParameter, Transformed};
-    let lp = &numbered.lp;
-    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-9;
-    let n = lp.segs.len();
-    let axis_segs: Vec<usize> =
-        (0..n).filter(|i| lp.segs.get(*i).is_some_and(|s| matches!(s, Seg2::Line { a, b } if on_axis(*a) && on_axis(*b)))).collect();
-    let [k] = axis_segs[..] else { return Ok(None) };
-    // The open chain after the axis segment, back around to it: only its ends on the axis.
-    let chain: Vec<Seg2> = (1..n).filter_map(|j| lp.segs.get((k + j) % n).copied()).collect();
-    if chain.is_empty() || chain.iter().skip(1).any(|s| on_axis(s.start())) || chain.iter().any(|s| on_axis(s.mid())) {
-        return Ok(None);
-    }
-    let full = angle.abs() >= std::f64::consts::TAU - 1e-9;
-    // Faces of a third of a turn at most, as truck sweeps a full turn: a boolean could not
-    // intersect a half turn's faces and the half circles bounding them (a half slot turned half a
-    // turn into a plate, #1853), and a sphere's face needs room for its poles (below).
-    let pieces = (angle.abs() / (std::f64::consts::TAU / 3.0) - 1e-9).ceil().max(1.0) as usize;
-    let step = angle / pieces as f64;
-    // Built with the axis through the world origin, then moved into place.
-    let shift = plane.to_world(axis_origin);
-    let local = Plane { origin: plane.origin - shift, ..*plane };
-    let plane = &local;
-    let axis = plane.dir_to_world(d);
-    let turned = |by: f64| mt::Matrix4::from_axis_angle(v3(axis), mt::Rad(by));
-    let turn = |m: &mt::Matrix4, p: Vec3| from_p3(mt::EuclideanSpace::from_vec((m * p3(p).to_homogeneous()).truncate()));
-    guard("revolve", || {
-        let fail = |m: &str| KernelError::Failed(format!("revolve: {m}"));
-        let pts: Vec<Vec3> = chain.iter().map(|s| plane.to_world(s.start())).chain(chain.last().map(|s| plane.to_world(s.end()))).collect();
-        let last = pts.len() - 1;
-        let pv: Vec<mt::Vertex> = pts.iter().map(|p| builder::vertex(p3(*p))).collect();
-        let mut e: Vec<mt::Edge> = Vec::new();
-        for (i, sg) in chain.iter().enumerate() {
-            let (Some(a), Some(b)) = (pv.get(i), pv.get(i + 1)) else { return Err(fail("chain")) };
-            e.push(swept_edge(plane, sg, a, b, on_axis(sg.end())));
-        }
-        // The profile's vertices and edges where each piece starts and ends: turned by the step,
-        // the ends staying where they are (on the axis). A part turn starts on the profile. A full
-        // turn starts at an odd angle and ends where it started: the profile lies in the plane
-        // it was drawn on, often a face of the body cut, and a seam lying in that face as well
-        // left the cut nothing it could intersect there (#1853).
-        let start = if full { FULL_TURN_START } else { 0.0 };
-        let mut levels: Vec<(Vec<mt::Vertex>, Vec<mt::Edge>)> = Vec::new();
-        for j in 0..=pieces {
-            if j == 0 && !full {
-                levels.push((pv.clone(), e.clone()));
-                continue;
-            }
-            if let (true, Some(first)) = (j == pieces && full, levels.first()) {
-                levels.push(first.clone());
-                continue;
-            }
-            let rot = turned(start + step * j as f64);
-            let qv: Vec<mt::Vertex> = pts
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    if i == 0 || i == last {
-                        pv.get(i).cloned().unwrap_or_else(|| builder::vertex(p3(*p)))
-                    } else {
-                        builder::vertex(p3(turn(&rot, *p)))
-                    }
-                })
-                .collect();
-            let mut er: Vec<mt::Edge> = Vec::new();
-            for (i, edge) in e.iter().enumerate() {
-                let (Some(qa), Some(qb)) = (qv.get(i), qv.get(i + 1)) else { return Err(fail("chain")) };
-                let curve = edge.curve().transformed(rot);
-                er.push(if edge.orientation() { mt::Edge::new(qa, qb, curve) } else { mt::Edge::new(qb, qa, curve).inverse() });
-            }
-            levels.push((qv, er));
-        }
-        // Side faces: each edge's swept surface, oriented to agree with its boundary, from the
-        // profile segment the edge was built from.
-        let mut faces: Vec<(mt::Face, FaceProv)> = Vec::new();
-        for (j, piece) in levels.windows(2).enumerate() {
-            let [(pv, e), (qv, er)] = piece else { return Err(fail("pieces")) };
-            let half = turned(start + step * (j as f64 + 0.5));
-            // Arcs swept by the vertices off the axis.
-            let mut arcs: Vec<Option<mt::Edge>> = vec![None; pts.len()];
-            for i in 1..last {
-                let (Some(a), Some(b), Some(p)) = (pv.get(i), qv.get(i), pts.get(i)) else { continue };
-                if let Some(slot) = arcs.get_mut(i) {
-                    *slot = Some(builder::circle_arc(a, b, p3(turn(&half, *p))));
-                }
-            }
-            for (i, sg) in chain.iter().enumerate() {
-                let (Some(ei), Some(eri)) = (e.get(i), er.get(i)) else { return Err(fail("edges")) };
-                let mut ws: Vec<mt::Edge> = vec![ei.clone()];
-                if let Some(Some(c)) = arcs.get(i + 1) {
-                    ws.push(c.clone());
-                }
-                ws.push(eri.inverse());
-                if let Some(Some(c)) = arcs.get(i) {
-                    ws.push(c.inverse());
-                }
-                let wire: mt::Wire = ws.into();
-                let radial = matches!(*sg, Seg2::Line { a, b } if (b - a).normalized().is_some_and(|u| u.dot(d).abs() < 1e-9));
-                let f = if radial {
-                    builder::try_attach_plane(&[wire]).map_err(|er| fail(&er.to_string()))?
-                } else {
-                    // The surface turns from the piece's start through |step|, so its angle runs
-                    // from 0 across the face. Inverting it turns its axis round, which puts the
-                    // face at 2π - |step| to 2π: its start then lies on the angle's seam, where
-                    // points (and a pole without a hint) read as 0, the far side, and the face
-                    // meshed and intersected as the wrong region (#1853). The face is turned
-                    // round instead.
-                    let (dir, by) = if step < 0.0 { (-axis, -step) } else { (axis, step) };
-                    let surface = match *sg {
-                        // An arc about a centre on the axis that reaches it sweeps part of a sphere
-                        // with its pole there, and a boolean can't follow an intersection into a
-                        // pole: a cut by the plane through the axis (the face the profile was drawn
-                        // on) failed (#1853). The face lies on the sphere turned about the axis
-                        // square to the revolve's and to the face's middle, as `sphere_solid`'s
-                        // patches do: its poles are a quarter turn from that middle, past the
-                        // face's third of a turn, and its seam runs round the back.
-                        Seg2::Arc { center, radius, .. } if on_axis(center) && (on_axis(sg.start()) || on_axis(sg.end())) => {
-                            let c = plane.to_world(center);
-                            let out = turn(&half, plane.to_world(sg.mid())) - c;
-                            let out = (out - axis * out.dot(axis)).normalized().ok_or_else(|| fail("sphere"))?;
-                            let pole = axis.cross(out);
-                            let meridian = builder::circle_arc(
-                                &builder::vertex(p3(c + pole * radius)),
-                                &builder::vertex(p3(c - pole * radius)),
-                                p3(c - out * radius),
-                            );
-                            mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(
-                                meridian.oriented_curve(),
-                                p3(c),
-                                v3(pole),
-                            )))
-                        }
-                        _ => {
-                            let template = builder::rsweep(ei, mt::Point3::new(0.0, 0.0, 0.0), v3(dir), mt::Rad(by));
-                            template.face_iter().next().map(|f| f.surface()).ok_or_else(|| fail("swept face"))?
-                        }
-                    };
-                    // The loop's turning (Newell) against the surface normal halfway round.
-                    let poly: Ring<Vec3> = wire
-                        .edge_iter()
-                        .flat_map(|ed| {
-                            let c = ed.oriented_curve();
-                            let (t0, t1) = c.range_tuple();
-                            (0..8).map(move |j| from_p3(c.subs(t0 + (t1 - t0) * j as f64 / 8.0))).collect::<Vec<_>>()
-                        })
-                        .collect();
-                    let nw = poly.area_vector();
-                    let probe = turn(&half, plane.to_world(sg.mid()));
-                    let sn = surface.search_nearest_parameter(p3(probe), None, 100).map(|(u, v)| surface.normal(u, v));
-                    if sn.is_some_and(|m| nw.dot(Vec3::new(m.x, m.y, m.z)) < 0.0) {
-                        mt::Face::try_new(vec![wire.inverse()], surface).map_err(|er| fail(&er.to_string()))?.inverse()
-                    } else {
-                        mt::Face::try_new(vec![wire], surface).map_err(|er| fail(&er.to_string()))?
-                    }
-                };
-                faces.push((f, record::profile(numbered.numbers((k + 1 + i) % n))));
-            }
-        }
-        let (faces, mut history): (Vec<mt::Face>, Vec<FaceProv>) = faces.into_iter().unzip();
-        let close = |solid: Solid, history: Vec<FaceProv>| {
-            let solid = if shift.len() > 0.0 { builder::translated(&solid, v3(shift)) } else { solid };
-            record::attach(Body::new(solid)?, &[], Some(history), Default::default()).map(Some)
-        };
-        if full {
-            return close(Solid::try_new(vec![faces.into()]).map_err(|er| fail(&er.to_string()))?, history);
-        }
-        // Caps: the profile at the start and at the end, sharing the axis edge.
-        let ((Some(a0), Some(an)), Some((_, er))) = ((pv.first(), pv.get(last)), levels.last()) else { return Err(fail("ends")) };
-        let axis_edge = builder::line(an, a0);
-        let start: mt::Wire = e.iter().rev().map(|x| x.inverse()).chain(std::iter::once(axis_edge.inverse())).collect::<Vec<_>>().into();
-        let end: mt::Wire = er.iter().cloned().chain(std::iter::once(axis_edge.clone())).collect::<Vec<_>>().into();
-        let cs = builder::try_attach_plane(&[start]).map_err(|er| fail(&er.to_string()))?;
-        let ce = builder::try_attach_plane(&[end]).map_err(|er| fail(&er.to_string()))?;
-        history.extend([record::cap(false), record::cap(true)]);
-        let mut last_err = String::new();
-        for flip in 0..4 {
-            let mut all = faces.clone();
-            all.push(if flip & 1 == 0 { cs.clone() } else { cs.inverse() });
-            all.push(if flip & 2 == 0 { ce.clone() } else { ce.inverse() });
-            match Solid::try_new(vec![all.into()]) {
-                Ok(solid) => return close(solid, history),
-                Err(er) => last_err = er.to_string(),
-            }
-        }
-        Err(fail(&last_err))
-    })
-}
-
-fn revolve_touching_axis(plane: &Plane, numbered: &NumberedLoop, axis_origin: Vec2, d: Vec2) -> Result<Option<Body>> {
-    let lp = &numbered.lp;
-    let on_axis = |p: Vec2| d.cross(p - axis_origin).abs() < 1e-9;
-    let n = lp.segs.len();
-    let axis_segs: Vec<usize> =
-        (0..n).filter(|i| lp.segs.get(*i).is_some_and(|s| matches!(s, Seg2::Line { a, b } if on_axis(*a) && on_axis(*b)))).collect();
-    let [k] = axis_segs[..] else { return Ok(None) };
-    // The open chain after the axis segment, back around to it, with the profile segments
-    // under each piece.
-    let mut chain: Vec<Seg2> = (1..n).filter_map(|j| lp.segs.get((k + j) % n).copied()).collect();
-    let mut chain_src: Vec<&[usize]> = (1..n).map(|j| numbered.numbers((k + j) % n)).collect();
-    // A single arc (a sphere) is split off-centre: a seam on the equator would lie in the very
-    // planes other bodies are often cut with.
-    if let [Seg2::Arc { center, radius, start, sweep }] = chain[..] {
-        let f = 0.37;
-        chain = vec![
-            Seg2::Arc { center, radius, start, sweep: sweep * f },
-            Seg2::Arc { center, radius, start: start + sweep * f, sweep: sweep * (1.0 - f) },
-        ];
-        chain_src = vec![numbered.numbers((k + 1) % n); 2];
-    }
-    if chain.is_empty() || chain.iter().skip(1).take(chain.len().saturating_sub(2)).any(|s| on_axis(s.start()) && on_axis(s.end())) {
-        return Ok(None);
-    }
-    // Built with the axis through the world origin (truck tessellates such cones reliably), then
-    // moved into place.
-    let shift = plane.to_world(axis_origin);
-    let local = Plane { origin: plane.origin - shift, ..*plane };
-    let plane = &local;
-    // Radial lines at the ends become planar caps (no degenerate disc centres).
-    let radial = |sg: &Seg2| matches!(*sg, Seg2::Line { a, b } if (b - a).normalized().is_some_and(|u| u.dot(d).abs() < 1e-9));
-    let mut mid: &[Seg2] = &chain;
-    let mut mid_src: &[&[usize]] = &chain_src;
-    // The segments of the radial lines that become caps.
-    let (mut start_cap, mut end_cap) = (None, None);
-    if mid.first().is_some_and(|f| radial(f) && on_axis(f.start())) {
-        mid = mid.get(1..).unwrap_or(&[]);
-        start_cap = mid_src.first().copied();
-        mid_src = mid_src.get(1..).unwrap_or(&[]);
-    }
-    if mid.last().is_some_and(|l| radial(l) && on_axis(l.end())) {
-        mid = mid.get(..mid.len().saturating_sub(1)).unwrap_or(&[]);
-        end_cap = mid_src.last().copied();
-        mid_src = mid_src.get(..mid_src.len().saturating_sub(1)).unwrap_or(&[]);
-    }
-    if mid.is_empty() {
-        return Ok(None);
-    }
-    let apex_start = mid.first().is_some_and(|f| on_axis(f.start()));
-    let apex_end = mid.last().is_some_and(|l| on_axis(l.end()));
-    guard("revolve", || {
-        let verts: Vec<mt::Vertex> = mid
-            .iter()
-            .map(|s| builder::vertex(p3(plane.to_world(s.start()))))
-            .chain(mid.last().map(|s| builder::vertex(p3(plane.to_world(s.end())))))
-            .collect();
-        let mut edges: Vec<mt::Edge> = Vec::new();
-        for (i, s) in mid.iter().enumerate() {
-            let (Some(a), Some(b)) = (verts.get(i), verts.get(i + 1)) else { continue };
-            edges.push(match *s {
-                Seg2::Line { .. } => builder::line(a, b),
-                Seg2::Arc { .. } => builder::circle_arc(a, b, p3(plane.to_world(s.mid()))),
-                Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => match crate::freeform::edge(plane, s, a, b) {
-                    Some(e) => e,
-                    None => builder::line(a, b),
-                },
-            });
-        }
-        // Each edge with the profile segments under it, before the wire may be turned round.
-        let seeds: Vec<(mt::EdgeID, Vec<usize>)> = edges.iter().map(|e| e.id()).zip(mid_src.iter().map(|s| s.to_vec())).collect();
-        let mut w: mt::Wire = edges.into();
-        let axis = plane.dir_to_world(d);
-        let mut shell = if apex_start || apex_end {
-            if !apex_start {
-                // builder::cone wants the apex first.
-                w = w.inverse();
-            }
-            builder::cone(&w, v3(axis), mt::Rad(std::f64::consts::TAU))
-        } else {
-            builder::rsweep(&w, p3(plane.to_world(axis_origin)), v3(axis), mt::Rad(std::f64::consts::TAU))
-        };
-        let sides = shell.len();
-        // History. truck sweeps each wire edge round into a column of faces (triangles at an
-        // apex, which stays put); each cap is the disc a trimmed radial line sweeps, found by
-        // the profile vertex on its rim.
-        let fixed: Vec<mt::VertexID> =
-            [(apex_start, verts.first()), (apex_end, verts.last())].into_iter().filter_map(|(apex, v)| v.filter(|_| apex).map(|v| v.id())).collect();
-        let mut history: Option<Vec<FaceProv>> = (seeds.len() == mid.len())
-            .then(|| record::columns(shell.face_iter(), &seeds, None, record::Column::ToEnd, &fixed))
-            .flatten()
-            .and_then(|sides| sides.into_iter().collect());
-        let (first_vertex, last_vertex) = (verts.first().map(|v| v.id()), verts.last().map(|v| v.id()));
-        for b in shell.extract_boundaries() {
-            let at = |v: Option<mt::VertexID>| v.is_some_and(|v| b.vertex_iter().any(|x| x.id() == v));
-            let src = if at(first_vertex) {
-                start_cap
-            } else if at(last_vertex) {
-                end_cap
-            } else {
-                None
-            };
-            history = history.zip(src).map(|(mut h, numbers)| {
-                h.push(record::profile(numbers));
-                h
-            });
-            let cap = builder::try_attach_plane(&[b]).map_err(|e| KernelError::Failed(format!("revolve cap: {e}")))?;
-            shell.push(cap);
-        }
-        let solid = Solid::try_new(vec![shell.clone()]).or_else(|_| {
-            // Caps may come out facing inwards: flip them.
-            let mut s2 = shell.clone();
-            for f in s2.face_iter_mut().skip(sides) {
-                f.invert();
-            }
-            Solid::try_new(vec![s2])
-        });
-        let solid = solid.map_err(|e| KernelError::Failed(format!("revolve: {e}")))?;
-        let solid = if shift.len() > 0.0 { builder::translated(&solid, v3(shift)) } else { solid };
-        record::attach(Body::new(solid)?, &[], history, Default::default()).map(Some)
-    })
-}
-
-/// Close a ruled shell (side faces between matching wires, with their provenance as built)
-/// with planar caps into a body, whose history is the sides' and the caps': the profile at
-/// `w0` is the start cap and at `w1` the end cap (the other way round when `from_end`).
-pub(crate) fn cap_and_close(sides: Vec<Side>, w0: &[mt::Wire], w1: &[mt::Wire], from_end: bool) -> Result<Body> {
-    let (mut faces, prov): (Vec<mt::Face>, Vec<Option<FaceProv>>) = sides.into_iter().unzip();
-    let history: Option<Vec<FaceProv>> = prov.into_iter().chain([Some(record::cap(from_end)), Some(record::cap(!from_end))]).collect();
-    let bottom =
-        builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
-    let top = builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
-    let mut last = String::new();
-    for (b, t) in [(bottom.clone(), top.clone()), (bottom.inverse(), top.inverse()), (bottom.clone(), top.inverse()), (bottom.inverse(), top)] {
-        let mut all = std::mem::take(&mut faces);
-        let keep = all.clone();
-        all.push(b);
-        all.push(t);
-        let shell: mt::Shell = all.into();
-        match Solid::try_new(vec![shell]) {
-            Ok(s) => return record::attach(Body::new(s)?, &[], history, Default::default()),
-            Err(e) => last = e.to_string(),
-        }
-        faces = keep;
-    }
-    Err(KernelError::Failed(format!("closing the shell: {last}")))
-}
-
-/// A sweep whose walls already close, including separate shells around profile holes.
-pub(crate) fn close_sweep(sides: Vec<Side>) -> Result<Body> {
-    let sources: std::collections::HashMap<_, _> = sides.iter().map(|(f, p)| (f.id(), p.clone())).collect();
-    let shell: mt::Shell = sides.into_iter().map(|(f, _)| f).collect();
-    let solid = Solid::try_new(shell.connected_components()).map_err(|e| KernelError::Failed(format!("closing the sweep: {e}")))?;
-    let history = solid.face_iter().map(|f| sources.get(&f.id()).cloned().flatten()).collect();
-    record::attach(Body::new(solid)?, &[], history, Default::default())
-}
-
 /// Ruled loft through two or more planar sections (outer loops only). The sections and the
 /// same sections in reverse order give the same body.
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
@@ -1872,40 +930,15 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
-    if crate::backend()? == crate::Backend::Smlib {
-        let reversed = loft_reversed(sections)?;
-        let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
-        let loops = loft_numbered_loops(&numbered, reversed)?;
-        let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
-        let pieces: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> = loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
-        if !rails.is_empty() {
-            return crate::smlib_sweeps::loft_rails(&pieces, first, rails, fit);
-        }
-        return crate::smlib_sweeps::loft(&pieces, first);
+    let reversed = loft_reversed(sections)?;
+    let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
+    let loops = loft_numbered_loops(&numbered, reversed)?;
+    let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
+    let pieces: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> = loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect();
+    if !rails.is_empty() {
+        return crate::smlib_sweeps::loft_rails(&pieces, first, rails, fit);
     }
-    let (wires, edge_sources, reversed) = loft_wires(sections)?;
-    let (Some(first), Some(last)) = (wires.first(), wires.last()) else { return Err(KernelError::Failed("loft: sections".into())) };
-    let mut planes: Vec<Plane> = sections.iter().map(|(p, _)| *p).collect();
-    if reversed {
-        planes.reverse();
-    }
-    let all = guard("loft", || crate::loft_rails::railed_wires(&planes, &wires, true, rails, fit))?;
-    // The wires run from the first section given, or (turned round) the last.
-    // Three wires or more: one smooth surface through them all for each segment. A plain loft
-    // falls back to ruled faces where that fails; a railed one has to follow its rails.
-    if all.len() >= 3 {
-        let smooth = guard("loft", || {
-            let faces = smooth_loft_faces(&all, &edge_sources, true)?;
-            cap_and_close(faces, std::slice::from_ref(first), std::slice::from_ref(last), reversed)
-        });
-        if smooth.is_ok() || !rails.is_empty() {
-            return smooth;
-        }
-    }
-    guard("loft", || {
-        let sides = ruled_loft_faces(&wires, &edge_sources)?;
-        cap_and_close(sides, std::slice::from_ref(first), std::slice::from_ref(last), reversed)
-    })
+    crate::smlib_sweeps::loft(&pieces, first)
 }
 
 /// A loft through regions with matching hole counts. Hole walls are built alongside the
@@ -1987,51 +1020,12 @@ pub fn loft_regions(sections: &[(Plane, Region2)]) -> Result<Body> {
     if counts.iter().sum::<usize>() > MAX_SEGS {
         return Err(KernelError::Invalid("matching loft sections would create too many segments".into()));
     }
-    if crate::backend()? == crate::Backend::Smlib {
-        return smlib_loft_regions(&outlines, &planes, &numbered, reversed);
-    }
-    guard("loft with holes", || {
-        let mut loops = vec![loft_numbered_wires(&outlines, reversed)?];
-        for i in 0..holes {
-            let secs = planes
-                .iter()
-                .zip(&numbered)
-                .map(|(p, r)| r.holes.get(i).cloned().map(|h| (*p, h)).ok_or_else(|| KernelError::Invalid("missing loft hole".into())))
-                .collect::<Result<Vec<_>>>()?;
-            // The holes have already been ordered with the outline.
-            loops.push(loft_numbered_wires(&secs, false)?);
-        }
-        let close = |smooth: bool| {
-            let mut sides = Vec::new();
-            let mut first = Vec::new();
-            let mut last = Vec::new();
-            for (i, (wires, sources)) in loops.iter().enumerate() {
-                let faces = if smooth { smooth_loft_faces(wires, sources, true)? } else { ruled_loft_faces(wires, sources)? };
-                let (Some(a), Some(b)) = (wires.first(), wires.last()) else { return Err(KernelError::Invalid("no loft sections".into())) };
-                if i == 0 {
-                    sides.extend(faces);
-                    first.push(a.clone());
-                    last.push(b.clone());
-                } else {
-                    sides.extend(faces.into_iter().map(|(f, source)| (f.inverse(), source)));
-                    first.push(a.inverse());
-                    last.push(b.inverse());
-                }
-            }
-            cap_and_close(sides, &first, &last, reversed)
-        };
-        if sections.len() >= 3
-            && let Ok(body) = guard("smooth loft with holes", || close(true))
-        {
-            return Ok(body);
-        }
-        close(false)
-    })
+    smlib_loft_regions(&outlines, &planes, &numbered, reversed)
 }
 
 /// [`loft_regions`] through SMLib's skin, which lofts a section's loops (its outline, then its
 /// holes, in the order given) to the loops in the same place in the next: the outline and each
-/// hole matched as for truck, every section's loops one profile, the holes turned against the
+/// hole matched as above, every section's loops one profile, the holes turned against the
 /// outline. `outlines` are as given, `planes` and the holes of `numbered` in canonical order.
 fn smlib_loft_regions(outlines: &[(Plane, NumberedLoop)], planes: &[Plane], numbered: &[NumberedRegion], reversed: bool) -> Result<Body> {
     let mut sections: Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> =
@@ -2126,51 +1120,26 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
     // with the most segments.
     let n0 = ordered.first().map(|(p, _)| p.normal()).unwrap_or(Vec3::Z);
     let parallel = ordered.iter().all(|(p, _)| p.normal().dot(n0).abs() > 1.0 - 1e-9);
-    // Whether a section faces the first one's way is followed neighbour to neighbour, not by its
-    // normal against the first's: planes turning about an axis pass 90 degrees and would be
-    // flipped, folding the loft (#2847).
-    let mut facing = true;
-    let mut before = n0;
     let oriented: Vec<(Plane, NumberedLoop)> = ordered
         .iter()
         .map(|(p, l)| {
-            let n = p.normal();
-            if n.dot(before) < 0.0 {
-                facing = !facing;
-            }
-            before = n;
-            (*p, l.oriented(!facing))
+            let ccw = p.normal().dot(n0) >= 0.0;
+            (*p, l.oriented(!ccw))
         })
         .collect();
     let lead = oriented.iter().max_by_key(|(_, l)| l.lp.segs.len()).ok_or_else(|| KernelError::Invalid("no sections".into()))?;
     let lead_c = lead.0.to_world(lead.1.lp.centroid());
     let lead_dirs: Vec<Vec3> = lead.1.lp.segs.iter().map(|s| lead.0.to_world(s.start()) - lead_c).collect();
-    // The share of the lead's perimeter before each of its vertices: where a circle section
-    // breaks when the lead's vertex directions do not go round in order.
-    let lead_len: f64 = lead.1.lp.segs.iter().map(Seg2::length).sum();
-    let fractions: Vec<f64> = lead
-        .1
-        .lp
-        .segs
-        .iter()
-        .scan(0.0, |before, s| {
-            let f = *before / lead_len;
-            *before += s.length();
-            Some(f)
-        })
-        .collect();
-    let mut out: Vec<(Plane, NumberedLoop)> = Vec::new();
+    let mut out = Vec::with_capacity(oriented.len());
     for (p, l) in &oriented {
         let c = l.lp.centroid();
         // Break angles: the lead section's vertex directions seen in this plane.
         let angles: Vec<f64> = lead_dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y)).angle()).collect();
+        let mut r = l.resample(n, &angles);
         // Circle resampling creates increasing local angles. An antiparallel sketch
-        // plane must run clockwise locally to keep the same winding in world space (the lead's
-        // directions go round clockwise there). Curving a run through a right angle does not
-        // reverse a section's winding.
-        let flip = parallel && p.normal().dot(n0) < 0.0;
-        let mut r = l.resample(n, &angles, &fractions, flip);
-        if flip {
+        // plane must run clockwise locally to keep the same winding in world space.
+        // Curving a run through a right angle does not reverse a section's winding.
+        if parallel && p.normal().dot(n0) < 0.0 {
             r = r.oriented(true);
         }
         // Start where every vertex lines up best with the lead's vertex of the same number (the
@@ -2255,7 +1224,7 @@ pub(crate) fn section_parameters(edges: &[Vec<mt::Edge>]) -> Vec<f64> {
 /// middle sections, which leave no edges). Every section wire comes from `uniform_wire`, so the
 /// k-th edges of all sections share one knot vector and their control points pair up. Face k
 /// comes from the profile segments under the k-th edge of every section (`numbers`: by
-/// section, by edge); the caps as [`cap_and_close`] takes them (`from_end`).
+/// section, by edge).
 /// One smooth face through every section for each wire edge (cubic across four sections or
 /// more, quadratic across three), neighbours sharing their seams. `closed` wires join their
 /// last edge to their first; open ones have a seam at each end.
@@ -2385,8 +1354,8 @@ impl PathSeg {
         }
     }
 
-    /// The path with each free-form curve as the lines of its polyline within 0.01 mm, as
-    /// truck's sweeps follow it.
+    /// The path with each free-form curve as the lines of its polyline within 0.01 mm, as the
+    /// sheet sweeps follow it.
     pub fn flattened(path: &[PathSeg]) -> Vec<PathSeg> {
         path.iter()
             .flat_map(|s| match *s {
@@ -2464,130 +1433,16 @@ pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
     Ok(pts)
 }
 
-/// [`sweep`] with sweep options. The default options are exactly [`sweep`]; any other
-/// orientation, a twist or an end scale follow the path as a polyline through stations (see
-/// [`crate::sweep_path_with`]).
+/// [`sweep`] with sweep options. The default options are exactly [`sweep`]; a twist, an end
+/// scale, guide rails or an orientation direction place the profile at stations along the path.
 pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
-    if crate::backend()? == crate::Backend::Smlib {
-        return smlib_sweep(plane, region, path, ctl);
-    }
-    if ctl.is_default() {
-        return sweep(plane, region, path);
-    }
-    let path = &PathSeg::flattened(path)[..];
-    ctl.check()?;
-    region_ok(region)?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
-    }
-    if path.iter().any(|s| s.tangents().is_none()) {
-        return Err(KernelError::Invalid("a path segment has no direction".into()));
-    }
-    crate::sweep_path::sweep_path_with(plane, region, &path_polyline(path)?, ctl)
+    smlib_sweep(plane, region, path, ctl)
 }
 
-/// Sweep a planar region (outer loop) along a chain of path segments, keeping the profile
-/// perpendicular to the path (lines translate it, arcs rotate it). A path with sharp corners
-/// is swept as a polyline, mitred at the corners.
+/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
+/// the path; at sharp corners the walls meet in mitres.
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
-    if crate::backend()? == crate::Backend::Smlib {
-        return smlib_sweep(plane, region, path, &crate::SweepControl::default());
-    }
-    let path = &PathSeg::flattened(path)[..];
-    region_ok(region)?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
-    }
-    // Segment by segment the profile only follows a path whose direction runs on across each
-    // joint: at a corner the next line would slide the profile within its own plane.
-    let ends: Vec<(Vec3, Vec3)> =
-        path.iter().map(PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
-    let corner = ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos());
-    if corner {
-        return crate::sweep_path::sweep_path(plane, region, &path_polyline(path)?);
-    }
-    let points = path_polyline(path)?;
-    if crate::sweep_path::closed_path(&points) {
-        // Sketch circles have two half arcs. Sweep the whole turn in one operation so truck
-        // shares the closing edges itself. Other closed paths use stations with shared ends.
-        if let Some((center, axis, angle)) = full_circle(path) {
-            return guard("closed sweep", || {
-                let profile = region_wires(plane, &oriented(region)?)?;
-                let mut sides = Vec::new();
-                for p in &profile {
-                    let shell: mt::Shell = builder::rsweep(&p.wire, p3(center), v3(axis), mt::Rad(angle));
-                    let numbers = seeds(std::slice::from_ref(p));
-                    let prov = record::columns(shell.face_iter(), &numbers, None, record::Column::ToEnd, &[]);
-                    sides.extend(shell.face_iter().enumerate().map(|(i, f)| (f.clone(), prov.as_ref().and_then(|p| p.get(i)).cloned().flatten())));
-                }
-                close_sweep(sides)
-            });
-        }
-        return crate::sweep_path::sweep_path(plane, region, &points);
-    }
-    // The outer loop and each hole, swept along the path; the ends are capped with holes.
-    let profile = region_wires(plane, &oriented(region)?)?;
-    let starts = wires_of(&profile);
-    guard("sweep", || {
-        let mut shell = mt::Shell::new();
-        let mut ends = Vec::new();
-        for w0 in &starts {
-            let mut cur = w0.clone();
-            for seg in path {
-                let mut part: mt::Shell = match *seg {
-                    PathSeg::Line { a, b } => builder::tsweep(&cur, v3(b - a)),
-                    PathSeg::Arc { center, axis, angle, .. } => {
-                        let ax = axis.normalized().ok_or_else(|| KernelError::Invalid("arc axis".into()))?;
-                        builder::rsweep(&cur, p3(center), v3(ax), mt::Rad(angle))
-                    }
-                    // The path was flattened: no curves are left.
-                    PathSeg::Curve { .. } | PathSeg::Cubic { .. } => return Err(KernelError::Invalid("a free-form path curve".into())),
-                };
-                let next = part
-                    .extract_boundaries()
-                    .into_iter()
-                    .find(|w| w.edge_iter().all(|e| !cur.edge_iter().any(|c| c.id() == e.id())))
-                    .ok_or_else(|| KernelError::Failed("sweep: lost the profile".into()))?;
-                shell.append(&mut part);
-                cur = next.inverse();
-            }
-            ends.push(cur);
-        }
-        // A straight profile edge square to an arc's axis turns in its own plane: that face is
-        // given a plane, so that it is found lying on a planar face of another body.
-        let mut bounds = solidcraft_geom::Aabb3::EMPTY;
-        shell.vertex_iter().for_each(|v| bounds.add(from_p3(v.point())));
-        let size = bounds.size().len();
-        if size.is_finite()
-            && let Some(flat) = crate::heal::planar_surfaces(&shell, (size * 1e-7).max(1e-9))
-        {
-            shell = flat;
-        }
-        // truck sweeps the faces: each profile edge's run along the whole path, path segment
-        // after segment.
-        let sides: Vec<Side> = match record::columns(shell.face_iter(), &seeds(&profile), None, record::Column::ToEnd, &[]) {
-            Some(prov) => shell.face_iter().cloned().zip(prov).collect(),
-            None => shell.face_iter().map(|f| (f.clone(), None)).collect(),
-        };
-        cap_and_close(sides, &starts, &ends, false)
-    })
-}
-
-/// A connected, single turn about one centre and axis, possibly split into sketch arcs.
-fn full_circle(path: &[PathSeg]) -> Option<(Vec3, Vec3, f64)> {
-    let PathSeg::Arc { a: first, center, axis, .. } = *path.first()? else { return None };
-    let axis = axis.normalized()?;
-    let mut end = first;
-    let mut total = 0.0;
-    for seg in path {
-        let PathSeg::Arc { a, center: c, axis: k, angle } = *seg else { return None };
-        if a.dist(end) > 1e-7 || c.dist(center) > 1e-7 || k.normalized()?.dist(axis) > 1e-9 || !angle.is_finite() {
-            return None;
-        }
-        total += angle;
-        end = rotate_about(a, c, axis, angle);
-    }
-    ((total.abs() - std::f64::consts::TAU).abs() < 1e-9).then_some((center, axis, total))
+    smlib_sweep(plane, region, path, &crate::SweepControl::default())
 }
 
 /// Cox–de Boor basis values N_{j,3}(u) for all j.
@@ -2741,29 +1596,8 @@ pub(crate) fn uniform_chain_wire(plane: &Plane, segs: &[Seg2], closed: bool) -> 
     Ok(edges.into())
 }
 
-/// A sphere as six patches (the cube's faces projected onto it) on revolved surfaces whose poles
-/// and seams lie outside each patch. No face has a singular point, which the boolean needs; the
-/// patches are one analytic sphere, so measured topology counts it as one face.
-pub fn sphere_patches(center: Vec3, radius: f64) -> Result<Body> {
-    sphere_patches_rotated(center, radius, [Vec3::X, Vec3::Y, Vec3::Z])
-}
-
-/// [`sphere_patches`] with the patch layout turned to the frame `rot` (orthonormal columns).
-pub fn sphere_patches_rotated(center: Vec3, radius: f64, rot: [Vec3; 3]) -> Result<Body> {
-    // Every patch is swept from the arc (segment 0) of the half disc a sphere revolves.
-    sphere_solid(center, radius, rot, &[0])
-}
-
-/// [`sphere_patches_rotated`], every patch swept from profile segments `arcs`.
-fn sphere_solid(center: Vec3, radius: f64, rot: [Vec3; 3], arcs: &[usize]) -> Result<Body> {
-    guard("sphere", || {
-        let shell: mt::Shell = sphere_patch_faces(center, radius, rot)?.into();
-        let solid = Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("sphere: {e}")))?;
-        record::attach(Body::new(solid)?, &[], Some(vec![record::profile(arcs); 6]), Default::default())
-    })
-}
-
-/// The six outward patch faces of [`sphere_patches_rotated`]; truck calls, so callers guard them.
+/// Six outward patch faces of a sphere (the cube's faces projected onto it) on revolved surfaces
+/// whose poles and seams lie outside each patch, for the STEP reader's spheres; callers guard them.
 pub(crate) fn sphere_patch_faces(center: Vec3, radius: f64, rot: [Vec3; 3]) -> Result<Vec<mt::Face>> {
     let radius = finite(radius, "radius")?;
     let turn = |v: Vec3| rot[0] * v.x + rot[1] * v.y + rot[2] * v.z;
