@@ -160,6 +160,27 @@ impl Brep {
         ffi::sweeps::sweep(&l.raw(), &p.raw(), frame, cap).map(Brep).map_err(error)
     }
 
+    /// [`Brep::sweep`], with where the sweep placed the profile: the rigid motions carrying the
+    /// profile as given onto its first section, a section about half way along and its last
+    /// section. Only the sweep knows them (the curve sweep turns the profile on a frame it works
+    /// out from point to point along the path); a sweep that carries on from where this one left
+    /// the profile starts from the last.
+    pub fn sweep_placed(profile: &[Curve], path: &[Curve], frame: SweepFrame, cap: bool) -> Result<(Brep, [Affine; 3])> {
+        init()?;
+        let (l, p) = (List::of(profile)?, List::of(path)?);
+        let frame = match frame {
+            SweepFrame::Follow => ffi::sweeps::SWEEP_FOLLOW,
+            SweepFrame::Translate => ffi::sweeps::SWEEP_TRANSLATE,
+        };
+        let mut placed = [0.0; 36];
+        let brep = ffi::sweeps::sweep_placed(&l.raw(), &p.raw(), frame, cap, &mut placed).map(Brep).map_err(error)?;
+        let motion = |i: usize| {
+            let at = |k: usize| placed.get(12 * i + k).copied().unwrap_or(0.0);
+            Affine { m: [[at(0), at(1), at(2)], [at(3), at(4), at(5)], [at(6), at(7), at(8)]], t: [at(9), at(10), at(11)] }
+        };
+        Ok((brep, [motion(0), motion(1), motion(2)]))
+    }
+
     /// A loft (skin) through `sections` (at least two closed loops), `degree` (1 ruled, 2 or 3)
     /// across them.
     pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Brep> {
