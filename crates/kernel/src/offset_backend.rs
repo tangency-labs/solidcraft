@@ -51,7 +51,7 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched).
-fn run(name: &str, b: &Body, op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>) -> Result<(Body, Option<History>)> {
+pub(crate) fn run(name: &str, b: &Body, op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>) -> Result<(Body, Option<History>)> {
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;

@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod assemble;
 mod backend;
 mod blend;
 mod blend_corner;
@@ -24,12 +25,10 @@ mod body;
 mod boolean_diagnostics;
 mod boolean_guard;
 mod boolean_record;
-mod bore_guard;
 mod boundary;
 mod boundary_network;
 mod bridge;
 mod build;
-mod candidate_reach;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
 mod clearance;
@@ -125,7 +124,8 @@ mod smlib_sweeps;
 #[cfg(test)]
 mod smlib_sweeps_tests;
 mod smooth_edges;
-mod sphere_lens;
+#[cfg(test)]
+mod sphere_lens_tests;
 mod spline_conv;
 mod splitface;
 mod step;
@@ -143,7 +143,6 @@ mod surfaces;
 mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
-mod tangent_cylinders;
 mod tess;
 #[cfg(test)]
 mod thin_face_tests;
@@ -152,7 +151,6 @@ mod thread_display_tests;
 #[cfg(test)]
 mod thread_tests;
 mod topo;
-mod touching_walls;
 mod tspline;
 #[cfg(test)]
 mod untouched_faces_tests;
