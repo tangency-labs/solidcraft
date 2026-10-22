@@ -1023,8 +1023,8 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
 
 /// A surface swept from chains of sketch segments on `plane` along a path that starts near them,
 /// turning with it (SMLib's curve sweep: along lines an extrusion, round arcs about one axis a
-/// revolution, exactly). A path whose direction jumps at a joint (a corner) is not supported yet.
-/// The walls form one surface body with no caps; its history has no operands: every face is new.
+/// revolution, exactly); at a corner the walls meet in a mitre, as the solid sweep's do. The
+/// walls form one surface body with no caps; its history has no operands: every face is new.
 pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg]) -> Result<Body> {
     sweep_sheet_with(plane, chains, path, &crate::SweepControl::default())
 }
@@ -1041,20 +1041,40 @@ pub fn sweep_sheet_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::Path
     if path.is_empty() || path.len() > 1000 {
         return Err(invalid("the path needs 1…1000 segments"));
     }
+    let runs = smooth_runs(path)?;
+    let controlled = ctl.varies() || matches!(ctl.orientation, crate::SweepOrientation::Direction(_));
+    if controlled && runs.len() > 1 {
+        return Err(imp::refuse("sweep with a twist, an end scale, guide rails or an orientation direction along a path with corners"));
+    }
+    let translate = ctl.orientation == crate::SweepOrientation::Parallel;
+    let mut pieces = Vec::with_capacity(chains.len());
+    for chain in numbered(chains) {
+        if runs.len() > 1 {
+            pieces.extend(imp::cornered(plane, &chain, path, &runs, translate)?);
+            continue;
+        }
+        let r = if controlled { imp::swept_stations(plane, &chain, path, ctl)? } else { imp::swept(plane, &chain, path, translate)? };
+        let h = swept_from(&r, plane, &chain);
+        pieces.push((r, h));
+    }
+    sheet_of(pieces, runs.len() > 1)
+}
+
+/// The path's segments in runs along which its direction carries on (within a thousandth of a
+/// radian across each joint): a new run starts at each corner.
+fn smooth_runs(path: &[crate::PathSeg]) -> Result<Vec<std::ops::Range<usize>>> {
     let ends: Vec<(Vec3, Vec3)> =
         path.iter().map(crate::PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| invalid("a path segment has no direction"))?;
-    if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
-        return Err(imp::refuse("surface sweep along a path with corners"));
+    let mut runs = Vec::new();
+    let mut from = 0;
+    for (i, w) in ends.windows(2).enumerate() {
+        if w[0].1.dot(w[1].0) < (1e-3f64).cos() {
+            runs.push(from..i + 1);
+            from = i + 1;
+        }
     }
-    let pieces = numbered(chains)
-        .into_iter()
-        .map(|chain| {
-            let r = if ctl.is_default() { imp::swept(plane, &chain, path)? } else { imp::swept_stations(plane, &chain, path, ctl)? };
-            let h = swept_from(&r, plane, &chain);
-            Ok((r, h))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    sheet_of(pieces, false)
+    runs.push(from..path.len());
+    Ok(runs)
 }
 
 /// A surface swept from chains of sketch segments on `plane` along a 3D polyline path: along the
@@ -1232,40 +1252,8 @@ mod imp {
         checked(&sheet.offset_sheet(d).map_err(sm("offset"))?, "offset")
     }
 
-    /// A sketch segment on `plane` as SMLib's curve: an arc as SMLib's own circle, anything else
-    /// as its exact record curve.
-    fn curve(plane: &Plane, s: &Seg2) -> Result<Curve> {
-        if let Seg2::Arc { center, radius, start, sweep } = *s {
-            let n = plane.normal().normalized().ok_or_else(|| invalid("profile plane"))?;
-            // Clockwise in the plane is counter-clockwise about the other normal.
-            let (axis, a0) = if sweep >= 0.0 { (n, start) } else { (n * -1.0, -start) };
-            let turn = sweep.abs().min(std::f64::consts::TAU);
-            return Ok(Curve::Arc { center: a3(plane.to_world(center)), axis: a3(axis), reference: a3(plane.x), radius, start: a0, end: a0 + turn });
-        }
-        record_curve(&crate::freeform::segment(plane, s)?.0)
-    }
-
-    /// A record line or (rational) B-spline as SMLib's curve.
-    fn record_curve(c: &b::Curve) -> Result<Curve> {
-        let degree = |knots: &[f64], n: usize| knots.len().checked_sub(n + 1).ok_or_else(|| invalid("spline degree"));
-        Ok(match c {
-            b::Curve::Line { start, end } => Curve::Line { start: *start, end: *end },
-            b::Curve::Spline { knots, points } => Curve::Nurbs {
-                degree: degree(knots, points.len())?,
-                points: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
-                knots: knots.clone(),
-            },
-            b::Curve::RationalSpline { knots, homogeneous } => Curve::Nurbs {
-                degree: degree(knots, homogeneous.len())?,
-                points: homogeneous.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect(),
-                knots: knots.clone(),
-            },
-            _ => return Err(invalid("a profile curve SMLib's sweeps do not take")),
-        })
-    }
-
     fn curves(plane: &Plane, chain: &[Numbered]) -> Result<Vec<Curve>> {
-        chain.iter().map(|(s, _)| curve(plane, s)).collect()
+        chain.iter().map(|(s, _)| crate::smlib_sweeps::curve(plane, s)).collect()
     }
 
     pub(super) fn extruded(base: &Plane, chain: &[Numbered], n: Vec3, distance: f64) -> Result<Brep> {
@@ -1276,29 +1264,171 @@ mod imp {
         checked(&SmBrep::revolve(&curves(plane, chain)?, a3(origin), a3(axis), angle, false).map_err(sm("surface revolve"))?, "surface revolve")
     }
 
-    /// A path segment as SMLib's curve.
-    fn path_curve(s: &crate::PathSeg) -> Result<Curve> {
-        Ok(match *s {
-            crate::PathSeg::Line { a, b } => Curve::Line { start: a3(a), end: a3(b) },
-            crate::PathSeg::Arc { a, center, axis, angle } => {
-                let k = axis.normalized().ok_or_else(|| invalid("a path arc has no axis"))?;
-                let (k, turn) = if angle < 0.0 { (k * -1.0, -angle) } else { (k, angle) };
-                let r = a - center;
-                let reference = r.normalized().ok_or_else(|| invalid("a path arc has no radius"))?;
-                Curve::Arc { center: a3(center), axis: a3(k), reference: a3(reference), radius: r.len(), start: 0.0, end: turn }
-            }
-            crate::PathSeg::Curve { plane, seg } => curve(&plane, &seg)?,
-            crate::PathSeg::Cubic { p } => Curve::Nurbs {
-                degree: 3,
-                points: p.iter().map(|q| [q.x, q.y, q.z, 1.0]).collect(),
-                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            },
-        })
+    fn route(path: &[crate::PathSeg]) -> Result<Vec<Curve>> {
+        path.iter().map(crate::smlib_sweeps::path_curve).collect()
     }
 
-    pub(super) fn swept(plane: &Plane, chain: &[Numbered], path: &[crate::PathSeg]) -> Result<Brep> {
-        let route = path.iter().map(path_curve).collect::<Result<Vec<_>>>()?;
-        checked(&SmBrep::sweep(&curves(plane, chain)?, &route, SweepFrame::Follow, false).map_err(sm("surface sweep"))?, "surface sweep")
+    fn frame(translate: bool) -> SweepFrame {
+        if translate { SweepFrame::Translate } else { SweepFrame::Follow }
+    }
+
+    /// The chain swept along the smooth `path`, turning with it, or only moving along it when
+    /// `translate`.
+    pub(super) fn swept(plane: &Plane, chain: &[Numbered], path: &[crate::PathSeg], translate: bool) -> Result<Brep> {
+        checked(&SmBrep::sweep(&curves(plane, chain)?, &route(path)?, frame(translate), false).map_err(sm("surface sweep"))?, "surface sweep")
+    }
+
+    /// `q` moved by the motion `a`.
+    fn apply(a: &Affine, q: Vec3) -> Vec3 {
+        let col = |i: usize| a.m.get(i).map_or(Vec3::ZERO, |c| v3(*c));
+        col(0) * q.x + col(1) * q.y + col(2) * q.z + v3(a.t)
+    }
+
+    /// `pl` carried by the rigid motion `a`.
+    fn placed(pl: &Plane, a: &Affine) -> Plane {
+        let o = apply(a, Vec3::ZERO);
+        Plane { origin: apply(a, pl.origin), x: apply(a, pl.x) - o, y: apply(a, pl.y) - o }
+    }
+
+    /// The bisector of a corner from direction `t1` to `t2` (unit, the way the path runs) and the
+    /// turn there; a corner that turns the path back on itself is refused.
+    fn mitre(t1: Vec3, t2: Vec3) -> Result<(Vec3, f64)> {
+        let turn = t1.dot(t2).clamp(-1.0, 1.0).acos();
+        if turn > std::f64::consts::PI - 1e-3 {
+            return Err(invalid("the path turns back on itself at a corner"));
+        }
+        Ok(((t1 + t2).normalized().ok_or_else(|| invalid("path corner"))?, turn))
+    }
+
+    /// A tool of square planar faces, one in each plane `cuts` (a point and its normal), `size`
+    /// across: what a run is imprinted with at its corners.
+    fn cutting_planes(cuts: &[(Vec3, Vec3)], size: f64) -> Result<SmBrep> {
+        let mut parts = Parts { tolerance: (size * 1e-9).max(1e-6), ..Parts::default() };
+        let h = size * 0.5;
+        let square = [Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)];
+        let segs: Vec<Seg2> = (0..4).map(|i| Seg2::Line { a: square[i], b: square[(i + 1) % 4] }).collect();
+        for &(at, n) in cuts {
+            let u = n.cross(if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized().ok_or_else(|| invalid("mitre plane"))?;
+            let pl = Plane { origin: at, x: u, y: n.cross(u) };
+            let lp = sketch_loop(&mut parts, &pl, &segs)?;
+            let domain = uv_box(std::slice::from_ref(&lp)).ok_or_else(|| invalid("mitre plane"))?;
+            parts.faces.push((b::Face { surface: crate::freeform::plane_surface(&pl), domain, loops: vec![lp] }, true));
+        }
+        SmBrep::from_record(&parts.canonical()?.brep, true).map_err(sm("sweep mitre"))
+    }
+
+    /// The faces of `sheet` (a run's walls, each from what `prov` says, in its record's order)
+    /// imprinted with `cuts` and kept where every cut's `keep` holds of a point inside them: the
+    /// piece between a run's mitres, each face from what its uncut face came from.
+    fn cut_back(sheet: &SmBrep, prov: &[FaceProv], cuts: &[(Vec3, Vec3)], size: f64) -> Result<(Brep, Vec<FaceProv>)> {
+        let (_, order) = sheet.to_native_ordered().map_err(|e| failed(format!("SMLib sweep mitre: {e}")))?;
+        let tagged = sheet.tagged(0).map_err(sm("sweep mitre"))?;
+        let Some(cut) = tagged.imprint(&cutting_planes(cuts, size)?).map_err(sm("sweep mitre"))? else {
+            return Ok((checked(sheet, "sweep mitre")?, prov.to_vec()));
+        };
+        let (record, kept_order) = cut.to_native_ordered().map_err(|e| failed(format!("SMLib sweep mitre: {e}")))?;
+        let h = cut.history().map_err(sm("sweep mitre"))?.history(&[order], &kept_order).map_err(|e| failed(format!("SMLib sweep mitre: {e}")))?;
+        // A point inside each face, from SMLib's face order to the record's.
+        let points = cut.face_points().map_err(sm("sweep mitre"))?;
+        let mut inside = vec![Vec3::ZERO; record.faces.len()];
+        for (i, p) in points.iter().enumerate() {
+            let k = if kept_order.faces.is_empty() { i } else { kept_order.faces.get(i).copied().unwrap_or(i) };
+            if let Some(slot) = inside.get_mut(k) {
+                *slot = v3(*p);
+            }
+        }
+        let keep: Vec<(usize, bool)> = (0..record.faces.len())
+            .filter(|f| inside.get(*f).is_some_and(|p| cuts.iter().all(|(at, n)| (*p - *at).dot(*n) < 0.0)))
+            .map(|f| (f, false))
+            .collect();
+        let c = Parts::of(&record, &keep)?.canonical()?;
+        let faces = c
+            .faces
+            .iter()
+            .map(|p| {
+                let f = keep.get(*p).map_or(0, |(f, _)| *f);
+                match h.faces.get(f).map(|x| x.origins.as_slice()) {
+                    Some([FaceOrigin::Face { face, .. }]) => prov.get(*face).cloned().unwrap_or_else(|| record::generated(Vec::new())),
+                    _ => record::generated(Vec::new()),
+                }
+            })
+            .collect();
+        Ok((c.brep, faces))
+    }
+
+    /// A sheet swept along a path with corners, by the solid sweep's corner model with open ends:
+    /// each smooth run swept on its own, turning with the path, carried on straight past each
+    /// corner (by the profile's reach times the tangent of half the turn, and a little more) and
+    /// cut back to the plane halving the corner, where the next run, cut back the same way, meets
+    /// it; the profile turns at a corner about the line square to both directions. Each run's
+    /// walls come from the segments they are swept from, found where the run starts; the runs are
+    /// stitched by the caller. Only moving along the path (`translate`), the profile is the same at
+    /// a corner in both runs, which meet there as they are.
+    pub(super) fn cornered(
+        plane: &Plane,
+        chain: &[Numbered],
+        path: &[crate::PathSeg],
+        runs: &[std::ops::Range<usize>],
+        translate: bool,
+    ) -> Result<Vec<(Brep, Vec<FaceProv>)>> {
+        let bad = || invalid("a path segment has no direction");
+        let start = path.first().map(crate::PathSeg::start).ok_or_else(|| invalid("empty path"))?;
+        let end = path.last().map(crate::PathSeg::end).ok_or_else(|| invalid("empty path"))?;
+        let reach = chain
+            .iter()
+            .flat_map(|(s, _)| (0..=8).map(move |i| s.point_at(f64::from(i) / 8.0)))
+            .map(|q| plane.to_world(q).dist(start))
+            .fold(0.0f64, f64::max);
+        let size = 4.0 * (path.iter().map(length).sum::<f64>() + reach) + 1.0;
+        let (first_t, _) = path.first().and_then(crate::PathSeg::tangents).ok_or_else(bad)?;
+        let (_, last_t) = path.last().and_then(crate::PathSeg::tangents).ok_or_else(bad)?;
+        // A closed path ends where it starts; at a corner there the last run meets the first in a
+        // mitre too.
+        let closing = (end.dist(start) <= 1e-6 && last_t.dot(first_t) < (1e-3f64).cos()).then_some(first_t);
+        let over = |turn: f64| if translate { 0.0 } else { reach * (turn * 0.5).tan() * 1.1 + reach * 1e-3 + 1e-6 };
+        let mut pose = *plane;
+        // The mitre the next run starts from: its point, its normal (along the run) and the turn.
+        let mut entry = closing.filter(|_| !translate).map(|t| mitre(last_t, t).map(|(m, turn)| (start, m, turn))).transpose()?;
+        let mut pieces = Vec::with_capacity(runs.len());
+        for (ri, run) in runs.iter().enumerate() {
+            let segs = path.get(run.clone()).ok_or_else(|| invalid("path run"))?;
+            let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Err(invalid("path run")) };
+            let ((t0, _), (_, t1)) = (first.tangents().ok_or_else(bad)?, last.tangents().ok_or_else(bad)?);
+            let (a0, b1) = (first.start(), last.end());
+            let next = match runs.get(ri + 1).and_then(|r| path.get(r.start)) {
+                Some(s) => Some(s.tangents().ok_or_else(bad)?.0),
+                None => closing,
+            };
+            let exit = next.filter(|_| !translate).map(|t2| mitre(t1, t2)).transpose()?;
+            let pre = entry.map_or(0.0, |(_, _, turn)| over(turn));
+            let post = exit.map_or(0.0, |(_, turn)| over(turn));
+            let mut along = Vec::with_capacity(segs.len() + 2);
+            if pre > 0.0 {
+                along.push(crate::PathSeg::Line { a: a0 - t0 * pre, b: a0 });
+            }
+            along.extend_from_slice(segs);
+            if post > 0.0 {
+                along.push(crate::PathSeg::Line { a: b1, b: b1 + t1 * post });
+            }
+            let from = Plane { origin: pose.origin - t0 * pre, ..pose };
+            let (sheet, [_, _, at_last]) =
+                SmBrep::sweep_placed(&curves(&from, chain)?, &route(&along)?, frame(translate), false).map_err(sm("surface sweep"))?;
+            let prov = swept_from(&sheet.to_native().map_err(|e| failed(format!("SMLib surface sweep: {e}")))?, &from, chain);
+            // Kept: after the entry mitre, before the exit one.
+            let cuts: Vec<(Vec3, Vec3)> = entry.map(|(at, m, _)| (at, m * -1.0)).into_iter().chain(exit.map(|(m, _)| (b1, m))).collect();
+            pieces.push(cut_back(&sheet, &prov, &cuts, size)?);
+            // The profile at the run's end, turned through the corner onto the next run.
+            let at_end = placed(&from, &at_last);
+            pose = Plane { origin: at_end.origin - t1 * post, ..at_end };
+            entry = None;
+            if let (Some(t2), Some((m, turn))) = (next, exit) {
+                let k = t1.cross(t2).normalized().ok_or_else(|| invalid("path corner"))?;
+                let turn_v = |v: Vec3| crate::build::rotate_about(v, Vec3::ZERO, k, turn);
+                pose = Plane { origin: crate::build::rotate_about(pose.origin, b1, k, turn), x: turn_v(pose.x), y: turn_v(pose.y) };
+                entry = Some((b1, m, turn));
+            }
+        }
+        Ok(pieces)
     }
 
     /// Fewest and most stations of a sweep that twists, scales or follows rails.
@@ -1325,18 +1455,21 @@ mod imp {
         checked(&SmBrep::sweep_stations(&curves(plane, chain)?, &maps, Ends::Open).map_err(sm("surface sweep"))?, "surface sweep")
     }
 
-    /// How far a path segment turns (radians).
+    /// Samples of a segment's parameter its turn and length are read from.
+    const TURN_SAMPLES: usize = 64;
+
+    /// How far a path segment turns (radians): its tangent's turn through even steps of its
+    /// parameter.
     fn turn_of(s: &crate::PathSeg) -> f64 {
         match *s {
             crate::PathSeg::Line { .. } => 0.0,
             crate::PathSeg::Arc { angle, .. } => angle.abs(),
-            _ => {
-                let pts: Vec<Vec3> = std::iter::once(s.start()).chain(s.points_after_start(1e-3)).collect();
-                pts.windows(3)
-                    .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
-                    .map(|(u, v)| u.cross(v).len().atan2(u.dot(v)))
-                    .sum()
-            }
+            _ => (0..=TURN_SAMPLES)
+                .filter_map(|i| at(s, i as f64 / TURN_SAMPLES as f64).map(|(_, t)| t))
+                .collect::<Vec<_>>()
+                .windows(2)
+                .map(|w| w[0].cross(w[1]).len().atan2(w[0].dot(w[1])))
+                .sum(),
         }
     }
 
@@ -1365,33 +1498,27 @@ mod imp {
         Ok((pts, tangents))
     }
 
+    /// A path segment's length (an arc's exactly; a free-form one's by its spans' own lengths).
     fn length(s: &crate::PathSeg) -> f64 {
-        match *s {
-            crate::PathSeg::Line { a, b } => a.dist(b),
-            crate::PathSeg::Arc { a, center, angle, .. } => a.dist(center) * angle.abs(),
-            _ => {
-                let pts: Vec<Vec3> = std::iter::once(s.start()).chain(s.points_after_start(1e-4)).collect();
-                pts.windows(2).map(|w| w[0].dist(w[1])).sum()
-            }
+        match s {
+            crate::PathSeg::Line { a, b } => a.dist(*b),
+            crate::PathSeg::Arc { a, center, angle, .. } => a.dist(*center) * angle.abs(),
+            crate::PathSeg::Curve { seg, .. } => seg.length(),
+            crate::PathSeg::Bezier(b) => b.length().unwrap_or(0.0),
         }
     }
 
     /// The point `f` (0…1) of the way along a segment's parameter and its unit tangent there.
     fn at(s: &crate::PathSeg, f: f64) -> Option<(Vec3, Vec3)> {
-        match *s {
-            crate::PathSeg::Line { a, b } => Some((a.lerp(b, f), (b - a).normalized()?)),
+        match s {
+            crate::PathSeg::Line { a, b } => Some((a.lerp(*b, f), (*b - *a).normalized()?)),
             crate::PathSeg::Arc { a, center, axis, angle } => {
                 let k = axis.normalized()?;
-                let p = crate::build::rotate_about(a, center, k, angle * f);
-                Some((p, (k.cross(p - center) * angle.signum()).normalized()?))
+                let p = crate::build::rotate_about(*a, *center, k, angle * f);
+                Some((p, (k.cross(p - *center) * angle.signum()).normalized()?))
             }
             crate::PathSeg::Curve { plane, seg } => Some((plane.to_world(seg.point_at(f)), plane.dir_to_world(seg.derivative(f)).normalized()?)),
-            crate::PathSeg::Cubic { p: [p0, p1, p2, p3] } => {
-                let g = 1.0 - f;
-                let p = p0 * (g * g * g) + p1 * (3.0 * g * g * f) + p2 * (3.0 * g * f * f) + p3 * (f * f * f);
-                let d = (p1 - p0) * (3.0 * g * g) + (p2 - p1) * (6.0 * g * f) + (p3 - p2) * (3.0 * f * f);
-                Some((p, d.normalized()?))
-            }
+            crate::PathSeg::Bezier(b) => Some((b.point(f)?, b.derivative(f)?.normalized()?)),
         }
     }
 
@@ -1435,7 +1562,16 @@ mod imp {
     pub(super) fn revolved(_: &Plane, _: &[Numbered], _: Vec3, _: Vec3, _: f64) -> Result<Brep> {
         Err(not_built())
     }
-    pub(super) fn swept(_: &Plane, _: &[Numbered], _: &[crate::PathSeg]) -> Result<Brep> {
+    pub(super) fn swept(_: &Plane, _: &[Numbered], _: &[crate::PathSeg], _: bool) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn cornered(
+        _: &Plane,
+        _: &[Numbered],
+        _: &[crate::PathSeg],
+        _: &[std::ops::Range<usize>],
+        _: bool,
+    ) -> Result<Vec<(Brep, Vec<FaceProv>)>> {
         Err(not_built())
     }
     pub(super) fn swept_stations(_: &Plane, _: &[Numbered], _: &[crate::PathSeg], _: &crate::SweepControl) -> Result<Brep> {
