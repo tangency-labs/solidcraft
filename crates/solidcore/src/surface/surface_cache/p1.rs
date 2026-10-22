@@ -45,6 +45,8 @@
 //! | [`SurfaceCache::face`]                            | `SmSurfaceCache::GetFace`                        |
 //! | [`SurfaceCache::point_test`]                      | `SmSurfaceCache::PointTest`                      |
 //! | [`SurfaceCache::point_classify`]                  | `SmSurfaceCache::PointClassify`                  |
+//! | [`SurfaceCache::point_test_with`], [`SurfaceCache::point_classify_with`] | virtual trimmed-cache point queries with an operation-scoped face service |
+//! | [`SurfaceCache::is_trimmed`]                      | the retained `SmTrimSrfCache` dynamic type       |
 //! | [`SurfaceCache::implant_edgeuse`], [`SurfaceCache::implant_poly_edge`] | `ImplantEdgeuse`, `ImplantPolyEdge` (base class) |
 //! | [`SurfaceCache::process_boundary_curves`]         | `GetProcessBoundaryCurves`                       |
 //! | [`SurfaceCache::patch_count`], [`SurfaceCache::patch_at`] | `GetPatchCount`, `GetPatchAt`            |
@@ -83,9 +85,10 @@
 //!   (`SmSurface::CreateIsoParametricCurve`, `surface.surface_p5`;
 //!   `SmSurface::CalculateBoundingBox`, `surface.surface_p1`), and
 //!   `SmSurface::IsSingularity` (`surface.surface_p5`; only the plane overrides it,
-//!   with "no singularity", wired by `surface.surface_cache_p2`) and
-//!   `SmSurface::GetFace` (`surface.surface_p1`) are not overridden by the other kinds:
-//!   those return [`SolidError::Unported`]. `EvaluateNormal` is
+//!   with "no singularity", wired by `surface.surface_cache_p2`).
+//!   `SmSurface::GetFace` (`surface.surface_p1`) follows the surface owner chain;
+//!   [`SurfaceCache::face`] additionally needs a validated caller-handle binding.
+//!   `EvaluateNormal` is
 //!   [`Surface::evaluate_normal`] (`surface::surface::p7`, with the plane and
 //!   curve-bounded overrides). An `SmPlane` is an
 //!   `SmBSplineSurface` upstream: the cast gives its B-spline part. The iso curves
@@ -103,6 +106,11 @@
 //!   copies of the cached curves instead of shared pointers.
 //!   `SmAltSrfCache::GetCopyOfCurves` stops at a cached curve that is not a B-spline
 //!   (upstream leaves the uncopied cached pointers in the output array).
+//! - **Cache copies.** `map_handles` uses exact, fallible evaluation copies of
+//!   surfaces, retaining their owner and face tolerance. Infallible `Clone` keeps
+//!   the existing geometry-copy semantics (including NURBS knot fix-up), not an
+//!   exact evaluation snapshot; its face binding is retained only when the copied
+//!   surface still reaches the validated owner key.
 //! - **Ignored statuses** stay ignored (`GetKnots` in `GetSurfaceContinuity`, the
 //!   bounding box calls of `BuildPolarBox`, `GetCopyOfCurves` in `HasCachedCurves`,
 //!   `SetMinMax` in `GetCorners`), except [`SolidError::Unported`], which is always
@@ -161,9 +169,6 @@ pub const TYPE: i64 = 15100;
 
 /// `SmSurfaceCache::GetTypeString`.
 pub const TYPE_STRING: &str = "SmSurfaceCache_TYPE";
-
-/// `SmFace_TYPE` (`TOPO_BASE_TYPE + 2`).
-pub(super) const FACE_TYPE: i64 = 16002;
 
 /// `SM_PB_SAMPLECOUNT`: sample points stored per bounding plane.
 pub const PB_SAMPLE_COUNT: usize = 5;
@@ -1528,9 +1533,15 @@ pub struct IsoBoundaryCurves {
 
 /// The Bezier decomposition of a surface (`SmSurfaceCache`). `O` is the caller's
 /// object handle type of the decomposition [`Tree`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)] // upstream's SmBoolean members
 pub struct SurfaceCache<O> {
+    /// Whether this cache originated from a trimmed cache; preserved by `into_base`.
+    pub(crate) trimmed_dispatch: bool,
+    /// Mapped face handle for trimmed point-test dispatch.
+    pub(crate) trimmed_face: Option<O>,
+    /// Owner key validated when `trimmed_face` was bound (never an arena index).
+    trimmed_face_key: Option<object::ObjectRef>,
     /// `m_apAltSrfCaches[0..m_lNumAltCaches]`, newest first.
     alt_caches: Vec<AltSrfCache>,
     /// `m_pTree`.
@@ -1588,12 +1599,61 @@ pub struct SurfaceCache<O> {
     pole_memo: Option<PoleMemo>,
 }
 
+impl<O: Clone> Clone for SurfaceCache<O> {
+    fn clone(&self) -> Self {
+        // Keep the prior infallible copy semantics; exact evaluation copies can
+        // fail their nesting guard and belong in `map_handles` instead.
+        let surface = self.surface.clone_keeping_owner();
+        let binding_current = self
+            .trimmed_face_key
+            .is_some_and(|key| surface.reached_face() == Some(key));
+        Self {
+            trimmed_dispatch: self.trimmed_dispatch,
+            trimmed_face: if binding_current {
+                self.trimmed_face.clone()
+            } else {
+                None
+            },
+            trimmed_face_key: self.trimmed_face_key.filter(|_| binding_current),
+            alt_caches: self.alt_caches.clone(),
+            tree: self.tree.clone(),
+            surface,
+            surface_handle: self.surface_handle.clone(),
+            uv_domain: self.uv_domain,
+            u_continuities: self.u_continuities.clone(),
+            v_continuities: self.v_continuities.clone(),
+            patches: self.patches.clone(),
+            auxs: self.auxs.clone(),
+            opts: self.opts,
+            iso_curve_tolerance: self.iso_curve_tolerance,
+            tessellation_algorithm: self.tessellation_algorithm,
+            start_fast_subdivision_angle_deg: self.start_fast_subdivision_angle_deg,
+            switch_to_fast_subdivision: self.switch_to_fast_subdivision,
+            trim_subdivision_factor: self.trim_subdivision_factor,
+            iso_boundary_curves: self.iso_boundary_curves.clone(),
+            subdivision_surfaces: self.subdivision_surfaces.clone(),
+            subdivision_handles: self.subdivision_handles,
+            subdivision_handle_count: self.subdivision_handle_count,
+            bounding_planes: self.bounding_planes.clone(),
+            have_t_surface_cache: self.have_t_surface_cache,
+            face_was_modified: self.face_was_modified,
+            process_boundary_curves: self.process_boundary_curves,
+            point_test_enabled: self.point_test_enabled,
+            face_containment_done: self.face_containment_done,
+            pole_memo: None,
+        }
+    }
+}
+
 impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// A cache of `surface` over `uv_domain` with the tessellation controls `opts`,
     /// without tree (the field initialisation of `SmSurfaceCache::SmSurfaceCache`).
     #[must_use]
     pub fn new(surface: Surface, uv_domain: Extent2d, opts: SurfaceCacheOptions) -> Self {
         Self {
+            trimmed_dispatch: false,
+            trimmed_face: None,
+            trimmed_face_key: None,
             alt_caches: Vec::new(),
             tree: None,
             surface,
@@ -1632,6 +1692,30 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
     }
 
+    /// Synchronizes the evaluation copy with its owning face's final tolerance.
+    pub fn set_owner_zone_tol_3d(&mut self, tolerance: f64) {
+        self.surface.set_owner_zone_tol_3d(Some(tolerance));
+    }
+
+    /// Whether this cache retains trimmed-cache dispatch, including after unwrapping.
+    #[must_use]
+    pub const fn is_trimmed(&self) -> bool {
+        self.trimmed_dispatch
+    }
+
+    /// Records a face handle only after checking the source surface's owner key.
+    pub(crate) fn bind_trimmed_face(&mut self, key: object::ObjectRef, face: O) -> Result<()> {
+        if self.surface.face()? != Some(key) {
+            return Err(invalid(
+                OP_CLASSIFY,
+                "surface owner does not match supplied face",
+            ));
+        }
+        self.trimmed_face_key = Some(key);
+        self.trimmed_face = Some(face);
+        Ok(())
+    }
+
     /// The handle of the cached surface.
     #[must_use]
     pub const fn surface_handle(&self) -> Option<O> {
@@ -1648,7 +1732,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of `map`.
+    /// Those of `map` and the bounded exact surface evaluation copies.
     pub fn map_handles<P: Copy + PartialEq>(
         &self,
         map: impl Fn(O) -> Result<P>,
@@ -1700,16 +1784,25 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
         let mut subdivision_surfaces = Vec::new();
         for (o, s) in &self.subdivision_surfaces {
-            subdivision_surfaces.push((map(*o)?, s.clone()));
+            subdivision_surfaces.push((map(*o)?, s.clone_for_evaluation()?));
         }
+        let surface = self.surface.clone_for_evaluation()?;
+        let binding_current = self.trimmed_face_key == surface.face()?;
         Ok(SurfaceCache {
+            trimmed_dispatch: self.trimmed_dispatch,
+            trimmed_face: self
+                .trimmed_face
+                .filter(|_| binding_current)
+                .map(&map)
+                .transpose()?,
+            trimmed_face_key: self.trimmed_face_key.filter(|_| binding_current),
             alt_caches: self.alt_caches.clone(),
             tree: self
                 .tree
                 .as_ref()
                 .map(|t| t.map_objects(&map))
                 .transpose()?,
-            surface: self.surface.clone(),
+            surface,
             surface_handle: self.surface_handle.map(&map).transpose()?,
             uv_domain: self.uv_domain,
             u_continuities: self.u_continuities.clone(),
@@ -1955,30 +2048,89 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`Surface::face`]; [`SolidError::Unported`] for a surface with a face:
-    /// faces have no handle in the caller's object space until the topology units
-    /// (`SmFace`, `topology.face_p2`) are ported.
+    /// Those of [`Surface::face`]; [`SolidError::Unported`] when a face-owned surface
+    /// has no validated caller-handle binding, or the binding's owner became stale.
     pub fn face(&self) -> Result<Option<O>> {
         match self.surface.face()? {
-            None => Ok(None),
-            // UNPORTED(topology.face_p2): SmFace handle of a surface's face
-            Some(_) => Err(SolidError::unported(
+            None if self.trimmed_face_key.is_none() => Ok(None),
+            Some(key) if self.trimmed_face_key == Some(key) => {
+                self.trimmed_face.map(Some).ok_or_else(|| {
+                    SolidError::unported("mapped face of trimmed cache", "topology.face_p2")
+                })
+            }
+            // An object key is not a typed arena index or a caller handle.
+            Some(_) if self.trimmed_face_key.is_none() => Err(SolidError::unported(
                 "SmFace handle of a surface's face",
                 "topology.face_p2",
             )),
+            None | Some(_) => Err(invalid(OP_CLASSIFY, "surface cache face binding is stale")),
         }
     }
 
     /// Whether `uv_point` passes the trim boundary test (`PointTest`): always with
-    /// point testing disabled, else when it lies in the cache domain.
-    #[must_use]
-    pub fn point_test(&self, uv_point: Point2) -> bool {
-        // skip point testing when asked
-        if self.point_test_enabled {
-            self.uv_domain.contains_point(uv_point, 0.0)
-        } else {
-            true
+    /// point testing disabled, else when it lies in the cache domain for an
+    /// untrimmed cache. Trimmed classification requires [`Self::point_test_with`].
+    ///
+    /// # Errors
+    ///
+    /// A trimmed cache with testing enabled cannot fall back to its rectangle:
+    /// it reports a missing face or an unported operation-scoped classifier.
+    pub fn point_test(&self, uv_point: Point2) -> Result<bool> {
+        if !self.point_test_enabled || (self.trimmed_dispatch && self.face_was_modified) {
+            return Ok(true);
         }
+        if self.trimmed_dispatch {
+            self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+            return Err(SolidError::unported(
+                "prepared face classifier for bound trim",
+                "query.face_p2",
+            ));
+        }
+        Ok(self.uv_domain.contains_point(uv_point, 0.0))
+    }
+
+    /// Point test with trimmed-cache dispatch. Bound trimmed caches fail closed when
+    /// the operation-scoped face-query service is absent.
+    pub fn point_test_with(
+        &self,
+        k: &Kernel,
+        uv_point: Point2,
+        opt_tol: Option<f64>,
+        queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+    ) -> Result<(bool, Option<O>)> {
+        if !self.trimmed_dispatch {
+            return Ok((self.point_test(uv_point)?, None));
+        }
+        if !self.point_test_enabled || self.face_was_modified {
+            return Ok((true, None));
+        }
+        let face = self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+        let service = queries.ok_or_else(|| {
+            SolidError::unported("prepared face classifier for bound trim", "query.face_p2")
+        })?;
+        let tol = match opt_tol {
+            Some(t) => t,
+            None => service.face_zone_tol_3d(face)?,
+        };
+        let (class, object) = service.face_point_classify(k, face, uv_point, tol)?;
+        Ok((matches!(class, 102..=104), object))
+    }
+
+    /// Classifies a point with the operation-scoped trimmed-cache override.
+    /// Unlike point testing, classification does not skip disabled or modified caches.
+    pub fn point_classify_with(
+        &self,
+        k: &Kernel,
+        uv_point: Point2,
+        src_zone_tol_3d: f64,
+        queries: &dyn crate::surface::surface_cache::face_context::FaceQueries<O>,
+    ) -> Result<(i32, Option<O>)> {
+        if !self.trimmed_dispatch {
+            return self.point_classify(uv_point, src_zone_tol_3d);
+        }
+        let face = self.face()?.ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+        let (class, object) = queries.face_point_classify(k, face, uv_point, src_zone_tol_3d)?;
+        Ok((class, if class == 100 { None } else { object }))
     }
 
     /// `PointClassify`: the base class has no trim boundaries to classify against.
@@ -2516,7 +2668,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 return Err(invalid(
                     OP_REGION,
                     "start node has no surface subdivision data",
-                ))
+                ));
             }
         };
 
@@ -3290,9 +3442,9 @@ mod tests {
     #[test]
     fn base_class_queries() {
         let mut c = bilinear_cache();
-        assert!(c.point_test(Point2::new(5.0, 5.0)));
+        assert!(c.point_test(Point2::new(5.0, 5.0)).unwrap());
         c.point_test_enabled = true;
-        assert!(!c.point_test(Point2::new(5.0, 5.0)));
+        assert!(!c.point_test(Point2::new(5.0, 5.0)).unwrap());
         assert!(c.point_classify(Point2::new(0.5, 0.5), 0.0).is_err());
         assert_eq!(c.face().unwrap(), None);
         assert!(c.is_kind_of(TYPE) && c.is_kind_of(object::OBJECT_TYPE) && !c.is_kind_of(15001));

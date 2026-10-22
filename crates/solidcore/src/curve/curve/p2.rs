@@ -64,6 +64,9 @@
 //! | [`FindCurveDistanceExtrema`]                      | `SmFindCurveDistanceExtremaEFO` (constructor, destructor) |
 //!
 //! Deviations:
+//! - Temporary evaluation copies retain owners and exact NURBS data throughout
+//!   owned curve, surface and volume branches, rejecting nesting of 64 or more
+//!   links before any recursive copy.
 //! - **Object model.** `SmCurve` is abstract; its derived classes become the
 //!   [`CurveKind`] variants. The ported kinds are [`BSplineCurve`],
 //!   [`HermiteCurve`], [`Conic`], [`IsoCurve`], [`ProjectedCurve`], [`OffsetCurve`],
@@ -680,6 +683,58 @@ pub struct LineIntersection {
 }
 
 impl Curve {
+    /// A temporary evaluation copy retaining owners, concrete kinds and exact
+    /// NURBS data, without copy-constructor knot fix-up. Notification identity is
+    /// not copied: the temporary is not another notification target.
+    pub(crate) fn clone_for_evaluation(&self) -> Result<Self> {
+        self.clone_for_evaluation_depth(0)
+    }
+
+    /// Copy every owned geometry branch within Surface's shared 64-level bound.
+    pub(crate) fn clone_for_evaluation_depth(&self, depth: usize) -> Result<Self> {
+        crate::surface::surface::p2::Surface::check_curve_evaluation_copy_depth(self, depth)?;
+        let kind = match &self.kind {
+            CurveKind::BSpline(c) => CurveKind::BSpline(c.clone_exact()),
+            CurveKind::Hermite(c) => CurveKind::Hermite(*c),
+            CurveKind::Conic(c) => CurveKind::Conic(*c),
+            CurveKind::Line(c) => {
+                let mut copy = c.clone();
+                *copy.base_mut() = c.base().clone_exact();
+                CurveKind::Line(copy)
+            }
+            CurveKind::Ellipse(c) => {
+                let mut copy = c.clone();
+                *copy.base_mut() = c.base().clone_exact();
+                CurveKind::Ellipse(copy)
+            }
+            CurveKind::Hyperbola(c) => {
+                let mut copy = c.clone();
+                *copy.base_mut() = c.base().clone_exact();
+                CurveKind::Hyperbola(copy)
+            }
+            CurveKind::Parabola(c) => {
+                let mut copy = c.clone();
+                *copy.base_mut() = c.base().clone_exact();
+                CurveKind::Parabola(copy)
+            }
+            CurveKind::Projected(c) => CurveKind::Projected(c.clone_for_evaluation(depth + 1)?),
+            CurveKind::Iso(c) => CurveKind::Iso(c.clone_for_evaluation(depth + 1)?),
+            CurveKind::Offset(c) => CurveKind::Offset(c.clone_for_evaluation(depth + 1)?),
+            CurveKind::CrvInVolume(c) => {
+                CurveKind::CrvInVolume(Box::new(c.clone_for_evaluation(depth + 1)?))
+            }
+            CurveKind::CrvOnSurf(c) => {
+                CurveKind::CrvOnSurf(Box::new(c.clone_for_evaluation(depth + 1)?))
+            }
+            CurveKind::Composite(c) => CurveKind::Composite(c.clone_for_evaluation(depth + 1)?),
+        };
+        Ok(Self {
+            kind,
+            owner: self.owner,
+            notify_identity: IdentitySlot::new(),
+        })
+    }
+
     /// A curve of `kind` without owner (`SmCurve(ULONG)` plus the derived
     /// constructor).
     #[must_use]
@@ -3800,6 +3855,286 @@ mod tests {
         })
         .unwrap();
         Curve::from(c)
+    }
+
+    fn evaluation_owner(key: u64) -> ObjectRef {
+        ObjectRef {
+            type_code: EDGE_TYPE,
+            key: ObjectKey(key),
+        }
+    }
+
+    fn noncanonical_evaluation_curve(dim: u64) -> Curve {
+        let mut b = BSplineCurve::create_canonical(&CanonicalData {
+            dim,
+            degree: 1,
+            control_points: &[Vec3::ZERO, Vec3::X, Vec3::new(1.0, 1.0, 0.0), Vec3::Y],
+            form: BSplineCurveForm::PolylineForm,
+            knot_multiplicities: &[2, 1, 1, 2],
+            knots: &[0.0, 0.25, 0.75, 1.0],
+            knot_type: KnotType::UniformKnots,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        b.get_or_create_gw_nurb()
+            .unwrap()
+            .knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.5, 0.5 + 1e-14, 1.0, 1.0]);
+        b.set_out_of_bounds_enabled(true);
+        // This fixture must expose the ordinary copy constructor's knot fix-up.
+        assert_ne!(
+            b.gw_nurb().unwrap().knots(),
+            b.clone().gw_nurb().unwrap().knots()
+        );
+        let mut c = Curve::from(b);
+        let _ = c.set_owner(Some(evaluation_owner(1)), None);
+        c
+    }
+
+    fn evaluation_bspline(c: &Curve) -> &BSplineCurve {
+        let CurveKind::BSpline(b) = c.kind() else {
+            panic!("expected B-spline");
+        };
+        b
+    }
+
+    #[test]
+    fn evaluation_copy_keeps_nested_knots_flags_and_owners() {
+        use crate::curve::projected_curve::OwnsCurve;
+        let mut offset = OffsetCurve::new(
+            3,
+            noncanonical_evaluation_curve(3),
+            Extent1d::from_raw(0.0, 1.0),
+            Vec3::Z,
+            0.125,
+            true,
+        );
+        let _ = offset.reverse_parameterization(&Extent1d::from_raw(0.0, 1.0));
+        let mut offset = Curve::from(offset);
+        let _ = offset.set_owner(Some(evaluation_owner(2)), None);
+        let mut source = Curve::from(ProjectedCurve::new(
+            offset,
+            Some(Vec3::ZERO),
+            Some(Vec3::Z),
+            Some(Vec3::X),
+            ProjectionType::Parallel,
+            OwnsCurve::Unsure,
+        ));
+        let _ = source.set_owner(Some(evaluation_owner(3)), None);
+        let copy = source.clone_for_evaluation().unwrap();
+        assert_eq!(copy.owner(), source.owner());
+        assert_eq!(copy.type_code(), PROJECTED_CURVE_TYPE);
+        let CurveKind::Projected(projected) = copy.kind() else {
+            panic!("expected projection");
+        };
+        assert_eq!(projected.owns_curve(), OwnsCurve::Unsure);
+        assert_eq!(projected.curve().owner(), Some(evaluation_owner(2)));
+        let CurveKind::Offset(offset) = projected.curve().kind() else {
+            panic!("expected offset");
+        };
+        assert_eq!(offset.reversed_flag(), 1);
+        assert_eq!(offset.owns_curve(), 1);
+        let base = offset.base_curve().unwrap();
+        assert_eq!(base.owner(), Some(evaluation_owner(1)));
+        let b = evaluation_bspline(base);
+        assert_eq!(
+            b.gw_nurb().unwrap().knots(),
+            &[0.0, 0.0, 0.5, 0.5 + 1e-14, 1.0, 1.0]
+        );
+        assert!(b.is_out_of_bounds_enabled());
+        assert_eq!(b.knot_type(), KnotType::UniformKnots);
+        assert_eq!(b.form(), BSplineCurveForm::PolylineForm);
+        let k = Kernel::default();
+        for t in [0.125, 0.25, 0.75, 0.875] {
+            assert_eq!(
+                source.evaluate(&k, t, 1, true, false).unwrap(),
+                copy.evaluate(&k, t, 1, true, false).unwrap()
+            );
+        }
+        // The public copy-constructor semantics remain unchanged.
+        assert_eq!(source.clone().owner(), None);
+    }
+
+    #[test]
+    fn evaluation_copy_preserves_composite_segment_state() {
+        let mut composite = CompositeCurve::with_curves(
+            3,
+            vec![
+                noncanonical_evaluation_curve(3),
+                Curve::from(OffsetCurve::empty()),
+            ],
+            true,
+            Some(&[false, true]),
+            Some(&[0.125, 0.25]),
+        )
+        .unwrap();
+        composite.segments_mut()[0].transition = ContinuityType::C1;
+        composite.segments_mut()[0].owns_curve = true;
+        let source = Curve::from(composite);
+        let copy = source.clone_for_evaluation().unwrap();
+        let CurveKind::Composite(composite) = copy.kind() else {
+            panic!("expected composite");
+        };
+        assert!(composite.is_closed());
+        let segment = &composite.segments()[0];
+        assert_eq!(segment.transition, ContinuityType::C1);
+        assert!(!segment.same_sense);
+        assert!(segment.owns_curve);
+        assert_eq!((segment.gap_start, segment.gap_end), (0.25, 0.125));
+        assert_eq!(segment.curve.owner(), Some(evaluation_owner(1)));
+        assert_eq!(
+            evaluation_bspline(&segment.curve)
+                .gw_nurb()
+                .unwrap()
+                .knots()[3],
+            0.5 + 1e-14
+        );
+        let CurveKind::Offset(empty) = composite.segments()[1].curve.kind() else {
+            panic!("expected empty offset");
+        };
+        assert!(empty.base_curve().is_none());
+        assert_eq!((empty.owns_curve(), empty.reversed_flag()), (2, 2));
+    }
+
+    #[test]
+    fn evaluation_copy_keeps_iso_and_curve_on_surface_data() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::surface::{Surface, SurfaceKind};
+        let mut patch = BSplineSurface::create_bilinear_surface(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Vec3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        patch.get_or_create_gw_nurb().unwrap().u_knots_mut()[1] = 1e-14;
+        let mut surface = Surface::from(patch.clone_exact());
+        let face = ObjectRef {
+            type_code: crate::geom::assert_array::labels::FACE_TYPE,
+            key: ObjectKey(4),
+        };
+        surface.set_owner(Some(face));
+        surface.set_owner_zone_tol_3d(Some(0.125));
+        let source = Curve::from(
+            IsoCurve::from_surface(surface, SurfParamType::U, 0.25, false, false).unwrap(),
+        );
+        let copy = source.clone_for_evaluation().unwrap();
+        let CurveKind::Iso(iso) = copy.kind() else {
+            panic!("expected iso curve");
+        };
+        assert!(!iso.from_left());
+        assert_eq!(iso.iso_parameter(), 0.25);
+        assert_eq!(iso.surface().owner(), Some(face));
+        assert_eq!(iso.surface().owner_zone_tol_3d(), Some(0.125));
+        let SurfaceKind::BSpline(b) = iso.surface().kind() else {
+            panic!("expected B-spline surface");
+        };
+        assert_eq!(b.gw_nurb().unwrap().u_knots()[1], 1e-14);
+        let mut on_surface = CrvOnSurf::new(
+            &Kernel::default(),
+            noncanonical_evaluation_curve(2),
+            patch,
+            None,
+            3,
+        )
+        .unwrap();
+        on_surface.set_breaks_cache(true, vec![0.25, 0.75]);
+        let copy = Curve::from(on_surface).clone_for_evaluation().unwrap();
+        let CurveKind::CrvOnSurf(c) = copy.kind() else {
+            panic!("expected curve on surface");
+        };
+        assert_eq!(c.owner_flag(), 3);
+        assert!(c.need_breaks());
+        assert_eq!(c.breaks(), &[0.25, 0.75]);
+        assert_eq!(c.uv_curve().owner(), Some(evaluation_owner(1)));
+        assert_eq!(
+            evaluation_bspline(c.uv_curve()).gw_nurb().unwrap().knots()[3],
+            0.5 + 1e-14
+        );
+        assert_eq!(c.surface().gw_nurb().unwrap().u_knots()[1], 1e-14);
+    }
+
+    #[test]
+    fn evaluation_copy_keeps_and_bounds_volume_chains() {
+        use crate::surface::volume::{Volume, VolumeKind};
+        let mut volume = Volume::new(VolumeKind::Base);
+        let _ = volume.set_owner(Some(evaluation_owner(5)));
+        for _ in 0..62 {
+            volume = Volume::with_maps(VolumeKind::Base, None, Some(volume));
+        }
+        let mut c = CrvInVolume::new(noncanonical_evaluation_curve(3), true, volume, 0, 7);
+        c.set_breaks_cache(true, vec![0.25], vec![ContinuityType::C1]);
+        let source = Curve::from(c);
+        let copy = source.clone_for_evaluation().unwrap();
+        let CurveKind::CrvInVolume(c) = copy.kind() else {
+            panic!("expected curve in volume");
+        };
+        assert_eq!(c.owner_flag(), 7);
+        assert!(c.need_breaks());
+        assert_eq!(c.breaks(), &[0.25]);
+        assert_eq!(c.conts(), &[ContinuityType::C1]);
+        assert_eq!(c.curve().owner(), Some(evaluation_owner(1)));
+        assert_eq!(
+            evaluation_bspline(c.curve()).gw_nurb().unwrap().knots()[3],
+            0.5 + 1e-14
+        );
+        let mut last = c.volume();
+        while let Some(next) = last.next_map() {
+            last = next;
+        }
+        assert_eq!(last.owner(), Some(evaluation_owner(5)));
+        let source = Curve::from(OffsetCurve::new(
+            3,
+            source,
+            Extent1d::from_raw(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        ));
+        assert!(matches!(
+            source.clone_for_evaluation(),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        // Only 64-level fixtures are built, so dropping a rejected input is bounded too.
+    }
+
+    #[test]
+    fn evaluation_copy_depth_bound_spans_curve_and_surface_branches() {
+        use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surface::Surface;
+        let mut curve = hermite();
+        for _ in 0..31 {
+            let mut s = SurfOfExtrusion::empty();
+            s.gen_curve = Some(curve);
+            curve = Curve::from(
+                IsoCurve::from_surface(Surface::from(s), SurfParamType::U, 0.0, true, false)
+                    .unwrap(),
+            );
+        }
+        curve = Curve::from(OffsetCurve::new(
+            3,
+            curve,
+            Extent1d::from_raw(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        ));
+        assert!(curve.clone_for_evaluation().is_ok());
+        curve = Curve::from(OffsetCurve::new(
+            3,
+            curve,
+            Extent1d::from_raw(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        ));
+        assert!(matches!(
+            curve.clone_for_evaluation(),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        // Exercise extreme initial counters without overflowing depth + 1.
+        assert!(hermite().clone_for_evaluation_depth(usize::MAX).is_err());
     }
 
     #[test]

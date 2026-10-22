@@ -183,6 +183,7 @@ impl From<SrfInVolume> for Surface {
 impl SrfInVolume {
     /// An evaluation copy retaining exact basis data, with Surface's 64-level bound.
     pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Surface::check_volume_evaluation_copy_depth(&self.volume, depth)?;
         Ok(Self {
             surface: Box::new(self.surface.clone_for_evaluation_depth(depth)?),
             in_param_space: self.in_param_space,

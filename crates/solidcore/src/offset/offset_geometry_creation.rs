@@ -142,8 +142,11 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::edge::ClosestPoint;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
+use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{SurfaceKind, TsectCurveType};
 use crate::surface::surface::Surface;
+use crate::surface::surface_cache::face_context::FaceQueries;
+use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::proto_topology::ProtoGeometry;
 
 const OP_LOCAL: &str =
@@ -353,6 +356,27 @@ pub trait OffsetExecutive<O> {
 ///   trimmed surface cache built on them reaches the face as upstream's does.
 #[allow(clippy::too_many_arguments)]
 pub trait OffsetBrep<O>: ProtoGeometry<O> {
+    /// Prepares the surface cache when a numerical solve actually requests it.
+    /// Backends with owning topology override this to build the real trimmed
+    /// cache; the default retains the existing opaque-owner deferral.
+    fn prepare_surface_solve_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<SurfaceCache<O>>
+    where
+        O: Copy + PartialEq,
+    {
+        crate::surface::surface::p1::get_surface_cache(k, surface, handle)
+    }
+
+    /// Read-only face queries after cache preparation. One service resolves all
+    /// owning B-reps in this operation's object space.
+    fn prepared_face_queries(&self) -> Option<&dyn FaceQueries<O>> {
+        None
+    }
+
     /// Stores a new curve and returns its handle; `None` when the store is full.
     fn insert_curve(&mut self, curve: Curve) -> Option<O>;
     /// Stores a new surface and returns its handle; `None` when the store is full.
@@ -705,18 +729,44 @@ fn brep_replace_surface<O>(
 
 /// `SmSurface::GlobalCurveIntersect(domain, curve, interval, tol, solutions)` of the
 /// surface and curve behind the handles (unit `surface.surface_p8`).
+struct OffsetSurfaceSolveContext<'a, B>(&'a mut B);
+
+impl<O: ClassObject, B: OffsetBrep<O>> SurfaceSolveContext<O> for OffsetSurfaceSolveContext<'_, B> {
+    fn build_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<SurfaceCache<O>> {
+        self.0.prepare_surface_solve_cache(k, surface, handle)
+    }
+
+    fn face_queries(&self) -> Option<&dyn FaceQueries<O>> {
+        self.0.prepared_face_queries()
+    }
+}
+
 fn surface_global_curve_intersect<O: ClassObject + SolutionObject>(
     k: &Kernel,
-    geometry: &impl ClassGeometry<O>,
+    geometry: &mut impl OffsetBrep<O>,
     surface: O,
     domain: &Extent2d,
     curve: O,
     interval: &Extent1d,
     tol: f64,
 ) -> Result<SolutionArray<O>> {
-    let s = surface_of(geometry, surface)?;
-    let c = curve_of(geometry, curve)?;
-    s.global_curve_intersect(k, [curve, surface], domain, c, interval, tol)
+    let c = curve_of(geometry, curve)?.clone_for_evaluation()?;
+    let s = surface_of(geometry, surface)?.clone_for_evaluation()?;
+    s.global_curve_intersect_with_context(
+        k,
+        [Some(curve), Some(surface)],
+        None,
+        &mut OffsetSurfaceSolveContext(geometry),
+        domain,
+        &c,
+        interval,
+        tol,
+    )
 }
 
 /// `SmOffsetSurface sOffset(dSign * dist, *pSurface, FALSE)` followed by

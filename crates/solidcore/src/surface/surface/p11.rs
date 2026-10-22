@@ -89,8 +89,8 @@ use crate::surface::plane::Plane;
 use crate::surface::surface_cache::p1::{BezierPatch, SurfaceCache};
 
 use super::p1::{
-    get_surface_cache, is_node_valid, is_point_valid, surface_to_evaluate, CsGlobalSolver,
-    SsiNormalizeEnfo, SspIntersectEnfo,
+    get_surface_cache, is_node_valid, surface_to_evaluate, CsGlobalSolver, SsiNormalizeEnfo,
+    SspIntersectEnfo,
 };
 use super::p2::{cs_are_perpen_disjoint_in, intersect_and_split, original_surface, set_up_breaks};
 use super::p5::{cs_identical_solutions, DropPointOptions};
@@ -1054,7 +1054,14 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
                     .local_curve_intersect(k, &uv_domain, curve, &ivl, tol, uv_guess, t_guess)?;
                 if let Some(h) = hit {
                     // for points within the surface's trim boundary
-                    if is_point_valid(surface_tree.owner(), cache, h.uv) {
+                    if super::p1::is_point_valid_with(
+                        k,
+                        surface_tree.owner(),
+                        cache,
+                        h.uv,
+                        None,
+                        self.face_queries,
+                    )? {
                         let mut solution = Solution::new();
                         solution.num_variables = 3;
                         *solution.start.param_mut(0)? = h.t;
@@ -1133,7 +1140,14 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
 
             // for points within the surface's trim boundary
             let uv_found = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
-            if is_point_valid(surface_tree.owner(), cache, uv_found) {
+            if super::p1::is_point_valid_with(
+                k,
+                surface_tree.owner(),
+                cache,
+                uv_found,
+                None,
+                self.face_queries,
+            )? {
                 let key = if op == SolverOperation::Minimize
                     || op == SolverOperation::Maximize
                     || op == SolverOperation::Signed3dDirectedMinimize
@@ -1461,9 +1475,21 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                     },
                 )?;
                 if let Some(x) = found {
-                    if is_point_valid(tree1.owner(), cache1, x.uv)
-                        && is_point_valid(tree2.owner(), cache2, x.other_uv)
-                    {
+                    if super::p1::is_point_valid_with(
+                        k,
+                        tree1.owner(),
+                        cache1,
+                        x.uv,
+                        None,
+                        self.face_queries,
+                    )? && super::p1::is_point_valid_with(
+                        k,
+                        tree2.owner(),
+                        cache2,
+                        x.other_uv,
+                        None,
+                        self.face_queries,
+                    )? {
                         let mut solution = Solution::new();
                         solution.num_variables = 4;
                         solution.solution_type = SolutionType::SingleValue;
@@ -1575,9 +1601,21 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             solution.objects[0] = objects[0];
             solution.objects[1] = objects[1];
             let (uv1, uv2) = split(&x);
-            if is_point_valid(tree1.owner(), cache1, uv1)
-                && is_point_valid(tree2.owner(), cache2, uv2)
-            {
+            if super::p1::is_point_valid_with(
+                k,
+                tree1.owner(),
+                cache1,
+                uv1,
+                None,
+                self.face_queries,
+            )? && super::p1::is_point_valid_with(
+                k,
+                tree2.owner(),
+                cache2,
+                uv2,
+                None,
+                self.face_queries,
+            )? {
                 let key = if op == SolverOperation::Minimize || op == SolverOperation::Maximize {
                     SortKey::ByValueWithParameter
                 } else {

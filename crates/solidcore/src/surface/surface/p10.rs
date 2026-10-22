@@ -21,7 +21,7 @@
 //!   `sm_IsPointValid` calls the virtual `PointTest` of the tree's cache: a face's
 //!   trimmed cache answers through the solver's `face_cache`
 //!   ([`crate::surface::surface::p8::FaceSolveCache::point_test`], a face
-//!   classification), any other cache with [`is_point_valid`] (its domain test).
+//!   classification), otherwise through [`super::p1::is_point_valid_with`].
 //! - **Ignored statuses.** The leaf solve ignores the status of
 //!   `SmExtent3d::IntersectLine` and `SmPseudoBox::IntersectLine` (a zero line vector,
 //!   an undefined box or a negative volume box leave the hit count at zero: no work)
@@ -47,7 +47,7 @@
 //! - **Bounds.** The leaf solve takes at most six guesses (upstream's fixed arrays). No
 //!   recursion.
 
-use super::p1::{is_node_valid, is_point_valid, is_surface_cache_owner, surface_to_evaluate};
+use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
 use super::p2::{original_surface, LsiGlobalSolver, Surface, TsectCurveType};
 use super::p4;
 use super::p6::{CurveIntersection, RangeTangentPoint};
@@ -311,7 +311,7 @@ impl<O: SolutionObject> LsiLeaf<'_, O> {
 impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     /// `sm_IsPointValid` of a leaf of `cache` (tree owner kind `owner`): the face's
     /// trimmed cache answers with its point test (a face classification) when the
-    /// solve runs on one, else [`is_point_valid`]. A failed classification keeps the
+    /// solve runs on one, else the prepared query service. A failed native classification keeps the
     /// point (`SE(SM_ERR)`, return TRUE); [`SolidError::Unported`] propagates.
     fn is_point_valid(
         &mut self,
@@ -322,15 +322,11 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     ) -> Result<bool> {
         match self.face_cache.as_deref_mut() {
             // keep all points when SurfaceNode has no trim boundaries
-            Some(face_cache) if is_surface_cache_owner(owner) => {
-                match face_cache.point_test(k, uv) {
-                    Ok(ok) => Ok(ok),
-                    Err(e) if e.is_unported() => Err(e),
-                    // signal errors from Face->PointClassify(), keep the point
-                    Err(_) => Ok(true),
-                }
-            }
-            _ => Ok(is_point_valid(owner, cache, uv)),
+            Some(face_cache) if is_surface_cache_owner(owner) => Ok(
+                super::p1::ignore_native_classification(face_cache.point_test(k, uv))?
+                    .unwrap_or(true),
+            ),
+            _ => super::p1::is_point_valid_with(k, owner, cache, uv, None, self.face_queries),
         }
     }
 

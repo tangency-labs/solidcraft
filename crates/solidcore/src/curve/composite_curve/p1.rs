@@ -410,6 +410,30 @@ impl CurveEvaluate for CompositeCurve {
 }
 
 impl CompositeCurve {
+    /// An exact evaluation copy of every segment, including its owner and flags.
+    /// `depth` is the segments' depth in the shared 64-level geometry traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        let segments = self
+            .segments
+            .iter()
+            .map(|s| {
+                Ok(CompositeCurveSegment {
+                    transition: s.transition,
+                    same_sense: s.same_sense,
+                    curve: s.curve.clone_for_evaluation_depth(depth)?,
+                    gap_start: s.gap_start,
+                    gap_end: s.gap_end,
+                    owns_curve: s.owns_curve,
+                })
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self {
+            dim: self.dim,
+            segments,
+            closed: self.closed,
+        })
+    }
+
     /// `SmCompositeCurve(ULONG lDim)`: a composite of dimension `dim` without
     /// segments (see the module docs).
     #[must_use]

@@ -346,6 +346,22 @@ pub struct CrvOnSurf {
 }
 
 impl CrvOnSurf {
+    /// An exact evaluation copy retaining both NURBS objects and all cache flags.
+    /// `depth` is the UV curve's depth in the shared 64-level geometry traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            uv_curve: Box::new(self.uv_curve.clone_for_evaluation_depth(depth)?),
+            surface: Box::new(self.surface.clone_exact()),
+            uv_domain: self.uv_domain,
+            need_breaks: self.need_breaks,
+            breaks: self.breaks.clone(),
+            owner_flag: self.owner_flag,
+            bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
+            max_gap_3d: self.max_gap_3d,
+            parametrization_matches: self.parametrization_matches,
+        })
+    }
+
     /// `SmCrvOnSurf_TYPE` (`CURV_BASE_TYPE + 48`).
     pub const TYPE: i64 = CRV_ON_SURF_TYPE;
 

@@ -117,6 +117,19 @@ pub struct ProjectedCurve {
 }
 
 impl ProjectedCurve {
+    /// An exact evaluation copy; `depth` is the base curve's depth in the shared
+    /// 64-level curve/surface/volume traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            curve: Box::new(self.curve.clone_for_evaluation_depth(depth)?),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        })
+    }
+
     /// `SmProjectedCurve_TYPE`.
     pub const TYPE: i64 = PROJECTED_CURVE_TYPE;
 

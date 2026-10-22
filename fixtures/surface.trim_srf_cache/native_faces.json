@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "native_face_holed_plane_live_build_and_trim_boundaries",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmTrimSrfCache.cpp:132,57,1048",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.5,0.25,0.00001], [0.1,0.1,0.00001], [-0.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_face_default_tolerance",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmTrimSrfCache.cpp:85",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true,
+        "boundary_probes": true,
+        "samples": [[0.5,0.5,0.0], [0.25,0.5,0.00001], [0.1,0.1,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_modified_skips_only_point_test",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmTrimSrfCache.cpp:73,1089",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true, "modified": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.1,0.1,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_editing_keeps_standalone_flags",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmTrimSrfCache.cpp:186",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.1,0.1,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_unbuilt_classification",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmTrimSrfCache.cpp:75",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": false,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.1,0.1,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_bspline_real_nonplanar_subdivision",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (verified SmBSplineSurface 15002, curved interior); source/SMLib/src/SmTrimSrfCache.cpp:230,267",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [-0.25,0.5,0.00001], [1.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_bspline_editing_does_not_implant_trims",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (verified SmBSplineSurface 15002); source/SMLib/src/SmTrimSrfCache.cpp:186",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": true, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [-0.25,0.5,0.00001]]
+      }}
+    }
+  ]
+}

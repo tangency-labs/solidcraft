@@ -114,6 +114,24 @@ pub struct OffsetCurve {
 }
 
 impl OffsetCurve {
+    /// An exact evaluation copy, retaining raw flags and the base curve's owner.
+    /// `depth` is the base's depth in the shared 64-level geometry traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            dim: self.dim,
+            base: self
+                .base
+                .as_deref()
+                .map(|c| c.clone_for_evaluation_depth(depth).map(Box::new))
+                .transpose()?,
+            normal: self.normal,
+            distance: self.distance,
+            interval: self.interval,
+            reversed: self.reversed,
+            owns_curve: self.owns_curve,
+        })
+    }
+
     /// `SmOffsetCurve_TYPE` (`CURV_BASE_TYPE + 36`).
     pub const TYPE: i64 = OFFSET_CURVE_TYPE;
 

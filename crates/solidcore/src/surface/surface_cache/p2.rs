@@ -945,7 +945,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     | SurfaceKind::Step(_)
                     | SurfaceKind::OffsetSurface(_)
                     | SurfaceKind::SrfInVolume(_) => {
-                        return Err(invalid(OP_BLOCK, "node surface is not a B-spline"))
+                        return Err(invalid(OP_BLOCK, "node surface is not a B-spline"));
                     }
                 };
                 // If that fails, do what we can and continue.

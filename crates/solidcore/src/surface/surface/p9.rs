@@ -636,11 +636,14 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
             solution,
         )? {
             let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
-            if super::p1::is_point_valid(
+            if super::p1::is_point_valid_with(
+                k,
                 self.base.tree(1)?.owner(),
                 self.surface_cache.ok_or(SolidError::null_pointer(OP))?,
                 uv,
-            ) {
+                None,
+                self.face_queries,
+            )? {
                 self.add_sorted_solution(solution, SortKey::ByAllParameters, true)?;
             }
         }
@@ -954,11 +957,14 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     index += 1;
                     continue;
                 }
-                if super::p1::is_point_valid(
+                if super::p1::is_point_valid_with(
+                    k,
                     self.base.tree(1)?.owner(),
                     self.surface_cache.ok_or(SolidError::null_pointer(OP))?,
                     hit.uv,
-                ) {
+                    None,
+                    self.face_queries,
+                )? {
                     self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
                 }
                 if super::p2::cs_are_perpen_disjoint(curve_tree, &curve_node, &surface_node)? {

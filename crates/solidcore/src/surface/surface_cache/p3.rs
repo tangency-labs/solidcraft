@@ -83,9 +83,10 @@
 //!   [`SurfaceCache::subdivide_node_split`] and its own implants. DISPATCH GAP: `GetTree`
 //!   (also called at the start of `SubdivideNode`, where it may build or rebuild the tree)
 //!   dispatches `BuildTree()` virtually, to `SmTrimSrfCache::BuildTree` on a trimmed
-//!   surface cache; [`SurfaceCache::get_tree`] builds the base class tree, and
-//!   [`SurfaceCache::subdivide_node`] does not call `GetTree` (it needs a built tree and
-//!   fails without one).
+//!   surface cache. [`SurfaceCache::get_tree`] preserves standalone trimmed-cache
+//!   flags and rejects a face-owned trimmed build without a [`CacheFace`](crate::surface::trim_srf_cache::CacheFace)
+//!   adapter, instead of silently building a plain cache. [`SurfaceCache::subdivide_node`]
+//!   does not call `GetTree` (it needs a built tree and fails without one).
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -106,7 +107,7 @@ use crate::geom::geom_utility::p2::ContinuityType;
 
 use super::p1::{
     bspline_of, compute_bezier_approximation_memo, invalid, BezierAux2d, BezierPatch,
-    FaceContainment, SurfaceCache, FACE_TYPE,
+    FaceContainment, SurfaceCache,
 };
 use super::p2::{
     create_approximate_bezier_patch_block, create_bezier_patch_block, ToleranceTester,
@@ -1188,18 +1189,33 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// The errors of [`SurfaceCache::build_tree`] (upstream returns NULL).
     pub fn get_tree(&mut self, k: &Kernel) -> Result<&mut Tree<O>> {
-        let face_owned = self
-            .surface()
-            .owner()
-            .is_some_and(|o| o.type_code == FACE_TYPE);
+        let face_owned = self.surface().face()?.is_some();
         if self.tree().is_none()
             || (!self.have_t_surface_cache
                 && face_owned
                 && self.face_containment_done != FaceContainment::UnderConstruction)
         {
-            // DISPATCH GAP: the virtual BuildTree() (SmTrimSrfCache::BuildTree on a
-            // trimmed surface cache); this builds the base class tree
-            self.build_tree(k, false)?;
+            if self.trimmed_dispatch {
+                if self.surface().face()?.is_some() {
+                    return Err(SolidError::unported(
+                        "TrimSrfCache::build_tree_with_face for a face-owned surface",
+                        "surface.trim_srf_cache",
+                    ));
+                }
+                // The standalone trimmed override has no topology to implant.
+                // Preserve its construction guard and state rather than quietly
+                // treating a lazy trimmed cache as a base cache.
+                let saved = self.face_containment_done;
+                self.face_containment_done = FaceContainment::UnderConstruction;
+                let built = self.build_tree(k, false);
+                self.face_containment_done = saved;
+                built?;
+                self.process_boundary_curves = true;
+                self.point_test_enabled = false;
+                self.have_t_surface_cache = false;
+            } else {
+                self.build_tree(k, false)?;
+            }
         }
         self.tree_mut_or(OP_GET)
     }

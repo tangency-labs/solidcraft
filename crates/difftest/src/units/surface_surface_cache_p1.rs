@@ -1262,7 +1262,10 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             o.push(flag(cache.process_boundary_curves()));
             o.push(cache.patch_count() as f64);
             o.push(0.0);
-            o.push(flag(cache.point_test(Point2::new(uv[0], uv[1]))));
+            match cache.point_test(Point2::new(uv[0], uv[1])) {
+                Ok(valid) => o.push(flag(valid)),
+                Err(e) => return Ok(Err(e)),
+            }
             let st = |r: solidcore::Result<()>| r.map_or_else(|e| status(&e), |()| 0.0);
             o.push(st(cache
                 .point_classify(Point2::new(uv[0], uv[1]), 0.0)

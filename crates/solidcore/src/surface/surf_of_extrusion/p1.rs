@@ -316,6 +316,26 @@ pub struct SurfOfExtrusion {
 }
 
 impl SurfOfExtrusion {
+    /// An evaluation copy with an exact, owner-preserving generator. `depth` is
+    /// the generator's depth in the shared 64-level geometry traversal.
+    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
+        Ok(Self {
+            base: self.base.clone_exact(),
+            gen_curve: self
+                .gen_curve
+                .as_ref()
+                .map(|c| c.clone_for_evaluation_depth(depth))
+                .transpose()?,
+            origin: self.origin,
+            extrusion_vec: self.extrusion_vec,
+            anal_uv_domain: self.anal_uv_domain,
+            orientation: self.orientation,
+            swap_uv: self.swap_uv,
+            curve_point: self.curve_point,
+            curve_vec: self.curve_vec,
+        })
+    }
+
     /// `SmSurfOfExtrusion_TYPE` (`SURF_BASE_TYPE + 30`).
     pub const TYPE: i64 = SURF_OF_EXTRUSION_TYPE;
 

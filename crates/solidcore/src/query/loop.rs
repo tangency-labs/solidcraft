@@ -23,6 +23,9 @@
 //!   (`SmTol::GetZoneTol3d(pSurface)` of the face's own surface, whose owner is the
 //!   face; the arena surfaces carry no owner). A face without surface gives
 //!   [`PointContainment::Unknown`], as upstream.
+//!   The same walk accepts prepared, read-only topology internally; a missing trim
+//!   reports [`SolidError::Unported`] only when the walk needs it, without eager work.
+//!   Temporary surface copies retain exact evaluation data and owner tolerances.
 //! - **UV trim curves.** A failing status of `GetOrCreateUVTrimCurve` (a recorded drop
 //!   failure of the existing curve, or a failed creation) or a missing curve gives
 //!   `SM_POC_UNKNOWN`, as upstream.
@@ -54,7 +57,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
-use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
+use crate::topology::loopuse::{uv_corner_boundaries_with_topology, QueryTopology};
 use crate::topology::{Brep, EdgeId, EdgeuseId, LoopId};
 
 /// Upper bound of the steps along one edge use and of the re-evaluations of one step
@@ -105,15 +108,6 @@ fn calc_quad_num(origin: Point3, test: Point3) -> i32 {
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input("query::loop::contains_uv_point", reason)
-}
-
-/// `pEU->GetOrCreateUVTrimCurve(pUVCurve)` with its status tested as `ContainsUVPoint`
-/// does (`stat != SM_SUCCESS || pUVCurve == NULL`): whether the edge use now has a UV
-/// trim curve and the status is a success. The B-rep is edited (the curve attached,
-/// the edge trimmed) where upstream edits it.
-fn ensure_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<bool> {
-    let fetch = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    Ok(fetch.status.is_ok() && eu1::uv_trim_curve(b, eu)?.0.is_some())
 }
 
 /// The edge of an edge use (`GetEdge`, dereferenced by `ContainsUVPoint`).
@@ -232,6 +226,18 @@ pub fn contains_uv_point(
     l: LoopId,
     surface: Option<&Surface>,
     uv: Point2,
+    tol_3d: f64,
+) -> Result<UvContainment> {
+    contains_uv_point_with_topology(k, &mut QueryTopology::Mutable(b), l, surface, uv, tol_3d)
+}
+
+/// Shared containment walk, with lazy trim creation limited to mutable topology.
+pub(crate) fn contains_uv_point_with_topology(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    l: LoopId,
+    surface: Option<&Surface>,
+    uv: Point2,
     _tol_3d: f64,
 ) -> Result<UvContainment> {
     // Work from Loopuses, because they will give us an ordered list of Edgeuses.
@@ -260,11 +266,9 @@ pub fn contains_uv_point(
         Some(s) => s,
         None => match face_rec.surface.as_ref() {
             Some(s) => {
-                // (a copy: the B-rep is edited while the walk uses the surface; the
-                // copy constructor resets the owner, which the face's surface keeps)
-                let mut copy = s.clone();
-                copy.set_owner(s.owner());
-                own_surface = copy;
+                // Keep the exact evaluation data and owner tolerance while the
+                // mutable walk may attach trim curves to the B-rep.
+                own_surface = s.clone_for_evaluation()?;
                 &own_surface
             }
             None => return Ok(UvContainment::of(PointContainment::Unknown)),
@@ -291,7 +295,7 @@ pub fn contains_uv_point(
     // When crUVPoint is on Surface UVBoundary - does Loop have any edgeuse ends on
     // Surface Natural UVBoundary
     let corners = if uv_boundaries != 0 {
-        crate::topology::loopuse::uv_corner_boundaries(k, b, l, &srf_uv_domain, tol_uv)?
+        uv_corner_boundaries_with_topology(k, b, l, &srf_uv_domain, tol_uv)?
     } else {
         crate::topology::loopuse::UvCorners::default()
     };
@@ -352,7 +356,7 @@ pub fn contains_uv_point(
             ivl.min()
         }
     };
-    if !ensure_trim_curve(k, b, last_eu)? {
+    if !b.ensure_trim_curve(k, last_eu)? {
         // stat != SM_SUCCESS || pThisUVCurve == NULL
         return Ok(UvContainment::of(PointContainment::Unknown));
     }
@@ -382,7 +386,7 @@ pub fn contains_uv_point(
             return Ok(UvContainment::on(this_edge, param));
         }
 
-        if !ensure_trim_curve(k, b, this_eu)? {
+        if !b.ensure_trim_curve(k, this_eu)? {
             // we can't work
             return Ok(UvContainment::of(PointContainment::Unknown));
         }
@@ -890,6 +894,50 @@ mod tests {
         // a plane has no singular sides, so GetSingularities is wired and no longer defers
         let r = contains(&mut b, [-5.0, 0.0]);
         assert!(!matches!(r, Err(SolidError::Unported { .. })));
+    }
+
+    #[test]
+    fn prepared_walk_keeps_lazy_trim_order() {
+        let k = Kernel::default();
+        // The final trim is read first. The first edge's 3D drop then exits before
+        // needing its missing trim or the missing trims of later edge uses.
+        let mut b = square(plane(), true, &[0, 1, 2]);
+        let prepared = contains_uv_point_with_topology(
+            &k,
+            &mut QueryTopology::Prepared(&b),
+            LoopId::from_index(0),
+            None,
+            Point2::new(0.0, -5.0),
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(prepared.containment, PointContainment::OnBoundary);
+        assert_eq!(prepared.on_edge, Some(EdgeId::from_index(0)));
+        assert_eq!(prepared, contains(&mut b, [0.0, -5.0]).unwrap());
+        for i in 0..3 {
+            assert!(b
+                .edgeuse(EdgeuseId::from_index(i))
+                .unwrap()
+                .uv_trim_curve
+                .is_none());
+        }
+
+        // Conversely, a missing final trim is needed even for that same 3D drop.
+        let b = square(plane(), true, &[3]);
+        assert!(matches!(
+            contains_uv_point_with_topology(
+                &k,
+                &mut QueryTopology::Prepared(&b),
+                LoopId::from_index(0),
+                None,
+                Point2::new(0.0, -5.0),
+                0.0,
+            ),
+            Err(SolidError::Unported {
+                unit: "topology.edgeuse_p3",
+                ..
+            })
+        ));
     }
 
     #[test]

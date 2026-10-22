@@ -7,6 +7,7 @@
 //! `_p3`); each lives in its own submodule and adds methods to [`SurfaceCache`] (or
 //! free functions).
 
+pub mod face_context;
 pub mod p1;
 pub mod p2;
 pub mod p3;

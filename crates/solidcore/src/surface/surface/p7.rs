@@ -2359,6 +2359,8 @@ pub struct SpGlobalSolver<'t, 's, O> {
     /// The cache holding the patches of the surface tree's nodes, read by the leaf
     /// solve (upstream reaches it through the node's tree owner).
     pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// Prepared face classification shared with other caches in this operation.
+    pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
 }
 
 impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
@@ -2467,6 +2469,8 @@ pub struct SsGlobalSolver<'t, 's, O> {
     /// (unit `surface.surface_p11`; upstream reaches them through the nodes' tree
     /// owners).
     pub caches: [Option<&'s SurfaceCache<O>>; 2],
+    /// One prepared classifier for both caches, which may belong to one B-rep.
+    pub face_queries: Option<&'s dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
 }
 
 impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {

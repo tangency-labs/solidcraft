@@ -895,6 +895,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 uv_domain2: s2.natural_uv_domain(),
                 kernel: &k,
                 caches: [None, None],
+                face_queries: None,
             };
             match st(solver.solutions_identical(&k, &a, &bb))? {
                 Ok((t, pref)) => {

@@ -533,6 +533,12 @@ const K_EU_UV: u8 = 11;
 const K_EXTRA: u8 = 12;
 /// A surface the port made (Rust only).
 const K_EXTRA_S: u8 = 13;
+/// Internal cache-only topology handles; never encoded as native script inputs.
+const K_VERTEXUSE: u8 = 14;
+const K_LOOPUSE: u8 = 15;
+const K_LOOP: u8 = 16;
+const K_SHELL: u8 = 17;
+const K_REGION: u8 = 18;
 
 #[derive(Debug, Clone, Copy)]
 struct H {
@@ -705,6 +711,31 @@ struct Two {
     extra_s: Vec<Surface>,
     marked: BTreeSet<H>,
     env: [NotifyEnv; 2],
+}
+
+impl std::fmt::Debug for Two {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OffsetFaceQueries")
+            .field("arenas", &self.breps.iter().filter(|b| b.is_some()).count())
+            .finish_non_exhaustive()
+    }
+}
+
+fn cache_topology_handle(b: i8, entity: EntityRef) -> H {
+    let (kind, index) = match entity {
+        EntityRef::Face(id) => (K_FACE, id.index()),
+        EntityRef::Edge(id) => (K_EDGE, id.index()),
+        EntityRef::Vertex(id) => (K_VERTEX, id.index()),
+        EntityRef::Faceuse(id) => (K_FACEUSE, id.index()),
+        EntityRef::Edgeuse(id) => (K_EDGEUSE, id.index()),
+        EntityRef::Vertexuse(id) => (K_VERTEXUSE, id.index()),
+        EntityRef::Loopuse(id) => (K_LOOPUSE, id.index()),
+        EntityRef::Loop(id) => (K_LOOP, id.index()),
+        EntityRef::Shell(id) => (K_SHELL, id.index()),
+        EntityRef::Region(id) => (K_REGION, id.index()),
+        EntityRef::Brep(_) => (K_BREP, 0),
+    };
+    hd(b, kind, index)
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -1009,7 +1040,125 @@ impl ProtoGeometry<H> for Two {
     }
 }
 
+impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
+    fn face_zone_tol_3d(&self, face: H) -> solidcore::Result<f64> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        fp2::tolerance(self.brep_r(face)?, fid(face))
+    }
+
+    fn face_point_classify(
+        &self,
+        k: &Kernel,
+        face: H,
+        uv: Point2,
+        src_tol: f64,
+    ) -> solidcore::Result<(i32, Option<H>)> {
+        use solidcore::surface::surface_cache::face_context::PreparedFaceQueries;
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        let map = |entity| Ok(cache_topology_handle(face.b, entity));
+        PreparedFaceQueries::new(self.brep_r(face)?, fid(face), &map)?
+            .face_point_classify(k, face, uv, src_tol)
+    }
+
+    fn face_point_classify_fast_drop(
+        &self,
+        k: &Kernel,
+        face: H,
+        uv: Point2,
+        src_tol: f64,
+    ) -> solidcore::Result<(i32, Option<H>)> {
+        use solidcore::surface::surface_cache::face_context::PreparedFaceQueries;
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        let map = |entity| Ok(cache_topology_handle(face.b, entity));
+        PreparedFaceQueries::new(self.brep_r(face)?, fid(face), &map)?
+            .face_point_classify_fast_drop(k, face, uv, src_tol)
+    }
+}
+
 impl OffsetBrep<H> for Two {
+    fn prepare_surface_solve_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<H>,
+    ) -> solidcore::Result<solidcore::surface::surface_cache::SurfaceCache<H>> {
+        use solidcore::query::face::p2::BrepCacheFace;
+        use solidcore::surface::surface::p1::{
+            get_surface_cache, make_surface_cache, make_trim_srf_cache_with_face,
+        };
+        use solidcore::surface::surface_cache::face_context::MappedCacheFace;
+        use solidcore::surface::trim_srf_cache::CacheFace;
+        let Some(owner) = surface.face()? else {
+            return get_surface_cache(k, surface, handle);
+        };
+        // The surface handle selects its arena. ObjectRef keys alone deliberately
+        // cannot distinguish equal face indices of these independent B-reps.
+        let Some(h) = handle.filter(|h| h.kind == K_FACE_SURFACE && (h.b == 0 || h.b == 1)) else {
+            return get_surface_cache(k, surface, handle);
+        };
+        let b = self.brep_m(h)?;
+        // The typed surface handle already names its face; the imported owner
+        // key belongs to the importer's object space, not the notification store's
+        // `key_of` convention. Validate the actual record instead of conflating
+        // those independent key mappings.
+        let face = fid(h);
+        let actual_owner = fp2::surface(b, face)?
+            .ok_or_else(|| invalid("cache face has no surface"))?
+            .face()?;
+        if actual_owner != Some(owner) {
+            return Err(invalid("surface owner is not the selected B-rep face"));
+        }
+        let map = |entity| Ok(cache_topology_handle(h.b, entity));
+        let unmap = |handle: H| {
+            if handle.b != h.b {
+                return Err(invalid("cache handle belongs to a different B-rep"));
+            }
+            Ok(match handle.kind {
+                K_FACE => EntityRef::Face(FaceId::from_index(handle.i)),
+                K_EDGE => EntityRef::Edge(EdgeId::from_index(handle.i)),
+                K_VERTEX => EntityRef::Vertex(VertexId::from_index(handle.i)),
+                K_EDGEUSE => EntityRef::Edgeuse(EdgeuseId::from_index(handle.i)),
+                K_VERTEXUSE => EntityRef::Vertexuse(VertexuseId::from_index(handle.i)),
+                K_LOOPUSE => {
+                    EntityRef::Loopuse(solidcore::topology::LoopuseId::from_index(handle.i))
+                }
+                _ => return Err(invalid("unsupported typed cache handle")),
+            })
+        };
+        let mut context = MappedCacheFace::new(BrepCacheFace { b, f: face }, &map, &unmap)?;
+        match make_trim_srf_cache_with_face(k, surface, handle, &mut context) {
+            Ok(mut cache) => {
+                cache.bind_face(
+                    owner,
+                    cache_topology_handle(h.b, EntityRef::Face(face)),
+                    context.zone_tol_3d(k, context.face())?,
+                )?;
+                if cache.base().tree().is_none() {
+                    cache.build_tree_with_face(k, &mut context)?;
+                }
+                Ok(cache.into_base())
+            }
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::InvalidInput { .. }
+                | SolidError::NotFound { .. }),
+            ) => Err(e),
+            Err(_) => make_surface_cache(k, surface, handle),
+        }
+    }
+
+    fn prepared_face_queries(
+        &self,
+    ) -> Option<&dyn solidcore::surface::surface_cache::face_context::FaceQueries<H>> {
+        Some(self)
+    }
+
     fn insert_curve(&mut self, curve: SmCurve) -> Option<H> {
         let i = u32::try_from(self.extra.len()).ok()?;
         let hh = curve_h(2, K_EXTRA, i, &curve);
@@ -4456,6 +4605,59 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn cache_context_distinguishes_equal_face_indices_in_two_arenas() {
+        let surface = SrfIn::Bspline(BssIn {
+            oob: false,
+            form: 11,
+            net: vec![
+                vec![[0.0, 0.0, 0.0, NOW], [0.0, 1.0, 0.0, NOW]],
+                vec![[1.0, 0.0, 0.0, NOW], [1.0, 1.0, 0.0, NOW]],
+            ],
+            p: 1,
+            q: 1,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            v: vec![0.0, 0.0, 1.0, 1.0],
+        });
+        let fixture = BrepIn::Face {
+            surface,
+            dom: [0.0, 0.0, 1.0, 1.0],
+        };
+        let mut input = import_input("cone.smb");
+        input.brep_a = fixture.clone();
+        input.brep_b = Some(fixture);
+        let mut prepared = prepare(&input).unwrap();
+        let k = Kernel::default();
+        for (arena, tolerance) in [(0, 0.003), (1, 0.007)] {
+            let handle = hd(arena, K_FACE_SURFACE, 0);
+            let brep = prepared.two.brep_m(handle).unwrap();
+            let face = FaceId::from_index(0);
+            brep.face_mut(face).unwrap().tolerance = tolerance;
+            brep.sync_face_surface_tolerance(face).unwrap();
+            // Exercise the native editing-mode cache branch, not guessed defaults.
+            brep.set_editing_enabled(true);
+            let source = ClassGeometry::surface(&prepared.two, handle).unwrap();
+            let mut surface = source.clone();
+            surface.set_owner(source.owner());
+            surface.set_owner_zone_tol_3d(source.owner_zone_tol_3d());
+            let cache = prepared
+                .two
+                .prepare_surface_solve_cache(&k, &surface, Some(handle))
+                .unwrap();
+            assert_eq!(cache.face().unwrap(), Some(hd(arena, K_FACE, 0)));
+            assert_eq!(cache.surface().owner_zone_tol_3d(), Some(tolerance));
+            assert_eq!(
+                prepared
+                    .two
+                    .prepared_face_queries()
+                    .unwrap()
+                    .face_zone_tol_3d(hd(arena, K_FACE, 0))
+                    .unwrap(),
+                tolerance
+            );
         }
     }
 

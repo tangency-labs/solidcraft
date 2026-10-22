@@ -46,6 +46,9 @@ use crate::runner::default_cases;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
+#[path = "surface_trim_srf_cache/native_face.rs"]
+mod native_face;
+
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 600;
 
@@ -1081,10 +1084,16 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if let Some(input) = case.inputs.get("native_face") {
+            return native_face::run_cpp(input);
+        }
         cpp(&case.parse()?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        if let Some(input) = case.inputs.get("native_face") {
+            return native_face::run_rust(input);
+        }
         rust(&case.parse()?)
     }
 }
