@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
 use std::sync::Arc;
 
-mod adapter;
 mod binary;
 mod metadata;
 mod preview;
@@ -36,15 +35,16 @@ struct SavedBody {
 struct Runtime {
     /// [`Body::size`] as stored (0: not measured).
     size: f64,
-    /// The orientation mesh's missing-face count at its tolerance.
+    /// Saved by earlier versions (an orientation mesh's missing-face count); read and ignored.
     coarse_missing: Option<(f64, u64)>,
 }
 fn invalid(detail: impl std::fmt::Display) -> KernelError {
     KernelError::Invalid(format!("native B-rep: {detail}"))
 }
 
-/// Explicit topology, spatial geometry, construction certificates and history, exactly.
-/// Failure is a cache miss at the IO boundary, never a failed document save.
+/// Explicit topology, spatial geometry, construction certificates and history, exactly: the
+/// body's own record and what it carries. Failure is a cache miss at the IO boundary, never a
+/// failed document save.
 pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
     guard("encode native B-rep", || {
         for source in body.face_sources.iter().flat_map(|s| s.iter()).flatten() {
@@ -58,17 +58,14 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
                 at = source;
             }
         }
-        if body.face_count() > MAX_ITEMS
-            || body.solid.edge_iter().take(MAX_ITEMS + 1).count() > MAX_ITEMS
-            || body.mesh.as_ref().is_some_and(|m| m.positions.len() > MAX_ITEMS || m.triangles.len() > MAX_ITEMS)
-        {
-            return Err(invalid("native geometry budget"));
-        }
         if body.mesh.is_some() {
             return Err(invalid("mesh bodies are source blobs, not B-rep"));
         }
-        let runtime = Runtime { size: body.size, coarse_missing: body.coarse_missing.map(|(tol, n)| (tol, n as u64)) };
-        let saved = SavedBody { solid: adapter::encode(body)?, metadata: metadata::encode(body)?, runtime };
+        if body.face_count() > MAX_ITEMS || body.edge_count() > MAX_ITEMS {
+            return Err(invalid("native geometry budget"));
+        }
+        let runtime = Runtime { size: body.size, coarse_missing: None };
+        let saved = SavedBody { solid: body.record().clone(), metadata: metadata::encode(body)?, runtime };
         // Structural validation does not invoke another geometric reconstruction.
         validate_topology(&saved)?;
         let value = serde_json::to_value(saved).map_err(invalid)?;
@@ -82,54 +79,18 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
     })
 }
 
-/// The schema 4 record of a solid body, in canonical order with its pcurves: what another
-/// backend (SMLib) builds the body from. Mesh bodies have none.
+/// The schema 4 record of a solid body, in canonical order with its pcurves: the body itself.
+/// Mesh bodies have none.
 pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
-    guard("B-rep record", || {
-        if body.mesh.is_some() {
-            return Err(invalid("mesh bodies are source blobs, not B-rep"));
-        }
-        adapter::encode(body)
-    })
+    if body.mesh.is_some() {
+        return Err(invalid("mesh bodies are source blobs, not B-rep"));
+    }
+    Ok(body.record().clone())
 }
 
-/// The body in SMLib, built from its schema 4 record. The record is trusted (SMLib's healer is
-/// skipped): the kernel's records keep SMLib's rules, and healing moved a cylinder's volume by
-/// 9e-7 where the record as given is exact to 1e-7.
-#[cfg(feature = "smlib")]
+/// The body in SMLib (see [`Body::smlib`]), as an owned copy.
 pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
-    let record = tolerant_record(body)?;
-    solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
-}
-
-/// [`brep_record`] for another kernel: where an edge lies a little farther from a face it bounds
-/// than the body's working tolerance (truck's offsets leave edges some 3e-5 mm off their faces),
-/// the record takes a tolerance ten, then a hundred times as large for the body, its edges and
-/// vertices, as the kernel it goes to works to tolerances (SMLib's own are far larger). Past
-/// that it is refused.
-#[cfg(feature = "smlib")]
-fn tolerant_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
-    guard("B-rep record", || {
-        if body.mesh.is_some() {
-            return Err(invalid("mesh bodies are source blobs, not B-rep"));
-        }
-        let working = crate::fill::face_tolerance(body);
-        let mut last = None;
-        for factor in [1.0, 10.0, 100.0] {
-            match adapter::encode_within(body, working * factor)? {
-                Ok(record) => return Ok(record),
-                Err(e) => last = Some(e),
-            }
-        }
-        Err(last.unwrap_or_else(|| invalid("no record")))
-    })
-}
-
-/// The truck solid of a schema 4 record, as a saved body's is built: tests compare records
-/// made elsewhere (the STEP reader's) with truck's own import.
-#[cfg(test)]
-pub(crate) fn solid_of_record(record: solidcraft_geom::brep::Brep) -> Result<truck_modeling::Solid> {
-    guard("decode a B-rep record", || adapter::decode(record))
+    body.smlib()?.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
 }
 
 /// Decode bounded untrusted data. Validate indices before topology extraction.
@@ -148,106 +109,65 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
         validate_value(&value, 0)?;
         let saved: SavedBody = serde_json::from_value(value).map_err(invalid)?;
         validate_topology(&saved)?;
-        let (solid, numbering) = adapter::decode_numbered(saved.solid, adapter::Producer::Own)?;
-        let Runtime { size, coarse_missing } = saved.runtime;
-        if !(size.is_finite() && size >= 0.0) || coarse_missing.is_some_and(|(tol, n)| !tol.is_finite() || n > MAX_ITEMS as u64) {
+        let Runtime { size, .. } = saved.runtime;
+        if !(size.is_finite() && size >= 0.0) {
             return Err(invalid("runtime values"));
         }
-        let body = Body {
-            solid: Arc::new(solid),
-            size,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            coarse_missing: coarse_missing.map(|(tol, n)| (tol, n as usize)),
-            mesh: None,
-            color: None,
-            paint: None,
-            splits: None,
-            face_sources: None,
-            history: None,
-            display_of: None,
-            meshes: None,
-            phased: false,
-            tolerances: None,
-            regularization_protected: false,
-        };
-        // A body made by another kernel keeps the tolerances its record saved for it.
-        let tolerances = adapter::decoded_tolerances(&numbering, &body);
-        let mut body = body.with_tolerances(tolerances);
+        let mut body = Body::from_record(saved.solid)?;
+        if size > 0.0 {
+            body.size = size;
+        }
         metadata::apply(&mut body, saved.metadata)?;
         Ok(body)
     })
 }
 
-/// An SMLib body as a kernel body, through its schema 4 record: SMLib's export mapped by
-/// `solidcraft_smlib` (canonical order, radians, pcurves), then this adapter's decode of a
-/// foreign record (analytic surfaces as truck's revolutions). The body is oriented as the record
-/// says (`Body::oriented`), never by meshing it.
-#[cfg(feature = "smlib")]
+/// An SMLib body as a kernel body: SMLib's export mapped by `solidcraft_smlib` (canonical order,
+/// radians, pcurves) is the body's record, and the SMLib body is kept with it.
 pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
     body_from_smlib_ordered(brep).map(|(body, _)| body)
 }
 
 /// [`body_from_smlib`], with where each of SMLib's faces and edges is in the body's face and
-/// edge order ([`crate::history`]): `None` where the body did not keep the record's order (a
-/// rebuild that walked a face's edges the other way).
-#[cfg(feature = "smlib")]
+/// edge order ([`crate::history`]).
 pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(Body, Option<solidcraft_smlib::history::Order>)> {
     let (record, order) = brep.to_native_ordered().map_err(|e| KernelError::Failed(e.to_string()))?;
-    guard("decode SMLib B-rep", || {
-        let (solid, numbering) = adapter::decode_numbered(record, adapter::Producer::Foreign)?;
-        let body = Body::oriented(solid)?;
-        let kept = numbering.kept_by(&body.solid);
-        // SMLib's approximated edges lie farther from their faces than the kernel's working
-        // tolerance: the body keeps the tolerances the record gave them, so its own record does.
-        let tolerances = adapter::decoded_tolerances(&numbering, &body);
-        Ok((body.with_tolerances(tolerances), kept.then_some(order)))
-    })
+    let handle = brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    Ok((Body::from_smlib_record(handle, record)?, Some(order)))
 }
 
-/// `body` in SMLib ([`smlib_body`], healed where SMLib's check refuses it as given), with where
-/// each of SMLib's faces and edges is in the body's face and edge order: SMLib's export of the
-/// imported body, checked to number every face, edge and vertex as the body's record does.
-/// `None` where it does not.
-#[cfg(feature = "smlib")]
+/// `body` in SMLib, with where each of SMLib's faces and edges is in the body's face and edge
+/// order: SMLib's export of the imported body, checked to number every face, edge and vertex as
+/// the body's record does. `None` where it does not.
 pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
-    smlib_record_ordered(&tolerant_record(body)?)
+    let brep = smlib_body(body)?;
+    Ok((brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?, numbering(body.record(), &brep)))
 }
 
-/// `record` in SMLib, healed where SMLib's check refuses it as given, with where each of SMLib's
-/// faces and edges is in the record's order: `None` where SMLib's export of it does not number
-/// every face, edge and vertex as the record does.
-#[cfg(feature = "smlib")]
+/// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that
+/// names why), with where each of SMLib's faces and edges is in the record's order.
 pub(crate) fn smlib_record_ordered(
     record: &solidcraft_geom::brep::Brep,
 ) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
-    use solidcraft_smlib::{Brep, CheckLevel};
-    let import = |trusted: bool| Brep::from_record(record, trusted).map_err(|e| KernelError::Failed(format!("SMLib: {e}")));
-    let valid = |b: &Brep| b.check(CheckLevel::All).is_ok_and(|c| c.is_valid());
-    // A record SMLib's check refuses as given (a gap a little over the record's tolerance, a
-    // hole listed before its face's outer loop) goes through SMLib's healer; healed, it is kept
-    // only where SMLib then finds it valid.
-    // One SMLib refuses as given altogether goes through the healer too.
-    let brep = match import(true) {
-        Ok(trusted) if valid(&trusted) => trusted,
-        Ok(trusted) => match import(false) {
-            Ok(healed) if valid(&healed) => healed,
-            _ => trusted,
-        },
-        Err(e) => import(false).map_err(|_| e)?,
-    };
-    let order = match brep.to_native_ordered() {
+    let brep = solidcraft_smlib::Brep::from_record(record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    let order = numbering(record, &brep);
+    Ok((brep, order))
+}
+
+/// Where SMLib's faces and edges of `brep` (imported from `record`) are in the record's order:
+/// `None` where SMLib's export does not number them as the record does.
+fn numbering(record: &solidcraft_geom::brep::Brep, brep: &solidcraft_smlib::Brep) -> Option<solidcraft_smlib::history::Order> {
+    match brep.to_native_ordered() {
         Ok((back, order)) => same_numbering(record, &back).then_some(order),
         Err(e) => {
             log::debug!(target: "smlib", "no order for an operand: {e}");
             None
         }
-    };
-    Ok((brep, order))
+    }
 }
 
 /// Whether two records of one body number its faces, edges and vertices alike: the same loops of
 /// the same edges, the same edge ends, and each vertex where the other's is.
-#[cfg(feature = "smlib")]
 fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Brep) -> bool {
     use solidcraft_geom::brep::Loop;
     if a.faces.len() != b.faces.len() || a.edges.len() != b.edges.len() || a.vertices.len() != b.vertices.len() {
@@ -273,7 +193,6 @@ fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Br
 /// opposite order with each edge the other way round. SMLib walks a face whose surface it turned
 /// (a hole's wall) the other way, starting where it likes; its faces and edges are numbered
 /// alike all the same.
-#[cfg(feature = "smlib")]
 fn same_cycle(x: &[solidcraft_geom::brep::OrientedEdge], y: &[solidcraft_geom::brep::OrientedEdge]) -> bool {
     let n = x.len();
     if n != y.len() {
@@ -358,7 +277,7 @@ fn value_nodes(v: &Value) -> usize {
         _ => 1,
     }
 }
-#[cfg(all(test, feature = "smlib"))]
+#[cfg(test)]
 mod smlib_import_tests;
 
 #[cfg(test)]
