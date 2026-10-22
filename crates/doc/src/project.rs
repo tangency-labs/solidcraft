@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
-use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;
 use crate::expr::Value;
@@ -33,6 +33,9 @@ pub struct Resolved {
     pub geom: Vec<LinkGeom>,
     /// 3D curves (world coordinates).
     pub wires: Vec<Vec<Vec3>>,
+    /// Each wire's exact curve where its source has one (an included edge or sketch curve),
+    /// one list per wire, empty for a curve known only as points ([`solidcraft_sketch::Wire::exact`]).
+    pub exact: Vec<Vec<WireCurve>>,
     pub source: LinkSource,
     /// The reference was not exactly where it was and was re-found on the nearest geometry.
     pub moved: bool,
@@ -108,6 +111,7 @@ fn resolve_uncached(
     let mut edge_index = None;
     let mut source = src.clone();
     let mut wires: Vec<Vec<Vec3>> = Vec::new();
+    let mut exact: Vec<Vec<WireCurve>> = Vec::new();
     let geom = match src {
         LinkSource::Edge { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -120,8 +124,9 @@ fn resolve_uncached(
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Edge { body: name, at: q };
             edge_index = Some(e);
-            let exact = st.bodies.get(bi).and_then(|b| exact_edges(b, plane, &[e]).pop().flatten());
-            edge_geom(plane, kind, exact, mesh.edges.get(e).cloned().unwrap_or_default(), &mut wires)
+            let planar = st.bodies.get(bi).and_then(|b| exact_edges(b, plane, &[e]).pop().flatten());
+            let pts = mesh.edges.get(e).cloned().unwrap_or_default();
+            edge_geom(plane, kind, planar, (pts, || edge_curves(st.bodies.get(bi), e)), &mut wires, &mut exact)
         }
         LinkSource::Face { body, at } => {
             let (bi, mesh) = body_mesh(st, body, *at)?;
@@ -182,6 +187,7 @@ fn resolve_uncached(
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
                     if off_plane(plane, &pts) {
                         wires.push(pts);
+                        exact.push(sketch_curves(ss, ci));
                         Vec::new()
                     } else {
                         project_sketch_curve(&ss.sketch, &ss.plane, ci, plane)
@@ -203,12 +209,14 @@ fn resolve_uncached(
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q };
             wires = crate::project3d::onto_face(&mesh, f, &pts, plane.normal());
+            exact = vec![Vec::new(); wires.len()];
             Vec::new()
         }
         LinkSource::Intersection { a, b } => {
             let (ma, fa) = crate::project3d::mesh_of(st, a).ok_or_else(|| lost(&a.describe()))?;
             let (mb, fb) = crate::project3d::mesh_of(st, b).ok_or_else(|| lost(&b.describe()))?;
             wires = crate::project3d::mesh_intersection(&ma, fa, &mb, fb);
+            exact = vec![Vec::new(); wires.len()];
             Vec::new()
         }
         LinkSource::Iso { body, at, dir } => {
@@ -221,6 +229,7 @@ fn resolve_uncached(
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Iso { body: name, at: q, dir: dir.clone() };
             wires = crate::project3d::iso_curve(&mesh, f, q, dir);
+            exact = vec![Vec::new(); wires.len()];
             Vec::new()
         }
         LinkSource::Spun { body, origin, dir } => {
@@ -275,7 +284,7 @@ fn resolve_uncached(
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom: merge_split_circles(geom), wires, source, moved, face_index, edge_index })
+    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index })
 }
 
 /// Whether a curve (world points) leaves the sketch plane: included, it then stays 3D.
@@ -285,17 +294,49 @@ fn off_plane(plane: &Plane, pts: &[Vec3]) -> bool {
 }
 
 /// What a body edge (its `exact` curve when read, and its polyline `pts`) gives a sketch: its
-/// section with the sketch plane, itself as a 3D curve (into `wires`) when it is included and
-/// leaves the plane, else its projection (the exact curve, or the polyline fitted).
-fn edge_geom(plane: &Plane, kind: LinkKind, exact: Option<Vec<LinkGeom>>, pts: Vec<Vec3>, wires: &mut Vec<Vec<Vec3>>) -> Vec<LinkGeom> {
+/// section with the sketch plane, itself as a 3D curve (its points into `wires`, its exact
+/// curve into `exact`) when it is included and leaves the plane, else its projection (the exact
+/// planar curve `planar`, or the polyline fitted).
+fn edge_geom(
+    plane: &Plane,
+    kind: LinkKind,
+    planar: Option<Vec<LinkGeom>>,
+    (pts, curves): (Vec<Vec3>, impl FnOnce() -> Vec<WireCurve>),
+    wires: &mut Vec<Vec<Vec3>>,
+    exact: &mut Vec<Vec<WireCurve>>,
+) -> Vec<LinkGeom> {
     match kind {
         LinkKind::Intersect => section_of_polyline(plane, &pts),
         LinkKind::Include if off_plane(plane, &pts) => {
             wires.push(pts);
+            exact.push(curves());
             Vec::new()
         }
-        _ => exact.unwrap_or_else(|| fit_world(plane, &pts)),
+        _ => planar.unwrap_or_else(|| fit_world(plane, &pts)),
     }
+}
+
+/// Edge `e` of `body` (its index in the body's edge order) as its exact curve from the body's
+/// record; none for a mesh body or an intersection curve the record holds no curve for.
+fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
+    let Some(body) = body.filter(|b| !b.body.is_mesh()) else { return Vec::new() };
+    let Ok(record) = crate::kernel::brep_record(&body.body) else { return Vec::new() };
+    record
+        .edges
+        .get(e)
+        .filter(|edge| !matches!(edge.curve, solidcraft_geom::brep::Curve::SurfaceIntersection { .. }))
+        .map(|edge| vec![WireCurve { curve: edge.curve.clone(), interval: edge.interval }])
+        .unwrap_or_default()
+}
+
+/// Curve `ci` of the solved sketch `ss` as its exact pieces in space, in the order its polyline
+/// runs; none where a piece has no record curve.
+fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
+    let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
+    segs.iter()
+        .map(|s| crate::kernel::sketch_record_curve(&ss.plane, s).map(|(curve, interval)| WireCurve { curve, interval }))
+        .collect::<Option<_>>()
+        .unwrap_or_default()
 }
 
 /// Edges `edges` of `body` (indices into its mesh's `edges`) on `plane` as their exact curves:
@@ -375,14 +416,14 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         .filter_map(|w| Some(closest_on_segment(near, *w.first()?, *w.get(1)?)))
         .min_by(|a, b| a.dist(near).total_cmp(&b.dist(near)))
         .ok_or_else(|| lost("named projection edge"))?;
-    let mut wires = Vec::new();
-    let exact = exact_edges(target, plane, &[index]).pop().flatten();
-    let geom = edge_geom(plane, kind, exact, pts, &mut wires);
+    let (mut wires, mut exact) = (Vec::new(), Vec::new());
+    let planar = exact_edges(target, plane, &[index]).pop().flatten();
+    let geom = edge_geom(plane, kind, planar, (pts, || edge_curves(Some(target), index)), &mut wires, &mut exact);
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid("named edge projects to nothing on this sketch plane".into()));
     }
     let source = LinkSource::Edge { body: body.into(), at };
-    Ok(Resolved { geom: merge_split_circles(geom), wires, source, moved: false, face_index: None, edge_index: Some(index) })
+    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved: false, face_index: None, edge_index: Some(index) })
 }
 
 fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str, index: usize, at: Vec3) -> Result<Resolved> {
@@ -403,7 +444,15 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
     if geom.is_empty() {
         return Err(DocError::Invalid("named face projects to nothing on this sketch plane".into()));
     }
-    Ok(Resolved { geom, wires: Vec::new(), source: LinkSource::Face { body: body.into(), at }, moved: false, face_index, edge_index: None })
+    Ok(Resolved {
+        geom,
+        wires: Vec::new(),
+        exact: Vec::new(),
+        source: LinkSource::Face { body: body.into(), at },
+        moved: false,
+        face_index,
+        edge_index: None,
+    })
 }
 
 fn projection_face_edges(body: &crate::ModelBody, mesh: &Mesh, index: u32, plane: &Plane) -> Result<Vec<usize>> {
@@ -484,6 +533,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
     Ok(Resolved {
         geom: merge_split_circles(geometry),
         wires: Vec::new(),
+        exact: Vec::new(),
         source: LinkSource::Face { body: body.name.clone(), at: point },
         moved: false,
         face_index: if indices.len() == 1 { indices.first().copied() } else { None },
@@ -663,7 +713,7 @@ fn refresh_links_in(
                 if geom.is_empty() {
                     return Err(DocError::Invalid(format!("the {} makes no outline", source.describe())));
                 }
-                Ok(Resolved { geom, wires: Vec::new(), source: source.clone(), moved: false, face_index: None, edge_index: None })
+                Ok(Resolved { geom, wires: Vec::new(), exact: Vec::new(), source: source.clone(), moved: false, face_index: None, edge_index: None })
             })
         } else if l.auto_face {
             anchor
@@ -690,7 +740,9 @@ fn refresh_links_in(
                     link.edge_name = Some(name);
                 }
                 sk.set_link_source(&l.id, r.source);
-                let _ = sk.set_link_wires(&l.id, &r.wires);
+                if let Err(e) = sk.set_link_wires(&l.id, &r.wires).and_then(|()| sk.set_link_wire_curves(&l.id, &r.exact)) {
+                    warn.push(format!("projected {}: {e}", l.source.describe()));
+                }
                 // Words built from text parameters change shape when the parameters do: that
                 // rebuild is the text following them, not a reference that changed under it.
                 let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());

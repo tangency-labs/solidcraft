@@ -62,6 +62,70 @@ pub struct Wire {
     /// are its three defining points (start, through, end) and whose `pts` are its samples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<WireArc>,
+    /// A linked curve's exact geometry where its source has one (an included edge or sketch
+    /// curve): record curves end to end along `pts`, in `space` coordinates. Empty for a curve
+    /// known only as its points (projected onto a face, intersection and iso curves). Set when
+    /// the link is resolved, with `pts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact: Vec<WireCurve>,
+}
+
+/// One exact piece of a 3D sketch curve ([`Wire::exact`]): a record curve on its interval.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WireCurve {
+    pub curve: solidcraft_geom::brep::Curve,
+    pub interval: [f64; 2],
+}
+
+impl WireCurve {
+    /// The piece carried by the rigid motion `point` of points and `vector` of directions (a
+    /// placement). `None` for an intersection curve, whose surfaces are not carried here.
+    pub fn mapped(&self, point: &impl Fn(Vec3) -> Vec3, vector: &impl Fn(Vec3) -> Vec3) -> Option<WireCurve> {
+        use solidcraft_geom::brep::{Curve, Frame};
+        let a = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+        let b = |v: Vec3| [v.x, v.y, v.z];
+        let p = |q: [f64; 3]| b(point(a(q)));
+        let frame = |f: &Frame| Frame { origin: p(f.origin), x_axis: b(vector(a(f.x_axis))), y_axis: b(vector(a(f.y_axis))) };
+        let curve = match &self.curve {
+            Curve::Line { start, end } => Curve::Line { start: p(*start), end: p(*end) },
+            Curve::Circle { frame: f, radius } => Curve::Circle { frame: frame(f), radius: *radius },
+            Curve::Ellipse { frame: f, radii } => Curve::Ellipse { frame: frame(f), radii: *radii },
+            Curve::Polyline { points } => Curve::Polyline { points: points.iter().map(|q| p(*q)).collect() },
+            Curve::Spline { knots, points } => Curve::Spline { knots: knots.clone(), points: points.iter().map(|q| p(*q)).collect() },
+            Curve::RationalSpline { knots, homogeneous } => Curve::RationalSpline {
+                knots: knots.clone(),
+                homogeneous: homogeneous
+                    .iter()
+                    .map(|h| {
+                        let q = point(a([h[0], h[1], h[2]]) * (1.0 / h[3]));
+                        [q.x * h[3], q.y * h[3], q.z * h[3], h[3]]
+                    })
+                    .collect(),
+            },
+            Curve::SurfaceIntersection { .. } => return None,
+        };
+        Some(WireCurve { curve, interval: self.interval })
+    }
+}
+
+impl Wire {
+    /// The wire carried by the rigid motion `point` of points and `vector` of directions: its
+    /// points, fit points and exact curves (dropped where one cannot be carried, leaving the
+    /// points).
+    pub fn map(&mut self, point: impl Fn(Vec3) -> Vec3, vector: impl Fn(Vec3) -> Vec3) {
+        for q in self.pts.iter_mut().chain(&mut self.fit) {
+            *q = point(*q);
+        }
+        if let Some(arc) = &mut self.arc {
+            let normal = vector(arc.normal);
+            arc.center = point(arc.center);
+            arc.start = point(arc.start);
+            arc.end = point(arc.end);
+            arc.normal = normal.normalized().unwrap_or(arc.normal);
+            arc.radius = arc.center.dist(arc.start);
+        }
+        self.exact = self.exact.iter().map(|c| c.mapped(&point, &vector)).collect::<Option<_>>().unwrap_or_default();
+    }
 }
 
 /// Most fit points of a drawn 3D curve.
@@ -271,7 +335,22 @@ impl Sketch {
                 Some(o) => o.clone(),
                 None => self.fresh("w")?,
             };
-            self.wires.push(Wire { id: wid, pts, space: WireSpace::Component, link: Some(id.to_string()), fit: Vec::new(), arc: None });
+            self.wires.push(Wire { id: wid, pts, space: WireSpace::Component, link: Some(id.to_string()), fit: Vec::new(), arc: None, exact: Vec::new() });
+        }
+        Ok(())
+    }
+
+    /// Give a link's wires their exact curves ([`Wire::exact`]), one list per wire in the order
+    /// [`Self::set_link_wires`] took them (an empty list: known only as points).
+    pub fn set_link_wire_curves(&mut self, id: &str, exact: &[Vec<WireCurve>]) -> Result<()> {
+        let wires = self.link_wires(id);
+        if wires.len() != exact.len() {
+            return Err(SketchError::Invalid(format!("link {id} has {} 3D curves, not {}", wires.len(), exact.len())));
+        }
+        for (i, curves) in wires.into_iter().zip(exact) {
+            if let Some(w) = self.wires.get_mut(i) {
+                w.exact = curves.clone();
+            }
         }
         Ok(())
     }
@@ -286,7 +365,7 @@ impl Sketch {
         let pts = drawn_polyline(fit)?;
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh(if fit.len() == 1 { "q" } else { "w" })?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: None, exact: Vec::new() });
         Ok(id)
     }
 
@@ -306,7 +385,7 @@ impl Sketch {
         let pts = arc_polyline(&arc, ARC_TOL);
         self.wire_budget(None, 1, pts.len() + fit.len())?;
         let id = self.fresh("w")?;
-        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc) });
+        self.wires.push(Wire { id: id.clone(), pts, space, link: None, fit: fit.to_vec(), arc: Some(arc), exact: Vec::new() });
         Ok(id)
     }
 
