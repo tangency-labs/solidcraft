@@ -1,5 +1,5 @@
 //! Exact mass properties from SMLib: area, volume, centroid and inertia, integrated on the exact
-//! surfaces rather than a tessellation.
+//! surfaces rather than a tessellation, and the exact box.
 
 use crate::{Brep, Result, error, ffi};
 
@@ -39,6 +39,12 @@ impl Brep {
         let m = ffi::measure::mass_properties(&self.0, relative_accuracy).map_err(error)?;
         let [area, volume, cx, cy, cz, ixx, iyy, izz, iyz, izx, ixy] = m;
         Ok(MassProperties { area, volume, centroid: [cx, cy, cz], moments: [ixx, iyy, izz], products: [iyz, izx, ixy] })
+    }
+
+    /// The exact axis-aligned box, least corner then greatest: the extrema of every vertex, edge
+    /// and face on its exact curve or surface, not grown by tolerances or control hulls.
+    pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
+        ffi::measure::bounds(&self.0).map_err(error)
     }
 
     /// Total area of every face, each counted once, so sheets and open shells too.
