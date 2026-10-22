@@ -4556,6 +4556,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "solidcraft-cloud",
  "solidcore-record",
  "solidcraft-doc",
  "solidcraft-geom",

@@ -11,6 +11,7 @@ pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
 pub mod capture;
+pub mod cloud;
 pub mod cmd;
 pub mod control_auth;
 pub mod control_pending;
@@ -618,6 +619,7 @@ pub struct Session {
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
+    cloud: cloud::State,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
     /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
@@ -870,6 +872,7 @@ impl Session {
             camera: None,
             render_viewport: None,
             render_jobs: Default::default(),
+            cloud: Default::default(),
             evaluations: 0,
             motion_traces: Default::default(),
             command_check: None,
@@ -903,6 +906,9 @@ impl Session {
         let crash_journal = self.crash_journal;
         let replacements = self.replacements.wrapping_add(1);
         let command_check = self.command_check.take();
+        let mut cloud = std::mem::take(&mut self.cloud);
+        cloud.binding = fresh.cloud.binding.clone();
+        cloud.captures.clear();
         *self = fresh;
         self.crash_journal = crash_journal;
         self.command_check = command_check;
@@ -918,6 +924,7 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+        self.cloud = cloud;
     }
 
     /// The token over the work running off the window thread for this design, on any of its
@@ -1984,6 +1991,7 @@ impl Session {
             camera: self.camera,
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
+            cloud: self.cloud.scratch(),
             saved_visibility: self.saved_visibility.clone(),
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
