@@ -14,6 +14,7 @@ mod airfoil;
 #[path = "../build.rs"]
 mod build_script;
 pub mod catalog;
+pub mod cloud;
 mod design;
 pub mod design_lock;
 mod design_metadata;

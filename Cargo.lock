@@ -4850,6 +4850,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-wrap"
+version = "10.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f21b97672d2dc848e7b25701ab4535618b92f4861c13cc3f7f7bed52ad3c8da"
+dependencies = [
+ "indexmap",
+ "nix 0.31.3",
+ "windows",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6146,6 +6157,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-cloud"
+version = "0.47.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "zstd",
+]
+
+[[package]]
 name = "solidcraft-color"
 version = "0.47.0"
 
@@ -6166,17 +6188,6 @@ dependencies = [
  "image",
  "serde_json",
  "solidcraft-control",
-]
-
-[[package]]
-name = "solidcraft-cloud"
-version = "0.24.1"
-dependencies = [
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "zstd 0.13.3",
 ]
 
 [[package]]
@@ -6347,6 +6358,7 @@ dependencies = [
  "pdf-writer",
  "pgp",
  "png",
+ "process-wrap",
  "quick-xml",
  "rand 0.8.8",
  "rustix 1.1.6",
@@ -6355,11 +6367,13 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
+ "shlex",
  "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-step",
  "solidcore-tess",
+ "solidcraft-cloud",
  "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-format",
