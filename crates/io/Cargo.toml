@@ -26,6 +26,7 @@ coset = { workspace = true }
 ed25519-dalek = { workspace = true }
 pgp = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-sketch = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }

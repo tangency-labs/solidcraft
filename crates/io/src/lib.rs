@@ -3,7 +3,8 @@
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
 //! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
-//! (see [`read_point_cloud`]).
+//! (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
+//! component models.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -56,12 +57,20 @@ pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+mod kicad_in;
+pub use kicad_in::{
+    DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile,
+    KicadOptions, KicadPad, KicadRepresentation, KicadStroke, KicadText, KicadVia, KicadZone, MAX_KICAD_BYTES, is_kicad_path, kicad_board_mesh,
+    kicad_board_path, parse_kicad_board, parse_kicad_board_with, read_kicad,
+};
 mod obj;
 pub use obj::read_obj;
 pub use threemf::{
     MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
 };
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
+mod vrml_in;
+pub use vrml_in::{MAX_VRML_BYTES, VrmlMesh, is_vrml_path, read_vrml};
 
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
