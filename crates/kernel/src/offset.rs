@@ -4,7 +4,6 @@
 //! (`crate::offset_backend`).
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::brep::{Brep, Frame, Loop, Surface};
 
 use crate::body::Body;
@@ -134,14 +133,6 @@ pub(crate) fn face_edges(b: &Brep, face: usize) -> Vec<u32> {
     out
 }
 
-/// Points along edge `e` of `b` (its ends and three inside), for comparing it with lines.
-pub(crate) fn edge_points(b: &Brep, e: u32) -> Vec<Vec3> {
-    let Some(edge) = b.edges.get(e as usize) else { return Vec::new() };
-    let Ok(c) = CurveEval::new(&edge.curve) else { return Vec::new() };
-    let [t0, t1] = edge.interval;
-    (0..=4).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 4.0)).collect()
-}
-
 /// The chosen faces and every face on the same surface joined to them (the halves of a hole's
 /// wall), as face indices. Pieces of a face split on purpose (Split Face) stay apart.
 pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
@@ -164,7 +155,8 @@ pub fn with_same_surface(b: &Body, chosen: &[usize]) -> Vec<usize> {
                 surfs.get(*j).and_then(|x| x.as_ref()).is_some_and(|sj| si.same(sj, tol))
                     && edges.get(*j).is_some_and(|theirs| {
                         theirs.iter().any(|e| {
-                            mine.binary_search(e).is_ok() && (keep.is_empty() || !crate::heal::on_split_line(&edge_points(&record, *e), keep))
+                            mine.binary_search(e).is_ok()
+                                && (keep.is_empty() || !crate::heal::on_split_line(&crate::heal::edge_points(&record, *e), keep))
                         })
                     })
             });

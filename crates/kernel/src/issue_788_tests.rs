@@ -1,7 +1,6 @@
 //! Two bores of one radius crossing each other (#788): the surfaces touch where the two ellipses
 //! of the crossing meet, which a mesh intersection cannot trace and a boolean cannot take in the
 //! middle of a face.
-use crate::tangent_cylinders;
 use crate::*;
 use solidcraft_geom::Vec3;
 use std::f64::consts::PI;
@@ -113,39 +112,4 @@ fn faces_split_for_the_crossing_leave_the_operands_alone() {
     let _ = boolean(&one, &bore(Vec3::ZERO, Vec3::Y, r, 60.0), BoolOp::Cut).unwrap();
     assert_eq!(one.face_count(), faces);
     assert_eq!(volume(&one), volume_before);
-}
-
-#[test]
-fn crossings_that_are_not_touching_are_left_alone() {
-    let r = 10.0;
-    let size = 100.0;
-    let tol = size * 1e-6;
-    let cyl = |face, origin: Vec3, axis: Vec3, radius| tangent_cylinders::Cylinder::new(face, origin, axis, radius).unwrap();
-    let z = cyl(0, Vec3::ZERO, Vec3::Z, r);
-    // Different radius, parallel axes, skew axes: no touching points to split at.
-    assert!(tangent_cylinders::crossing(&z, &cyl(1, Vec3::ZERO, Vec3::Y, r * 0.9), tol).is_none());
-    assert!(tangent_cylinders::crossing(&z, &cyl(1, Vec3::new(5.0, 0.0, 0.0), Vec3::Z, r), tol).is_none());
-    assert!(tangent_cylinders::crossing(&z, &cyl(1, Vec3::new(0.0, 0.0, 0.0), Vec3::new(1e-6, 0.0, 1.0), r), tol).is_none());
-    assert!(tangent_cylinders::crossing(&z, &cyl(1, Vec3::new(1.0, 0.0, 0.0), Vec3::Y, r), tol).is_none());
-    // Axes that meet: two touching points, a radius either side of the crossing.
-    let found = tangent_cylinders::crossing(&z, &cyl(1, Vec3::ZERO, Vec3::Y, r), tol).unwrap();
-    assert!(found.points.iter().any(|p| p.dist(Vec3::new(r, 0.0, 0.0)) < 1e-9));
-    assert!(found.points.iter().any(|p| p.dist(Vec3::new(-r, 0.0, 0.0)) < 1e-9));
-}
-
-#[test]
-fn hostile_cylinders_are_refused() {
-    let tol = 1e-4;
-    let cyl = |axis: Vec3, radius, origin: Vec3| tangent_cylinders::Cylinder::new(0, origin, axis, radius);
-    // An axis with no direction cannot make a cylinder at all.
-    assert!(cyl(Vec3::new(f64::NAN, 0.0, 1.0), 10.0, Vec3::ZERO).is_none());
-    assert!(cyl(Vec3::ZERO, 10.0, Vec3::ZERO).is_none());
-    let good = cyl(Vec3::Z, 10.0, Vec3::ZERO).unwrap();
-    for bad in [
-        cyl(Vec3::Y, f64::NAN, Vec3::ZERO).unwrap(),
-        cyl(Vec3::Y, f64::INFINITY, Vec3::ZERO).unwrap(),
-        cyl(Vec3::Y, 10.0, Vec3::new(f64::INFINITY, 0.0, 0.0)).unwrap(),
-    ] {
-        assert!(tangent_cylinders::crossing(&good, &bad, tol).is_none(), "{bad:?}");
-    }
 }

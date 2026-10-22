@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use crate::*;
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
+use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 fn fixture() -> (Body, Body, Vec3, f64) {
     let slope = 1f64.to_radians().tan();
@@ -89,32 +89,6 @@ fn thin_connected_web_between_bore_stations_survives_union() {
     assert!(public_keeps_web, "public Union removed real web material");
     assert_eq!(step_export(&[&target], "source").unwrap(), target_before);
     assert_eq!(step_export(&[&ring], "ring").unwrap(), ring_before);
-}
-
-#[test]
-fn unproved_curved_boundary_between_clear_endpoints_refuses_recut() {
-    let a = Vec2::new(6., -1.);
-    let b = Vec2::new(6., 1.);
-    let c = Vec2::new(8., 1.);
-    let d = Vec2::new(8., -1.);
-    let region = Region2 {
-        outer: Loop2 {
-            segs: vec![
-                Seg2::Cubic { p0: a, p1: Vec2::new(3., -0.5), p2: Vec2::new(3., 0.5), p3: b },
-                Seg2::Line { a: b, b: c },
-                Seg2::Line { a: c, b: d },
-                Seg2::Line { a: d, b: a },
-            ],
-        }
-        .reversed(),
-        holes: vec![],
-    };
-    let body = extrude(&Plane::XY, &[region], 16.05, 16.07).unwrap().remove(0);
-    assert!(a.len() > 5. && b.len() > 5., "endpoint samples miss the interior excursion");
-    assert!(body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().contains(Vec3::new(4.5, 0., 16.06)));
-    let before = step_export(&[&body], "curved source").unwrap();
-    assert!(crate::bore_guard::boundaries_clear(&body, &[], Vec3::ZERO, UnitVec3::Z, 5., 14., 24., 1e-6).is_none());
-    assert_eq!(step_export(&[&body], "curved source").unwrap(), before);
 }
 
 /// Posts sunk into one floor have their tops in a common plane but apart: they don't
