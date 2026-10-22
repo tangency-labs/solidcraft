@@ -176,6 +176,33 @@ impl SurfaceEval {
         self.derivs(uv[0], uv[1]).map(|d| d.0)
     }
 
+    /// The second partial derivatives `(S_uu, S_uv, S_vv)` at (u, v): in closed form on the
+    /// analytic surfaces, from the basis functions' own second derivatives on a spline; `None`
+    /// for a revolution ([`EvalSurface::second`]).
+    pub fn second(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        if !(u.is_finite() && v.is_finite()) {
+            return None;
+        }
+        Some(match self {
+            SurfaceEval::Eval(e, _) => return e.second(u, v),
+            SurfaceEval::Cylinder { axes: a, radius } => (a.radial(u).0 * -*radius, Vec3::ZERO, Vec3::ZERO),
+            SurfaceEval::Cone { axes: a, radius_at_origin, slope } => {
+                let (r, dr) = a.radial(u);
+                (r * -(radius_at_origin + v * slope), dr * *slope, Vec3::ZERO)
+            }
+            SurfaceEval::Sphere { axes: a, radius } => {
+                let (r, dr) = a.radial(u);
+                let (s, c) = v.sin_cos();
+                (r * (-c * radius), dr * (-s * radius), (r * c + a.z * s) * -*radius)
+            }
+            SurfaceEval::Torus { axes: a, major, minor } => {
+                let (r, dr) = a.radial(u);
+                let (s, c) = v.sin_cos();
+                (r * -(major + minor * c), dr * (-s * minor), (r * c + a.z * s) * -*minor)
+            }
+        })
+    }
+
     /// The parameters of `p`, a point within `accept` of the surface, from `near` when given
     /// (not unwrapped to it).
     pub fn project(&self, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
