@@ -440,6 +440,21 @@ pub trait IntersectorBrep<O>:
     /// Those of the edit; an owner with no B-rep behind its handles returns
     /// [`SolidError::Unported`] under a `harness:` label.
     fn brep_delete_face(&mut self, k: &mut Kernel, brep: O, face: O) -> Result<()>;
+    /// `SmBrep::DeleteEdge(pEdge)` with its default (`pOptSurfaceToKeep = NULL`) on
+    /// the B-rep `brep`: the owner of a real B-rep implements it with
+    /// `topology::brep::p4::delete_edge`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the edit; [`SolidError::InvalidInput`] for an edge of another B-rep.
+    fn brep_delete_edge(&mut self, k: &mut Kernel, brep: O, edge: O) -> Result<()>;
+    /// `SmBrep::DeleteVertex(pVertex)` on the B-rep `brep`: the owner of a real B-rep
+    /// implements it with `topology::brep::p4::delete_vertex`.
+    ///
+    /// # Errors
+    ///
+    /// Those of the edit; [`SolidError::InvalidInput`] for a vertex of another B-rep.
+    fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: O, vertex: O) -> Result<()>;
     /// `SmBrep::GlueEdgesGeneral(pSurvivingEdge, eRelativeOrientation, dEdgeGap,
     /// bDoRegionNesting, pEdgeToDelete, pInsideFaceuses)` on B-rep `brep`
     /// (`topology::brep::p7::glue_edges_general`; `pInsideFaceuses` defaults to `NULL`).

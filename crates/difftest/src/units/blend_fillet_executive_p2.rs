@@ -687,6 +687,26 @@ impl ExecutiveAccess<Handle> for Access {
             cascade_to_boundaries,
         )
     }
+    fn stitch_faces(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        faces: Option<&[Handle]>,
+        allow_spine_edges: bool,
+    ) -> SolidResult<StitchAttempt> {
+        // both executive call sites stitch every face (pOptFaces = NULL)
+        if faces.is_some() {
+            return missing();
+        }
+        StitchAttempt::from_stitch(solidcore::topology::brep::p4::stitch_faces(
+            k,
+            self.brep_mut(brep)?,
+            tolerance,
+            None,
+            allow_spine_edges,
+        ))
+    }
     fn tolerance(&self, k: &Kernel, brep: Handle, approx: bool) -> SolidResult<f64> {
         let tolerance = self.brep(brep)?.tolerance();
         Ok(if approx {

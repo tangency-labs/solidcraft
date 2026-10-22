@@ -40,8 +40,8 @@
 //!   `topology::brep::p3::squeeze_edge`), so
 //!   [`ProtoTopologyManager::glue_coincident_brep_vertices`] takes `&mut Kernel` and
 //!   the B-reps mutably.
-//! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
-//!   each tagged `UNPORTED(<unit>)`: `DeleteEdge` (`topology.brep_p4`).
+//! - **Callees of other units** go through traits the B-reps' owner implements:
+//!   `SmBrep::DeleteEdge` (`topology.brep_p4`) through [`BrepGlue::delete_edge`],
 //!   `SmBrep::Point3DClassify` goes through [`ProtoBrep::brep_point_3d_classify`],
 //!   which the B-reps' owner implements. `SmBrep::GlueVertices`
 //!   goes through [`BrepGlue`], which the B-reps' owner implements with
@@ -204,15 +204,14 @@ pub trait BrepGlue<O> {
         v2: O,
         opt_wire_edges_in_brep: Option<&[O]>,
     ) -> Result<()>;
-}
-
-/// `SmBrep::DeleteEdge` of B-rep `which`.
-fn brep_delete_edge<O>(_which: i32, _edge: O) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge (justified: plan/findings.md "topology.brep_p4: back-edges on opaque object handles": B-rep `which` and the edge are an index and a generic `O` handle, no `&mut Brep` / `EdgeId` to call with)
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
+    /// `SmBrep::DeleteEdge(pEdge)` of `brep` (`pOptSurfaceToKeep = NULL`;
+    /// `topology::brep::p4::delete_edge`).
+    ///
+    /// # Errors
+    ///
+    /// Those of `topology::brep::p4::delete_edge`; [`SolidError::InvalidInput`] for a
+    /// handle that names no edge of `brep`.
+    fn delete_edge(&mut self, k: &mut Kernel, brep: O, edge: O) -> Result<()>;
 }
 
 /// What the manager's topology intersector (`m_pTI`) provides to
@@ -1142,7 +1141,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 let other_vtx = brep.edge_other_vertex(edge, Some(v1))?;
                                 let stat = if other_vtx == Some(v1) {
                                     // Can't call SqueezeEdge() in this case.
-                                    brep_delete_edge(which, edge)
+                                    brep.delete_edge(k, self.which_brep(which), edge)
                                 } else {
                                     let r =
                                         brep.brep_squeeze_edge(k, self.which_brep(which), edge, v1); // deletes v2

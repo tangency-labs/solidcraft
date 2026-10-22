@@ -266,12 +266,10 @@ fn drop_uv_curves(
         "intersect.surface_drop_lib_p3",
     ))
 }
-pub(super) fn stitch_faces(_k: &Kernel, _b: &mut Brep, _tolerance: f64) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::StitchFaces
-    Err(SolidError::unported(
-        "SmBrep::StitchFaces",
-        "topology.brep_p4",
-    ))
+/// `SmBrep::StitchFaces(tol, ...)` with the header defaults (`pOptFaces = NULL`,
+/// `bAllowSpineEdges = FALSE`); the counts and gaps are unused.
+pub(super) fn stitch_faces(k: &mut Kernel, b: &mut Brep, tolerance: f64) -> Result<()> {
+    crate::topology::brep::p4::stitch_faces(k, b, tolerance, None, false).map(drop)
 }
 fn transform_brep(k: &mut Kernel, b: &mut Brep, placement: &Axis2Placement) -> Result<()> {
     crate::topology::brep::p5::transform(k, b, placement, None, true)

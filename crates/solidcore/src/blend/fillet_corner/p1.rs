@@ -1141,7 +1141,7 @@ fn note_fillet_error(
 
 /// `SmBrep::DeleteEdge` on the pseudo B-rep (unit `topology.brep_p4`).
 fn pseudo_brep_delete_edge(_pseudo: &mut FilletBrep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
+    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge -- justified: plan/findings.md "topology.brep_p4: the last stubs (PR #441)": the corner geometry pass holds no Kernel, and the pseudo B-rep's fillet records (edge list, SmFilletEdge/SmFilletVertex members) would have to drop what DeleteEdge deletes
     Err(SolidError::unported(
         "SmBrep::DeleteEdge",
         "topology.brep_p4",

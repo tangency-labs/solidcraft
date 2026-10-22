@@ -24,8 +24,8 @@
 //!   reads and the nesting of its polymorphic readers (AGENTS.md section 1).
 //! - **Arena records are never freed.** Upstream `delete`s of edge uses, vertex uses,
 //!   shells, regions and edges unlink the record (it stays in its arena as an orphan).
-//!   The B-rep's edge list is its edge arena, so `m_pEdgeListHead->Remove` has no
-//!   counterpart beyond unlinking the deleted edge's uses. The owning-list edits
+//!   `m_pEdgeListHead->Remove` takes the edge off [`Brep::edge_list`] only. The
+//!   owning-list edits
 //!   `SmEdge::Remove(eu)`, `SmVertex::Remove(vu)`, `SmRegion::Remove(shell)` and
 //!   `SmBrep::Remove(region)` (inline `SmOwningTopology` operations) edit the records'
 //!   use lists and back links.
@@ -89,9 +89,9 @@
 //!   back the region and shell it may have made (`MakeFaceWithCurves` warns about it).
 //! - **`GlueEdgesGeneral`**: the arena cannot share one curve between two edges, so
 //!   upstream's `pSurvCurve == pDelCurve` short cut (no `CurveMaxDistanceBetween`) is taken
-//!   only for two edges without curve (`NULL == NULL`). The glued-away edge stays in the edge arena as an orphan without edge uses;
-//!   enumerations of the B-rep's edges must skip edges without edge uses (upstream removes
-//!   it from `m_pEdgeListHead`).
+//!   only for two edges without curve (`NULL == NULL`). The glued-away edge leaves the edge
+//!   list (`m_pEdgeListHead->Remove`) and stays in the edge arena as an orphan without
+//!   edge uses, as upstream leaves it allocated.
 //! - **Notification context.** Face-from-curves entrypoints share one algorithm.
 //!   The kernel-context variant binds caller-owned stores to the actual kernel only
 //!   during construction notifications; the external-context API keeps its
@@ -1428,6 +1428,10 @@ pub fn glue_edges_general(
 
     let mut surv_wire = ed::is_wire(b, surv)?;
     let to_delete_eus = ed::edgeuses(b, del, None, None)?;
+
+    // Remove Edge from the Brep list - the edge record is not deleted
+    b.remove_from_edge_list(del);
+
     let mut test_split: Vec<FaceuseId> = Vec::new();
 
     // every mated pair, from the end of the list

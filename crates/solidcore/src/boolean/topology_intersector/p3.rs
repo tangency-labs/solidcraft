@@ -52,11 +52,10 @@
 //!   `query::face::p1` on the B-rep behind the handle. `dCurveTolerance` reaches the
 //!   point classifications as `SmZoneTol3d` (`zone_tol3d`), as upstream's implicit
 //!   conversion does.
-//! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
-//!   each tagged `UNPORTED(<unit>)`: `SmBrep::DeleteEdge` (`topology.brep_p4`). The
-//!   code after it is ported in full. `SmFace::GetEdges` is
-//!   [`IntersectorBrep::face_edges`] and `GetUpwardLoopuses` an [`IntersectorBrepP3`]
-//!   hook (`topology.face_p4`).
+//! - **B-rep edits and walks of other units** are [`IntersectorBrepP3`] hooks:
+//!   `SmBrep::DeleteEdge` (`topology.brep_p4`) is [`IntersectorBrep::brep_delete_edge`],
+//!   `SmFace::GetEdges` [`IntersectorBrep::face_edges`] and `GetUpwardLoopuses` an
+//!   [`IntersectorBrepP3`] hook (`topology.face_p4`).
 //! - **Undefined behaviour upstream** (a null or deleted object dereferenced, a
 //!   classification object of the wrong kind used as an edge or vertex, an index past
 //!   a list) is [`SolidError::InvalidInput`].
@@ -198,17 +197,6 @@ pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> {
     /// Those of `upward_loopuses`; [`SolidError::InvalidInput`] for a handle that is
     /// not a face of a known B-rep.
     fn face_upward_loopuses(&self, face: O) -> Result<Vec<O>>;
-}
-
-// ---- unported callees -----------------------------------------------------------------------
-
-/// `SmBrep::DeleteEdge(pEdge)`.
-fn brep_delete_edge<O>(_brep: O, _edge: O) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
 }
 
 // ---- small helpers ----------------------------------------------------------------------------
@@ -859,7 +847,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // delete the unneeded edge
                 fixed = true;
                 squeezed.deleted_edges.push(e1);
-                brep_delete_edge(brep_h, e1)?;
+                brep.brep_delete_edge(k, brep_h, e1)?;
                 out.topology_was_deleted = true;
             }
 
@@ -873,7 +861,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         fixed = true;
                         ignore_soft(self.remove_relationship(Some(e1o), Some(e2)))?;
                         squeezed.deleted_edges.push(e1o);
-                        brep_delete_edge(brep_h, e1o)?;
+                        brep.brep_delete_edge(k, brep_h, e1o)?;
                         out.topology_was_deleted = true;
                         self.relate(k, brep, Some(e1), Some(e2))?;
                     }
@@ -895,7 +883,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             if brep.edge_is_manifold(e2)? && faces_share_surface(brep, e2)? {
                 fixed = true;
                 squeezed.deleted_edges.push(e2);
-                brep_delete_edge(brep_h, e2)?;
+                brep.brep_delete_edge(k, brep_h, e2)?;
                 out.topology_was_deleted = true;
             }
             if !fixed {
@@ -906,7 +894,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         fixed = true;
                         ignore_soft(self.remove_relationship(Some(e1), Some(e2o)))?;
                         squeezed.deleted_edges.push(e2o);
-                        brep_delete_edge(brep_h, e2o)?;
+                        brep.brep_delete_edge(k, brep_h, e2o)?;
                         out.topology_was_deleted = true;
                         self.relate(k, brep, Some(e1), Some(e2))?;
                     }

@@ -390,6 +390,31 @@ impl ExecutiveAccess<Handle> for Access {
             cascade_to_boundaries,
         )
     }
+    fn stitch_faces(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        faces: Option<&[Handle]>,
+        allow_spine_edges: bool,
+    ) -> SolidResult<StitchAttempt> {
+        // the fixture has no face handles; both executive call sites stitch every face
+        if faces.is_some() {
+            return missing();
+        }
+        let b = self
+            .breps
+            .get_mut(brep.0)
+            .and_then(Option::as_mut)
+            .ok_or_else(missing_error)?;
+        StitchAttempt::from_stitch(solidcore::topology::brep::p4::stitch_faces(
+            k,
+            b,
+            tolerance,
+            None,
+            allow_spine_edges,
+        ))
+    }
     fn editing_enabled(&self, brep: Handle) -> SolidResult<bool> {
         self.breps
             .get(brep.0)

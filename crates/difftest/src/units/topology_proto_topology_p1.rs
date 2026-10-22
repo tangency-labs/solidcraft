@@ -1335,6 +1335,12 @@ impl solidcore::topology::proto_topology::p3::BrepGlue<H> for Pool {
             "the pool has no B-rep arena to glue in",
         ))
     }
+    fn delete_edge(&mut self, _k: &mut Kernel, _brep: H, _edge: H) -> solidcore::Result<()> {
+        Err(SolidError::invalid_input(
+            "difftest::topology_proto_topology_p1::Pool",
+            "the pool has no B-rep arena to delete in",
+        ))
+    }
 }
 
 impl ClassGeometry<H> for Pool {

@@ -1064,6 +1064,30 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             .map(drop)
         })
     }
+
+    /// `SmBrep::DeleteEdge(pEdge)` (`pOptSurfaceToKeep = NULL`):
+    /// [`crate::topology::brep::p4::delete_edge`], notifying as the face deletion does.
+    fn brep_delete_edge(&mut self, k: &mut Kernel, brep: H, edge: H) -> crate::Result<()> {
+        if brep.kind != K_BREP || edge.kind != K_EDGE || edge.b != brep.b {
+            return Err(invalid("edge is not in the B-rep"));
+        }
+        self.with_edit_env(brep, |b, env| {
+            let mut delete = crate::topology::brep::p4::DeleteEnv::from_notify(env);
+            crate::topology::brep::p4::delete_edge(k, b, &mut delete, eid(edge), None)
+        })
+    }
+
+    /// `SmBrep::DeleteVertex(pVertex)`: [`crate::topology::brep::p4::delete_vertex`],
+    /// notifying as the face deletion does.
+    fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: H, vertex: H) -> crate::Result<()> {
+        if brep.kind != K_BREP || vertex.kind != K_VERTEX || vertex.b != brep.b {
+            return Err(invalid("vertex is not in the B-rep"));
+        }
+        self.with_edit_env(brep, |b, env| {
+            let mut delete = crate::topology::brep::p4::DeleteEnv::from_notify(env);
+            crate::topology::brep::p4::delete_vertex(k, b, &mut delete, vid(vertex))
+        })
+    }
 }
 
 impl ArenaPair<'_> {
@@ -1353,6 +1377,11 @@ impl crate::topology::proto_topology::p3::BrepGlue<H> for ArenaPair<'_> {
             wires.as_deref(),
             Some(&mut notify),
         )
+    }
+
+    /// `SmBrep::DeleteEdge` of `brep`, as [`IntersectorBrep::brep_delete_edge`].
+    fn delete_edge(&mut self, k: &mut Kernel, brep: H, edge: H) -> crate::Result<()> {
+        IntersectorBrep::brep_delete_edge(self, k, brep, edge)
     }
 }
 

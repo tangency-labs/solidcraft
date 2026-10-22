@@ -412,9 +412,10 @@ mod tests {
         let a = Curve::from(wave(0.0));
         let b = Curve::from(wave(5.0));
         let ok = [Some(&a), Some(&b)];
-        assert!(create_skin_primitive(&mut k, &[1, 1], &ok, 3, true)
-            .unwrap_err()
-            .is_unported());
+        // the skin face is built and stitched (topology.brep_p4)
+        let skin = create_skin_primitive(&mut k, &[1, 1], &ok, 3, true).expect("skin");
+        assert_eq!(skin.side_faces.len(), 1);
+        assert_eq!(skin.brep.edge_list().len(), 4);
         for (counts, degree) in [(&[1usize, 1][..], 0), (&[1, 1], 4), (&[2], 1), (&[1, 0], 1)] {
             assert!(matches!(
                 create_skin_primitive(&mut k, counts, &ok, degree, true),

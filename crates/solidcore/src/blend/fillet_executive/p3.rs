@@ -245,6 +245,36 @@ pub struct StitchAttempt {
     pub max_edge_gap: f64,
 }
 
+impl StitchAttempt {
+    /// The attempt a `SmBrep::StitchFaces` call ([`crate::topology::brep::p4::stitch_faces`])
+    /// reports: its counts and gaps, or its failure as `status` with zero counts and
+    /// gaps (the callers read none of them after a failure). [`SolidError::Unported`]
+    /// propagates.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the stitch.
+    pub fn from_stitch(r: Result<crate::topology::brep::p4::StitchOutcome>) -> Result<Self> {
+        match r {
+            Ok(o) => Ok(Self {
+                status: None,
+                stitched: u64::from(o.stitched_edges),
+                lamina: u64::from(o.lamina_edges),
+                max_vertex_gap: o.max_vertex_edge_gap,
+                max_edge_gap: o.max_edge_face_trim_curve_gap,
+            }),
+            Err(e) if e.is_unported() => Err(e),
+            Err(e) => Ok(Self {
+                status: Some(e),
+                stitched: 0,
+                lamina: 0,
+                max_vertex_gap: 0.0,
+                max_edge_gap: 0.0,
+            }),
+        }
+    }
+}
+
 /// Dependency access. Handles must preserve object identity across B-reps and
 /// resolve topology through typed `Brep` arenas. Required methods read dependency
 /// records or adapt existing APIs; default methods are precisely the missing calls, with complete arguments.
@@ -565,21 +595,18 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
 
-    /// `SmBrep::StitchFaces`; waiting for `topology.brep_p4`.
+    /// `SmBrep::StitchFaces(tol, ..., pOptFaces, bAllowSpineEdges)`: delegate to the
+    /// already ported `topology::brep::p4::stitch_faces` (brep p4) on the B-rep `brep`
+    /// resolves to, passing every argument, and report it as
+    /// [`StitchAttempt::from_stitch`] does.
     fn stitch_faces(
         &mut self,
-        _k: &mut Kernel,
-        _brep: O,
-        _tolerance: f64,
-        _faces: Option<&[O]>,
-        _allow_spine_edges: bool,
-    ) -> Result<StitchAttempt> {
-        // UNPORTED(topology.brep_p4): SmBrep::StitchFaces
-        Err(SolidError::unported(
-            "SmBrep::StitchFaces",
-            "topology.brep_p4",
-        ))
-    }
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        faces: Option<&[O]>,
+        allow_spine_edges: bool,
+    ) -> Result<StitchAttempt>;
 
     /// `SmFilletExecutive::DoPiecewiseMerge`; waiting for `blend.fillet_executive_p1`.
     fn piecewise_merge(

@@ -66,13 +66,13 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
     }
     /// Shrink every face's surface to its UV trim curves and every edge's curve to
     /// the edge (`SmBrep::ShrinkGeometry`).
-    fn shrink_geometry(&mut self, brep: BrepId) -> Result<()> {
-        let _ = brep;
-        // UNPORTED(topology.brep_p4): SmBrep::ShrinkGeometry
-        Err(SolidError::unported(
-            "SmBrep::ShrinkGeometry",
-            "topology.brep_p4",
-        ))
+    fn shrink_geometry(&mut self, brep: BrepId) -> Result<()>
+    where
+        Self: Sized,
+    {
+        self.with_primitive_brep(brep, |k, b| {
+            crate::topology::brep::p4::shrink_geometry(k, b)
+        })
     }
     /// Whether two consecutive edges of the face's outer loop are lamina
     /// (`SmFace::HasConsecutiveLaminaEdges`).
@@ -81,23 +81,36 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
     }
     /// Delete a face with the edges and vertices left unconnected, nesting regions
     /// (`SmBrep::DeleteFace(face, TRUE)`).
-    fn delete_face_and_free_topology(&mut self, face: FaceRef) -> Result<()> {
-        let _ = face;
-        // UNPORTED(topology.brep_p3): SmBrep::DeleteFace
-        Err(SolidError::unported(
-            "SmBrep::DeleteFace",
-            "topology.brep_p3",
-        ))
+    ///
+    /// The B-rep keeps no notification records of its own, so the deletion notifies
+    /// through the kernel context's callbacks under the kernel's identities
+    /// ([`crate::topology::brep::p3::with_kernel_callbacks`]).
+    fn delete_face_and_free_topology(&mut self, face: FaceRef) -> Result<()>
+    where
+        Self: Sized,
+    {
+        use crate::topology::brep::p3 as brep_p3;
+        let options = brep_p3::DeleteFaceOptions {
+            delete_edges_vertices: true,
+            ..brep_p3::DeleteFaceOptions::default()
+        };
+        self.with_primitive_brep(face.0, |k, b| {
+            brep_p3::with_kernel_callbacks(k, b, |k, b, env| {
+                let mut marks = crate::topology::topology_traverser::Marks::default();
+                brep_p3::delete_face(k, b, env, &mut marks, face.1, options).map(drop)
+            })
+        })
     }
     /// Glue coincident boundary topology of the B-rep's faces within `tolerance`
     /// (`SmBrep::StitchFaces`; its counts and gaps are unused here).
-    fn stitch_faces(&mut self, brep: BrepId, tolerance: f64) -> Result<()> {
-        let _ = (brep, tolerance);
-        // UNPORTED(topology.brep_p4): SmBrep::StitchFaces
-        Err(SolidError::unported(
-            "SmBrep::StitchFaces",
-            "topology.brep_p4",
-        ))
+    fn stitch_faces(&mut self, brep: BrepId, tolerance: f64) -> Result<()>
+    where
+        Self: Sized,
+    {
+        // header defaults: pOptFaces = NULL, bAllowSpineEdges = FALSE
+        self.with_primitive_brep(brep, |k, b| {
+            crate::topology::brep::p4::stitch_faces(k, b, tolerance, None, false).map(drop)
+        })
     }
     /// Remove edges and vertices that only split faces or edges
     /// (`SmBrep::RemoveTopologicalEdgesAndVertices`).

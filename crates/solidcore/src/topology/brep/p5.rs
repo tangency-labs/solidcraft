@@ -1167,7 +1167,7 @@ pub fn glue_with_notifications(
         remove_vertexuse(b, deleted, vu)?;
         post_insert_vertexuse(b, survivor, vu)?;
     }
-    remove_owned_vertex(b, deleted)?;
+    remove_owned_vertex(b, deleted);
     destroy_topology_record(b, crate::error::EntityRef::Vertex(deleted))?;
     if let Some(first) = first.filter(|&first| first != last) {
         if let Some(vu) = shell_vertexuse(b, last)? {
@@ -1319,12 +1319,9 @@ fn transfer_shell_children(
     let wires: Vec<_> = wire_edges.iter().copied().map(Some).collect();
     crate::topology::shell::transfer_children(k, b, source, target, Some(&wires))
 }
-fn remove_owned_vertex(_b: &mut Brep, _vertex: VertexId) -> Result<()> {
-    // UNPORTED(topology.brep_p1): SmBrep::m_pVertexListHead
-    // Completing the glue (the record removal subsumes the list edit) exposes real
-    // Rust-vs-C++ differences in the shell-vertex path: heal.stitch_p2's
-    // TestSmStitchIntoShell cases gain an extra edge (plan/findings.md).
-    missing("SmBrep::m_pVertexListHead", "topology.brep_p1")
+/// `m_pVertexListHead->Remove(pVertexToDelete)`.
+fn remove_owned_vertex(b: &mut Brep, vertex: VertexId) {
+    b.remove_from_vertex_list(vertex);
 }
 
 /// Outputs of `MakeEdgeInFace`, initialized to null after its editing and face checks.

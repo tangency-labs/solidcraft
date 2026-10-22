@@ -1296,6 +1296,9 @@ impl solidcore::topology::proto_topology::p3::BrepGlue<H> for Two {
             wires.as_deref(),
         )
     }
+    fn delete_edge(&mut self, k: &mut Kernel, brep: H, edge: H) -> solidcore::Result<()> {
+        IntersectorBrep::brep_delete_edge(self, k, brep, edge)
+    }
 }
 
 impl IntersectorBrep<H> for Two {
@@ -1729,6 +1732,26 @@ impl IntersectorBrep<H> for Two {
                 bp3::DeleteFaceOptions::default(),
             )
             .map(drop)
+        })
+    }
+    fn brep_delete_edge(&mut self, k: &mut Kernel, brep: H, edge: H) -> solidcore::Result<()> {
+        if brep.kind != K_BREP || edge.kind != K_EDGE || edge.b != brep.b {
+            return Err(invalid("edge is not in the B-rep"));
+        }
+        let b = self.brep_m(brep)?;
+        with_edit_env(b, |b, env| {
+            let mut delete = solidcore::topology::brep::p4::DeleteEnv::from_notify(env);
+            solidcore::topology::brep::p4::delete_edge(k, b, &mut delete, eid(edge), None)
+        })
+    }
+    fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: H, vertex: H) -> solidcore::Result<()> {
+        if brep.kind != K_BREP || vertex.kind != K_VERTEX || vertex.b != brep.b {
+            return Err(invalid("vertex is not in the B-rep"));
+        }
+        let b = self.brep_m(brep)?;
+        with_edit_env(b, |b, env| {
+            let mut delete = solidcore::topology::brep::p4::DeleteEnv::from_notify(env);
+            solidcore::topology::brep::p4::delete_vertex(k, b, &mut delete, vid(vertex))
         })
     }
 
