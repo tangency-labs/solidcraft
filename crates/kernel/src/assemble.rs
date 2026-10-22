@@ -11,7 +11,7 @@
 //! normal, as the record does.
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
 use solidcraft_geom::brep::{Brep, Curve, Curve2, Edge, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex};
 
@@ -127,18 +127,6 @@ impl Assembly {
             })
             .collect();
         Ok(Assembly { tolerance: b.tolerance, vertices: b.vertices.clone(), edges, faces, regions: b.regions.clone(), shells: b.shells.len() })
-    }
-
-    /// An empty sheet to build faces into: one open shell (shell 0) in the infinite region.
-    pub(crate) fn sheet(tolerance: f64) -> Assembly {
-        Assembly {
-            tolerance,
-            vertices: Vec::new(),
-            edges: Vec::new(),
-            faces: Vec::new(),
-            regions: vec![Region { shells: vec![0], void: false }],
-            shells: 1,
-        }
     }
 
     /// A new vertex at `p`.
@@ -396,14 +384,4 @@ pub(crate) fn natural_out(b: &Brep, face: usize) -> Option<bool> {
         Shell::Faces { faces, .. } => faces.iter().find(|f| f.face as usize == face).map(|f| f.forward),
         _ => None,
     })
-}
-
-/// The outward unit normal of face `face` of `b` at the parameters of `p`, a point on it.
-pub(crate) fn outward_normal(b: &Brep, face: usize, p: Vec3) -> Option<Vec3> {
-    let f = b.faces.get(face)?;
-    let s = SurfaceEval::new(&f.surface).ok()?;
-    let uv = s.project(p, None, f64::INFINITY)?;
-    let (_, su, sv) = s.derivs(uv[0], uv[1])?;
-    let n = su.cross(sv).normalized()?;
-    Some(if natural_out(b, face)? { n } else { -n })
 }

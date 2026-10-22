@@ -34,7 +34,7 @@ fn edge_frame(rec: &Faces, e: usize) -> Result<EdgeFrame> {
         if uses.next().is_some() {
             return None;
         }
-        rec.into_face(f, u)
+        rec.direction_into_face(f, u)
     };
     let (Some(t1), Some(t2)) = (into(i1), into(i2)) else { return Err(KernelError::Failed("blend: edge direction".into())) };
     let phi = t1.dot(t2).clamp(-1.0, 1.0).acos();

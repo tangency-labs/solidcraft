@@ -322,7 +322,7 @@ fn frame(rec: &Faces, e: usize) -> Option<Frame> {
         if !uses.is_empty() {
             return None;
         }
-        beside.push((n, rec.into_face(i, u)?));
+        beside.push((n, rec.direction_into_face(i, u)?));
         chained |= rec.uses(i).filter(|x| x.edge as usize != e).any(|x| {
             let Some(other) = rec.rec.edges.get(x.edge as usize) else { return false };
             let [a, b] = other.vertices;

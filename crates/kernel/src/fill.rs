@@ -155,13 +155,13 @@ fn general_fill(
     // Where a G1/G2 edge's neighbour and the one before disagree at their corner.
     let n = chain.len();
     let mut clash = vec![false; n];
-    for k in 0..n {
+    for (k, slot) in clash.iter_mut().enumerate() {
         let prev = (k + n - 1) % n;
         let (Some(Some(a)), Some(Some(b))) = (beside.get(prev), beside.get(k)) else { continue };
         let (Some(ea), Some(eb)) = (edges.get(prev), edges.get(k)) else { continue };
         let (end, start) = (ea.knots.last().copied().unwrap_or(0.0), eb.knots.first().copied().unwrap_or(0.0));
         if let (Some(x), Some(y)) = (a.across(record, end)?, b.across(record, start)?) {
-            clash[k] = x.normal.dot(y.normal).abs() < (2.0 * PATCH_ANGLE_TOL_DEG).to_radians().cos();
+            *slot = x.normal.dot(y.normal).abs() < (2.0 * PATCH_ANGLE_TOL_DEG).to_radians().cos();
         }
     }
     let mut across = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Option<Across>>, String> {
