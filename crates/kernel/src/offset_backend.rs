@@ -161,7 +161,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
             .triangles
             .iter()
             .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (crate::boolean_guard::point_triangle_dist(*p, x, y, z), *f as usize)))
+            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
             .min_by(|x, y| x.0.total_cmp(&y.0));
         match near {
             Some((d, f)) if d < reach => {
@@ -214,7 +214,7 @@ fn with_offsets(result: &Body, input: &Body, mut h: History, distance: f64) -> O
         let tris = at(&made, i);
         let p = tris.iter().max_by(|x, y| area(x).total_cmp(&area(y))).map(|[a, b, c]| (*a + *b + *c) * (1.0 / 3.0))?;
         let under = at(&source, face);
-        let d = under.iter().map(|[a, b, c]| crate::boolean_guard::point_triangle_dist(p, *a, *b, *c)).fold(f64::INFINITY, f64::min);
+        let d = under.iter().map(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(p, *a, *b, *c).dist(p)).fold(f64::INFINITY, f64::min);
         if !d.is_finite() {
             return None;
         }

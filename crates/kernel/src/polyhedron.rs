@@ -245,7 +245,7 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
             .triangles
             .iter()
             .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (crate::boolean_guard::point_triangle_dist(*p, x, y, z), *f as usize)))
+            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
             .min_by(|a, c| a.0.total_cmp(&c.0));
         match near {
             Some((d, f)) if d < size * 1e-3 + 1e-6 => {
