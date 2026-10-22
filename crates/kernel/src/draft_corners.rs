@@ -39,7 +39,7 @@ impl DraftCorner {
 pub enum CornerRefusal {
     /// The continued curves do not meet (two parallel lines, two circles that part).
     Apart,
-    /// A curve at the corner is neither a line nor an arc: its wall has no exact continuation.
+    /// A curve of the profile is neither a line nor an arc: its wall has no exact continuation.
     NotExact,
     /// A wall at the corner closes before the far end (its arc shrinks to its centre).
     WallCloses,
@@ -97,6 +97,9 @@ pub fn draft_corners(region: &Region2, distance: f64, taper: f64) -> Result<Vec<
     let segs = &outer.segs;
     let d = distance * taper.tan();
     let n = segs.len();
+    // The walls are built as one exact set: a profile with a sharp corner keeps its curvature only
+    // when every curve is a line or an arc.
+    let free = segs.iter().any(|s| matches!(carrier(s, d), Carrier::Free));
     let mut out = Vec::new();
     for k in 0..n {
         let (Some(a), Some(b)) = (segs.get((k + n - 1) % n), segs.get(k)) else { continue };
@@ -111,7 +114,7 @@ pub fn draft_corners(region: &Region2, distance: f64, taper: f64) -> Result<Vec<
         let (ea, eb) = (a.end() + right(ta) * d, b.start() + right(tb) * d);
         // A left turn opens a gap when the profile grows, a right turn when it shrinks.
         let gap = (turn > 0.0) == (d > 0.0);
-        let curvature = continued(ca, cb, ea, eb, p, d);
+        let curvature = if free { Err(CornerRefusal::NotExact) } else { continued(ca, cb, ea, eb, p, d) };
         let options = if gap {
             [
                 CornerOption { rule: DraftCorner::PreserveCurvature, fill: curvature },

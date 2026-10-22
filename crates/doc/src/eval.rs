@@ -2457,6 +2457,28 @@ pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, 
     Ok(out)
 }
 
+/// The corner rule a taper takes for profile `r` of `ss` when the user chose none: preserve
+/// curvature, unless a corner of the profile cannot keep it exactly (a curve that is neither a
+/// line nor an arc), then the tangent rule, with a note in `notes` saying where and why.
+fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, notes: &mut Vec<String>) -> Result<kernel::DraftCorner> {
+    let reports = kernel::draft_corners(r, distance, taper)?;
+    let inexact = reports.iter().find(|c| {
+        c.options.iter().any(|o| o.rule == kernel::DraftCorner::PreserveCurvature && o.fill == Err(kernel::CornerRefusal::NotExact))
+    });
+    Ok(match inexact {
+        Some(c) => {
+            notes.push(format!(
+                "the taper's corners of profile at ({}, {}) in {} use the tangent rule: a curve of it is neither a line nor an arc, so its walls cannot continue as themselves exactly; corner: round also builds",
+                show_mm(c.at.x),
+                show_mm(c.at.y),
+                ss.name
+            ));
+            kernel::DraftCorner::Tangent
+        }
+        None => kernel::DraftCorner::PreserveCurvature,
+    })
+}
+
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
@@ -4466,6 +4488,7 @@ fn feature_tools_with_constructor(
     st: &ModelState,
     constructor: &mut Option<ExtrudeConstructor>,
     to_body: &mut Option<String>,
+    warning: &mut Option<String>,
 ) -> Result<Vec<Traced>> {
     *to_body = None;
     let unnamed = |bodies: Vec<Body>| -> Vec<Traced> { bodies.into_iter().map(Traced::unnamed).collect() };
@@ -4553,15 +4576,22 @@ fn feature_tools_with_constructor(
                 ];
                 // How far a tool grows past its profile, at most: its sides' run over its length.
                 let growth = len * taper.tan().abs();
+                let mut notes = Vec::new();
                 let tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
-                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, extent.corner)?;
+                        let roles = crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                        let corner = match extent.corner {
+                            Some(c) => c,
+                            None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
+                        };
+                        let body = kernel::extrude_tapered_between(&start_plane, r, 0.0, len, 0.0, sign, taper, corner)?;
                         Ok(roles.tool(body, None))
                     })
                     .collect::<Result<_>>()?;
+                for note in notes {
+                    append_warning(warning, note);
+                }
                 // Profiles apart by more than the tools grow (the letters of a text): the tools
                 // are apart too, and go into the body as one, in one boolean rather than one per
                 // profile, each on a body grown or cut by the ones before. (A join meeting several
@@ -5898,7 +5928,7 @@ fn replay(
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
             let moved = with_named_face_points(doc, st, src).map(|(g, _)| g);
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
@@ -6426,7 +6456,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Sweep { operation, targets, .. } => {
             let mut constructor = None;
             let mut to_body = None;
-            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body)?;
+            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
