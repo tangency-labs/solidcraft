@@ -170,6 +170,19 @@ impl Brep {
         ffi::ops::thicken(&self.0, thickness, symmetric).map(Brep).map_err(error)
     }
 
+    /// This body with its topological edges and vertices removed (SMLib's
+    /// `SmBrep::RemoveTopologicalEdgesAndVertices`): faces on one surface meeting along an edge
+    /// become one, and two edges on one curve meeting at a vertex nothing else uses become one.
+    /// The edges nearest to `keep` (each within `tolerance`) stay. The shape is unchanged, and
+    /// SMLib's history tags follow the merge.
+    pub fn merge_faces(&self, keep: &[[f64; 3]], tolerance: f64) -> Result<Brep> {
+        init()?;
+        if keep.len() > MAX_POINTS {
+            return Err(Error::Argument);
+        }
+        ffi::ops::merge_faces(&self.0, keep, tolerance).map(Brep).map_err(pick_error)
+    }
+
     /// The flat faces nearest to `faces` (each within `tolerance`) tilted by `angle` radians
     /// (0 < |angle| < 89.94 degrees) about the line where each meets the neutral plane through
     /// `neutral_origin` with normal `neutral_normal`, a positive angle leaning them in going along
