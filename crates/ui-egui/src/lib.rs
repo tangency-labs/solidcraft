@@ -221,6 +221,7 @@ pub mod ref_images;
 mod render_ui;
 pub mod render_workspace;
 pub mod resume_ui;
+pub mod revisions_panel;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -553,6 +554,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Revisions window, when open.
+    pub revisions: Option<revisions_panel::RevisionsPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -807,6 +810,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            revisions: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1544,6 +1548,12 @@ impl SolveApp {
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
         self.tree.clear_folder_pick();
+        // Revisions is a file window. Another command closes it, the same way a new command
+        // leaves the File view. While it stayed open it was wider than a command dialog, and
+        // every later dialog failed the shared window-width limit.
+        if id != "doc.revisions" {
+            self.revisions = None;
+        }
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -1846,6 +1856,10 @@ impl SolveApp {
         }
         if id == "sketch.edit" {
             self.start_sketch_edit(opener);
+        }
+        if id == "doc.revisions" {
+            revisions_panel::open(self);
+            self.home.open = false;
             return;
         }
         if id == "sketch.finish" {
@@ -3129,6 +3143,7 @@ impl SolveApp {
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
+        revisions_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());

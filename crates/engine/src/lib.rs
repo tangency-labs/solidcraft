@@ -459,6 +459,10 @@ pub struct Session {
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
     /// the user chose is kept.
     pub user_named: bool,
+    /// Set when an earlier revision is open read-only (`doc.restore` with `mode: "readonly"`).
+    /// Edits and Save are refused until that revision is restored as the working model, saved
+    /// as a new file, or another design is opened.
+    pub revision_view: Option<u64>,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -713,6 +717,7 @@ impl Session {
             disk: None,
             read_only: false,
             user_named: false,
+            revision_view: None,
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -1459,6 +1464,13 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if let Some(rev) = self.revision_view
+            && (spec.undoable || spec.id == "file.save")
+        {
+            return Err(EngineError::Other(format!(
+                "revision {rev} is open read-only; restore it as the working model (`doc.restore` mode \"working\") or use Save As"
+            )));
+        }
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
@@ -1715,6 +1727,7 @@ impl Session {
             disk: self.disk,
             read_only: self.read_only,
             user_named: self.user_named,
+            revision_view: self.revision_view,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),

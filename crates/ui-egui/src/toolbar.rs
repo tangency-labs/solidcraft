@@ -677,7 +677,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     FileAction::Command("component.insert_design").run(app);
                     close = true;
                 }
-                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", shown) {
+                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", shown && app.session.revision_view.is_none()) {
                     FileAction::Save.run(app);
                     close = true;
                 }
@@ -685,6 +685,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
                 if item_if(ui, &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown) {
                     FileAction::SaveAs.run(app);
+                    close = true;
+                }
+                if item_if(ui, app.tr("home.revisions"), "", "restore", shown) {
+                    FileAction::Command("doc.revisions").run(app);
                     close = true;
                 }
                 if item(ui, "Save As JSON…", "", "save") {

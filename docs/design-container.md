@@ -19,6 +19,15 @@ Within `document.json`:
   and `triangles` plus a `mesh_blob` reference.
 - Canvases retain placement, format and pixel metadata, with empty `data` plus an
   `image_blob` reference. Raw image bytes replace base64 in the package.
+- `document_history` records the save count and up to 16 parametric snapshots, newest
+  kept. A snapshot is the document without `document_history` and without the evaluated
+  model. Its import, mesh and canvas payloads use the same blob references as the live
+  document, so an unchanged payload is stored once. The parametric JSON of those snapshots
+  stays within 8 MiB. Plain JSON applies that cap to the encoded snapshot and drops the
+  oldest snapshot bodies. An entry can remain after its snapshot is dropped. Restoring a
+  revision with no snapshot is an error. `cache/model.json` and `cache/bodies.bin` are the
+  current evaluation, not revision history. If rehydrating a snapshot would push resolved
+  payloads over the budget, that snapshot is dropped and the design still opens.
 
 References are `blobs/<lowercase SHA-256>.<step|mesh|png|jpeg>`, hashed over the exact
 uncompressed payload. Identical content with the same encoding is written once.
