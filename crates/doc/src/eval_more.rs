@@ -1863,27 +1863,6 @@ fn local_frame(z: Vec3, x: Option<Vec3>) -> Result<(Vec3, Vec3, Vec3)> {
     Ok((x, y, z))
 }
 
-/// Offset a closed polygon to its left by `d` (mitred corners).
-fn offset_left(p: &[Vec2], d: f64) -> Vec<Vec2> {
-    let m = p.len();
-    let line = |i: usize| -> Option<(Vec2, Vec2)> {
-        let (a, b) = (*p.get(i)?, *p.get((i + 1) % m)?);
-        let t = (b - a).normalized()?;
-        Some((a + Vec2::new(-t.y, t.x) * d, t))
-    };
-    (0..m)
-        .filter_map(|i| {
-            let (p0, d0) = line((i + m - 1) % m)?;
-            let (p1, d1) = line(i)?;
-            let den = d0.cross(d1);
-            if den.abs() < 1e-12 {
-                return Some(p1);
-            }
-            Some(p0 + d0 * ((p1 - p0).cross(d1) / den))
-        })
-        .collect()
-}
-
 /// The smallest size a plastic feature's lengths may have, in millimetres. Thinner walls and
 /// shorter arms than this are below what the solid booleans can resolve.
 const PLASTIC_MIN_SIZE: f64 = 0.01;
@@ -2054,7 +2033,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 [a, b, ..] => b.signed_area().abs() > 0.5 * a.signed_area().abs(),
                 _ => false,
             };
-            let (Some(outer), Some(inner), false) = (outer, openings.first().cloned(), alike) else {
+            let (Some(_), Some(_), false) = (outer, openings.first(), alike) else {
                 let what = match (loops.len(), openings.len()) {
                     (0 | 1, _) => "pick the rim face of a shelled body (a face with an inner and an outer edge)".to_string(),
                     (_, 0) => "pick the rim face of a shelled body: this face's inner edges are where other features stand on it, not an opening"
@@ -2063,46 +2042,20 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 };
                 return Err(DocError::Invalid(what));
             };
-            let bw = if *groove { w + g } else { w };
-            // A lip: the band raised from the rim's own faces (its walls continue the walls
-            // below, which a join can't do: they would coincide).
-            if !*groove
-                && let Ok(b) = kernel::raise_band(&mb.body, face.0, w, h, *outside)
-                && let Some(slot) = st.bodies.iter_mut().find(|x| x.name == target)
-            {
+            // A lip: the band raised from the rim's own faces, its walls continuing the walls below.
+            if !*groove {
+                let b = kernel::raise_band(&mb.body, face.0, w, h, *outside)?;
+                let slot = st.bodies.iter_mut().find(|x| x.name == target).ok_or_else(|| DocError::Invalid("body".into()))?;
                 *slot = ModelBody::traced_new(target.clone(), Traced::step(b, &[&mb.traced()]), slot.feature);
                 return Ok(());
             }
-            // The band along the chosen edge, inside the rim face. A groove's cutter reaches past
-            // the edge into the free side (the cavity, or outside), so no wall coincides.
-            let free = if *groove { bw } else { 0.0 };
-            let (plane, band) = if let Ok(exact) = kernel::rim_band(&mb.body, face.0, bw, free, *outside) {
-                exact
-            } else if *outside {
-                (
-                    plane,
-                    Region2 {
-                        outer: Loop2::polygon(&offset_left(&outer, -free)).ccw(),
-                        holes: vec![Loop2::polygon(&offset_left(&outer, bw)).ccw().reversed()],
-                    },
-                )
-            } else {
-                (
-                    plane,
-                    Region2 {
-                        outer: Loop2::polygon(&offset_left(&inner, -bw)).ccw(),
-                        holes: vec![Loop2::polygon(&offset_left(&inner, free)).ccw().reversed()],
-                    },
-                )
-            };
+            // A groove: the band along the chosen edge, inside the rim face, and its gap. The
+            // cutter reaches past the edge into the free side (the cavity, or outside).
+            let bw = w + g;
+            let (plane, band) = kernel::rim_band(&mb.body, face.0, bw, bw, *outside)?;
             let delta = (h * 0.05).clamp(1e-3, 0.5);
-            if *groove {
-                let tool = kernel::extrude(&plane, &[band], -(h + g), delta)?.into_iter().map(|b| crate::lineage::part_tool(b, "groove")).collect();
-                apply_traced(doc, st, f, tool, Operation::Cut, std::slice::from_ref(&target))
-            } else {
-                let tool = kernel::extrude(&plane, &[band], -delta, h)?.into_iter().map(|b| crate::lineage::part_tool(b, "lip")).collect();
-                apply_traced(doc, st, f, tool, Operation::Join, std::slice::from_ref(&target))
-            }
+            let tool = kernel::extrude(&plane, &[band], -(h + g), delta)?.into_iter().map(|b| crate::lineage::part_tool(b, "groove")).collect();
+            apply_traced(doc, st, f, tool, Operation::Cut, std::slice::from_ref(&target))
         }
         FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             let target = body_under(st, body, position.0)?;

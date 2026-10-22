@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{Surface, part, placement::Rigid};
+use solidcraft_geom::brep::{part, placement::Rigid};
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
@@ -15,28 +15,6 @@ pub enum BoolOp {
     Union,
     Cut,
     Intersect,
-}
-
-/// Whether every face of the body is planar.
-pub fn is_planar(body: &Body) -> bool {
-    !body.is_mesh() && body.record().faces.iter().all(|f| matches!(f.surface, Surface::Plane { .. } | Surface::PlaneThrough { .. }))
-}
-
-/// Extrusion tools apart from each other as one body, so a target takes them in one boolean;
-/// `None` when fewer than two are given or any two are not apart ([`union_apart`]).
-pub fn compound_disjoint_extrusions(tools: &[Body]) -> Result<Option<Body>> {
-    union_apart(tools)
-}
-
-/// Whether a union keeps `b` as it is where it touches `a` face to face: SMLib's boolean takes
-/// touching faces exactly, so any two solid bodies.
-pub fn can_join_touching_faces(a: &Body, b: &Body) -> bool {
-    !a.is_mesh() && !b.is_mesh()
-}
-
-/// [`can_join_touching_faces`] for a compound of several tools.
-pub fn can_join_all_touching_faces(a: &Body, b: &Body) -> bool {
-    can_join_touching_faces(a, b)
 }
 
 /// Boolean of two bodies in SMLib. The result may be empty (`Ok(None)`) for a cut that removes
