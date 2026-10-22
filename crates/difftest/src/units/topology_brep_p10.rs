@@ -538,7 +538,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
             b.set_editing_enabled(editing);
             // the runner's records: the merged and deleted objects propagate their
             // flags and user values into the survivors, as upstream's objects do
-            let mut env = solidcore::topology::edge::NotifyEnv {
+            let mut env = NotifyEnv {
                 records: &mut records,
                 attributes: &mut store,
                 context: None,

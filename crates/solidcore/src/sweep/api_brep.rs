@@ -695,14 +695,27 @@ mod tests {
     }
 
     #[test]
-    fn consuming_sweeps_copy_then_defer() {
+    fn consuming_sweeps_copy_then_run_or_defer() {
         let mut k = Kernel::default();
         let (c, l, h) = (circle(), line(), hermite());
         let ok = [Some(&c), Some(&l)];
         let z = Vec3::new(0.0, 0.0, 1.0);
         let o = Point3::new(0.0, 0.0, 0.0);
-        assert!(unported(&create_linear_sweep(&mut k, &ok, z, 10.0, true)));
-        assert!(unported(&create_linear_sweep(&mut k, &[], z, 10.0, true)));
+        // the copies are made and the sweep runs (topology.brep_p4 is ported)
+        let b = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect("linear sweep");
+        assert_eq!(
+            (
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ),
+            (2, 7, 6)
+        );
+        // no profile curves: a successful empty sweep, as upstream
+        let b = create_linear_sweep(&mut k, &[], z, 10.0, true).expect("empty sweep");
+        assert!(b.face_list().is_empty());
+        assert!(b.edge_list().is_empty());
+        assert!(b.vertex_list().is_empty());
         assert!(invalid(&create_linear_sweep(
             &mut k,
             &[Some(&c), None],
@@ -710,6 +723,7 @@ mod tests {
             1.0,
             false
         )));
+        // the stitch's glue path stops at the vertex-list removal
         assert!(unported(&create_rotational_sweep(
             &mut k, &ok, o, z, 90.0, false
         )));
@@ -779,25 +793,36 @@ mod tests {
             2,
             false
         )));
+        // the stitch's glue path stops at the vertex-list removal
         assert!(unported(&create_rotational_sweep_with_repetitions(
             &mut k, &ok, o, z, 5.0, 2, false
         )));
     }
 
     #[test]
-    fn pipe_and_planar_path_validate_then_defer() {
+    fn pipe_and_planar_path_validate_then_run_or_defer() {
         let mut k = Kernel::default();
         let p = path();
         assert!(invalid(&create_pipe_sweep(&mut k, 1.0, None, true)));
         assert!(invalid(&create_pipe_sweep(&mut k, 0.0, Some(&p), true)));
         assert!(invalid(&create_pipe_sweep(&mut k, -1.0, Some(&p), false)));
-        assert!(unported(&create_pipe_sweep(
-            &mut k,
-            f64::NAN,
-            Some(&p),
-            false
-        )));
-        assert!(unported(&create_pipe_sweep(&mut k, 1.0, Some(&p), true)));
+        // a NaN radius passes the API's validation; upstream returns an empty B-rep
+        let b = create_pipe_sweep(&mut k, f64::NAN, Some(&p), false).expect("nan pipe");
+        assert!(b.face_list().is_empty());
+        assert!(b.edge_list().is_empty());
+        assert!(b.vertex_list().is_empty());
+        // a positive radius sweeps the tube; the capped one's cap builder glues and
+        // stops at the stitch's vertex-list removal
+        let b = create_pipe_sweep(&mut k, 1.0, Some(&p), false).expect("pipe");
+        assert_eq!(b.face_list().len(), 1);
+        let capped = create_pipe_sweep(&mut k, 1.0, Some(&p), true);
+        assert!(matches!(
+            capped,
+            Err(SolidError::Unported {
+                upstream: "SmBrep::m_pVertexListHead",
+                unit: "topology.brep_p1"
+            })
+        ));
 
         let (c, l) = (circle(), line());
         assert!(invalid(&create_sweep_along_planar_path(

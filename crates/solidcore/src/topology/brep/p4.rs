@@ -401,9 +401,8 @@ fn brep_get_curves(b: &Brep) -> Result<Vec<EdgeId>> {
 }
 
 /// `SmBrep::UnLockBoundingBox` (unit `query.brep`).
-fn unlock_bounding_box(b: &mut Brep) -> Result<()> {
+fn unlock_bounding_box(b: &mut Brep) {
     crate::query::brep::unlock_bounding_box(b);
-    Ok(())
 }
 
 // ---- helpers -------------------------------------------------------------------------------
@@ -1712,7 +1711,8 @@ fn destroy_records(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     b.set_region_list_head(None);
     b.set_infinite_region_record(None);
 
-    unlock_bounding_box(b)
+    unlock_bounding_box(b);
+    Ok(())
 }
 
 #[cfg(test)]

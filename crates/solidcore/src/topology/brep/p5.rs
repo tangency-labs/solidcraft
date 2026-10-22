@@ -1321,6 +1321,9 @@ fn transfer_shell_children(
 }
 fn remove_owned_vertex(_b: &mut Brep, _vertex: VertexId) -> Result<()> {
     // UNPORTED(topology.brep_p1): SmBrep::m_pVertexListHead
+    // Completing the glue (the record removal subsumes the list edit) exposes real
+    // Rust-vs-C++ differences in the shell-vertex path: heal.stitch_p2's
+    // TestSmStitchIntoShell cases gain an extra edge (plan/findings.md).
     missing("SmBrep::m_pVertexListHead", "topology.brep_p1")
 }
 
@@ -2062,20 +2065,16 @@ pub fn initial_stitch_tolerance(brep_tolerance: f64, requested: f64) -> f64 {
 
 /// Stitches twice if needed, then orients surfaces. No success is manufactured
 /// from the statuses ignored upstream when a required callee is missing.
+///
+/// The stitch passes run outside an edit of their own: the stitch's glue and squeeze
+/// helpers notify through their own kernel-context edits
+/// ([`crate::topology::brep::p3::with_kernel_callbacks`]), which the guard refuses
+/// inside another edit, and upstream's `SmBrep::StitchFaces` has no edit scope to
+/// nest. Only the orientation pass needs the caller's notification environment.
 pub fn stitch_and_orient(
     k: &mut Kernel,
     b: &mut Brep,
     options: &StitchAndOrientOptions,
-) -> Result<()> {
-    plain_edit(k, b, |k, b, env| stitch_and_orient_in(k, b, options, env))
-}
-
-/// [`stitch_and_orient`] under the edit's notification environment ([`plain_edit`]).
-fn stitch_and_orient_in(
-    k: &mut Kernel,
-    b: &mut Brep,
-    options: &StitchAndOrientOptions,
-    env: &mut EditNotifyEnv<'_>,
 ) -> Result<()> {
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
@@ -2100,15 +2099,17 @@ fn stitch_and_orient_in(
             &mut lamina,
         ))?;
     }
-    crate::error::ignore_status(orient_trimmed_surfaces(
-        k,
-        b,
-        Some(&mut *env),
-        true,
-        options.just_unify.unwrap_or(lamina > 0),
-        options.faces_to_swap.as_deref(),
-    ))?;
-    Ok(())
+    plain_edit(k, b, |k, b, env| {
+        crate::error::ignore_status(orient_trimmed_surfaces(
+            k,
+            b,
+            Some(env),
+            true,
+            options.just_unify.unwrap_or(lamina > 0),
+            options.faces_to_swap.as_deref(),
+        ))?;
+        Ok(())
+    })
 }
 
 /// `StitchFaces(tol, lNumStitched, lNumLamina, dMaxVGap, dMaxEGap, NULL, bAllowSpine)`:
