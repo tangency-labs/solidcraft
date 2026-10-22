@@ -1,15 +1,14 @@
 //! Surface/surface intersection (`capi/include/smlib.h`, "Surface/surface intersection"): two
 //! surfaces described in plain numbers, intersected by one of SMLib's SSI entry points, each
-//! intersection curve sampled uniformly in its parameters.
+//! intersection curve exactly as SMLib holds it: schema 4 B-splines (`solidcraft_geom::brep`).
 //!
 //! The constructors take exactly the fields of an SSI corpus case (`tests/ssi-corpus`), angles in
 //! degrees. Each surface's UV domain is SMLib's natural one ([`Surface::domain`]): (u, v) itself
 //! for planes, the parameterisation of SMLib's internal NURBS form for the other analytic kinds.
 
-use crate::{Error, Result, error, ffi, init};
+use solidcraft_geom::brep as b;
 
-/// `SMLIB_SSI_MAX_SAMPLES`: most samples per curve.
-pub const MAX_SAMPLES: usize = 100_000;
+use crate::{Error, Result, error, ffi, init};
 
 /// A surface with its UV domain, owned on the C side.
 pub struct Surface(ffi::ssi::SurfaceHandle);
@@ -209,27 +208,25 @@ impl CurveType {
     }
 }
 
-/// One intersection curve, sampled at the same count of parameters on the 3D curve and on each
-/// UV curve. A value SMLib could not evaluate is NaN, and so is every UV value (with the surface
-/// at it) of a UV curve the method did not return ([`SsiCurve::has_uv_a`]).
+/// One intersection curve as SMLib returned it: its 3D curve and, where the method returned
+/// them, its curves in each surface's UV, each the (rational) B-spline SMLib holds (its lines,
+/// circles and ellipses are B-splines too; an intersection curve one SMLib fitted within the
+/// approximation tolerance).
 #[derive(Clone, Debug)]
 pub struct SsiCurve {
     pub curve_type: CurveType,
-    pub has_uv_a: bool,
-    pub has_uv_b: bool,
     /// SMLib's deviation estimate (NaN: none).
     pub deviation: f64,
-    /// The 3D curve's natural parameter interval, which `xyz` samples uniformly.
+    /// The 3D curve's natural parameter interval.
     pub interval: [f64; 2],
-    pub xyz: Vec<[f64; 3]>,
-    pub uv_a: Vec<[f64; 2]>,
-    pub uv_b: Vec<[f64; 2]>,
-    /// Surface a at `uv_a`, b at `uv_b`.
-    pub a_at_uv: Vec<[f64; 3]>,
-    pub b_at_uv: Vec<[f64; 3]>,
+    pub curve: b::Curve,
+    /// On surface a, in a's UV.
+    pub uv_a: Option<b::Curve2>,
+    /// On surface b, in b's UV.
+    pub uv_b: Option<b::Curve2>,
 }
 
-/// An isolated point: a [`CurveType::Touching`] curve's first sample.
+/// An isolated point: where a [`CurveType::Touching`] curve starts.
 #[derive(Clone, Copy, Debug)]
 pub struct SsiPoint {
     pub xyz: [f64; 3],
@@ -244,39 +241,54 @@ pub struct SsiResult {
     pub points: Vec<SsiPoint>,
 }
 
-fn triples(v: &[f64]) -> Vec<[f64; 3]> {
-    v.as_chunks::<3>().0.to_vec()
+/// The 3D B-spline: polynomial where every weight is 1.
+fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
+    let points = c.points.as_chunks::<3>().0;
+    if c.weights.iter().all(|w| *w == 1.0) {
+        b::Curve::Spline { knots: c.knots, points: points.to_vec() }
+    } else {
+        b::Curve::RationalSpline {
+            knots: c.knots,
+            homogeneous: points.iter().zip(&c.weights).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect(),
+        }
+    }
 }
 
-fn pairs(v: &[f64]) -> Vec<[f64; 2]> {
-    v.as_chunks::<2>().0.to_vec()
+/// A UV B-spline, as [`curve3`].
+fn curve2(c: ffi::ssi::Nurbs) -> b::Curve2 {
+    let points = c.points.as_chunks::<2>().0;
+    if c.weights.iter().all(|w| *w == 1.0) {
+        b::Curve2::Spline { knots: c.knots, points: points.to_vec() }
+    } else {
+        b::Curve2::RationalSpline { knots: c.knots, homogeneous: points.iter().zip(&c.weights).map(|(p, w)| [p[0] * w, p[1] * w, *w]).collect() }
+    }
+}
+
+/// A UV curve the method may not have returned (`SMLIB_ERR_EMPTY`).
+fn uv(r: &ffi::ssi::ResultHandle, i: i32, which: i32) -> Result<Option<b::Curve2>> {
+    match ffi::ssi::curve_nurbs(r, i, which, 2) {
+        Ok(c) => Ok(Some(curve2(c))),
+        Err(ffi::ERR_EMPTY) => Ok(None),
+        Err(s) => Err(error(s)),
+    }
 }
 
 /// Intersects `a` and `b` within their domains with `method` at approximation tolerance
-/// `approx_tol` (<= 0: SMLib's default, 1/1000 of the surfaces' size), sampling each curve at
-/// `samples` parameters (2..=[`MAX_SAMPLES`]). An intersector failure is SMLib's status.
-pub fn intersect(a: &Surface, b: &Surface, method: Method, approx_tol: f64, samples: usize) -> Result<SsiResult> {
-    if !(2..=MAX_SAMPLES).contains(&samples) {
-        return Err(Error::Argument);
-    }
-    let r = ffi::ssi::ssi(&a.0, &b.0, method.code(), approx_tol, int(samples)?).map_err(error)?;
+/// `approx_tol` (<= 0: SMLib's default, 1/1000 of the surfaces' size). An intersector failure is
+/// SMLib's status; a curve SMLib does not hold as a B-spline is [`Error::Unsupported`].
+pub fn intersect(a: &Surface, b: &Surface, method: Method, approx_tol: f64) -> Result<SsiResult> {
+    let r = ffi::ssi::ssi(&a.0, &b.0, method.code(), approx_tol).map_err(error)?;
     let n = ffi::ssi::curve_count(&r).map_err(error)?;
     let mut curves = Vec::new();
     for i in 0..n {
         let info = ffi::ssi::curve_info(&r, i).map_err(error)?;
-        let count = usize::try_from(info.samples).map_err(|_| Error::Argument)?;
-        let s = ffi::ssi::curve_samples(&r, i, count).map_err(error)?;
         curves.push(SsiCurve {
             curve_type: CurveType::from_code(info.ty),
-            has_uv_a: info.flags & 1 != 0,
-            has_uv_b: info.flags & 2 != 0,
             deviation: info.deviation,
             interval: info.interval,
-            xyz: triples(&s.xyz),
-            uv_a: pairs(&s.uv_a),
-            uv_b: pairs(&s.uv_b),
-            a_at_uv: triples(&s.a_at_uv),
-            b_at_uv: triples(&s.b_at_uv),
+            curve: curve3(ffi::ssi::curve_nurbs(&r, i, ffi::ssi::CURVE_3D, 3).map_err(error)?),
+            uv_a: uv(&r, i, ffi::ssi::CURVE_UV_A)?,
+            uv_b: uv(&r, i, ffi::ssi::CURVE_UV_B)?,
         });
     }
     let n = ffi::ssi::point_count(&r).map_err(error)?;
@@ -304,15 +316,16 @@ mod tests {
             (Ok(p), Ok(s)) => (p, s),
             (p, s) => panic!("{p:?} {s:?}"),
         };
-        let r = intersect(&plane, &sphere, Method::Global, 1e-6, 101).expect("intersect");
+        let r = intersect(&plane, &sphere, Method::Global, 1e-6).expect("intersect");
         assert!(!r.curves.is_empty());
         for c in &r.curves {
-            assert_eq!(c.xyz.len(), 101);
-            for p in &c.xyz {
-                assert!((p[0].hypot(p[1]) - 1.0).abs() < 1e-5 && p[2].abs() < 1e-5, "{p:?}");
+            let eval = b::eval::CurveEval::new(&c.curve).expect("a curve");
+            let [t0, t1] = c.interval;
+            for k in 0..=100 {
+                let p = eval.point(t0 + (t1 - t0) * f64::from(k) / 100.0).expect("evaluates");
+                assert!((p.x.hypot(p.y) - 1.0).abs() < 1e-5 && p.z.abs() < 1e-5, "{p:?}");
             }
         }
-        assert_eq!(intersect(&plane, &sphere, Method::Global, 1e-6, 1).err(), Some(Error::Argument));
     }
 
     #[test]

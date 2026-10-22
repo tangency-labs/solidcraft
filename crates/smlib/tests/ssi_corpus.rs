@@ -530,12 +530,20 @@ fn surface(s: &Value) -> Result<solidcraft_smlib::ssi::Surface, String> {
     r.map_err(|e| e.to_string())
 }
 
-/// SMLib's answer as the corpus runner writes it for `gsi`: samples SMLib could not evaluate
-/// dropped, empty UV arrays for a UV curve the method did not return, the runner's type names,
-/// and no isolated points (the runner only reports those in face mode).
+/// SMLib's answer as the corpus runner writes it for `gsi`: each exact curve sampled where the
+/// runner samples it ([`RUNNER_SAMPLES`] parameters spread evenly over the 3D curve's natural
+/// interval, each UV curve over its own, the surfaces at the UV samples), samples that cannot be
+/// evaluated dropped, empty UV arrays for a UV curve the method did not return, the runner's type
+/// names, and no isolated points (the runner only reports those in face mode).
 #[cfg(feature = "native")]
-fn runner_output(r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>, ms: f64) -> Outcome {
-    use solidcraft_smlib::ssi::CurveType;
+fn runner_output(
+    r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>,
+    a: &solidcraft_smlib::ssi::Surface,
+    b: &solidcraft_smlib::ssi::Surface,
+    ms: f64,
+) -> Outcome {
+    use solidcraft_geom::brep::{Curve2, eval::CurveEval};
+    use solidcraft_smlib::ssi::{CurveType, Surface};
     let r = match r {
         Ok(r) => r,
         Err(solidcraft_smlib::Error::Status(s)) => {
@@ -543,33 +551,33 @@ fn runner_output(r: solidcraft_smlib::Result<solidcraft_smlib::ssi::SsiResult>, 
         }
         Err(e) => return Outcome::Crashed(e.to_string()),
     };
-    let curves = r
-        .curves
-        .into_iter()
-        .map(|c| {
-            let curve_type = match c.curve_type {
-                CurveType::None => "n/a",
-                CurveType::Unknown => "UNKNOWN",
-                CurveType::Touching => "TOUCHING",
-                CurveType::Crossing => "CROSSING",
-                CurveType::Tangent => "TANGENT",
-                CurveType::Coincident => "COINCIDENT",
-                CurveType::NearTangent => "NEAR_TANGENT",
-                CurveType::RegionBoundary => "REGION_BOUNDARY",
-                CurveType::Other(_) => "?",
-            };
-            let evaluated = |p: &[f64]| p.iter().any(|x| !x.is_nan());
-            let on = |has: bool, uv: Vec<[f64; 2]>, at: Vec<V3>| -> (Vec<[f64; 2]>, Vec<V3>) {
-                if !has {
-                    return (Vec::new(), Vec::new());
-                }
-                uv.into_iter().zip(at).filter(|(q, _)| evaluated(q)).unzip()
-            };
-            let (uv1, s1_at_uv) = on(c.has_uv_a, c.uv_a, c.a_at_uv);
-            let (uv2, s2_at_uv) = on(c.has_uv_b, c.uv_b, c.b_at_uv);
-            EngineCurve { curve_type: curve_type.into(), xyz: c.xyz.into_iter().filter(|p| evaluated(p)).collect(), uv1, uv2, s1_at_uv, s2_at_uv }
-        })
-        .collect();
+    let params = |[t0, t1]: [f64; 2]| (0..RUNNER_SAMPLES).map(move |i| t0 + (t1 - t0) * (i as f64 / (RUNNER_SAMPLES - 1) as f64));
+    let on = |c: &Option<Curve2>, s: &Surface| -> (Vec<[f64; 2]>, Vec<V3>) {
+        let Some(c) = c else { return (Vec::new(), Vec::new()) };
+        let Some(ivl) = c.interval() else { return (Vec::new(), Vec::new()) };
+        params(ivl).filter_map(|t| c.eval(t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
+    };
+    let mut curves = Vec::new();
+    for c in r.curves {
+        let curve_type = match c.curve_type {
+            CurveType::None => "n/a",
+            CurveType::Unknown => "UNKNOWN",
+            CurveType::Touching => "TOUCHING",
+            CurveType::Crossing => "CROSSING",
+            CurveType::Tangent => "TANGENT",
+            CurveType::Coincident => "COINCIDENT",
+            CurveType::NearTangent => "NEAR_TANGENT",
+            CurveType::RegionBoundary => "REGION_BOUNDARY",
+            CurveType::Other(_) => "?",
+        };
+        let xyz = match CurveEval::new(&c.curve) {
+            Ok(e) => params(c.interval).filter_map(|t| e.point(t)).map(|p| [p.x, p.y, p.z]).collect(),
+            Err(e) => return Outcome::Crashed(format!("an intersection curve: {e}")),
+        };
+        let (uv1, s1_at_uv) = on(&c.uv_a, a);
+        let (uv2, s2_at_uv) = on(&c.uv_b, b);
+        curves.push(EngineCurve { curve_type: curve_type.into(), xyz, uv1, uv2, s1_at_uv, s2_at_uv });
+    }
     Outcome::Ran(EngineResult { status: ssi_score::SM_SUCCESS, status_name: None, time_ms: ms, curves, points: Vec::new() })
 }
 
@@ -588,8 +596,8 @@ fn smlib_global_intersect_at_1e_6() {
             let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
             let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
             let t = std::time::Instant::now();
-            let r = intersect(&a, &b, Method::Global, 1e-6, RUNNER_SAMPLES);
-            runner_output(r, t.elapsed().as_secs_f64() * 1e3)
+            let r = intersect(&a, &b, Method::Global, 1e-6);
+            runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
         })
         .collect();
     let ran = t0.elapsed();
