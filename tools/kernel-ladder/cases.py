@@ -299,8 +299,12 @@ case(T5, "010-hole-tangent-to-end-face", "a d10 through hole tangent to the end 
      {"body_count": 1, "volume_mm3": VB - PI * 25 * 20}, "the wall touches x=0 along a line: removed pi 5^2 20, one body", base=B1)
 case(T5, "011-crossing-holes-steinmetz", "two d10 through holes whose axes cross: vertical and along Y at z=10",
      [H(position=top, diameter=10), H(position=[30, 0, 10], diameter=10)],
-     {"body_count": 1, "volume_mm3": VB - PI * 25 * 20 - PI * 25 * 40 + 16 * 125 / 3, "faces": 8},
-     "equal radii, crossing axes: the common part is the Steinmetz solid 16 r^3 / 3; removed pi r^2 (20 + 40) - 16 r^3/3", base=B1)
+     {"body_count": 1, "volume_mm3": VB - PI * 25 * 20 - PI * 25 * 40 + 16 * 125 / 3, "faces": 10},
+     "equal radii, crossing axes: the common part is the Steinmetz solid 16 r^3 / 3; removed pi r^2 (20 + 40) - 16 r^3/3. "
+     "Faces: the stock's 6 and two per hole. With equal radii the walls cross along two ellipses that meet at the two "
+     "points where the walls are tangent (x = 25 and 35, y = 20, z = 10), so each wall is left in two pieces (the vertical "
+     "one above and below the other hole, the horizontal one either side of the vertical hole) that touch only at those "
+     "points: no edge joins them, so they are separate faces", base=B1)
 rr, off = 2.5, 2.0
 lo, hi = max(-rr, off - rr), min(rr, off + rr)
 vx = quad(lambda u: 4 * math.sqrt(max(rr * rr - u * u, 0)) * math.sqrt(max(rr * rr - (u - off) ** 2, 0)), lo, hi, 256)
