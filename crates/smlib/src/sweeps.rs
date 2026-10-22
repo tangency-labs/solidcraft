@@ -1,6 +1,7 @@
 //! SMLib's sweeps: extrusion (straight or drafted), revolution, sweep along a path, loft through
-//! sections, the screw sweep of a thread or coil, and the sweep of a profile placed at stations
-//! (one that twists, scales or follows guide rails along its path). Profiles, paths and sections are lists of
+//! sections or to a point, the screw sweep of a thread or coil, and the sweep of a profile placed
+//! at stations (one that twists, scales or follows guide rails along its path). Profiles, paths and
+//! sections are lists of
 //! [`Curve`]s; each sweep returns a new body.
 //!
 //! With `cap`, the profile's loops close the ends and the result must be a closed manifold solid
@@ -189,6 +190,14 @@ impl Brep {
             Ends::Joined => ffi::sweeps::ENDS_JOINED,
         };
         ffi::sweeps::sweep_stations(&l.raw(), &maps, ends).map(Brep).map_err(error)
+    }
+
+    /// A loft from the planar `section` (one closed loop of lines, in order) to the point `apex`
+    /// off its plane: a pyramid, its base the section and a triangle on each line.
+    pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Brep> {
+        init()?;
+        let l = List::of(section)?;
+        ffi::sweeps::loft_to_point(&l.raw(), &apex).map(Brep).map_err(error)
     }
 
     /// `profile` carried by a screw motion about the axis through `origin` along `direction`:
