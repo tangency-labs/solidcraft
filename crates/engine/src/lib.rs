@@ -13,6 +13,7 @@ pub mod batch_params;
 pub mod batch_preflight;
 pub mod browser_find;
 pub mod capture;
+pub mod cloud;
 pub mod cmd;
 pub mod control_auth;
 pub mod control_pending;
@@ -1024,6 +1025,7 @@ pub struct Session {
     /// The sheet scenes of the drawing open, for the sheet page ([`drawing_scene::extract`]): view
     /// state, never saved or an undo step, dropped when the drawing closes.
     pub(crate) drawing_scenes: drawing_scene::Cache,
+    cloud: cloud::State,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
     /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
@@ -1465,6 +1467,7 @@ impl Session {
             render_jobs: Default::default(),
             dimension_values: Default::default(),
             drawing_scenes: Default::default(),
+            cloud: Default::default(),
             evaluations: 0,
             #[cfg(test)]
             body_name_passes: 0,
@@ -1519,6 +1522,9 @@ impl Session {
         let previous_doc = self.doc.clone();
         let hidden = self.visibility != fresh.visibility;
         let redo_watch = self.redo_watch.take();
+        let mut cloud = std::mem::take(&mut self.cloud);
+        cloud.binding = fresh.cloud.binding.clone();
+        cloud.captures.clear();
         *self = fresh;
         self.crash_journal = crash_journal;
         #[cfg(feature = "usage-stats")]
@@ -1548,6 +1554,7 @@ impl Session {
         self.replacements = replacements;
         self.ids = ids;
         self.redo_watch = redo_watch;
+        self.cloud = cloud;
         self.note_redo_changes(&previous_doc, hidden);
     }
 
@@ -3403,6 +3410,7 @@ impl Session {
             // The open drawing's lines are the sheet page's: a copy for an export takes them
             // (`scratch_as_shown`), the many others never read them.
             drawing_scenes: Default::default(),
+            cloud: self.cloud.scratch(),
             saved_visibility: self.saved_visibility.clone(),
             dimension_values: self.dimension_values.clone(),
             opened_import: self.opened_import.clone(),

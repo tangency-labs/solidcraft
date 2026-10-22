@@ -2160,6 +2160,8 @@ fn write_bytes(
     s.read_only = false;
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
+    s.cloud.binding = None;
+    s.cloud.captures.clear();
     s.mark_saved();
     let bytes_len = bytes.len();
     let mut out = SaveResult {
@@ -2462,6 +2464,8 @@ impl Session {
         self.read_only = done.read_only;
         self.provenance_chain.clone_from(&done.provenance_chain);
         self.provenance.clone_from(&done.provenance);
+        self.cloud.binding.clone_from(&done.cloud.binding);
+        self.cloud.captures.clear();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -2603,6 +2607,9 @@ pub(super) fn mesh_data(doc: &Document, body: &solidcraft_doc::ModelBody, mesh: 
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.cloud_binding().is_some() && str_(p, "path").is_none() {
+        return super::cloud::save(s, &json!({}));
+    }
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,

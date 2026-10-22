@@ -89,16 +89,23 @@ impl Job {
 
     pub fn update(&self, change: impl FnOnce(&mut JobStatus)) -> Result<()> {
         let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
+        if state.status.phase == Phase::Synced {
+            return Ok(());
+        }
         change(&mut state.status);
+        if state.cancelled && state.status.phase != Phase::Synced {
+            state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
+        }
         Ok(())
     }
 
     pub fn cancel(&self) -> Result<()> {
         let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
-        state.cancelled = true;
-        if !state.status.saved_locally {
-            state.status.phase = Phase::Cancelled;
+        if state.status.phase == Phase::Synced {
+            return Ok(());
         }
+        state.cancelled = true;
+        state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
         // A durable queued save is retained even when the user cancels its upload.
         Ok(())
     }
