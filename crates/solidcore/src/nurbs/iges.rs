@@ -893,6 +893,37 @@ mod tests {
         assert_eq!(s.indices().m, 1);
     }
 
+    /// #427 (`UB-250`): upstream `N_IgesClampSrf` writes past its new knot vector for these
+    /// knots. The port's checked indexing refuses them instead. Shapes the reference does
+    /// handle stay as upstream: a NaN interior knot between clamped ends takes the "already
+    /// clamped" path and is kept, so the fork's broader guard (tangency-labs/smlib@0a7e06d,
+    /// which also refuses infinite and huge knots the reference accepts) is not ported.
+    #[test]
+    fn clamp_surface_refuses_the_427_knots() {
+        // degree 2 in v: knots.len() - 3 control points
+        let clamp = |v: Vec<f64>, vb: [f64; 2]| {
+            let net = vec![vec![CPoint::new(1.0, 1.0, 1.0, NOW); v.len() - 3]; 2];
+            let mut s = Surface::new(net, 1, 2, vec![0.0, 0.0, 1.0, 1.0], v).unwrap();
+            clamp_surface(&mut s, [0.0, 1.0], vb).map(|()| s.v_knots().to_vec())
+        };
+        let refused = |r: Result<Vec<f64>>| matches!(r, Err(SolidError::InvalidInput { .. }));
+        let issue = vec![360.0, 360.0, 360.0, f64::NAN, f64::NAN, 540.0, 540.0, 540.0];
+        assert!(refused(clamp(issue, [360.0, 540.0])));
+        let descending = vec![0.0, 0.0, 0.0, 0.8, 0.2, 1.0, 1.0];
+        assert!(refused(clamp(descending, [0.1, 0.9])));
+        let good = || vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+        for vb in [[-1.0, 2.0], [1.5, 2.0], [f64::NAN, 1.0]] {
+            assert!(refused(clamp(good(), vb)), "{vb:?}");
+        }
+        // As upstream: already clamped, nothing written, the NaN kept.
+        let nan = clamp(vec![0.0, 0.0, 0.0, f64::NAN, 1.0, 1.0, 1.0], [0.0, 1.0]).unwrap();
+        assert!(nan[3].is_nan());
+        assert_eq!(
+            clamp(good(), [0.25, 0.75]).unwrap(),
+            [0.25, 0.25, 0.25, 0.5, 0.75, 0.75, 0.75]
+        );
+    }
+
     /// Fuzz regression: a huge degree overflowed the clamp / knot-correction index
     /// arithmetic (and sized a huge allocation).
     #[test]
