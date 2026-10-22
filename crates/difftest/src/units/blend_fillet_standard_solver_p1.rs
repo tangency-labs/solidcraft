@@ -42,7 +42,7 @@ use solidcore::blend::fillet_standard_solver::p1::{
     RailSurface, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_FS_TYPE,
     CONSTANT_RADIUS_FS_TYPE_STRING,
 };
-use solidcore::curve::curve::Curve;
+use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -799,10 +799,14 @@ fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
                 mirror: *mirror,
                 complement: *complement,
             };
-            let mut c = bcurve_of(center)?;
+            // the shim's centre line is a plain SmBSplineCurve
+            let mut c = Curve::from(bcurve_of(center)?);
             let mut r1 = bcurve_of(rail1)?;
             let mut r2 = bcurve_of(rail2)?;
             let res = fsg.create_surface_from_curves(&k, &mut c, &mut r1, &mut r2, *tol, *g1);
+            let CurveKind::BSpline(c) = c.into_kind() else {
+                return Err(HarnessError::new("centre line changed kind"));
+            };
             (res, [c, r1, r2])
         }
         Inputs::Blend {

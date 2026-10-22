@@ -106,11 +106,9 @@
 //!   empty `bShelling` branch are not ported. `SM_VALIDATE_INTERSECTORS` is not
 //!   defined in the reference build.
 //! - **Centre line of the circular FSG.** `CreateSurfaceFromCurves` receives the centre
-//!   line as its B-spline data, so `GetDegree` / `IsLine` / `IsArc` are not dispatched on
-//!   an `SmLine` centre line as upstream does (`SmFilletStandardSolver.cpp:3353-3384`;
-//!   `SmLine::IsLine` answers without testing); the vector may round differently. Taking
-//!   the curve as `&mut Curve` is a signature change of
-//!   `blend.fillet_standard_solver_p1`, left to a follow-up (`plan/findings.md`).
+//!   line as the [`Curve`] itself, so `GetDegree` / `IsLine` / `IsArc` / `Evaluate`
+//!   dispatch on an `SmLine` (or other analytic) centre line as upstream does
+//!   (`SmFilletStandardSolver.cpp:3353-3384`).
 //! - **Recursion.** None.
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
@@ -733,8 +731,8 @@ struct ApproximateCurveFlags {
 /// *pCenterLine, *pRail1, *pRail2, tol, bNeedG1Continuity = FALSE, NULL, NULL, NULL, NULL,
 /// pNewSurface)`; the four NULLs are the optional surfaces and UV curves of the rails
 /// (`blend.fillet_standard_solver_p1`'s generator takes none). The curves are non-const
-/// upstream, so they are `&mut`; the centre line is passed as its `SmBSplineCurve` part
-/// (the reference type of `rCenterLine`).
+/// upstream, so they are `&mut`; the centre line is passed as the curve itself, so its
+/// virtuals dispatch on its kind (`rCenterLine` binds the `SmBSplineCurve` kinds).
 fn circular_cross_section_surface(
     k: &Kernel,
     fsg: CircularCrossSectionFsg,
@@ -744,8 +742,7 @@ fn circular_cross_section_surface(
     tol: f64,
     need_g1_continuity: bool,
 ) -> Result<BSplineSurface> {
-    let cl = b_spline_part_mut(center_line)?.ok_or(dangling("centre line kind"))?;
-    fsg.create_surface_from_curves(k, cl, rail1, rail2, tol, need_g1_continuity)
+    fsg.create_surface_from_curves(k, center_line, rail1, rail2, tol, need_g1_continuity)
 }
 
 // ---- helpers over handles -------------------------------------------------------------------

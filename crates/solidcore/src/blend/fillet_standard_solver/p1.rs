@@ -85,15 +85,16 @@
 //!   a pair; `rbFoundAnswer` is the result. `LoadInitialValues` takes `rlSurface2Index` (read when
 //!   `rbDoSurf2Calcs` is `0`) and returns the rail of `rpSurface2` and the new index. The
 //!   surface generators drop the solver (they read only its tolerance and type) and
-//!   their unused centre line, surface and UV curve arguments; the rails and centre line
-//!   are plain B-spline curves changed in place as upstream (knot insertion and
-//!   synchronisation). So `CreateSurfaceFromCurves` of the circular generator runs
-//!   `GetDegree` / `IsLine` / `IsArc` on the centre line's B-spline data, where upstream
-//!   dispatches them virtually on `rCenterLine`: for an `SmLine` centre line
-//!   (`SmOffsetGeometryCreation.cpp:2717-2751`) `SmLine::IsLine` (`SmLine.cpp:1167-1183`)
-//!   answers without testing and rounds its vector as `length * m_dScale *
-//!   m_vLineVector`, which the sampled B-spline test may round differently (see
-//!   `plan/findings.md`).
+//!   their unused centre line, surface and UV curve arguments; the rails are plain
+//!   B-spline curves changed in place as upstream (knot insertion and synchronisation).
+//!   The circular generator's `CreateSurfaceFromCurves` takes the centre line as a
+//!   [`Curve`] of an `SmBSplineCurve` kind, so `GetDegree` / `IsLine` / `IsArc` /
+//!   `Evaluate` / `GetNaturalInterval` dispatch on its kind as upstream's virtual calls
+//!   on `rCenterLine` do (an `SmLine` centre line, `SmOffsetGeometryCreation.cpp:2717-2751`,
+//!   answers degree 1 and `SmLine::IsLine` even after `MakeCurvesCompatible` raised its
+//!   NURB to degree 3); the knot synchronisation edits its NURB part. The blend
+//!   generator still takes the centre line's B-spline data (no caller passes an
+//!   analytic one).
 //!   `BlendCurveCrossSectionFsg::continuity` is `u32` where `m_lContinuity` is `ULONG`
 //!   (64 bits in the reference build); the FFI guard bounds it to 32 bits, so no compared
 //!   value differs.
@@ -1965,6 +1966,42 @@ impl Default for CircularCrossSectionFsg {
     }
 }
 
+/// Whether `c` is an `SmBSplineCurve` kind (B-spline, line, ellipse, hyperbola or
+/// parabola), the kinds an `SmBSplineCurve &` binds.
+fn is_b_spline_kind(c: &Curve) -> bool {
+    matches!(
+        c.kind(),
+        CurveKind::BSpline(_)
+            | CurveKind::Line(_)
+            | CurveKind::Ellipse(_)
+            | CurveKind::Hyperbola(_)
+            | CurveKind::Parabola(_)
+    )
+}
+
+/// The NURB part of an `SmBSplineCurve` kind, in place, for the static B-spline
+/// routines that edit it whatever the kind (a line's NURB is made first when it has
+/// none); `None` for the other kinds.
+fn nurb_part_mut(c: &mut Curve) -> Result<Option<&mut BSplineCurve>> {
+    Ok(match c.kind_mut() {
+        CurveKind::BSpline(b) => Some(b),
+        CurveKind::Line(l) => {
+            let made = match l.base_with_nurb()? {
+                std::borrow::Cow::Owned(b) => Some(b),
+                std::borrow::Cow::Borrowed(_) => None,
+            };
+            if let Some(b) = made {
+                *l.base_mut() = b;
+            }
+            Some(l.base_mut())
+        }
+        CurveKind::Ellipse(e) => Some(e.base_mut()),
+        CurveKind::Hyperbola(h) => Some(h.base_mut()),
+        CurveKind::Parabola(p) => Some(p.base_mut()),
+        _ => None,
+    })
+}
+
 /// The arc a curve is (`IsArc(11, 1e-8, ..)`, the `SmCurve` base: B-spline curves do
 /// not override it).
 fn bspline_is_arc(k: &Kernel, c: &BSplineCurve) -> Result<Option<(Axis2Placement, f64, f64, f64)>> {
@@ -2224,31 +2261,48 @@ impl CircularCrossSectionFsg {
     /// of the curve and surface constructions; [`SolidError::InvalidInput`] where
     /// upstream indexes past its cross sections (a second pass for a ruled or revolved
     /// surface).
+    ///
+    /// `center_line` is upstream's `SmBSplineCurve & rCenterLine`: an `SmBSplineCurve`
+    /// kind (B-spline, line, ellipse, hyperbola or parabola) whose `GetDegree`, `IsLine`,
+    /// `IsArc`, `Evaluate` and `GetNaturalInterval` dispatch on that kind (an `SmLine`
+    /// answers degree 1 and its own line whatever its NURB); the static knot
+    /// synchronisation edits its NURB part. Another kind is
+    /// [`SolidError::InvalidInput`] (upstream cannot bind it).
     pub fn create_surface_from_curves(
         &self,
         k: &Kernel,
-        center_line: &mut BSplineCurve,
+        center_line: &mut Curve,
         rail1: &mut BSplineCurve,
         rail2: &mut BSplineCurve,
         approx_tol_3d: f64,
         need_g1_continuity: bool,
     ) -> Result<BSplineSurface> {
         const OP: &str = OP_CIRC;
+        if !is_b_spline_kind(center_line) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the centre line is not an SmBSplineCurve kind",
+            ));
+        }
         let knots = rail1.knots(None)?.0;
         let knots2 = rail2.knots(None)?.0;
 
         // make sure all 3 curves have compatible knot vectors
         if knots2.len() != knots.len() {
+            let cl = nurb_part_mut(center_line)?.ok_or(SolidError::invalid_input(
+                OP,
+                "the centre line is not an SmBSplineCurve kind",
+            ))?;
             let mut rails = [
                 core::mem::take(rail1),
                 core::mem::take(rail2),
-                core::mem::take(center_line),
+                core::mem::take(cl),
             ];
             let sync = BSplineCurve::synchronize_knots_of_curves(&mut rails, EFF_ZERO_SQRT);
             let [a, b, c] = rails;
             *rail1 = a;
             *rail2 = b;
-            *center_line = c;
+            *cl = c;
             sync?;
         }
 
@@ -2266,9 +2320,10 @@ impl CircularCrossSectionFsg {
         let mut sweep = false;
         let mut revolve = false;
 
-        // see if newSurf == RuledSurface
+        // see if newSurf == RuledSurface (`GetDegree` and `IsLine` of the centre line's
+        // own kind)
         let deg1_line = if center_line.degree()? == 1 {
-            center_line.is_line(ANALYTIC_SAMPLES, ANALYTIC_TOL)?
+            center_line.is_line(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?
         } else {
             None
         };
@@ -2283,7 +2338,7 @@ impl CircularCrossSectionFsg {
         }
 
         // see if NewSurf == SurfaceOfRevolution
-        let arc = bspline_is_arc(k, center_line)?;
+        let arc = center_line.is_arc(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?;
         if let Some((ref_frame, _, _, end_ang)) = &arc {
             revolve = true;
             match bspline_is_arc(k, rail1)? {
@@ -2328,6 +2383,7 @@ impl CircularCrossSectionFsg {
                     ii = knots.len() - 1;
                 }
                 self.cross_section_at(
+                    k,
                     kkk,
                     ii,
                     &knots,
@@ -2457,10 +2513,11 @@ impl CircularCrossSectionFsg {
     /// `jj` for the knot span ending at `ii`, pass `kkk`).
     fn cross_section_at(
         &self,
+        k: &Kernel,
         kkk: usize,
         ii: usize,
         knots: &[f64],
-        center_line: &BSplineCurve,
+        center_line: &Curve,
         rail1: &BSplineCurve,
         rail2: &BSplineCurve,
         approx_tol_3d: f64,
@@ -2492,7 +2549,7 @@ impl CircularCrossSectionFsg {
 
             // get center, rail1, rail2 points for dT
             let cent = center_line
-                .evaluate(t, 1, true, false)?
+                .evaluate(k, t, 1, true, false)?
                 .first()
                 .copied()
                 .ok_or_else(|| SolidError::sm_err(OP))?;
@@ -3422,7 +3479,7 @@ mod tests {
             .expect("ruled");
         assert!(ruled.gw_nurb().is_some());
 
-        let mut c = line(p(0.0, 1.0, 1.0), p(5.0, 1.0, 1.0));
+        let mut c = Curve::from(line(p(0.0, 1.0, 1.0), p(5.0, 1.0, 1.0)));
         let (mut a, mut b) = (r1.copy(), r2.copy());
         let s = CircularCrossSectionFsg::default()
             .create_surface_from_curves(&k, &mut c, &mut a, &mut b, 1e-6, false)
@@ -3433,7 +3490,7 @@ mod tests {
         assert!(corner.distance(p(0.0, 0.0, 1.0)) < 1e-6);
 
         // a zero radius section
-        let mut c = line(p(0.0, 0.0, 1.0), p(5.0, 0.0, 1.0));
+        let mut c = Curve::from(line(p(0.0, 0.0, 1.0), p(5.0, 0.0, 1.0)));
         let (mut a, mut b) = (r1.copy(), r2.copy());
         assert!(matches!(
             CircularCrossSectionFsg::default()
@@ -3468,5 +3525,55 @@ mod tests {
         assert_eq!(g.base.plane_abc, p(1.0, 2.0, 3.0));
         assert_eq!(g.base.plane_d, 0.5);
         assert!(!g.base.plane_adjusts);
+    }
+
+    #[test]
+    fn circular_centre_line_dispatches_on_its_line_kind() {
+        let k = Kernel::default();
+        let r1 = line(p(0.0, 0.0, 1.0), p(5.0, 0.0, 1.0));
+        let r2 = line(p(0.0, 1.0, 0.0), p(5.0, 1.0, 0.0));
+        // an SmLine centre line whose NURB was elevated to degree 3 (as
+        // MakeCurvesCompatible does in SmOffsetGeometryCreation::EdgeuseOffset):
+        // SmLine::GetDegree still answers 1, so the ruled (sweep) branch runs
+        let mut lc = Curve::from(crate::curve::line::Line::from_points(
+            p(0.0, 1.0, 1.0),
+            p(5.0, 1.0, 1.0),
+            3,
+        ));
+        nurb_part_mut(&mut lc)
+            .expect("nurb")
+            .expect("line kind")
+            .degree_elevate(3)
+            .expect("elevate");
+        assert_eq!(lc.degree().expect("degree"), 1);
+        let (mut a, mut b) = (r1.copy(), r2.copy());
+        let swept = CircularCrossSectionFsg::default()
+            .create_surface_from_curves(&k, &mut lc, &mut a, &mut b, 1e-6, false)
+            .expect("swept");
+        // the same NURB as a plain B-spline (degree 3) takes the skinned branch
+        let mut bc = Curve::from(nurb_part_mut(&mut lc).expect("nurb").expect("kind").clone());
+        assert_eq!(bc.degree().expect("degree"), 3);
+        let (mut a, mut b) = (r1.copy(), r2.copy());
+        let skinned = CircularCrossSectionFsg::default()
+            .create_surface_from_curves(&k, &mut bc, &mut a, &mut b, 1e-6, false)
+            .expect("skinned");
+        let rows = |s: &BSplineSurface| {
+            (
+                s.number_control_points(SurfParamType::U),
+                s.number_control_points(SurfParamType::V),
+            )
+        };
+        // the ruled surface spans the two end sections; the skin all four
+        assert_eq!(rows(&swept), (2, 7));
+        assert_eq!(rows(&skinned), (4, 7));
+
+        // a centre line that is no SmBSplineCurve kind cannot bind rCenterLine
+        let mut hc = Curve::from(crate::curve::hermite_curve::HermiteCurve::default());
+        let (mut a, mut b) = (r1.copy(), r2.copy());
+        assert!(matches!(
+            CircularCrossSectionFsg::default()
+                .create_surface_from_curves(&k, &mut hc, &mut a, &mut b, 1e-6, false),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 }

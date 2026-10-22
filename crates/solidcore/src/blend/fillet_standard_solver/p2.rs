@@ -102,7 +102,7 @@ use crate::blend::fillet_standard_solver::p1::{
     SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE, CURVE_BASED_FS_TYPE,
 };
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -2005,14 +2005,25 @@ impl CircularCrossSectionFsg {
         let need_g1_continuity = false;
         // (SM_FS_CONST_RADIUS: "bNeedG1Continuity = TRUE; // fix it later" is commented
         // out upstream)
-        self.create_surface_from_curves(
+        // the centre line is a plain SmBSplineCurve here, so its virtuals are the
+        // B-spline ones
+        let mut cl = Curve::from(core::mem::take(center_line));
+        let r = self.create_surface_from_curves(
             k,
-            center_line,
+            &mut cl,
             rail1,
             rail2,
             approx_tol_3d,
             need_g1_continuity,
-        )
+        );
+        let CurveKind::BSpline(b) = cl.into_kind() else {
+            return Err(SolidError::invalid_input(
+                "blend::fillet_standard_solver::p2::CircularCrossSectionFsg::create_surface",
+                "the centre line changed kind",
+            ));
+        };
+        *center_line = b;
+        r
     }
 }
 
