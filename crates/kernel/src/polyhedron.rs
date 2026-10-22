@@ -205,30 +205,6 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcraft_geom::Plane, pull: V
     }
 }
 
-pub(crate) fn solve3_pub(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
-    solve3(m, r)
-}
-
-fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
-    let det = |a: [[f64; 3]; 3]| {
-        a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
-            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
-    };
-    let d = det(m);
-    if d.abs() < 1e-9 {
-        return None;
-    }
-    let mut out = [0.0; 3];
-    for (k, o) in out.iter_mut().enumerate() {
-        let mut mk = m;
-        for (row, rv) in mk.iter_mut().zip(r) {
-            row[k] = rv;
-        }
-        *o = det(mk) / d;
-    }
-    Some(out)
-}
-
 /// Move the faces at the given points along their outward normals by `distance` (negative: into
 /// the body), SMLib's offset of faces: the faces around them are extended or trimmed to meet them.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {

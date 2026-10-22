@@ -27,33 +27,6 @@ fn failed(e: impl std::fmt::Display) -> KernelError {
 
 impl Body {
     pub(crate) fn regularize_certified_planar_faces(self) -> Result<Self> {
-        self.regularize_planar_faces(false)
-    }
-
-    /// Only newly produced Cut walls call this path. The temporary planes carry
-    /// construction support, never persistent ancestor/source-role authority.
-    pub(crate) fn regularize_generated_planar_faces(self) -> Result<Self> {
-        let body = self.regularize_planar_faces(true)?;
-        let sources = body.face_sources().map(|sources| {
-            sources
-                .iter()
-                .map(|source| {
-                    let mut source = source.clone();
-                    if let Some(super::FaceSource::ExtrudeSide { plane, coalesced, .. }) = &mut source {
-                        if plane.is_some() && !*coalesced {
-                            source = None;
-                        } else {
-                            *plane = None;
-                        }
-                    }
-                    source
-                })
-                .collect()
-        });
-        Ok(body.with_face_sources(sources.map(Arc::new)))
-    }
-
-    fn regularize_planar_faces(self, generated: bool) -> Result<Self> {
         if self.regularization_protected {
             return Ok(self);
         }
@@ -73,16 +46,7 @@ impl Body {
                 .zip(sources)
                 .map(|(actual, s)| {
                     s.as_ref()
-                        .and_then(|source| {
-                            if generated {
-                                match source {
-                                    super::FaceSource::ExtrudeSide { segment: solidcraft_geom::Seg2::Line { .. }, plane: Some(p), .. } => Some(*p),
-                                    _ => None,
-                                }
-                            } else {
-                                super::planar_sources::certified_plane(source)
-                            }
-                        })
+                        .and_then(super::planar_sources::certified_plane)
                         .filter(|p| actual.is_some_and(|actual| super::planar_sources::same_support(p, &actual)))
                 })
                 .collect();
@@ -97,8 +61,8 @@ impl Body {
                     }
                 }
             }
-            // The edges between two faces of one shell on one certified plane (from one source,
-            // unless the faces are generated walls), off every authored split line.
+            // The edges between two faces of one shell on one certified plane, from one source,
+            // off every authored split line.
             let mut eligible = Vec::new();
             let mut identity = 16_000_000usize;
             let mut work = 2_000_000usize;
@@ -120,7 +84,7 @@ impl Body {
                 };
                 let Some(left) = identity.checked_sub(cost) else { return Ok(None) };
                 identity = left;
-                if !generated && sa != sb {
+                if sa != sb {
                     continue;
                 }
                 let Some(cost) = split_points.checked_mul(6).and_then(|n| n.checked_add(1)) else { return Ok(None) };
@@ -160,24 +124,17 @@ impl Body {
             let (body, or) = crate::native::body_from_smlib_ordered(&r)?;
             let or = or.ok_or_else(|| failed("the result's record is numbered unlike SMLib's body"))?;
             let h = r.history().map_err(failed)?.history(std::slice::from_ref(&ob), &or).map_err(failed)?;
-            // Each face keeps the source of the first face it is made of; a generated wall made
-            // of several is coalesced.
+            // Each face keeps the source of the first face it is made of.
             let mut metadata = 2_000_000usize;
             let mut output = Vec::with_capacity(h.faces.len());
             for f in &h.faces {
                 let members: Vec<usize> =
                     f.origins.iter().filter_map(|o| if let crate::history::FaceOrigin::Face { face, .. } = o { Some(*face) } else { None }).collect();
-                let mut source = members.iter().min().and_then(|m| sources.get(*m)).cloned().flatten();
+                let source = members.iter().min().and_then(|m| sources.get(*m)).cloned().flatten();
                 if let Some(s) = &source {
                     let Some(cost) = super::planar_sources::descriptor_cost(s) else { return Ok(None) };
                     let Some(left) = metadata.checked_sub(cost) else { return Ok(None) };
                     metadata = left;
-                }
-                if generated
-                    && members.len() > 1
-                    && let Some(super::FaceSource::ExtrudeSide { coalesced, .. }) = &mut source
-                {
-                    *coalesced = true;
                 }
                 output.push(source);
             }

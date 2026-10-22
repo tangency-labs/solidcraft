@@ -238,83 +238,6 @@ mod sheets {
     }
 }
 
-/// Certify that a curved wall is swept along `d` (unit) from its surface record: a cylinder or
-/// a revolved line about an axis along `d`, or a spline net whose rows run along `d` (either
-/// parameter) with weights that separate into one factor per parameter. Seam vertices alone
-/// cannot establish this: a half-cylinder's seam normals can both be perpendicular to a
-/// transverse direction, silently filling its hole. A plane is no curved wall.
-pub(crate) fn wall_along(surface: &Surface, d: Vec3, tol: f64, remaining: &mut usize) -> bool {
-    let v3 = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
-    let along = |a: Vec3| a.normalized().is_some_and(|a| a.cross(d).len() < 1e-9);
-    let points: Vec<Vec<(Vec3, f64)>> = match surface {
-        Surface::Cylinder { frame, .. } => return along(v3(frame.x_axis).cross(v3(frame.y_axis))),
-        Surface::PlacedRevolution { profile, axis, matrix, .. } => {
-            let solidcraft_geom::brep::Curve::Line { start, end } = &**profile else { return false };
-            let (Some(a), Some(m)) = (v3(*axis).normalized(), (v3(*end) - v3(*start)).normalized()) else { return false };
-            if a.cross(m).len() > 1e-9 {
-                return false; // A conical meridian is not a cylindrical wall.
-            }
-            // The axis placed by the column-major matrix (a direction: no translation).
-            let c = |k: usize| matrix[0][k] * a.x + matrix[1][k] * a.y + matrix[2][k] * a.z;
-            return c(3).abs() < 1e-12 && along(Vec3::new(c(0), c(1), c(2)));
-        }
-        Surface::Spline { points, .. } => points.iter().map(|r| r.iter().map(|p| (v3(*p), 1.0)).collect()).collect(),
-        Surface::RationalSpline { homogeneous, .. } => {
-            homogeneous.iter().map(|r| r.iter().map(|p| (Vec3::new(p[0] / p[3], p[1] / p[3], p[2] / p[3]), p[3])).collect()).collect()
-        }
-        _ => return false,
-    };
-    let (rows, cols) = (points.len(), points.first().map_or(0, Vec::len));
-    let count = rows.saturating_mul(cols);
-    if rows < 2 || cols < 2 || count > 16_384 || points.iter().any(|r| r.len() != cols) {
-        return false;
-    }
-    let Some(left) = remaining.checked_sub(count.saturating_mul(2)) else { return false };
-    *remaining = left;
-    if points.iter().flatten().any(|(p, w)| !w.is_finite() || *w <= 0.0 || !p.is_finite()) {
-        return false;
-    }
-    let max_weight = points.iter().flatten().map(|p| p.1).fold(0.0, f64::max);
-    if points.iter().flatten().any(|p| p.1 / max_weight < 1e-12) {
-        return false;
-    }
-    // Either parameter can be the extrusion direction. Projected positions must
-    // be invariant in that parameter; rational weights must also separate into
-    // a product of one factor per parameter, otherwise mixed weights bend the wall.
-    for transpose in [false, true] {
-        let (groups, length) = if transpose { (cols, rows) } else { (rows, cols) };
-        let at = |i: usize, j: usize| if transpose { points[j][i] } else { points[i][j] };
-        let mut valid = true;
-        let mut extended = false;
-        for i in 0..groups {
-            let (base, base_w) = at(i, 0);
-            for j in 0..length {
-                let (p, w) = at(i, j);
-                let delta = p - base;
-                let magnitude = [p.x.abs(), p.y.abs(), p.z.abs(), base.x.abs(), base.y.abs(), base.z.abs()].into_iter().fold(1.0, f64::max);
-                if delta.cross(d).len() > tol * 1e-3 + magnitude * f64::EPSILON * 128.0 {
-                    valid = false;
-                    break;
-                }
-                extended |= delta.dot(d).abs() > tol * 1e-3;
-                let lhs = w / max_weight * (at(0, 0).1 / max_weight);
-                let rhs = base_w / max_weight * (at(0, j).1 / max_weight);
-                if (lhs - rhs).abs() > 1e-12 * lhs.abs().max(rhs.abs()) {
-                    valid = false;
-                    break;
-                }
-            }
-            if !valid {
-                break;
-            }
-        }
-        if valid && extended {
-            return true;
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod planar_tests {
@@ -353,24 +276,6 @@ mod planar_tests {
     }
     fn rectangle(a: Vec2, b: Vec2) -> Region2 {
         Region2 { outer: Loop2::polygon(&[a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)]), holes: vec![] }
-    }
-    #[test]
-    fn curved_prism_wall_requires_positive_separable_rational_weights() {
-        let surface = |mixed: bool| {
-            let weight = if mixed { 2.0 } else { 1.0 };
-            Surface::RationalSpline {
-                u_knots: vec![0., 0., 1., 1.],
-                v_knots: vec![0., 0., 1., 1.],
-                homogeneous: vec![
-                    vec![[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 10.0, 1.0]],
-                    vec![[5.0, 0.0, 0.0, 1.0], [5.0 * weight, 0.0, 10.0 * weight, weight]],
-                ],
-            }
-        };
-        assert!(wall_along(&surface(false), Vec3::Z, 1e-5, &mut 1000));
-        assert!(!wall_along(&surface(true), Vec3::Z, 1e-5, &mut 1000), "parallel Euclidean controls alone do not certify a rational sweep");
-        assert!(!wall_along(&surface(false), Vec3::Y, 1e-5, &mut 1000));
-        assert!(!wall_along(&surface(false), Vec3::Z, 1e-5, &mut 0));
     }
     #[test]
     fn compound_planar_extrusion_normalizes_overlap_and_retains_islands() {

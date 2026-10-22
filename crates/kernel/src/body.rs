@@ -1261,27 +1261,6 @@ impl Body {
         }
         Ok(contacts)
     }
-
-    /// For each shell: whether it bounds material (else a void or an open/wire shell), and the
-    /// shell directly around it (the outer shell of the region it lies in; `None` in the open).
-    pub(crate) fn shell_nesting(&self) -> (Vec<bool>, Vec<Option<usize>>) {
-        let n = self.record.shells.len();
-        let (mut material, mut parent) = (vec![false; n], vec![None; n]);
-        for (r, region) in self.record.regions.iter().enumerate() {
-            let around = if r == 0 { None } else { region.shells.first().map(|&s| s as usize) };
-            for (k, &s) in region.shells.iter().enumerate() {
-                let s = s as usize;
-                if r > 0 && k == 0 {
-                    if let Some(m) = material.get_mut(s) {
-                        *m = !region.void;
-                    }
-                } else if let Some(p) = parent.get_mut(s) {
-                    *p = around;
-                }
-            }
-        }
-        (material, parent)
-    }
 }
 
 /// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the

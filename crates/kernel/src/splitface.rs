@@ -22,7 +22,7 @@ use std::f64::consts::TAU;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::{self, Frame, Surface};
 use solidcraft_geom::tess::uv::Starts;
-use solidcraft_geom::{Aabb3, Plane, Seg2, UnitVec3, Vec2, Vec3};
+use solidcraft_geom::{Aabb3, Plane, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
@@ -358,75 +358,12 @@ impl ToolSide {
     }
 }
 
-/// Which side of a tool a point is on.
-pub(crate) fn side_of_point(tool: &SplitTool, near: &Body, p: Vec3) -> Result<f64> {
-    Ok(ToolSide::of(tool, near)?.at(p))
-}
-
 /// How many fields a tool is (a sketch tool: one per curve).
 pub(crate) fn field_count(tool: &SplitTool) -> Result<usize> {
     Ok(match tool {
         SplitTool::Curves { curves, .. } => curves.len(),
         _ => 1,
     })
-}
-
-/// A plane or circular cylinder behind a face's surface, facing as the face does.
-pub(crate) enum Analytic {
-    Plane { n: Vec3 },
-    Cylinder { o: Vec3, axis: UnitVec3, r: f64, out: f64 },
-}
-
-/// The plane or circular cylinder face `face` of `body` lies on (a B-spline whose control net is
-/// flat is a plane), with the face's orientation; none for other surfaces.
-pub(crate) fn analytic_face(body: &Body, face: usize) -> Result<Option<Analytic>> {
-    let p = face_patch(body, face)?;
-    let sign = if p.flip { -1.0 } else { 1.0 };
-    let flat = |pts: &[Vec3]| -> Option<Vec3> {
-        let o = *pts.first()?;
-        let size = pts.iter().map(|q| q.dist(o)).fold(0.0, f64::max);
-        let n = pts.iter().flat_map(|a| pts.iter().map(move |b| (*a - o).cross(*b - o))).max_by(|a, b| a.len().total_cmp(&b.len()))?.normalized()?;
-        pts.iter().all(|q| (*q - o).dot(n).abs() <= size * 1e-9).then_some(n)
-    };
-    Ok(match &p.surface {
-        Surface::Plane { u_axis, v_axis, .. } => v3(*u_axis).cross(v3(*v_axis)).normalized().map(|n| Analytic::Plane { n: n * sign }),
-        Surface::PlaneThrough { origin, u_point, v_point } => {
-            (v3(*u_point) - v3(*origin)).cross(v3(*v_point) - v3(*origin)).normalized().map(|n| Analytic::Plane { n: n * sign })
-        }
-        Surface::Cylinder { frame, radius } => {
-            v3(frame.x_axis).cross(v3(frame.y_axis)).unit().map(|axis| Analytic::Cylinder { o: v3(frame.origin), axis, r: *radius, out: sign })
-        }
-        Surface::Spline { points, .. } => {
-            let pts: Vec<Vec3> = points.iter().flatten().map(|q| v3(*q)).collect();
-            // The net's normal, turned to the surface's own.
-            let m = Measured::new(&p)?;
-            flat(&pts).and_then(|n| {
-                let (_, su, sv) = m.eval.derivs(p.domain[0][0], p.domain[1][0])?;
-                let own = su.cross(sv);
-                Some(Analytic::Plane { n: if own.dot(n) < 0.0 { -n } else { n } * sign })
-            })
-        }
-        _ => None,
-    })
-}
-
-/// Which side of a tool each face of `body` lies on (in face order): the field at the centre of
-/// the face's triangle where it is largest, so well inside the face.
-pub(crate) fn face_sides(body: &Body, tool: &SplitTool) -> Result<Vec<f64>> {
-    let side = ToolSide::of(tool, body)?;
-    let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-4)))?;
-    let mut best = vec![0.0f64; body.face_count()];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        let Some([a, b, c]) = mesh.tri(t) else { continue };
-        let x = side.at((a + b + c) * (1.0 / 3.0));
-        if let Some(slot) = best.get_mut(*f as usize)
-            && x.is_finite()
-            && x.abs() > slot.abs()
-        {
-            *slot = x;
-        }
-    }
-    Ok(best)
 }
 
 /// The regions of a body cut by a tool: for each face (in face order), the region it lies in,
@@ -487,11 +424,6 @@ fn smlib_tools(groups: &[Vec<Patch>], reach: &Aabb3) -> Result<Vec<solidcraft_sm
         out.push(solidcraft_smlib::ssi::Surface::from_record(&b.surface, b.domain).map_err(|e| failed("split tool", e))?);
     }
     Ok(out)
-}
-
-/// The record's position of SMLib's face `i` (identity when `order` is empty).
-fn canonical(order: &[usize], i: usize) -> Option<usize> {
-    if order.is_empty() { Some(i) } else { order.get(i).copied() }
 }
 
 /// A result checked by SMLib and brought back with its history over `[body]`.

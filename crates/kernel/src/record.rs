@@ -39,28 +39,6 @@ pub(crate) fn generated(origins: Vec<FaceOrigin>) -> FaceProv {
     FaceProv { origins, change: Change::Generated }
 }
 
-/// Result faces that are each a region of input faces, given as the input faces under it and
-/// whether it is one input face untouched (`whole`). Kept when whole; Merged with several
-/// origins; Split when its one origin lies under other result faces too; Modified otherwise;
-/// Generated with no origin.
-pub(crate) fn regions(faces: Vec<(BTreeSet<FaceOrigin>, bool)>) -> Vec<FaceProv> {
-    let mut faces: Vec<FaceProv> = faces.into_iter().map(|(origins, whole)| region(origins, whole)).collect();
-    mark_shared_split(&mut faces);
-    faces
-}
-
-/// A result face that is a region of the input faces `origins` (see [`regions`]), before
-/// faces sharing an origin are marked Split.
-pub(crate) fn region(origins: BTreeSet<FaceOrigin>, whole: bool) -> FaceProv {
-    let change = match origins.len() {
-        0 => Change::Generated,
-        1 if whole => Change::Kept,
-        1 => Change::Modified,
-        _ => Change::Merged,
-    };
-    FaceProv { origins: origins.into_iter().collect(), change }
-}
-
 pub(crate) use solidcraft_geom::brep::history::mark_shared_split;
 
 /// The origins of a result edge that is (a piece of, or the moved) edges `edges` of operand
