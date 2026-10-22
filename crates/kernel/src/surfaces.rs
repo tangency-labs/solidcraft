@@ -210,6 +210,7 @@ pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg])
     if chains.is_empty() || chains.len() > MAX_CHAINS {
         return Err(KernelError::Invalid("pick the curves or profiles to sweep".into()));
     }
+    let path = &PathSeg::flattened(path)[..];
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
     }
@@ -235,6 +236,8 @@ pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg])
                     let part = guard("surface sweep", || Ok(mt::builder::rsweep(&cur, p3(center), crate::body::v3(k), mt::Rad(angle))))?;
                     (part, Box::new(move |p| crate::build::rotate_about(p, center, k, angle)))
                 }
+                // The path was flattened: no curves are left.
+                PathSeg::Curve { .. } => return Err(KernelError::Invalid("a free-form path curve".into())),
             };
             let next = far_wire(&part, &cur, map.as_ref())?;
             sides.extend(swept_sides(&part, &seeds, &[]));
@@ -260,6 +263,7 @@ pub fn sweep_sheet_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::Path
     if ctl.is_default() {
         return sweep_sheet(plane, chains, path);
     }
+    let path = &crate::PathSeg::flattened(path)[..];
     ctl.check()?;
     if path.is_empty() || path.len() > 1000 {
         return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));

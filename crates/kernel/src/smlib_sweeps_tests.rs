@@ -61,7 +61,7 @@ fn an_extrusion_names_its_caps_and_walls_and_keeps_their_sources() {
     // A drafted disc: a frustum, its wall the circle's.
     let disc = region(Loop2::circle(Vec2::ZERO, 5.0));
     let taper = -5f64.to_radians();
-    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&disc), Some(&disc), 0.0, 4.0, 1.0, Some(Draft { taper })).unwrap();
+    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&disc), Some(&disc), 0.0, 4.0, 1.0, Some(Draft { taper, foot: 0.0 })).unwrap();
     let r2 = 5.0 + 4.0 * taper.tan();
     close(volume(&b), PI * 4.0 / 3.0 * (25.0 + r2 * r2 + 5.0 * r2), 1e-3, "drafted disc");
     assert!(origins(&b).iter().filter(|o| o.contains("Profile")).count() >= 1);
@@ -146,6 +146,95 @@ fn a_sweep_twists_scales_and_follows_rails_through_stations() {
     }
 }
 
+/// An 8 x 5 rectangle on the xy plane, centred on the path's start.
+fn bar_section() -> Region2 {
+    region(Loop2::polygon(&[Vec2::new(-4.0, -2.5), Vec2::new(4.0, -2.5), Vec2::new(4.0, 2.5), Vec2::new(-4.0, 2.5)]))
+}
+
+#[test]
+fn a_sweep_round_a_corner_meets_in_a_mitre_and_names_every_wall() {
+    // 30 up then 40 across: mitred, the outer side gains what the inner loses, V = A (l1 + l2).
+    let path = [
+        crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 30.0) },
+        crate::PathSeg::Line { a: Vec3::new(0.0, 0.0, 30.0), b: Vec3::new(40.0, 0.0, 30.0) },
+    ];
+    let b = smlib_sweeps::sweep(&Plane::XY, &pieces_of(&bar_section()), &path, false).unwrap();
+    close(volume(&b), 2800.0, 1e-9, "mitred bar");
+    // Each leg's four walls (the side walls in the bend's plane are one face round the corner,
+    // flat as they are) from the four segments; the start and the end cap.
+    let o = origins(&b);
+    assert_eq!(o.iter().filter(|x| **x == cap(false)).count(), 1, "{o:?}");
+    assert_eq!(o.iter().filter(|x| **x == cap(true)).count(), 1, "{o:?}");
+    assert!(o.iter().all(|x| x.contains("Profile") || x.contains("Cap")), "{o:?}");
+    for k in 0..4 {
+        assert!(o.contains(&profile(k)), "segment {k}: {o:?}");
+    }
+    // Every wall of a straight leg is a plane.
+    assert!((0..b.face_count()).all(|i| b.planar_face(i).is_some()), "{o:?}");
+}
+
+#[test]
+fn a_sweep_round_a_closed_path_has_no_caps() {
+    // A square path of side 40 round the origin, the section in the plane square to its first
+    // side at its middle: four mitred legs closing on themselves. Each leg's centre line is 40,
+    // so V = A 4 40 (the mitres trade what they add and take).
+    let c = [Vec3::new(20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 0.0), Vec3::new(-20.0, 20.0, 0.0), Vec3::new(-20.0, -20.0, 0.0)];
+    let start = Vec3::new(20.0, 0.0, 0.0);
+    let mut path = vec![crate::PathSeg::Line { a: start, b: c[1] }];
+    for i in 1..4 {
+        path.push(crate::PathSeg::Line { a: c[i], b: c[(i + 1) % 4] });
+    }
+    path.push(crate::PathSeg::Line { a: c[0], b: start });
+    let plane = Plane { origin: start, x: Vec3::X, y: Vec3::Z };
+    let sq = region(Loop2::polygon(&[Vec2::new(-2.0, -1.0), Vec2::new(2.0, -1.0), Vec2::new(2.0, 1.0), Vec2::new(-2.0, 1.0)]));
+    let b = smlib_sweeps::sweep(&plane, &pieces_of(&sq), &path, false).unwrap();
+    close(volume(&b), 8.0 * 160.0, 1e-9, "square frame");
+    let o = origins(&b);
+    assert!(o.iter().all(|x| x.contains("Profile")), "no caps round a closed path: {o:?}");
+}
+
+#[test]
+fn a_loft_through_holed_sections_keeps_the_hole_and_names_its_walls() {
+    let ring = |z: f64| {
+        let r = Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![Loop2::circle(Vec2::ZERO, 12.0)] };
+        (Plane::XY.offset(z), r)
+    };
+    let b = crate::loft_regions(&[ring(0.0), ring(20.0)]).unwrap();
+    close(volume(&b), PI * (400.0 - 144.0) * 20.0, 1e-3, "tube");
+    let o = origins(&b);
+    assert_eq!(b.face_count(), 4, "{o:?}");
+    assert!(o.contains(&cap(false)) && o.contains(&cap(true)), "{o:?}");
+    assert_eq!(o.iter().filter(|x| x.contains("Profile")).count(), 2, "outer wall and bore: {o:?}");
+}
+
+#[test]
+fn a_loft_to_a_point_is_a_pyramid() {
+    let sq = Loop2::polygon(&[Vec2::new(-10.0, -10.0), Vec2::new(10.0, -10.0), Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0)]);
+    let b = crate::loft_to_point(&Plane::XY, &sq, Vec3::new(0.0, 0.0, 15.0)).unwrap();
+    close(volume(&b), 2000.0, 1e-9, "pyramid");
+    let mut want = vec![cap(false), profile(0), profile(1), profile(2), profile(3)];
+    want.sort();
+    assert_eq!(origins(&b), want);
+}
+
+#[test]
+fn a_drafted_extrusion_stands_on_a_straight_foot() {
+    // A 10 x 10 square, 1 straight, then sloping out 5 degrees (taken from the base) up to 10:
+    // the prism 100 and the frustum from 10 to 10 + 2 x 10 tan 5 over 9.
+    let sq = region(Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]));
+    let taper = 5f64.to_radians();
+    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&sq), Some(&sq), 0.0, 10.0, 1.0, Some(Draft { taper, foot: 1.0 })).unwrap();
+    let (a1, s2) = (100.0, 10.0 + 2.0 * 10.0 * taper.tan());
+    let a2 = s2 * s2;
+    close(volume(&b), 100.0 + 9.0 / 3.0 * (a1 + a2 + (a1 * a2).sqrt()), 1e-9, "footed draft");
+    let o = origins(&b);
+    assert!(o.contains(&cap(false)) && o.contains(&cap(true)), "{o:?}");
+    // Each segment's foot and sloping wall.
+    for k in 0..4 {
+        assert_eq!(o.iter().filter(|x| **x == profile(k)).count(), 2, "segment {k}: {o:?}");
+    }
+}
+
 #[test]
 fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     // An 8 x 8 square round a circle of radius 30, a quarter turn of twist (onto itself): Pappus.
@@ -163,4 +252,20 @@ fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
     // A twist that does not bring the square back onto itself cannot close.
     let ctl = crate::SweepControl { twist: PI / 3.0, ..Default::default() };
     assert!(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).is_err());
+}
+
+#[test]
+fn a_sweep_follows_a_free_form_path_as_a_curve() {
+    // A 4 x 4 square along a planar S-shaped cubic Bézier (curvature radius above 20): V = A L.
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let seg = Seg2::Cubic { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(0.0, 20.0), p2: Vec2::new(20.0, 20.0), p3: Vec2::new(20.0, 40.0) };
+    let path = [crate::PathSeg::Curve { plane: xz, seg }];
+    let sq = region(Loop2::polygon(&[Vec2::new(-2.0, -2.0), Vec2::new(2.0, -2.0), Vec2::new(2.0, 2.0), Vec2::new(-2.0, 2.0)]));
+    let b = smlib_sweeps::sweep(&Plane::XY, &pieces_of(&sq), &path, false).unwrap();
+    close(volume(&b), 16.0 * 46.220575543, 1e-3, "square along a Bézier");
+    assert_eq!(b.face_count(), 6, "four smooth walls and two caps");
+    // Twisted along it, through stations placed by length along the curve: the area is kept.
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    let b = smlib_sweeps::sweep_controlled(&Plane::XY, &numbered(&sq), &path, &ctl).unwrap();
+    close(volume(&b), 16.0 * 46.220575543, 1e-3, "twisted square along a Bézier");
 }

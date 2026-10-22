@@ -5675,14 +5675,7 @@ fn feature_tools_with_constructor(
                 Some(_) => Vec::new(),
                 None => path_segments(ps, path, start)?,
             };
-            let path_start = points
-                .as_ref()
-                .and_then(|p| p.first().copied())
-                .or_else(|| match segs.first() {
-                    Some(kernel::PathSeg::Line { a, .. } | kernel::PathSeg::Arc { a, .. }) => Some(*a),
-                    None => None,
-                })
-                .unwrap_or(start);
+            let path_start = points.as_ref().and_then(|p| p.first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
             let rails = rail_polylines(doc, st, rails, f.component, path_start)?;
             let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
             // A path through 3D sketch curves follows them as points.
@@ -5708,11 +5701,8 @@ fn feature_tools_with_constructor(
             }
             let segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
             let first = segs.first().ok_or_else(|| DocError::Invalid("empty path".into()))?;
-            let (start, tangent) = match *first {
-                kernel::PathSeg::Line { a, b } => (a, b - a),
-                kernel::PathSeg::Arc { a, center, axis, .. } => (a, axis.cross(a - center)),
-            };
-            let t = tangent.normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
+            let start = first.start();
+            let (t, _) = first.tangents().ok_or_else(|| DocError::Invalid("path direction".into()))?;
             let plane = Plane::from_normal(start, t).ok_or_else(|| DocError::Invalid("pipe profile plane".into()))?;
             Ok(unnamed(vec![kernel::sweep(&plane, &pipe_region(vals, r, wall)?, &segs)?]))
         }
@@ -5959,7 +5949,8 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
     let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
     for id in ids {
         let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-        segs.extend(ps.sketch.segs(ci));
+        // A free-form curve as its exact pieces (Béziers, conics) where it has them.
+        segs.extend(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
     }
     // Orient the chain: the first segment starts at the end nearest `start`, each next one
     // starts where the previous ended.
@@ -5994,9 +5985,8 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
             solidcraft_geom::Seg2::Arc { center, sweep, .. } => {
                 vec![kernel::PathSeg::Arc { a: w(s.start()), center: w(center), axis: n * sweep.signum(), angle: sweep.abs() }]
             }
-            // Free-form path curves are followed as polylines.
             solidcraft_geom::Seg2::Cubic { .. } | solidcraft_geom::Seg2::Conic { .. } | solidcraft_geom::Seg2::Bezier { .. } => {
-                s.polyline(1e-2).windows(2).map(|q| kernel::PathSeg::Line { a: w(q[0]), b: w(q[1]) }).collect()
+                vec![kernel::PathSeg::Curve { plane: ps.plane, seg: *s }]
             }
         })
         .collect())
@@ -6205,7 +6195,8 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
             let mapped = path_in_frame(doc, ps, component)?;
             let ps = mapped.as_ref();
-            let mut segs = path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?;
+            // Free-form curves measured along their polylines.
+            let mut segs = kernel::PathSeg::flattened(&path_segments(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))?);
             if *flip {
                 segs = segs.iter().rev().map(reverse_seg).collect();
             }
@@ -6261,6 +6252,8 @@ fn seg_len(s: &kernel::PathSeg) -> f64 {
     match *s {
         kernel::PathSeg::Line { a, b } => (b - a).len(),
         kernel::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
+        // Patterns flatten their paths; a curve left is measured along its chord.
+        kernel::PathSeg::Curve { plane, seg } => plane.to_world(seg.start()).dist(plane.to_world(seg.end())),
     }
 }
 
@@ -6284,6 +6277,11 @@ fn seg_at(s: &kernel::PathSeg, t: f64) -> (Vec3, Vec3) {
             let v = rotate_vec(a - center, k, s * t / r);
             (center + v, k.cross(v).normalized().unwrap_or(Vec3::X) * s)
         }
+        kernel::PathSeg::Curve { plane, seg } => {
+            let (a, b) = (plane.to_world(seg.start()), plane.to_world(seg.end()));
+            let d = (b - a).normalized().unwrap_or(Vec3::X);
+            (a + d * t, d)
+        }
     }
 }
 
@@ -6295,6 +6293,7 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
             let end = center + rotate_vec(a - center, k, angle);
             kernel::PathSeg::Arc { a: end, center, axis: k * -1.0, angle }
         }
+        kernel::PathSeg::Curve { plane, seg } => kernel::PathSeg::Curve { plane, seg: seg.reversed() },
     }
 }
 

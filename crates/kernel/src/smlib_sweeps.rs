@@ -65,10 +65,13 @@ fn not_supported(what: &str) -> KernelError {
 pub(crate) struct Draft {
     /// Radians; positive grows the profile (as [`crate::extrude_tapered`] takes it).
     pub taper: f64,
+    /// A height (less than the distance) the walls first stand straight for, before they slope
+    /// on to the same far end ([`crate::extrude_tapered_between`]'s foot).
+    pub foot: f64,
 }
 
 #[cfg(feature = "smlib")]
-pub(crate) use imp::{extrude, loft, loft_rails, revolve, screw, sweep, sweep_controlled};
+pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, sweep, sweep_controlled};
 
 #[cfg(not(feature = "smlib"))]
 mod stubs {
@@ -98,9 +101,12 @@ mod stubs {
     pub(crate) fn loft_rails(_: &[(Plane, Vec<Piece>)], _: usize, _: &[Vec<Vec3>], _: crate::RailFit) -> Result<Body> {
         Err(not_built())
     }
+    pub(crate) fn loft_to_point(_: &Plane, _: &[Piece], _: Vec3) -> Result<Body> {
+        Err(not_built())
+    }
 }
 #[cfg(not(feature = "smlib"))]
-pub(crate) use stubs::{extrude, loft, loft_rails, revolve, screw, sweep, sweep_controlled};
+pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, sweep, sweep_controlled};
 
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
@@ -315,14 +321,46 @@ mod imp {
         let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
         let dir = n * sign.signum();
         let c = curves(&base, pieces)?;
+        let top = plane.offset(from + sign.signum() * distance);
+        let edges = seeds(&base, pieces, |q| q);
+        let foot = draft.map_or(0.0, |d| d.foot);
+        if let Some(d) = draft.filter(|d| d.foot > 0.0) {
+            // A straight foot, then the walls sloping from its top to the far end the taper gives
+            // from the base, joined face to face where they meet.
+            if !(foot < distance) {
+                return Err(KernelError::Invalid(format!("taper foot = {foot}")));
+            }
+            let knee = plane.offset(from + sign.signum() * foot);
+            let lean = -(distance * d.taper.tan() / (distance - foot)).atan();
+            let prism = Brep::extrude(&c, p(dir), foot, 0.0, true).map_err(|e| failed("extrude", e))?;
+            let slope = Brep::extrude(&curves(&knee, pieces)?, p(dir), distance - foot, lean, true).map_err(|e| failed("extrude", e))?;
+            let brep = prism.boolean(&slope, solidcraft_smlib::BooleanOp::Union).map_err(|e| failed("extrude", e))?;
+            let brep = brep.ok_or_else(|| failed("extrude", "nothing is left"))?;
+            let body = body_of(&brep, "extrude")?;
+            // The caps and the foot's walls from the base; the sloping walls (and the foot's again)
+            // from the edges at the knee, which both stand on.
+            let low = roles(&body, &base, Some(&top), &edges, &[], false)?;
+            let high = roles(&body, &knee, Some(&top), &seeds(&knee, pieces, |q| q), &[], false)?;
+            let roles: Vec<Role> = low
+                .into_iter()
+                .zip(high)
+                .map(|(a, b)| match (a, b) {
+                    (Role::Wall(mut x), Role::Wall(y)) => {
+                        x.extend(y);
+                        Role::Wall(x)
+                    }
+                    (Role::Unknown, w @ Role::Wall(_)) => w,
+                    (a, _) => a,
+                })
+                .collect();
+            return with_history(body, &roles, pieces);
+        }
         // SMLib's draft is positive inward; the kernel's taper grows the profile.
         let lean = draft.map_or(0.0, |d| -d.taper);
         let brep = Brep::extrude(&c, p(dir), distance, lean, true).map_err(|e| failed("extrude", e))?;
         let body = body_of(&brep, "extrude")?;
-        let edges = seeds(&base, pieces, |q| q);
         // Half-way along a straight wall lies over its segment; a drafted one has moved.
         let inside = if draft.is_none() { seeds(&base, pieces, |q| q + dir * (distance * 0.5)) } else { Vec::new() };
-        let top = plane.offset(from + sign.signum() * distance);
         let roles = roles(&body, &base, Some(&top), &edges, &inside, false)?;
         let sources = (draft.is_none() && sign > 0.0).then(|| extrude_sources(&roles, pieces, region, plane, &base, &top));
         let body = body.with_face_sources(sources.map(std::sync::Arc::new));
@@ -419,18 +457,240 @@ mod imp {
                 let reference = r.normalized().ok_or_else(|| KernelError::Invalid("path arc radius".into()))?;
                 Curve::Arc { center: p(center), axis: p(k), reference: p(reference), radius, start: 0.0, end: turn }
             }
+            crate::PathSeg::Curve { plane, seg } => curve(&plane, &seg)?,
         })
     }
 
     /// The profile `pieces` on `plane` swept along `path`, turning with it, or only moving along
-    /// it when `translate`.
+    /// it when `translate`. SMLib's sweep follows a smooth path; at a corner (the direction
+    /// jumping) the path is swept piece by piece ([`cornered`]).
     pub(crate) fn sweep(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
+        let runs = smooth_runs(path)?;
+        if runs.len() > 1 {
+            return cornered(plane, pieces, path, &runs, translate);
+        }
+        let brep = swept(plane, pieces, path, translate)?;
+        let body = body_of(&brep, "sweep")?;
+        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
+        with_history(body, &roles, pieces)
+    }
+
+    fn swept(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Brep> {
         let c = curves(plane, pieces)?;
         let route = path.iter().map(path_curve).collect::<Result<Vec<_>>>()?;
         let frame = if translate { SweepFrame::Translate } else { SweepFrame::Follow };
-        let brep = Brep::sweep(&c, &route, frame, true).map_err(|e| failed("sweep", e))?;
+        Brep::sweep(&c, &route, frame, true).map_err(|e| failed("sweep", e))
+    }
+
+    /// The path's segments in runs along which its direction carries on (within a thousandth of
+    /// a radian across each joint): a new run starts at each corner.
+    fn smooth_runs(path: &[crate::PathSeg]) -> Result<Vec<std::ops::Range<usize>>> {
+        let ends: Vec<(Vec3, Vec3)> = path
+            .iter()
+            .map(crate::PathSeg::tangents)
+            .collect::<Option<_>>()
+            .ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        let mut runs = Vec::new();
+        let mut from = 0;
+        for (i, w) in ends.windows(2).enumerate() {
+            if w[0].1.dot(w[1].0) < (1e-3f64).cos() {
+                runs.push(from..i + 1);
+                from = i + 1;
+            }
+        }
+        runs.push(from..path.len());
+        Ok(runs)
+    }
+
+    /// `pl` carried rigidly by a turn of `angle` about the unit `k` through `center`.
+    fn turned_plane(pl: &Plane, center: Vec3, k: Vec3, angle: f64) -> Plane {
+        Plane { origin: center + turned(pl.origin - center, k, angle), x: turned(pl.x, k, angle), y: turned(pl.y, k, angle) }
+    }
+
+    fn moved_plane(pl: &Plane, by: Vec3) -> Plane {
+        Plane { origin: pl.origin + by, ..*pl }
+    }
+
+    /// The profile's plane carried along `segs` as the sweep carries it: along a line it moves,
+    /// round an arc it turns about the arc's axis; only moving with `translate`.
+    fn carried(pl: &Plane, segs: &[crate::PathSeg], translate: bool) -> Result<Plane> {
+        let mut pl = *pl;
+        for s in segs {
+            pl = match *s {
+                crate::PathSeg::Line { a, b } => moved_plane(&pl, b - a),
+                crate::PathSeg::Arc { a, center, axis, angle } => {
+                    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("path arc axis".into()))?;
+                    if translate {
+                        moved_plane(&pl, crate::build::rotate_about(a, center, k, angle) - a)
+                    } else {
+                        turned_plane(&pl, center, k, angle)
+                    }
+                }
+                // A planar curve turns the profile in its plane as its direction turns.
+                crate::PathSeg::Curve { plane, .. } => {
+                    let (a, b) = seg_ends(s)?;
+                    let moved = moved_plane(&pl, b - a);
+                    let (t0, t1) = s.tangents().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+                    let n = plane.normal();
+                    if translate { moved } else { turned_plane(&moved, b, n, t0.cross(t1).dot(n).atan2(t0.dot(t1))) }
+                }
+            };
+        }
+        Ok(pl)
+    }
+
+    /// Where `s` starts and ends.
+    fn seg_ends(s: &crate::PathSeg) -> Result<(Vec3, Vec3)> {
+        Ok(match *s {
+            crate::PathSeg::Line { a, b } => (a, b),
+            crate::PathSeg::Arc { a, center, axis, angle } => {
+                let k = axis.normalized().ok_or_else(|| KernelError::Invalid("path arc axis".into()))?;
+                (a, crate::build::rotate_about(a, center, k, angle))
+            }
+            crate::PathSeg::Curve { plane, seg } => (plane.to_world(seg.start()), plane.to_world(seg.end())),
+        })
+    }
+
+    /// A box on one side of the plane through `at` square to the unit `normal`: a `size` square
+    /// in the plane, `size` deep along `normal`.
+    fn half_space(at: Vec3, normal: Vec3, size: f64) -> Result<Brep> {
+        let u = if normal.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+        let u = normal.cross(u).normalized().ok_or_else(|| KernelError::Invalid("mitre plane".into()))?;
+        let v = normal.cross(u);
+        let h = size * 0.5;
+        let c = [at + (u + v) * h, at + (v - u) * h, at - (u + v) * h, at + (u - v) * h];
+        let square: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p(c[i]), end: p(c[(i + 1) % 4]) }).collect();
+        Brep::extrude(&square, p(normal), size, 0.0, true).map_err(|e| failed("mitre", e))
+    }
+
+    fn combined(a: &Brep, b: &Brep, op: solidcraft_smlib::BooleanOp, what: &str) -> Result<Brep> {
+        a.boolean(b, op).map_err(|e| failed(what, e))?.ok_or_else(|| failed(what, "nothing is left"))
+    }
+
+    /// A sweep along a path with corners: each smooth run of it swept on its own, and the runs
+    /// joined at each corner. Turning with the path, the profile turns at a corner about the
+    /// line square to both directions, and the runs meet in a mitre: each run is swept on
+    /// straight past the corner (along its direction there) and cut back to the plane that halves
+    /// the corner, where the next run, cut back the same way, meets it face to face. Only moving
+    /// along the path, the profile is the same at the corner in both runs, which meet there.
+    ///
+    /// History: the start cap is the face in the profile's plane, the end cap the face in its
+    /// plane at the path's end; each wall comes from the profile segment it is swept from, found
+    /// on the first run's start or half-way along each run.
+    fn cornered(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], runs: &[std::ops::Range<usize>], translate: bool) -> Result<Body> {
+        let start = path.first().map(seg_ends).transpose()?.map(|(a, _)| a).ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        // How far the profile reaches from the path.
+        let reach = pieces
+            .iter()
+            .flat_map(|x| (0..=8).map(move |i| x.seg.point_at(f64::from(i) / 8.0)))
+            .map(|q| plane.to_world(q).dist(start))
+            .fold(0.0f64, f64::max);
+        let mut length = 0.0;
+        for s in path {
+            let (a, b) = seg_ends(s)?;
+            length += a.dist(b).max(match *s {
+                crate::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
+                crate::PathSeg::Curve { seg, .. } => seg.length(),
+                crate::PathSeg::Line { .. } => 0.0,
+            });
+        }
+        let size = 4.0 * (length + reach) + 1.0;
+        let tangent = |s: Option<&crate::PathSeg>| {
+            s.and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))
+        };
+        let (first_t, _) = tangent(path.first())?;
+        let (_, last_t) = tangent(path.last())?;
+        let end = path.last().map(seg_ends).transpose()?.map(|(_, b)| b).ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        // A closed path ends where it starts, with no caps; at a corner there the last run and the
+        // first meet in a mitre too.
+        let closed = end.dist(start) <= 1e-6;
+        let closing = (closed && last_t.dot(first_t) < (1e-3f64).cos()).then_some(first_t);
+        let mitre = |t1: Vec3, t2: Vec3| -> Result<(Vec3, f64)> {
+            let turn = t1.dot(t2).clamp(-1.0, 1.0).acos();
+            if turn > std::f64::consts::PI - 1e-3 {
+                return Err(KernelError::Invalid("the path turns back on itself at a corner".into()));
+            }
+            Ok(((t1 + t2).normalized().ok_or_else(|| KernelError::Invalid("path corner".into()))?, turn))
+        };
+        let mut pose = *plane;
+        let mut body: Option<Brep> = None;
+        let mut inside = Vec::new();
+        // The mitre the next run starts from: its point, its normal (along the run) and the turn.
+        let mut entry: Option<(Vec3, Vec3, f64)> = match closing {
+            Some(_) if !translate => {
+                let (m, turn) = mitre(last_t, first_t)?;
+                Some((start, m, turn))
+            }
+            _ => None,
+        };
+        for (ri, run) in runs.iter().enumerate() {
+            let segs = path.get(run.clone()).ok_or_else(|| KernelError::Invalid("path run".into()))?;
+            let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Err(KernelError::Invalid("path run".into())) };
+            let (t0, _) = first.tangents().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+            let (_, t1) = last.tangents().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+            let (a0, _) = seg_ends(first)?;
+            let (_, b1) = seg_ends(last)?;
+            // Half-way along the run (the middle of its middle segment), each wall over its piece.
+            let mid = run.start + segs.len() / 2;
+            let before = path.get(run.start..mid).ok_or_else(|| KernelError::Invalid("path run".into()))?;
+            let at_mid = carried(&pose, before, translate)?;
+            if let Some(m) = path.get(mid) {
+                let half = match *m {
+                    crate::PathSeg::Line { a, b } => crate::PathSeg::Line { a, b: a + (b - a) * 0.5 },
+                    crate::PathSeg::Arc { a, center, axis, angle } => crate::PathSeg::Arc { a, center, axis, angle: angle * 0.5 },
+                    crate::PathSeg::Curve { plane, seg } => crate::PathSeg::Curve { plane, seg: seg.split_half().0 },
+                };
+                let there = carried(&at_mid, &[half], translate)?;
+                inside.extend(seeds(&there, pieces, |q| q));
+            }
+            let next = match runs.get(ri + 1).and_then(|r| path.get(r.start)) {
+                Some(s) => Some(tangent(Some(s))?.0),
+                None => closing,
+            };
+            // The plane halving the corner at the run's end, and the turn there.
+            let exit = next.map(|t2| mitre(t1, t2)).transpose()?;
+            let piece = if translate {
+                swept(&pose, pieces, segs, true)?
+            } else {
+                // On past each mitre: the profile's reach times the tangent of half the turn takes
+                // every point of it to the mitre's plane; a little further, so the cut back runs
+                // through the walls, never along the run's own end.
+                let over = |turn: f64| reach * (turn * 0.5).tan() * 1.1 + reach * 1e-3 + 1e-6;
+                let pre = entry.map_or(0.0, |(_, _, turn)| over(turn));
+                let post = exit.map(|(_, turn)| over(turn)).unwrap_or(0.0);
+                let mut route = Vec::with_capacity(segs.len() + 2);
+                if pre > 0.0 {
+                    route.push(crate::PathSeg::Line { a: a0 - t0 * pre, b: a0 });
+                }
+                route.extend_from_slice(segs);
+                if post > 0.0 {
+                    route.push(crate::PathSeg::Line { a: b1, b: b1 + t1 * post });
+                }
+                let mut piece = swept(&moved_plane(&pose, t0 * -pre), pieces, &route, false)?;
+                if let Some((at, toward, _)) = entry {
+                    piece = combined(&piece, &half_space(at, -toward, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                }
+                if let Some((m, _)) = exit {
+                    piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                }
+                piece
+            };
+            body = Some(match body {
+                None => piece,
+                Some(b) => combined(&b, &piece, solidcraft_smlib::BooleanOp::Union, "sweep corner")?,
+            });
+            // The profile at the run's end, then turned through the corner onto the next run.
+            pose = carried(&pose, segs, translate)?;
+            entry = None;
+            if let (Some(t2), Some((m, turn)), false) = (next, exit, translate) {
+                let k = t1.cross(t2).normalized().ok_or_else(|| KernelError::Invalid("path corner".into()))?;
+                pose = turned_plane(&pose, b1, k, turn);
+                entry = Some((b1, m, turn));
+            }
+        }
+        let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
         let body = body_of(&brep, "sweep")?;
-        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
+        let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
     }
 
@@ -439,6 +699,7 @@ mod imp {
         match *s {
             crate::PathSeg::Line { a, b } => a.dist(b),
             crate::PathSeg::Arc { a, center, angle, .. } => angle.abs() * a.dist(center),
+            crate::PathSeg::Curve { seg, .. } => seg.length(),
         }
     }
 
@@ -450,6 +711,21 @@ mod imp {
                 let k = axis.normalized()?;
                 let q = crate::build::rotate_about(a, center, k, angle * f);
                 Some((q, (k.cross(q - center) * angle.signum()).normalized()?))
+            }
+            // The parameter whose length from the start is that share of the curve's.
+            crate::PathSeg::Curve { plane, seg } => {
+                let want = seg.length() * f;
+                let (mut lo, mut hi) = (0.0f64, 1.0f64);
+                for _ in 0..48 {
+                    let t = 0.5 * (lo + hi);
+                    if seg.split_at(t).0.length() < want {
+                        lo = t;
+                    } else {
+                        hi = t;
+                    }
+                }
+                let t = 0.5 * (lo + hi);
+                Some((plane.to_world(seg.point_at(t)), plane.dir_to_world(seg.derivative(t)).normalized()?))
             }
         }
     }
@@ -480,6 +756,21 @@ mod imp {
         Ok((pts, tangents))
     }
 
+    /// How far the direction of travel turns along a path segment (radians, all told).
+    fn path_turn(s: &crate::PathSeg) -> f64 {
+        match *s {
+            crate::PathSeg::Line { .. } => 0.0,
+            crate::PathSeg::Arc { angle, .. } => angle.abs(),
+            crate::PathSeg::Curve { seg, .. } => {
+                let pts = seg.polyline(1e-3);
+                pts.windows(3)
+                    .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
+                    .map(|(u, v)| u.cross(v).atan2(u.dot(v)).abs())
+                    .sum()
+            }
+        }
+    }
+
     /// Fewest and most stations of a sweep that twists, scales or follows rails.
     const MIN_STATIONS: usize = 16;
     const MAX_STATIONS: usize = 2048;
@@ -492,16 +783,13 @@ mod imp {
     pub(crate) fn sweep_controlled(plane: &Plane, region: &NumberedRegion, path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
         let pieces = pieces(region.loops());
         let c = curves(plane, &pieces)?;
-        let start = match path.first() {
-            Some(crate::PathSeg::Line { a, .. } | crate::PathSeg::Arc { a, .. }) => *a,
-            None => return Err(KernelError::Invalid("the path needs 1…1000 segments".into())),
-        };
+        let start = path.first().map(crate::PathSeg::start).ok_or_else(|| KernelError::Invalid("the path needs 1…1000 segments".into()))?;
         // Each point of the profile turns with the path and the twist, and SMLib's skin is a cubic
         // interpolation through the stations with free ends, whose error near the ends falls only
         // as the square of the step: a square of reach 7.1 twisted a quarter turn over 40 mm is
         // 2e-7 off in volume at 1.4 degree steps and 2e-6 at 2.8 (measured against V = A L). A
         // station per degree of turn.
-        let turn: f64 = path.iter().map(|s| if let crate::PathSeg::Arc { angle, .. } = s { angle.abs() } else { 0.0 }).sum::<f64>() + ctl.twist.abs();
+        let turn: f64 = path.iter().map(path_turn).sum::<f64>() + ctl.twist.abs();
         let step = std::f64::consts::PI / 180.0;
         let rail_points = ctl.rails.iter().map(Vec::len).max().unwrap_or(0);
         let n = ((turn / step).ceil() as usize).max(rail_points.saturating_sub(1)).clamp(MIN_STATIONS, MAX_STATIONS);
@@ -851,6 +1139,16 @@ mod imp {
         }
         all.push(nets.last().ok_or_else(|| fail("sections"))?.iter().map(Net::curve).collect());
         loft_through(sections, first, &all, 3)
+    }
+
+    /// A loft from the section `pieces` (lines) on `plane` to `apex`: the base is the start cap,
+    /// each triangle comes from the segment it stands on.
+    pub(crate) fn loft_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3) -> Result<Body> {
+        let c = curves(plane, pieces)?;
+        let brep = Brep::loft_to_point(&c, p(apex)).map_err(|e| failed("loft to a point", e))?;
+        let body = body_of(&brep, "loft to a point")?;
+        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
+        with_history(body, &roles, pieces)
     }
 
     /// The profile `pieces` on `plane` carried by a screw motion about the axis through `origin`

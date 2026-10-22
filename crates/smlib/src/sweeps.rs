@@ -1,8 +1,7 @@
 //! SMLib's sweeps: extrusion (straight or drafted), revolution, sweep along a path, loft through
 //! sections or to a point, the screw sweep of a thread or coil, and the sweep of a profile placed
 //! at stations (one that twists, scales or follows guide rails along its path). Profiles, paths and
-//! sections are lists of
-//! [`Curve`]s; each sweep returns a new body.
+//! sections are lists of [`Curve`]s; each sweep returns a new body.
 //!
 //! With `cap`, the profile's loops close the ends and the result must be a closed manifold solid
 //! ([`Error::NotSolid`] otherwise); without, it is the swept sheet.
