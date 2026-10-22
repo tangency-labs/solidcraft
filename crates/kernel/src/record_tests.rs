@@ -21,7 +21,7 @@ fn sketch_made(b: &Body) -> &History {
     h.check(b, &[]).unwrap();
     assert!(h.faces.iter().all(|f| f.change == Change::Generated && !f.origins.is_empty()));
     assert!(h.edges.iter().all(|e| e.origins.is_empty()));
-    assert_eq!(h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>(), crate::history::edge_faces(&b.solid));
+    assert_eq!(h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>(), crate::history::edge_faces(b.record()));
     h
 }
 
@@ -525,7 +525,7 @@ fn raised_band_reports_kept_trimmed_and_new_faces() {
     let [FaceOrigin::Face { operand: 0, face: rim }] = rim.origins.as_slice() else { panic!() };
     // The rim's inner loop: the edges the walls stand on.
     let loop_edges: Vec<usize> =
-        crate::history::edge_faces(&sh.solid).iter().enumerate().filter(|(_, fs)| fs.contains(rim)).map(|(i, _)| i).collect();
+        crate::history::edge_faces(sh.record()).iter().enumerate().filter(|(_, fs)| fs.contains(rim)).map(|(i, _)| i).collect();
     let mut walls = 0;
     for (i, f) in h.faces.iter().enumerate() {
         if let [FaceOrigin::Edge { operand: 0, edge }] = f.origins.as_slice() {

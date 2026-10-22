@@ -3,8 +3,7 @@
 //! neighbours) starts from the body's record, takes faces away, adds faces bounded by new or
 //! existing edges, and finishes into a record in canonical order (docs/native-brep.md): pcurves
 //! from the record's one routine ([`solidcraft_geom::brep::pcurve`]) for every new use, the
-//! record's own for every use kept, edge uses, regions and shells. SMLib builds the body from
-//! that record, as from any other.
+//! record's own for every use kept, edge uses, regions and shells. The body is that record.
 //!
 //! Faces keep the record's convention as the operation gives them: each face's loops are seen
 //! from the side the material is not on (the outward side), the outer loop counter-clockwise
@@ -19,7 +18,7 @@ use solidcraft_geom::brep::{
 };
 
 use crate::body::Body;
-use crate::history::{EdgeOrigin, EdgeProv, FaceProv, History};
+use crate::history::{EdgeOrigin, FaceProv};
 use crate::{KernelError, Result};
 
 fn invalid(m: impl std::fmt::Display) -> KernelError {
@@ -426,24 +425,12 @@ fn domain_of(surface: &Surface, pcurves: &[Vec<Curve2>], kept: Option<[[f64; 2];
     Some(out)
 }
 
-/// The body SMLib builds from `record`, and whether its faces and edges are numbered as the
-/// record's (then face i of the body is face i of the record, and so for edges).
-pub(crate) fn body_of(record: &Brep) -> Result<(Body, bool)> {
-    let (brep, same) = crate::native::smlib_record_ordered(record)?;
-    let (body, kept) = crate::native::body_from_smlib_ordered(&brep)?;
-    Ok((body, same.is_some() && kept.is_some()))
-}
-
 /// The body of `finished`, built from the one operand `from`, with the history whose faces are
 /// `faces` (in the assembly's face order, taken-away faces skipped): each kept edge the operand
-/// edge it is, each new one where its two faces meet. No history where SMLib renumbered the
-/// record.
-pub(crate) fn body_with_history(finished: &Finished, assembly: &Assembly, from: &Body, faces: Vec<FaceProv>) -> Result<Body> {
-    let (body, same) = body_of(&finished.record)?;
-    let counts = crate::record::counts(&[from]);
-    if !same {
-        return Ok(body.with_checked_history(None, &counts));
-    }
+/// edge it is, each re-made one the operand edges it is a piece of, each new one where its two
+/// faces meet ([`crate::record::of_faces`]). The body is the finished record, so its faces and
+/// edges are numbered as the record's.
+pub(crate) fn body_with_history(finished: Finished, assembly: &Assembly, from: &Body, faces: Vec<FaceProv>) -> Result<Body> {
     // The provenance of each record face, from the assembly's face order.
     let mut provs: Vec<Option<FaceProv>> = vec![None; finished.record.faces.len()];
     let mut given = faces.into_iter();
@@ -451,30 +438,18 @@ pub(crate) fn body_with_history(finished: &Finished, assembly: &Assembly, from: 
         let p = given.next().ok_or_else(|| invalid("history: fewer faces than the body"))?;
         *provs.get_mut(*k).ok_or_else(|| invalid("history: face"))? = Some(p);
     }
-    let mut faces: Vec<FaceProv> = provs.into_iter().collect::<Option<_>>().ok_or_else(|| invalid("history: a face without provenance"))?;
-    crate::record::mark_shared_split(&mut faces);
-    let edges = finished
-        .record
+    let faces: Option<Vec<FaceProv>> = provs.into_iter().collect();
+    let edges: Vec<Vec<EdgeOrigin>> = finished
         .edges
         .iter()
-        .zip(&finished.edges)
-        .map(|(e, a)| {
-            let mut between: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
-            between.sort_unstable();
-            between.dedup();
-            let origins = match assembly.edges.get(*a) {
-                Some(AEdge { source: Some(edge), .. }) => vec![EdgeOrigin::Edge { operand: 0, edge: *edge }],
-                Some(AEdge { of, .. }) if !of.is_empty() => {
-                    let mut of = of.clone();
-                    of.sort_unstable();
-                    of.into_iter().map(|edge| EdgeOrigin::Edge { operand: 0, edge }).collect()
-                }
-                _ => crate::record::meeting(&between, &faces),
-            };
-            EdgeProv { faces: between, origins }
+        .map(|a| match assembly.edges.get(*a) {
+            Some(AEdge { source: Some(edge), .. }) => crate::record::pieces_of(0, [*edge]),
+            Some(AEdge { of, .. }) => crate::record::pieces_of(0, of.iter().copied()),
+            None => Vec::new(),
         })
         .collect();
-    Ok(body.with_checked_history(Some(History { operands: 1, faces, edges }), &counts))
+    let body = Body::from_record(finished.record)?;
+    Ok(crate::record::attach(body, &crate::record::counts(&[from]), faces, &edges))
 }
 
 /// Whether the face `face` of `b` has its natural normal out of the material.

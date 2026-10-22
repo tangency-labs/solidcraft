@@ -318,7 +318,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             }
         }
         let finished = asm.finish().map_err(|e| fail(format!("the neighbouring faces do not close the gap ({e})")))?;
-        crate::assemble::body_with_history(&finished, &asm, body, history)
+        crate::assemble::body_with_history(finished, &asm, body, history)
     })
 }
 

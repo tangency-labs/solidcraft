@@ -187,11 +187,11 @@ fn faces_of(h: &History) -> Vec<(Change, Vec<FaceOrigin>)> {
     h.faces.iter().map(|f| (f.change, f.origins.clone())).collect()
 }
 
-/// Truck's boolean with a sphere (no prism, no coincident faces): a box with a corner taken
+/// A boolean with a sphere (no prism, no coincident faces): a box with a corner taken
 /// off by a sphere. The three faces at the corner get a notch, the sphere's patches inside the
 /// box bound it, meeting the box's faces along new edges.
 #[test]
-fn box_minus_sphere_through_truck() {
+fn box_minus_sphere() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
@@ -210,30 +210,6 @@ fn box_minus_sphere_through_truck() {
     // Each notched box face meets two of the sphere's patches.
     assert_eq!(meets(h).len(), 6, "{}", show(h));
     assert!(meets(h).iter().all(|(x, y)| matches!((x, y), (FaceOrigin::Face { operand: 0, .. }, FaceOrigin::Face { operand: 1, .. }))));
-}
-
-/// The jitter retries move both operands and the result back: the history holds for the
-/// operands themselves, the same faces coming from the same operand faces.
-#[test]
-fn shifted_truck_attempt_keeps_the_history() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
-    let counts = crate::record::counts(&[&a, &b]);
-    let mut compared = 0;
-    for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
-        let Ok((_, Some((plain, _)))) = crate::ops::truck_boolean(&a, &b, op, None, 0.035) else { continue };
-        // The shifts the retries use (a hundredth of the size along each).
-        for j in [[0.1373, 0.2719, 0.3911], [-0.5127, 0.0833, 0.2291], [0.6911, -0.3337, -0.6127]] {
-            let shift = truck_modeling::Vector3::new(j[0], j[1], j[2]) * 0.17;
-            let Ok((s, h)) = crate::ops::truck_boolean(&a, &b, op, Some(shift), 0.035) else { continue };
-            let faces = h.as_ref().map(|(f, _)| f.clone());
-            assert_eq!(faces, Some(plain.clone()), "{op:?}");
-            let r = crate::boolean_record::truck_result(s, h, 17.4, &[], &counts).unwrap();
-            verified(&r, &[&a, &b], 0.02);
-            compared += 1;
-        }
-    }
-    assert!(compared > 0);
 }
 
 /// Two prisms along x, the tool's section inside the target's, overlapping in part: sewn slab by
@@ -397,17 +373,6 @@ fn planar_fallback() {
         assert_eq!(meets(h).len(), 6, "{op:?}\n{}", show(h));
         assert!(h.edges.iter().all(|e| e.origins.len() == 1), "{op:?}\n{}", show(h));
     }
-}
-
-/// The nudged retry: a boolean with the tool moved a hair, composed with the move.
-#[test]
-fn nudged_tool_composes() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
-    let nb = crate::transform(&b, Vec3::new(1e-5, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
-    let r = boolean(&a, &nb, BoolOp::Cut).unwrap().unwrap();
-    let r = crate::ops::nudged(r, &nb, &crate::record::counts(&[&a, &b]));
-    verified(&r, &[&a, &b], 0.02);
 }
 
 /// A boolean with a triangle mesh: the mesh's faces are its triangles (and it has no edges).
@@ -593,7 +558,7 @@ mod smlib {
         let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         for (name, b) in [("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0)), ("vertex", boxed(10.0, 10.0, 10.0, 20.0, 20.0, 20.0))] {
             let r = through_smlib(&a, &b, BoolOp::Union);
-            assert_eq!(r.solid.boundaries().len(), 2, "{name}");
+            assert_eq!(r.shell_count(), 2, "{name}");
             assert_eq!((r.face_count(), r.edge_count()), (12, 24), "{name}");
             let v = crate::measure(&r).unwrap().volume;
             assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{name}: {v}");
@@ -609,7 +574,7 @@ mod smlib {
         let a = boxed(0.0, 0.0, 0.0, 20.0, 20.0, 10.0);
         let once = through_smlib(&a, &boxed(10.0, -1.0, -1.0, 21.0, 10.0, 11.0), BoolOp::Cut);
         let r = through_smlib(&once, &boxed(-1.0, 10.0, -1.0, 10.0, 21.0, 11.0), BoolOp::Cut);
-        assert_eq!(r.solid.boundaries().len(), 2);
+        assert_eq!(r.shell_count(), 2);
         let v = crate::measure(&r).unwrap().volume;
         assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{v}");
     }
@@ -625,7 +590,7 @@ mod smlib {
         for (name, z0, depth) in [("through", -1.0, 12.0), ("blind", 2.0, 9.0)] {
             let b = crate::cylinder(Vec3::new(10.0, 15.0, z0), Vec3::Z, 5.0, depth).unwrap();
             let r = through_smlib(&a, &b, BoolOp::Cut);
-            assert_eq!(r.solid.boundaries().len(), 1, "{name}");
+            assert_eq!(r.shell_count(), 1, "{name}");
             let record = crate::brep_record(&r).unwrap();
             assert!(record.edges.iter().all(|e| e.uses.len() == 2), "{name}");
             let hole = std::f64::consts::PI * 25.0 * (10.0 - z0.max(0.0));
