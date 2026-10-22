@@ -1194,7 +1194,6 @@ fn open_sections(sections: &[(Plane, Vec<Seg2>)]) -> Result<Vec<crate::loft_rail
 }
 
 /// SMLib's side of this module.
-#[cfg(feature = "smlib")]
 mod imp {
     use solidcraft_smlib::sweeps::{Affine, Curve, Ends, SweepFrame};
     use solidcraft_smlib::{Brep as SmBrep, CheckLevel};
@@ -1544,51 +1543,6 @@ mod imp {
             .collect();
         let degree = u32::try_from(column.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
         checked(&SmBrep::loft(&sections, degree, false).map_err(sm("surface loft"))?, "surface loft")
-    }
-}
-
-#[cfg(not(feature = "smlib"))]
-mod imp {
-    use super::*;
-
-    fn not_built() -> KernelError {
-        refuse("surfaces: this build has no SMLib (feature `smlib`)")
-    }
-    pub(super) fn refuse(what: &str) -> KernelError {
-        crate::smlib_sweeps::refuse(what)
-    }
-    pub(super) fn stitched(_: &Brep, _: f64) -> Result<(Body, Option<History>)> {
-        Err(not_built())
-    }
-    pub(super) fn thicken(_: &Body, _: f64, _: bool) -> Result<Body> {
-        Err(not_built())
-    }
-    pub(super) fn offset_face(_: &Brep, _: usize, _: f64) -> Result<Brep> {
-        Err(not_built())
-    }
-    pub(super) fn extruded(_: &Plane, _: &[Numbered], _: Vec3, _: f64) -> Result<Brep> {
-        Err(not_built())
-    }
-    pub(super) fn revolved(_: &Plane, _: &[Numbered], _: Vec3, _: Vec3, _: f64) -> Result<Brep> {
-        Err(not_built())
-    }
-    pub(super) fn swept(_: &Plane, _: &[Numbered], _: &[crate::PathSeg], _: bool) -> Result<Brep> {
-        Err(not_built())
-    }
-    pub(super) fn cornered(
-        _: &Plane,
-        _: &[Numbered],
-        _: &[crate::PathSeg],
-        _: &[std::ops::Range<usize>],
-        _: bool,
-    ) -> Result<Vec<(Brep, Vec<FaceProv>)>> {
-        Err(not_built())
-    }
-    pub(super) fn swept_stations(_: &Plane, _: &[Numbered], _: &[crate::PathSeg], _: &crate::SweepControl) -> Result<Brep> {
-        Err(not_built())
-    }
-    pub(super) fn lofted(_: &[&solidcraft_geom::bspline::CurveN<4>]) -> Result<Brep> {
-        Err(not_built())
     }
 }
 

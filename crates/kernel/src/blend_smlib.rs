@@ -71,7 +71,6 @@ enum Kind {
     Chamfer,
 }
 
-#[cfg(feature = "smlib")]
 mod imp {
     use std::collections::BTreeSet;
 
@@ -284,33 +283,7 @@ mod imp {
     }
 }
 
-#[cfg(not(feature = "smlib"))]
-mod imp {
-    use solidcraft_geom::Vec3;
-
-    use super::Kind;
-    use crate::blend_variable::RadiusSpline;
-    use crate::body::Body;
-    use crate::{KernelError, Result};
-
-    fn not_built() -> KernelError {
-        KernelError::Invalid("not supported yet: this build has no SMLib".into())
-    }
-
-    pub(super) fn blend(_: &Body, _: &str, _: Kind, _: &[Vec3], _: &[f64]) -> Result<Body> {
-        Err(not_built())
-    }
-
-    pub(super) fn variable(_: &Body, _: Vec3, _: Vec3, _: &RadiusSpline) -> Result<Body> {
-        Err(not_built())
-    }
-
-    pub(super) fn sides(_: &Body, _: &[Vec3], _: f64, _: crate::ChamferSide, _: bool) -> Result<Body> {
-        Err(not_built())
-    }
-}
-
-#[cfg(all(test, feature = "smlib"))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use solidcraft_geom::Vec3;
