@@ -98,6 +98,9 @@ pub struct Solid {
     /// What was repaired or noted on the way (faces whose same_sense disagreed with their
     /// loops, edges whose same_sense disagreed with their vertices, raised tolerances).
     pub notes: Vec<String>,
+    /// The record faces turned over because their loops disagree with their same_sense (their
+    /// outer loop runs clockwise about the normal the file gives them), in increasing order.
+    pub turned: Vec<u32>,
 }
 
 /// A solid item that could not be read, and why.
@@ -805,6 +808,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         let vmap = |v: u32| vertex_new.get(v as usize).copied().filter(|x| *x != u32::MAX).ok_or("vertex reference".to_string());
         let emap = |e: u32| edge_new.get(e as usize).copied().filter(|x| *x != u32::MAX).ok_or("edge reference".to_string());
         let fmap = |f: u32| face_new.get(f as usize).copied().filter(|x| *x != u32::MAX).ok_or("face reference".to_string());
+        let mut turned_faces = Vec::with_capacity(flipped);
+        for (f, t) in turned.iter().enumerate() {
+            if *t {
+                turned_faces.push(fmap(index(f)?)?);
+            }
+        }
+        turned_faces.sort_unstable();
 
         // Vertex loops: their vertex's distance from the surface is its tolerance.
         for &f in &face_order {
@@ -886,7 +896,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
         brep.validate().map_err(|e| format!("the record is invalid: {e}"))?;
         brep.check_geometry().map_err(|e| format!("the record's geometry disagrees: {e}"))?;
-        Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes })
+        Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
     /// Every edge of the shell's faces used at least twice among them.

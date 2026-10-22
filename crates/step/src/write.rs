@@ -1,6 +1,7 @@
 //! Writing ISO 10303-21: a DATA section built entity by entity, and [`crate::geom`] curves and
-//! surfaces as ISO 10303-42 entities. Identical entities are written once and shared, as the
-//! reader shares them.
+//! surfaces as ISO 10303-42 entities. Identical geometric entities are written once and shared,
+//! as the reader shares them; topological ones are distinct ([`Writer::add_distinct`]).
+//! [`topology`] writes a schema 4 record's solids.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -10,6 +11,8 @@ use crate::geom::{
     SurfaceForm, Trim, TrimPreference,
 };
 use crate::p21::Param;
+
+pub mod topology;
 
 /// A real as Part 21 writes it: always with a decimal point, exponent as `E`.
 pub fn real(x: f64) -> String {
@@ -108,18 +111,33 @@ impl Writer {
         if let Some(id) = self.shared.get(&body) {
             return *id;
         }
-        let id = self.lines.len() as u64 + 1;
-        self.lines.push(format!("#{id}={body};"));
+        let id = self.push_distinct(&body);
         self.shared.insert(body, id);
         id
     }
 
-    /// A simple entity instance.
-    pub fn add(&mut self, name: &str, p: &[Param]) -> u64 {
+    fn push_distinct(&mut self, body: &str) -> u64 {
+        let id = self.lines.len() as u64 + 1;
+        self.lines.push(format!("#{id}={body};"));
+        id
+    }
+
+    fn simple(name: &str, p: &[Param]) -> String {
         let mut body = format!("{name}(");
         params(p, &mut body);
         body.push(')');
-        self.push(body)
+        body
+    }
+
+    /// A simple entity instance, shared with an identical earlier one.
+    pub fn add(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.push(Self::simple(name, p))
+    }
+
+    /// A simple entity instance of its own, even when an identical one exists: an entity whose
+    /// identity matters (two vertices at one point are two vertices; a product is one product).
+    pub fn add_distinct(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.push_distinct(&Self::simple(name, p))
     }
 
     /// A complex entity instance; its records are written in alphabetical order, as Part 21 asks.
