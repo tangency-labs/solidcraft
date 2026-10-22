@@ -11,7 +11,6 @@
 //! normal, as the record does.
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
 use solidcraft_geom::brep::{Brep, Curve, Curve2, Edge, Face, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex};
 
