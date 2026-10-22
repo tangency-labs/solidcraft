@@ -2,21 +2,29 @@
   "en": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "Drag to move the boss across the model. It snaps to sketch points on the face.",
     "Drag to move the rest across the model. It snaps to sketch points on the face.": "Drag to move the rest across the model. It snaps to sketch points on the face.",
+    "Drag to move the snap fit across the model. It snaps to sketch points on the face.": "Drag to move the snap fit across the model. It snaps to sketch points on the face.",
+    "Drag to point the catch in another direction.": "Drag to point the catch in another direction.",
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely."
   },
   "ja": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "ドラッグしてボスをモデル上で移動します。面上のスケッチ点にスナップします。",
     "Drag to move the rest across the model. It snaps to sketch points on the face.": "ドラッグしてレストをモデル上で移動します。面上のスケッチ点にスナップします。",
+    "Drag to move the snap fit across the model. It snaps to sketch points on the face.": "ドラッグしてスナップ フィットをモデル上で移動します。面上のスケッチ点にスナップします。",
+    "Drag to point the catch in another direction.": "ドラッグしてキャッチの向きを変えます。",
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "ドラッグしてレストを 5° 刻みで回転します。Alt または Ctrl を押したままにすると自由に回転します。"
   },
   "pl": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "Przeciągnij, aby przesunąć występ po modelu. Przyciąga się do punktów szkicu na ścianie.",
     "Drag to move the rest across the model. It snaps to sketch points on the face.": "Przeciągnij, aby przesunąć podparcie po modelu. Przyciąga się do punktów szkicu na ścianie.",
+    "Drag to move the snap fit across the model. It snaps to sketch points on the face.": "Przeciągnij, aby przesunąć zatrzask po modelu. Przyciąga się do punktów szkicu na ścianie.",
+    "Drag to point the catch in another direction.": "Przeciągnij, aby skierować zaczep w inną stronę.",
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "Przeciągnij, aby obrócić podparcie co 5°. Przytrzymaj Alt lub Ctrl, aby obracać swobodnie."
   },
   "zh": {
     "Drag to move the boss across the model. It snaps to sketch points on the face.": "拖动以在模型上移动凸台。它会吸附到面上的草图点。",
     "Drag to move the rest across the model. It snaps to sketch points on the face.": "拖动以在模型上移动垫块。它会吸附到面上的草图点。",
+    "Drag to move the snap fit across the model. It snaps to sketch points on the face.": "拖动以在模型上移动卡扣。它会吸附到面上的草图点。",
+    "Drag to point the catch in another direction.": "拖动以将卡钩指向另一个方向。",
     "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.": "拖动以 5° 为步长旋转垫块。按住 Alt 或 Ctrl 可自由旋转。"
   }
 }

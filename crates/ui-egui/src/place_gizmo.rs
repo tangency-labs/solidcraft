@@ -16,6 +16,7 @@
 
 mod boss;
 mod rest;
+mod snap_fit;
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
@@ -67,6 +68,7 @@ pub(crate) struct Turn {
 static TOOLS: &[&Spec] = &[
     &boss::SPEC,
     &rest::SPEC,
+    &snap_fit::SPEC,
 ];
 
 thread_local! {
