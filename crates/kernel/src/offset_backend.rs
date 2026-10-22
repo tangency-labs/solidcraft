@@ -1,6 +1,5 @@
-//! Shell, offset faces and thicken through SMLib, when [`crate::backend`] is SMLib (the one
-//! kernel setting, `SOLIDCRAFT_KERNEL`): the body goes to SMLib as its schema 4 record,
-//! tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
+//! Shell, offset faces, draft and thicken through SMLib: the body goes to SMLib as its schema 4
+//! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
 //! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
 //! error, never a body.
@@ -11,8 +10,7 @@
 //! lie: the copy is the operation's distance from the face, the face itself on it. So a result
 //! face farther from its tagged face than half that distance is recorded as its offset
 //! ([`FaceOrigin::Offset`]), and its edges as where its faces meet. A face SMLib makes new along
-//! a sheet's open edge (a thickened sheet's wall) is recorded as made in place of that edge, as
-//! truck's thicken records it.
+//! a sheet's open edge (a thickened sheet's wall) is recorded as made in place of that edge.
 
 #![cfg(feature = "smlib")]
 
@@ -75,7 +73,7 @@ fn run(name: &str, b: &Body, op: impl FnOnce(&Brep) -> std::result::Result<Brep,
 }
 
 /// [`crate::shell`] through SMLib: walls of `thickness` inside, open at the faces under the
-/// points `open` (the face of the nearest triangle, as truck's shell picks them) and the faces
+/// points `open` (the face of the nearest triangle) and the faces
 /// on the same surface joined to them: a round wall stored in pieces (a hole's two halves) opens
 /// whole. SMLib is given one point inside each, never the pick itself, which may lie on the
 /// line between two pieces.

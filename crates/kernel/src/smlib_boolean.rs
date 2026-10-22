@@ -1,6 +1,5 @@
-//! Booleans through SMLib ([`crate::backend`] picks them): each operand's schema 4 record built
-//! in SMLib and tagged as operand 0 or 1, `SmBrep` boolean, the result exported to schema 4 and
-//! decoded as a kernel body. The result's history is SMLib's own (its tags carried through the
+//! Booleans through SMLib: each operand's schema 4 record built in SMLib and tagged as operand 0
+//! or 1, `SmBrep` boolean, the result exported to schema 4 and decoded as a kernel body. The result's history is SMLib's own (its tags carried through the
 //! operation), renumbered from SMLib's face and edge order into the operands' and the result's
 //! ([`crate::history::History`]'s contract). A result SMLib's own check or the record's geometry
 //! check refuses is an error, never a body.
