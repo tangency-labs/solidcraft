@@ -3,8 +3,6 @@
 use super::*;
 use std::f64::consts::FRAC_PI_2;
 
-use crate::body::v3;
-
 /// One seam of a box corner: a quarter circle about `centre` from direction `u` to direction `w`,
 /// with `leave` the way the patch leaves the blend's surface. A fillet is flat along its own axis,
 /// so its curvature across the seam is nothing.
@@ -36,12 +34,12 @@ fn box_corner(r: f64, n: usize) -> (Vec<Vec<Frame>>, Vec3, Vec3) {
 }
 
 /// The rolling-ball corner the kernel builds today: the sphere through the same three seams, made
-/// the way `curvecorner` makes it (a meridian arc swept about the axis through the ball's centre).
-fn rolling_ball(r: f64, c: Vec3) -> mt::Surface {
+/// as a sphere record about the ball's centre, its axis along the corner's diagonal.
+fn rolling_ball(r: f64, c: Vec3) -> b::Surface {
     let axis = Vec3::new(1.0, 1.0, 1.0).normalized().unwrap_or(Vec3::Z);
-    let side = axis.any_perp();
-    let meridian = builder::circle_arc(&builder::vertex(p3(c + axis * r)), &builder::vertex(p3(c - axis * r)), p3(c + side * r));
-    mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(c), v3(axis))))
+    let side = axis.any_perp().normalized().unwrap();
+    let y = axis.cross(side);
+    b::Surface::Sphere { frame: b::Frame { origin: [c.x, c.y, c.z], x_axis: [side.x, side.y, side.z], y_axis: [y.x, y.y, y.z] }, radius: r }
 }
 
 /// The stations clear of the corners. Two blends meet at a corner with their seams 90° apart and
@@ -56,9 +54,7 @@ fn interior(sides: &[Vec<Frame>]) -> Vec<Vec<Frame>> {
 fn a_box_corner_is_curvature_continuous_with_every_blend() {
     let r = 2.0;
     let (sides, apex, centre) = box_corner(r, 25);
-    let faces = corner_g2_patch(&sides, apex).unwrap();
-    let face = faces.first().expect("a corner patch");
-    let surface = face.oriented_surface();
+    let surface = corner_g2_patch(&sides, apex).unwrap().surface;
     let inner = interior(&sides);
     let (gap, angle, curvature) = seam_error(&surface, &inner, 1.0 / r).unwrap();
     println!("G2 corner: gap {gap:e}, normal angle {angle:e} rad, curvature {curvature:e} (relative to 1/r)");
@@ -92,8 +88,7 @@ fn a_corner_meets_three_blends_of_different_shape_apart() {
             f.bend = f.leave.any_perp() * *bend;
         }
     }
-    let faces = corner_g2_patch(&sides, apex).unwrap();
-    let surface = faces.first().expect("a corner patch").oriented_surface();
+    let surface = corner_g2_patch(&sides, apex).unwrap().surface;
     let inner = interior(&sides);
     let (gap, angle, curvature) = seam_error(&surface, &inner, bends.iter().copied().fold(0.0, f64::max)).unwrap();
     println!("three different blends: gap {gap:e}, angle {angle:e} rad, curvature {curvature:e}");
