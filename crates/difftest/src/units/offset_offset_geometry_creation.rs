@@ -57,7 +57,8 @@
 //! B-spline part; revolution, extrusion, cone, cylinder, sphere and torus face surfaces
 //! are then restored from the shim's binary `WriteToDB` records (`read_face_surfaces`)
 //! through the existing polymorphic reader. Native type codes, complete record
-//! consumption, face alignment and existing owner identities are checked. No native
+//! consumption, face alignment and existing owner identities are checked. Restored
+//! surfaces synchronize their cached tolerance from the actual owning face. No native
 //! operation results are imported or replayed on the Rust side.
 //!
 //! **Deferred.** Operations dispatching on an unsupported, inexact face kind
@@ -2169,6 +2170,10 @@ fn read_face_surfaces(
             .owner();
         surface.set_owner(owner);
         face.surface = Some(surface);
+        // Replacement bypasses add_face_record's cache synchronization. Restore
+        // that invariant from this face's real tolerance, never a guessed default.
+        b.sync_face_surface_tolerance(f)
+            .map_err(|e| harness(e.to_string()))?;
         *exact
             .get_mut(i)
             .ok_or_else(|| harness("surface record past the faces"))? = true;
@@ -4360,7 +4365,7 @@ mod tests {
     }
 
     #[test]
-    fn surface_records_restore_native_kinds_owners_and_nurbs_in_both_arenas() {
+    fn surface_records_restore_native_kinds_owners_tolerances_and_nurbs_in_both_arenas() {
         for (fixture, expected_type) in [
             (file("cone.smb"), CONE_TYPE),
             (file("Solids/cylinder.smb"), CONE_TYPE),
@@ -4396,7 +4401,11 @@ mod tests {
                 let before: Vec<_> = brep
                     .faces()
                     .iter()
-                    .map(|(_, face)| face.surface.as_ref().map(|s| (s.owner(), nurb_state(s))))
+                    .map(|(_, face)| {
+                        face.surface
+                            .as_ref()
+                            .map(|s| (s.owner(), s.owner_zone_tol_3d(), nurb_state(s)))
+                    })
                     .collect();
                 read_face_surfaces(&mut brep, &mut exact, &types, records).unwrap();
                 assert!(exact.iter().all(|&value| value), "{name}: {exact:?}");
@@ -4405,12 +4414,46 @@ mod tests {
                         assert!(original.is_none());
                         continue;
                     };
-                    let (owner, nurb) = original.unwrap();
+                    let (owner, tolerance, nurb) = original.unwrap();
                     assert_eq!(surface.owner(), owner, "{name}: {index:?}");
+                    assert_eq!(surface.owner_zone_tol_3d(), tolerance, "{name}: {index:?}");
                     assert_eq!(nurb_state(surface), nurb, "{name}: {index:?}");
                     if let Some(type_code) = types[index.index() as usize] {
                         assert_eq!(surface.type_code(), type_code, "{name}: {index:?}");
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn restored_surface_uses_its_own_face_tolerance_and_keeps_unowned_surfaces_unowned() {
+        let out = export(&import_input("cone.smb")).unwrap();
+        let (a, b) = ffi::split_exports(&out).unwrap();
+        let records = ffi::split_surface_records(&out).unwrap();
+        for (arena, (block, records)) in [a, b.unwrap()].iter().zip(&records).enumerate() {
+            for unowned in [false, true] {
+                let (mut brep, mut exact, types) = import_with_types(block).unwrap();
+                let faces: Vec<_> = brep.faces().ids().collect();
+                for &face_id in &faces {
+                    let face = brep.face_mut(face_id).unwrap();
+                    face.tolerance =
+                        (arena + 1) as f64 * (f64::from(face_id.index()) + 1.0) * 0.003;
+                    if unowned {
+                        face.surface.as_mut().unwrap().set_owner(None);
+                    }
+                    brep.sync_face_surface_tolerance(face_id).unwrap();
+                }
+                read_face_surfaces(&mut brep, &mut exact, &types, records).unwrap();
+                for face_id in faces {
+                    let face = brep.face(face_id).unwrap();
+                    let surface = face.surface.as_ref().unwrap();
+                    assert_eq!(surface.owner().is_none(), unowned);
+                    assert_eq!(
+                        surface.face_zone_tol_3d().unwrap(),
+                        (!unowned).then_some(face.tolerance),
+                        "arena={arena}, face={face_id:?}",
+                    );
                 }
             }
         }
