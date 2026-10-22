@@ -1,6 +1,5 @@
-//! Truck bodies into SMLib through their schema 4 records: the kernel's primitives keep their
-//! analytic volume. Truck holds cylinders, spheres and tori as rational B-splines, which SMLib
-//! integrates to a few 1e-7 (truck's own mesh measure is 1e-4 off).
+//! Bodies into SMLib through their schema 4 records: the kernel's primitives keep their analytic
+//! volume.
 use std::f64::consts::PI;
 
 use solidcraft_geom::Vec3;
@@ -44,8 +43,8 @@ fn revolutions_keep_their_analytic_volume() {
     }
 }
 
-/// A body SMLib made (analytic faces) comes back from truck as revolutions, and goes into SMLib
-/// again as the same analytic faces: a second boolean on a first one's result.
+/// A body SMLib made (analytic faces) comes back as a record and goes into SMLib again as the
+/// same analytic faces: a second boolean on a first one's result.
 #[test]
 fn smlib_results_go_back_into_smlib() {
     for (name, body, exact) in [
@@ -62,8 +61,8 @@ fn smlib_results_go_back_into_smlib() {
     }
 }
 
-/// Truck's cylinders are circles extruded as rational splines: they go into SMLib as its
-/// cylinder, so a boolean with one intersects a plane with a cylinder, not with a spline.
+/// Extruded circles go into SMLib as its cylinder, so a boolean with one intersects a plane with
+/// a cylinder, not with a spline.
 #[test]
 fn extruded_circles_go_as_cylinders() {
     use solidcraft_smlib::flat;
@@ -89,7 +88,7 @@ fn a_cavity_comes_back_from_smlib() {
     let cavity = box_solid(v(25., 25., 25.), v(30., 30., 30.)).unwrap();
     let r = super::smlib_body(&block).unwrap().boolean(&super::smlib_body(&cavity).unwrap(), solidcraft_smlib::BooleanOp::Subtract).unwrap().unwrap();
     let back = super::body_from_smlib(&r).unwrap();
-    assert_eq!((back.solid.boundaries().len(), back.face_count()), (2, 12));
+    assert_eq!((back.shell_count(), back.face_count()), (2, 12));
     let got = super::smlib_body(&back).unwrap().volume(1e-7).unwrap();
     assert!((got - (64_000.0 - 125.0)).abs() < 1e-6, "{got}");
 }
