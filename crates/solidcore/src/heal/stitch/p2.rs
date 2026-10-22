@@ -36,9 +36,8 @@
 //!   reason (the lengths are still computed).
 //! - `SmBrep::Notify(SM_NO_PRE_EDIT)` is `super::p1::brep_notify_pre_edit`
 //!   (`topology::brep::p2::notify`), which still defers inside `topology.brep_p2`.
-//!   This file's own stubs return [`SolidError::Unported`]: `CalculateBoundingBox`
-//!   (`query.brep`) and `FindAndSetInfiniteRegion` (`topology.brep_p5`, ported there but
-//!   not wired here yet: it needs the `Kernel` and a typed void-type argument).
+//!   This file's own stub returns [`SolidError::Unported`]: `CalculateBoundingBox`
+//!   (`query.brep`). `FindAndSetInfiniteRegion` is `topology.brep_p5`'s.
 //!   `DeleteFace` and `SqueezeEdge` are `topology.brep_p3`'s, notifying through the
 //!   kernel context's callbacks; `GlueVertices`, `GlueEdgesGeneral` and
 //!   `MakeVertexSplitEdge` (through [`test_and_split_edge`]) defer only where their own
@@ -1488,8 +1487,8 @@ fn delete_face(
 }
 
 /// `SmBrep::FindAndSetInfiniteRegion(pOptShellToTest, eVoidSettingFlag, pOptBrepBBox)`
-/// (upstream defaults `NULL`, `SM_VS_INFINITEREGION_SWAP`, `NULL`); the box is passed
-/// as a copy.
+/// (upstream defaults `NULL`, `SM_VS_INFINITEREGION_SWAP`, `NULL`), on a fresh
+/// [`crate::query::brep::BrepQuery`] of the B-rep.
 pub(crate) fn find_and_set_infinite_region(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1497,14 +1496,14 @@ pub(crate) fn find_and_set_infinite_region(
     void_setting: SetRegionVoidType,
     brep_bbox: Option<&Extent3d>,
 ) -> Result<()> {
-    let _ = k;
-    let code = match void_setting {
-        SetRegionVoidType::NestedSolid => 0,
-        SetRegionVoidType::InfiniteRegionOnly => 1,
-        SetRegionVoidType::InfiniteRegionSwap => 2,
-    };
-    let mut bbox = brep_bbox.copied();
-    crate::topology::brep::p5::find_and_set_infinite_region(b, shell_to_test, code, bbox.as_mut())
+    crate::topology::brep::p5::find_and_set_infinite_region(
+        k,
+        b,
+        &crate::query::brep::BrepQuery::default(),
+        shell_to_test,
+        void_setting,
+        brep_bbox,
+    )
 }
 
 /// `SmFace::IsLamina` (unit `topology.face_p3`).

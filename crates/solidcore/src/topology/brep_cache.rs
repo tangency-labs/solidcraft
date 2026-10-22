@@ -493,8 +493,9 @@ pub struct BrepObjects<'a> {
     pub brep: &'a Brep,
     /// Identity of the source B-rep in the caller's shape store.
     pub brep_id: crate::topology::BrepId,
-    /// Cache built from these arenas with identity handles.
-    pub cache: &'a BrepCache,
+    /// Cache built from these arenas with identity handles. Shape solves read the
+    /// shape's own trees, so a view for them needs none (`None`).
+    pub cache: Option<&'a BrepCache>,
     /// Identity of each edge/face record (independent of its arena index).
     pub keys: &'a dyn Fn(CacheObject) -> object::ObjectRef,
     /// Owners of intermediate generated curves and edge uses, as for `Curve::edge`.
@@ -506,7 +507,7 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
         if object != CacheObject::Brep {
             return Err(SolidError::invalid_input(OP, "expected B-rep handle"));
         }
-        Ok(self.cache)
+        self.cache.ok_or(SolidError::null_pointer(OP))
     }
     fn curve(&self, object: CacheObject) -> Result<&crate::curve::curve::Curve> {
         let CacheObject::Curve(e) = object else {
@@ -617,6 +618,42 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             _ => ShapeMember::Other,
         }
     }
+    fn shape_member_object(&self, member: object::ShapeMember) -> Result<CacheObject> {
+        use crate::geom::object::ShapeMember;
+        let (brep, object) = match member {
+            ShapeMember::Vertex((b, v)) => (b, CacheObject::Vertex(v)),
+            ShapeMember::Edge((b, e)) => (b, CacheObject::Edge(e)),
+            ShapeMember::Face((b, f)) => (b, CacheObject::Face(f)),
+            ShapeMember::Other => {
+                return Err(SolidError::invalid_input(OP, "not a shape member"));
+            }
+        };
+        if brep != self.brep_id {
+            return Err(SolidError::invalid_input(
+                OP,
+                "shape member of another B-rep",
+            ));
+        }
+        Ok(object)
+    }
+}
+
+impl crate::intersect::point_class::ClassObject for CacheObject {
+    fn class_kind(&self) -> crate::intersect::point_class::ClassObjectKind {
+        use crate::intersect::point_class::ClassObjectKind;
+        match self {
+            Self::Vertex(_) => ClassObjectKind::Vertex,
+            Self::Curve(_) => ClassObjectKind::Curve,
+            Self::Surface(_) => ClassObjectKind::Surface,
+            Self::Edge(_) => ClassObjectKind::Edge,
+            Self::Face(_) => ClassObjectKind::Face,
+            Self::Brep
+            | Self::Other(_)
+            | Self::PolyVertex(_)
+            | Self::PolyEdge(_)
+            | Self::PolyFace(_) => ClassObjectKind::Other,
+        }
+    }
 }
 
 /// Conventional identities for a single B-rep: the type code and raw arena index.
@@ -709,7 +746,7 @@ mod tests {
         let mut objects = BrepObjects {
             brep: &b,
             brep_id,
-            cache: &cache,
+            cache: Some(&cache),
             keys: &keys,
             owner_of: &owner_of,
         };

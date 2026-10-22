@@ -467,17 +467,16 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_union_loses_the_breps_the_merge_took() -> Result<()> {
-        // both leaves move onto the merge's stack before the union defers (`SmMerge::SmMerge`,
-        // boolean.merge_p2); upstream would leak them, here they are gone, and the slots
-        // stay listed for the caller
+    fn a_union_leaves_its_result_first_and_releases_the_other_slot() -> Result<()> {
+        // the union of the two leaves runs to its end (its FindAndSetInfiniteRegion,
+        // topology.brep_p5, is wired): one result for the one tree, in the first slot;
+        // the second slot is released and dropped from the list
         let (mut a, ids) = models(1)?;
         let mut list = ids.clone();
-        let union = a.boolean_trees(&mut list, &[0, 1, -1]);
-        assert!(matches!(&union, Err(e) if e.is_unported()), "{union:?}");
-        assert_eq!(list, ids);
-        assert!(!whole(&a, ids[0]) && !whole(&a, ids[1]));
-        assert!(a.deleted.is_empty());
+        a.boolean_trees(&mut list, &[0, 1, -1])?;
+        assert_eq!(list, [ids[0]]);
+        assert!(whole(&a, ids[0]));
+        assert_eq!(a.deleted, [ids[1]]);
         Ok(())
     }
 

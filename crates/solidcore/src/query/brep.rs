@@ -484,7 +484,7 @@ impl<'a> BrepQuery<'a> {
             let objects = BrepObjects {
                 brep: b,
                 brep_id,
-                cache: self.cache(k, b)?,
+                cache: Some(self.cache(k, b)?),
                 keys,
                 owner_of,
             };
@@ -571,6 +571,37 @@ impl<'a> BrepQuery<'a> {
         pc.set_deviation(0.0); // SM_USE_OLDTOL
         pc.set_pre_snap_param(BIG_DOUBLE);
         Ok(pc)
+    }
+}
+
+/// The B-rep's ray queries at a shell (`SmShell::RayFire`): the shape solve reads the
+/// B-rep's geometry under these identities, without the B-rep's cache (a shape has
+/// its own trees), and the hits are its vertices, edges and faces.
+impl crate::topology::shell::ShellRayWorld<CacheObject> for BrepQuery<'_> {
+    type Objects<'a>
+        = BrepObjects<'a>
+    where
+        Self: 'a;
+
+    fn objects<'a>(&'a self, brep: (BrepId, &'a Brep)) -> Result<BrepObjects<'a>> {
+        let (brep_id, brep) = brep;
+        if brep_id != self.identity.brep_id {
+            return Err(SolidError::invalid_input(
+                "query::brep::BrepQuery::objects",
+                "ray fire on another B-rep than the query's",
+            ));
+        }
+        Ok(BrepObjects {
+            brep,
+            brep_id,
+            cache: None,
+            keys: self.identity.keys,
+            owner_of: self.identity.owner_of,
+        })
+    }
+
+    fn class_entity(&self, object: CacheObject) -> Option<EntityRef> {
+        bp2::cache_entity(object).ok()
     }
 }
 

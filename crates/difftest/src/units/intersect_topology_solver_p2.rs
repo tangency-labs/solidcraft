@@ -283,7 +283,7 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
     {
         return Err(HarnessError::new("unbounded static fixture"));
     }
-    let kernel = Kernel::default();
+    let mut kernel = Kernel::default();
     let first: Vec<Point3> = i
         .first
         .iter()
@@ -362,7 +362,7 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
         handle: StaticHandle(999),
     };
     let interval = Extent1d::from_min_max(0.0, 1.0);
-    let shape = Shape::new(&kernel, &solidcore::geom::object::NoBreps, &[], &[], &[], &[])
+    let shape = Shape::new(&mut kernel, &solidcore::geom::object::NoBreps, &[], &[], &[], &[])
         .map_err(|e| HarnessError::new(e.to_string()))?;
     let result = match i.entry {
         0 => TopologySolver::brep_point_solve(

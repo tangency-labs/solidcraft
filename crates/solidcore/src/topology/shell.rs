@@ -55,6 +55,10 @@
 //! over `Shell::members`: code that edits `members` directly (e.g. a later unit that
 //! rebuilds face-use lists) must keep them in step or reset them to `None`.
 //! There is no recursion. Missing external callees return explicit `Unported` errors.
+//! `RayFire` reaches the B-rep's geometry through a [`ShellRayWorld`] (upstream: the
+//! faces' own pointers); the B-rep's is [`crate::query::brep::BrepQuery`]. Its view
+//! borrows the B-rep for the shape solve only, since the sector step after it may add
+//! UV trim curves.
 //! The single-member `Remove` / `PostInsert` co-ports (`topology.brep_p3`, PR #204)
 //! return upstream's `SM_ERR` of `Remove` (a member not in this list) as
 //! [`SolidError::sm_err`], which callers that ignore it can tell apart. `PostInsert`
@@ -987,13 +991,29 @@ pub struct ShellRaySectorAttempt {
 
 /// Actual geometry and owner context needed by shell ray queries.
 /// No global owner registry or duplicate geometry metadata is introduced.
-pub trait ShellRayWorld<O>: crate::intersect::topology_solver::p1::TopologyObjects<O> {
+/// The production world is [`crate::query::brep::BrepQuery`].
+pub trait ShellRayWorld<O> {
+    /// The topology solver's view of a B-rep's geometry.
+    type Objects<'a>: crate::intersect::topology_solver::p1::TopologyObjects<O>
+    where
+        Self: 'a;
+
+    /// The view of `brep` the ray's shape solve reads. It borrows the B-rep only
+    /// for that solve: the sector step after it may edit the B-rep.
+    ///
+    /// # Errors
+    /// A world that cannot view `brep`.
+    fn objects<'a>(
+        &'a self,
+        brep: (crate::topology::BrepId, &'a Brep),
+    ) -> Result<Self::Objects<'a>>;
+
     /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`) of
     /// `brep`. Worlds that cannot build the real shape (a harness without the B-rep's
     /// cached geometry) defer here instead of failing later.
     fn shell_ray_shape(
         &self,
-        kernel: &Kernel,
+        kernel: &mut Kernel,
         brep: (crate::topology::BrepId, &Brep),
         faces: &[crate::geom::object::FaceKey],
     ) -> Result<Shape> {
@@ -1112,7 +1132,7 @@ where
         let vectors = [direction];
         let solutions = TopologySolver::shape_point_solve(
             &*kernel,
-            world,
+            &world.objects((brep_id, &*brep))?,
             &shape,
             input.start,
             TopologySolveOptions {

@@ -63,14 +63,15 @@
 //!   the trees in (upstream dereferences it): [`SolidError::InvalidInput`], as for a
 //!   missing face surface, edge curve or edge vertex.
 //! - **Marks.** `SmNewMarkAndLock`'s mark is a set of loaded keys per kind: a shape
-//!   may span B-reps, and the mark is released before the constructor returns, so
-//!   nothing else observes it. `AddUnique` keeps a set next to each member list.
+//!   may span B-reps, and the mark is released before the constructor returns. The
+//!   constructor still claims and releases a mark of the kernel's context (its
+//!   counter advances, as upstream's). `AddUnique` keeps a set next to each member list.
 
 use std::collections::BTreeSet;
 
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
-use crate::geom::context::Context;
+use crate::geom::context::{with_mark_lock, Context, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tree::{NodeGeomType, Tree};
 use crate::kernel::Kernel;
@@ -411,7 +412,7 @@ impl Shape {
     /// the trees in its null context); those of the topology lists; [`SolidError::Unported`]
     /// from the box computations.
     pub fn new(
-        k: &Kernel,
+        k: &mut Kernel,
         store: &dyn BrepStore,
         breps: &[BrepId],
         faces: &[FaceKey],
@@ -499,83 +500,20 @@ impl Shape {
         };
 
         // Now add topology item->shapes in a unique way to the appropriate trees
-        // (`SmNewMarkAndLock`: the sets of loaded keys)
+        // (`SmNewMarkAndLock` claims a context mark; the sets of loaded keys mark)
         if !empty {
-            let mut marked = ShapeMarks::default();
-
-            for &id in breps {
-                let b = brep_of(id)?;
-                // Load Brep vertices into vertex tree
-                for v in bp1::vertices(b, None)? {
-                    if marked.vertices.insert((id, v)) {
-                        members.vertices.add_unique((id, v));
-                        trees.add_vertex(b, (id, v))?;
-                    }
-                }
-                // Now load brep edges into the Edge Tree
-                for e in bp1::edges(b, None)? {
-                    if marked.edges.insert((id, e)) {
-                        members.edges.add_unique((id, e));
-                        trees.add_curve(k, b, (id, e))?;
-                    }
-                }
-                // Now load the brep faces into the Face Tree
-                for f in bp1::faces(b, None)? {
-                    if marked.faces.insert((id, f)) {
-                        members.faces.add_unique((id, f));
-                        trees.add_surface(k, b, (id, f))?;
-                    }
-                }
-            } // end iter every Brep loading its vertices, edge->curves, and face->surfaces to trees
-
-            // Load individual face->Surfaces
-            for &(id, f) in faces {
-                if !marked.faces.insert((id, f)) {
-                    continue;
-                }
-                let b = brep_of(id)?;
-                trees.add_surface(k, b, (id, f))?;
-                // Load edge->curves of the face
-                for e in traverser::face_edges(b, f)? {
-                    if marked.edges.insert((id, e)) {
-                        members.edges.add_unique((id, e));
-                        trees.add_curve(k, b, (id, e))?;
-                    }
-                }
-                // Load vertices of the face
-                for v in face_vertices(b, f, false, None)? {
-                    if marked.vertices.insert((id, v)) {
-                        members.vertices.add_unique((id, v));
-                        trees.add_vertex(b, (id, v))?;
-                    }
-                }
-            } // end iter every face loading their vertices, edge->curves, and face->surfaces to trees
-
-            // Now load edge objects and adjacent vertices
-            for &(id, e) in edges {
-                if !marked.edges.insert((id, e)) {
-                    continue;
-                }
-                let b = brep_of(id)?;
-                trees.add_curve(k, b, (id, e))?;
-                // Load vertices of the edge
-                for v in edge::vertices(b, e, None)? {
-                    let v = v.ok_or_else(|| {
-                        SolidError::invalid_input(OP_NEW, "edge vertex use without vertex")
-                    })?;
-                    if marked.vertices.insert((id, v)) {
-                        members.vertices.add_unique((id, v));
-                        trees.add_vertex(b, (id, v))?;
-                    }
-                }
-            } // end iter every edge loading their vertices and edge->curves to trees
-
-            // Now load vertex objects
-            for &(id, v) in vertices {
-                if marked.vertices.insert((id, v)) {
-                    trees.add_vertex(brep_of(id)?, (id, v))?;
-                }
-            }
+            with_mark_lock(k, ALL_MARKS, |k, _| {
+                Self::load_trees(
+                    k,
+                    &brep_of,
+                    breps,
+                    faces,
+                    edges,
+                    vertices,
+                    &mut members,
+                    &mut trees,
+                )
+            })??;
         }
 
         Ok(Self {
@@ -586,6 +524,97 @@ impl Shape {
             edges: members.edges.list,
             vertices: members.vertices.list,
         })
+    }
+
+    /// The tree loads of [`Shape::new`] under its mark: B-reps, then faces, edges and
+    /// vertices, each object once.
+    #[allow(clippy::too_many_arguments)] // the constructor's lists and outputs
+    fn load_trees<'s>(
+        k: &Kernel,
+        brep_of: &dyn Fn(BrepId) -> Result<&'s Brep>,
+        breps: &[BrepId],
+        faces: &[FaceKey],
+        edges: &[EdgeKey],
+        vertices: &[VertexKey],
+        members: &mut ShapeMembers,
+        trees: &mut ShapeTrees,
+    ) -> Result<()> {
+        let mut marked = ShapeMarks::default();
+
+        for &id in breps {
+            let b = brep_of(id)?;
+            // Load Brep vertices into vertex tree
+            for v in bp1::vertices(b, None)? {
+                if marked.vertices.insert((id, v)) {
+                    members.vertices.add_unique((id, v));
+                    trees.add_vertex(b, (id, v))?;
+                }
+            }
+            // Now load brep edges into the Edge Tree
+            for e in bp1::edges(b, None)? {
+                if marked.edges.insert((id, e)) {
+                    members.edges.add_unique((id, e));
+                    trees.add_curve(k, b, (id, e))?;
+                }
+            }
+            // Now load the brep faces into the Face Tree
+            for f in bp1::faces(b, None)? {
+                if marked.faces.insert((id, f)) {
+                    members.faces.add_unique((id, f));
+                    trees.add_surface(k, b, (id, f))?;
+                }
+            }
+        } // end iter every Brep loading its vertices, edge->curves, and face->surfaces to trees
+
+        // Load individual face->Surfaces
+        for &(id, f) in faces {
+            if !marked.faces.insert((id, f)) {
+                continue;
+            }
+            let b = brep_of(id)?;
+            trees.add_surface(k, b, (id, f))?;
+            // Load edge->curves of the face
+            for e in traverser::face_edges(b, f)? {
+                if marked.edges.insert((id, e)) {
+                    members.edges.add_unique((id, e));
+                    trees.add_curve(k, b, (id, e))?;
+                }
+            }
+            // Load vertices of the face
+            for v in face_vertices(b, f, false, None)? {
+                if marked.vertices.insert((id, v)) {
+                    members.vertices.add_unique((id, v));
+                    trees.add_vertex(b, (id, v))?;
+                }
+            }
+        } // end iter every face loading their vertices, edge->curves, and face->surfaces to trees
+
+        // Now load edge objects and adjacent vertices
+        for &(id, e) in edges {
+            if !marked.edges.insert((id, e)) {
+                continue;
+            }
+            let b = brep_of(id)?;
+            trees.add_curve(k, b, (id, e))?;
+            // Load vertices of the edge
+            for v in edge::vertices(b, e, None)? {
+                let v = v.ok_or_else(|| {
+                    SolidError::invalid_input(OP_NEW, "edge vertex use without vertex")
+                })?;
+                if marked.vertices.insert((id, v)) {
+                    members.vertices.add_unique((id, v));
+                    trees.add_vertex(b, (id, v))?;
+                }
+            }
+        } // end iter every edge loading their vertices and edge->curves to trees
+
+        // Now load vertex objects
+        for &(id, v) in vertices {
+            if marked.vertices.insert((id, v)) {
+                trees.add_vertex(brep_of(id)?, (id, v))?;
+            }
+        }
+        Ok(())
     }
 
     /// The spatial tree of the shape's vertices (`GetVertexTree`).
@@ -932,7 +961,7 @@ mod tests {
 
     #[test]
     fn empty_shape() {
-        let s = Shape::new(&Kernel::default(), &NoBreps, &[], &[], &[], &[]).unwrap();
+        let s = Shape::new(&mut Kernel::default(), &NoBreps, &[], &[], &[], &[]).unwrap();
         let top = s.vertex_tree().node(NodeId(0)).unwrap();
         assert_eq!(top.bbox.min(), Vec3::new(0.0, 0.0, 0.0));
         assert_eq!(top.bbox.max(), Vec3::new(1.0, 1.0, 1.0));
@@ -948,14 +977,14 @@ mod tests {
 
     #[test]
     fn shape_of_vertices_loads_each_once() {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut brep = Brep::new_with_infinite_region().unwrap();
         let v0 = brep.add_vertex(Vec3::new(0.0, 0.0, 0.0)).unwrap();
         let v1 = brep.add_vertex(Vec3::new(2.0, 3.0, 4.0)).unwrap();
         let b = BrepId::from_index(0);
         let store = (b, &brep);
         // a listed vertex comes first, then the B-rep's; each is in the tree once
-        let s = Shape::new(&k, &store, &[b], &[], &[], &[(b, v1)]).unwrap();
+        let s = Shape::new(&mut k, &store, &[b], &[], &[], &[(b, v1)]).unwrap();
         assert_eq!(s.vertices(), &[(b, v1), (b, v0)]);
         assert_eq!(s.vertex_tree().object_list().unwrap().len(), 2);
         assert!(s.faces().is_empty() && s.edges().is_empty());
@@ -966,15 +995,32 @@ mod tests {
     }
 
     #[test]
+    fn a_shape_with_members_claims_and_releases_a_context_mark() {
+        // SmShape::SmShape's SmNewMarkAndLock: NewMark adds 2 to the first unlocked
+        // mark, which is unlocked again when the constructor returns; an empty shape
+        // takes no mark
+        use crate::geom::context::MarkType;
+        let mut k = Kernel::default();
+        let before = k.context.current_mark(MarkType::Mark);
+        Shape::new(&mut k, &NoBreps, &[], &[], &[], &[]).unwrap();
+        assert_eq!(k.context.current_mark(MarkType::Mark), before);
+        let brep = Brep::new_with_infinite_region().unwrap();
+        let b = BrepId::from_index(0);
+        Shape::new(&mut k, &(b, &brep), &[b], &[], &[], &[]).unwrap();
+        assert_eq!(k.context.current_mark(MarkType::Mark), before + 2);
+        assert!(!k.context.is_mark_locked(MarkType::Mark));
+    }
+
+    #[test]
     fn shape_keys_must_resolve() {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let brep = Brep::new();
         let b = BrepId::from_index(0);
         let invalid = |r: Result<Shape>| matches!(r, Err(SolidError::InvalidInput { .. }));
         // a key whose B-rep the store does not hold
         let other = BrepId::from_index(1);
         assert!(invalid(Shape::new(
-            &k,
+            &mut k,
             &(b, &brep),
             &[other],
             &[],
@@ -982,10 +1028,17 @@ mod tests {
             &[]
         )));
         // the last object a B-rep without infinite region: upstream's null context
-        assert!(invalid(Shape::new(&k, &(b, &brep), &[b], &[], &[], &[])));
+        assert!(invalid(Shape::new(
+            &mut k,
+            &(b, &brep),
+            &[b],
+            &[],
+            &[],
+            &[]
+        )));
         // a face that does not exist
         assert!(Shape::new(
-            &k,
+            &mut k,
             &(b, &brep),
             &[],
             &[(b, FaceId::from_index(0))],

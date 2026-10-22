@@ -66,6 +66,8 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::BrepQuery;
+use crate::topology::brep::p1::SetRegionVoidType;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::VertexuseId;
 use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
@@ -989,44 +991,36 @@ fn get_or_create_uv_trim_curve(
     crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status
 }
 
-/// Finds the infinite region, then resets its void state. The ray-selection
-/// operation belongs to part 9; its optional shell and bounding box are retained
-/// in the interface for that integration. `void_setting_code` is the native
-/// `SmSetRegionVoidType` code (0 nested-solid, 1 infinite-only, 2 swap). Its common
-/// enum is being ported in part 1's independent PR; this deferred boundary does
-/// not duplicate that type.
+/// Finds the infinite region (part 9's `FindInfiniteRegion`, whose ray fires use
+/// `query`: the B-rep's identities and cache), then makes it the infinite region and
+/// sets the void flags as `void_setting` asks (part 1's `ResetInfiniteRegion`). A
+/// face-use shell to test always swaps the flags (`SM_VS_INFINITEREGION_SWAP`), as
+/// upstream.
+///
+/// # Errors
+///
+/// Those of both callees; [`SolidError::InvalidInput`] when no region is found
+/// (upstream's `NER`).
 pub fn find_and_set_infinite_region(
+    k: &mut Kernel,
     b: &mut Brep,
+    query: &BrepQuery<'_>,
     shell: Option<ShellId>,
-    mut void_setting_code: i32,
-    bbox: Option<&mut Extent3d>,
+    mut void_setting: SetRegionVoidType,
+    bbox: Option<&Extent3d>,
 ) -> Result<()> {
-    let region =
-        find_infinite_region(b, shell, bbox)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let region = crate::topology::brep::p9::find_infinite_region(k, b, query, shell, bbox)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
     if let Some(shell) = shell {
         if shell_is_faceuse_shell(b, shell)? {
-            void_setting_code = 2; // SM_VS_INFINITEREGION_SWAP
+            void_setting = SetRegionVoidType::InfiniteRegionSwap;
         }
     }
-    reset_infinite_region(b, region, void_setting_code)
-}
-
-fn find_infinite_region(
-    _b: &mut Brep,
-    _shell: Option<ShellId>,
-    _bbox: Option<&mut Extent3d>,
-) -> Result<Option<RegionId>> {
-    // UNPORTED(topology.brep_p9): SmBrep::FindInfiniteRegion
-    missing("SmBrep::FindInfiniteRegion", "topology.brep_p9")
+    crate::topology::brep::p1::reset_infinite_region(k, b, Some(region), void_setting)
 }
 
 fn shell_is_faceuse_shell(b: &Brep, shell: ShellId) -> Result<bool> {
     Ok(b.shell(shell)?.is_faceuse_shell())
-}
-
-fn reset_infinite_region(_b: &mut Brep, _region: RegionId, _mode: i32) -> Result<()> {
-    // UNPORTED(topology.brep_p1): SmBrep::ResetInfiniteRegion
-    missing("SmBrep::ResetInfiniteRegion", "topology.brep_p1")
 }
 
 /// Glues vertices, leaving the survivor in place. `wire_edges` is the optional

@@ -16,6 +16,7 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::topology::brep::p1::SetRegionVoidType;
 use solidcore::topology::brep::p5;
 use solidcore::topology::{Brep, EdgeId, FaceId, LoopId, RegionId, VertexId};
 use solidcore::{Result as SolidResult, SolidError};
@@ -186,12 +187,28 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
         3 => vec![status(p5::delete_topological_vertex(
             k, b, i.editing, v1, e,
         ))?],
-        4 => vec![status(p5::find_and_set_infinite_region(
-            b,
-            None,
-            i32::from(i.mode),
-            None,
-        ))?],
+        4 => {
+            // the shim casts the mode to SmSetRegionVoidType; only its three values exist
+            let void_setting = match i.mode {
+                0 => SetRegionVoidType::NestedSolid,
+                1 => SetRegionVoidType::InfiniteRegionOnly,
+                2 => SetRegionVoidType::InfiniteRegionSwap,
+                _ => {
+                    return Err(SolidError::invalid_input(
+                        "difftest::topology_brep_p5",
+                        "void setting outside SmSetRegionVoidType",
+                    ))
+                }
+            };
+            vec![status(p5::find_and_set_infinite_region(
+                k,
+                b,
+                &solidcore::query::brep::BrepQuery::default(),
+                None,
+                void_setting,
+                None,
+            ))?]
+        }
         5 => vec![status(p5::glue_vertices(k, b, v1, v2, None))?],
         6 => {
             let old = p5::EdgeInFace {

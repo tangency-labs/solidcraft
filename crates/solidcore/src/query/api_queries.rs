@@ -663,7 +663,7 @@ pub fn face_classify_uv(
 /// Trim-aware closest point on one face (`SmApiFaceClosestPoint`), the face's B-rep
 /// held in `breps`. Shape construction and solver errors propagate.
 pub fn face_closest_point<O: SolutionObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     breps: &dyn BrepStore,
     objects: &dyn TopologyObjects<O>,
     face: FaceKey,

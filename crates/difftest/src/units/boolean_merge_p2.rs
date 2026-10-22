@@ -495,9 +495,16 @@ impl MergeBrep<H> for Two {
             min_unstitched_edge_gap: r.min_unstitched_edge_gap,
         })
     }
-    fn find_and_set_infinite_region(&mut self, _k: &mut Kernel, brep: H) -> solidcore::Result<()> {
-        // pOptShellToTest = NULL, SM_VS_INFINITEREGION_SWAP (2), no bounding box
-        topology::brep::p5::find_and_set_infinite_region(self.brep_m(brep)?, None, 2, None)
+    fn find_and_set_infinite_region(&mut self, k: &mut Kernel, brep: H) -> solidcore::Result<()> {
+        // pOptShellToTest = NULL, SM_VS_INFINITEREGION_SWAP, no bounding box
+        topology::brep::p5::find_and_set_infinite_region(
+            k,
+            self.brep_m(brep)?,
+            &solidcore::query::brep::BrepQuery::default(),
+            None,
+            topology::brep::p1::SetRegionVoidType::InfiniteRegionSwap,
+            None,
+        )
     }
 }
 

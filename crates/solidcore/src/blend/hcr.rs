@@ -218,12 +218,13 @@ fn transform_brep(brep: &mut Brep, transform: &Axis2Placement) -> Result<()> {
 
 /// `SmBrep::FindAndSetInfiniteRegion()` with upstream's default arguments (no shell to
 /// test, `SM_VS_INFINITEREGION_SWAP`, no bounding box).
-fn find_and_set_infinite_region(brep: &mut Brep) -> Result<()> {
-    const SM_VS_INFINITEREGION_SWAP: i32 = 2;
+fn find_and_set_infinite_region(k: &mut Kernel, brep: &mut Brep) -> Result<()> {
     crate::topology::brep::p5::find_and_set_infinite_region(
+        k,
         brep,
+        &qbrep::BrepQuery::default(),
         None,
-        SM_VS_INFINITEREGION_SWAP,
+        crate::topology::brep::p1::SetRegionVoidType::InfiniteRegionSwap,
         None,
     )
 }
@@ -524,8 +525,8 @@ impl Hcr {
         scene.set_editing_enabled(true);
         // transform the copied Brep to place the eye looking up the Z axis
         ignore_status(transform_brep(&mut scene, &vt))?;
-        ignore_status(find_and_set_infinite_region(&mut scene))?; // [B23]
-                                                                  // its status is ignored upstream (the box then stays empty)
+        ignore_status(find_and_set_infinite_region(k, &mut scene))?; // [B23]
+                                                                     // its status is ignored upstream (the box then stays empty)
         let scene_box = ignored(qbrep::calculate_bounding_box(
             k,
             &scene,

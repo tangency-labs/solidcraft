@@ -370,7 +370,7 @@ impl<O: LoopObject> HealData<O> {
         );
         step!(
             FixInfiniteRegions,
-            self.fix_infinite_region(b, HealerOpType::FixInfiniteRegions)
+            self.fix_infinite_region(k, b, HealerOpType::FixInfiniteRegions)
         );
         Ok(())
     }

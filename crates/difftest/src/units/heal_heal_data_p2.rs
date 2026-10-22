@@ -1540,7 +1540,7 @@ fn rust_heal(
                 .make_uv_trim_curves(&k, &mut b, *make, HealerOpType::MakeUvtrimcurves)
                 .map(|()| false),
             Step::FixInfiniteRegion => h
-                .fix_infinite_region(&mut b, HealerOpType::FixInfiniteRegions)
+                .fix_infinite_region(&mut k, &mut b, HealerOpType::FixInfiniteRegions)
                 .map(|()| false),
             Step::HealBrep {
                 mode,

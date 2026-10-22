@@ -167,16 +167,12 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
     let result: solidcore::Result<i32> = (|| {
         match i.op {
             0 => {
-                record.push(id(port::find_infinite_region::<
-                    super::topology_shell::NoRayObject,
-                    _,
-                >(
+                record.push(id(port::find_infinite_region(
                     &mut k,
                     &mut b,
-                    solidcore::topology::BrepId::from_index(0),
+                    &solidcore::query::brep::BrepQuery::default(),
                     None,
                     None,
-                    &super::topology_shell::EmptyRayWorld,
                 )?));
                 Ok(0)
             }

@@ -1,6 +1,7 @@
 //! Native shell/region operations on shared native B-rep fixtures: queries, wire edges,
 //! `TransferChildrenTo` (incl. face-use and wire shells in one B-rep), shell type members,
-//! `RayFire` (empty-shape branch only), degeneracy, region ordering and filtering.
+//! `RayFire` (through the B-rep's own `query::brep::BrepQuery` world), degeneracy,
+//! region ordering and filtering.
 //! Native fixtures and raw graph imports reuse the edge-use fixture protocol.
 //! Setup failures fail the harness; topology and native integer flags compare exactly.
 
@@ -8,6 +9,8 @@ use super::topology_edgeuse_p1::{fixture_input, import};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use solidcore::query::brep::BrepQuery;
+use solidcore::topology::brep_cache::CacheObject;
 use solidcore::topology::shell::{shell_brep, shell_region, wire_edges};
 use solidcore::topology::{FaceuseId, Region, Shell, ShellId};
 use solidcore_ffi::units::{topology_edgeuse_p1 as graph, topology_shell as ffi};
@@ -136,111 +139,21 @@ mod ray_num3 {
     }
 }
 
-// This adapter supports exactly empty shape trees (harness-limited, see below). There are no geometry
-// handles to invent: every object-dependent accessor has an uninhabited input.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum NoRayObject {}
-pub(crate) struct EmptyRayWorld;
-impl solidcore::geom::solution_array::SolutionObject for NoRayObject {
-    fn kind(&self) -> solidcore::geom::solution_array::ObjectKind {
-        match *self {}
+/// `GetGap3d()` without a surface reads only the stored gap, so the ray records need no
+/// classification geometry.
+struct NoClassGeometry;
+impl solidcore::intersect::point_class::ClassGeometry<CacheObject> for NoClassGeometry {
+    fn curve(&self, _: CacheObject) -> Option<&solidcore::curve::curve::Curve> {
+        None
     }
-}
-impl solidcore::intersect::point_class::ClassObject for NoRayObject {
-    fn class_kind(&self) -> solidcore::intersect::point_class::ClassObjectKind {
-        match *self {}
+    fn surface(&self, _: CacheObject) -> Option<&solidcore::surface::surface::Surface> {
+        None
     }
-}
-impl solidcore::topology::shell::ShellRayWorld<NoRayObject> for EmptyRayWorld {
-    // Harness-limited: a non-empty boundary-face shape needs the B-rep's cached
-    // geometry (`topology::brep_cache::BrepObjects` over a built `BrepCache`), which this
-    // world has no handles for. The cases whose C++ run reaches that stage are deferred
-    // (`harness:shell-ray-world`), never compared here.
-    fn class_entity(&self, object: NoRayObject) -> Option<solidcore::EntityRef> {
-        match object {}
+    fn volume(&self, _: CacheObject) -> Option<&solidcore::surface::volume::Volume> {
+        None
     }
-    fn shell_ray_shape(
-        &self,
-        kernel: &solidcore::kernel::Kernel,
-        brep: (solidcore::topology::BrepId, &solidcore::topology::Brep),
-        faces: &[solidcore::geom::object::FaceKey],
-    ) -> solidcore::Result<solidcore::geom::object::Shape> {
-        if faces.is_empty() {
-            return solidcore::geom::object::Shape::new(kernel, &brep, &[], &[], &[], &[]);
-        }
-        // Harness-limited (see the note above): the shape builds, but this adapter has
-        // no handles for the B-rep geometry the shape solve then reads.
-        Err(solidcore::SolidError::unported(
-            "SmShape::SmShape / SmTopologySolver::ShapePointSolve on boundary faces",
-            "harness:shell-ray-world",
-        ))
-    }
-}
-impl solidcore::intersect::topology_solver::p1::TopologyObjects<NoRayObject> for EmptyRayWorld {
-    fn curve(&self, object: NoRayObject) -> solidcore::Result<&solidcore::curve::curve::Curve> {
-        match object {}
-    }
-    fn analytic_curve_handle(&self, object: NoRayObject) -> Option<NoRayObject> {
-        match object {}
-    }
-    fn vertex_point(&self, object: NoRayObject) -> solidcore::Result<solidcore::math::Point3> {
-        match object {}
-    }
-    fn vertex_tolerance(&self, object: NoRayObject) -> solidcore::Result<f64> {
-        match object {}
-    }
-    fn curve_edge(&self, object: NoRayObject) -> solidcore::Result<Option<NoRayObject>> {
-        match object {}
-    }
-    fn edge_curve(&self, object: NoRayObject) -> solidcore::Result<Option<NoRayObject>> {
-        match object {}
-    }
-    fn edge_interval(
-        &self,
-        object: NoRayObject,
-    ) -> solidcore::Result<solidcore::geom::extent1d::Extent1d> {
-        match object {}
-    }
-    fn surface_face(&self, object: NoRayObject) -> solidcore::Result<Option<NoRayObject>> {
-        match object {}
-    }
-    fn face_surface(&self, object: NoRayObject) -> solidcore::Result<NoRayObject> {
-        match object {}
-    }
-    fn surface(
-        &self,
-        object: NoRayObject,
-    ) -> solidcore::Result<&solidcore::surface::surface::Surface> {
-        match object {}
-    }
-    fn face_uv_domain(
-        &self,
-        object: NoRayObject,
-    ) -> solidcore::Result<solidcore::geom::extent2d::Extent2d> {
-        match object {}
-    }
-    fn face_tolerance(&self, object: NoRayObject) -> solidcore::Result<f64> {
-        match object {}
-    }
-    fn surface_owner(&self, object: NoRayObject) -> solidcore::Result<Option<NoRayObject>> {
-        match object {}
-    }
-    fn shape_member(&self, object: NoRayObject) -> solidcore::geom::object::ShapeMember {
-        match object {}
-    }
-}
-impl solidcore::intersect::point_class::ClassGeometry<NoRayObject> for EmptyRayWorld {
-    fn curve(&self, object: NoRayObject) -> Option<&solidcore::curve::curve::Curve> {
-        match object {}
-    }
-    fn surface(&self, object: NoRayObject) -> Option<&solidcore::surface::surface::Surface> {
-        match object {}
-    }
-    fn volume(&self, object: NoRayObject) -> Option<&solidcore::surface::volume::Volume> {
-        match object {}
-    }
-    fn point(&self, object: NoRayObject) -> Option<solidcore::math::Point3> {
-        match object {}
+    fn point(&self, _: CacheObject) -> Option<solidcore::math::Point3> {
+        None
     }
 }
 
@@ -290,11 +203,33 @@ fn ray_output(values: &[f64]) -> Result<Output, HarnessError> {
         .values("classification", floats))
 }
 
+/// Upstream's file B-reps own their geometry (`SmSurface::GetFace`, `SmCurve::GetEdge`
+/// name the face and edge); the graph import leaves the owners unset. The ray's shape
+/// solve maps a hit surface or curve back to its face or edge through that owner, so
+/// the copy gets the arena identities the ray world ([`BrepQuery::default`]) resolves.
+fn own_geometry(b: &mut solidcore::topology::Brep) -> Result<(), HarnessError> {
+    use solidcore::topology::brep_cache::arena_identity;
+    let faces: Vec<_> = b.faces().ids().collect();
+    for f in faces {
+        if let Some(surface) = b.face_mut(f).map_err(failure)?.surface.as_mut() {
+            let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(f))));
+        }
+    }
+    let edges: Vec<_> = b.edges().ids().collect();
+    for e in edges {
+        if let Some(curve) = b.edge_mut(e).map_err(failure)?.curve.as_mut() {
+            let _ = curve.set_owner(Some(arena_identity(CacheObject::Edge(e))), None);
+        }
+    }
+    Ok(())
+}
+
 fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output, HarnessError> {
     use solidcore::intersect::point_class::{PointClassType, PointClassification};
     use solidcore::topology::shell::{ray_fire, ShellRayInput, ShellRayState};
     // The ray fires may add UV trim curves (as the native B-rep's): one copy per case.
     let mut scratch = brep.clone();
+    own_geometry(&mut scratch)?;
     let mut kernel = solidcore::kernel::Kernel::default();
     let mut out = Vec::new();
     // The shim's guard: non-finite ray values would reach the intersection solver
@@ -325,7 +260,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
     }
     for id in brep.shells().ids() {
         let counters = mark_counters(&kernel);
-        let mut classification = PointClassification::<NoRayObject>::new(0.125);
+        let mut classification = PointClassification::<CacheObject>::new(0.125);
         classification.set_class_object(PointClassType::Point, None);
         classification.set_gap_3d(123.0);
         classification.set_pre_snap_param(456.0);
@@ -334,7 +269,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
             &mut scratch,
             solidcore::topology::BrepId::from_index(0),
             id,
-            &EmptyRayWorld,
+            &BrepQuery::default(),
             ShellRayInput {
                 start: solidcore::math::Point3::new(input.start[0], input.start[1], input.start[2]),
                 direction: solidcore::math::Vec3::new(
@@ -369,7 +304,7 @@ fn rust_ray(brep: &solidcore::topology::Brep, input: &RayInput) -> Result<Output
             f64::from(pc.point_class().code()),
             f64::from(pc.object().is_none()),
             pc.src_zone_tol_3d(),
-            pc.gap_3d(&kernel, &EmptyRayWorld, None).map_err(failure)?,
+            pc.gap_3d(&kernel, &NoClassGeometry, None).map_err(failure)?,
             pc.pre_snap_param(),
         ]);
         out.extend(mark_delta(&kernel, counters).map(|v| v as f64));

@@ -1109,18 +1109,20 @@ fn result_solid(operation: BooleanOperation, data: &MergeRegionData, was_solid: 
 }
 
 fn find_and_set_infinite(
-    _kernels: &mut BooleanKernels<'_>,
+    kernels: &mut BooleanKernels<'_>,
     primary: &mut Brep,
     shell: Option<crate::topology::ShellId>,
     void_setting: bp::SetRegionVoidType,
-    bounding_box: Option<&mut crate::geom::extent3d::Extent3d>,
+    bounding_box: Option<&crate::geom::extent3d::Extent3d>,
 ) -> Result<()> {
-    let code = match void_setting {
-        bp::SetRegionVoidType::NestedSolid => 0,
-        bp::SetRegionVoidType::InfiniteRegionOnly => 1,
-        bp::SetRegionVoidType::InfiniteRegionSwap => 2,
-    };
-    crate::topology::brep::p5::find_and_set_infinite_region(primary, shell, code, bounding_box)
+    crate::topology::brep::p5::find_and_set_infinite_region(
+        kernels.primary,
+        primary,
+        &BrepQuery::default(),
+        shell,
+        void_setting,
+        bounding_box,
+    )
 }
 
 /// `m_pOther->IsSheet()` (`topology.brep_p2`), in the other B-rep's context as

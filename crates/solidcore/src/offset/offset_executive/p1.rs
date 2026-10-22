@@ -1839,7 +1839,7 @@ fn solve_original_brep_point(
         brep: original,
         // There is exactly one B-rep in this query adapter's local namespace.
         brep_id: crate::topology::BrepId::from_index(0),
-        cache,
+        cache: Some(cache),
         keys: &arena_identity,
         // make_original_brep_cache checked that all geometry owners are direct.
         owner_of: &|_| None,

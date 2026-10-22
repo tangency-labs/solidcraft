@@ -230,7 +230,7 @@ fn type_string_codes(out: &mut Vec<i64>, s: &str) {
 }
 
 fn rust_types(ts: &[i64]) -> Result<Vec<i64>, SolidError> {
-    let shape = Shape::new(&Kernel::default(), &NoBreps, &[], &[], &[], &[])?;
+    let shape = Shape::new(&mut Kernel::default(), &NoBreps, &[], &[], &[], &[])?;
     let mut o = Vec::new();
     for &t in ts {
         o.push(i64::from(obj::is_kind_of(t)));
@@ -507,7 +507,7 @@ fn rust_shape(
         .iter()
         .map(|&i| (b, VertexId::from_index(i as u32)))
         .collect();
-    let shape = Shape::new(&Kernel::default(), store, &breps, &f, &e, &v)?;
+    let shape = Shape::new(&mut Kernel::default(), store, &breps, &f, &e, &v)?;
     let mut o = vec![
         shape.faces().len() as f64,
         shape.edges().len() as f64,

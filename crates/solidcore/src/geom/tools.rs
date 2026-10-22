@@ -508,7 +508,7 @@ fn brep_point_solve_faces(
     let objects = BrepObjects {
         brep,
         brep_id,
-        cache: &cache,
+        cache: Some(&cache),
         keys,
         owner_of,
     };

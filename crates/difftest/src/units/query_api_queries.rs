@@ -586,7 +586,7 @@ impl TopologyObjects<Object> for Objects<'_> {
     }
 }
 
-fn topology(k: &Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>> {
+fn topology(k: &mut Kernel, i: &Inputs, b: &Brep, second: &Brep) -> Result<Vec<f64>> {
     let a = &i.data;
     let point = v([a[11], a[12], a[13]]);
     let index = a[20] as usize;
@@ -747,7 +747,7 @@ impl UnitDiff for Runner {
         let i: Inputs = c.parse()?;
         compared_op(i.op)?;
         let a = &i.data;
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         if a[16] != 0. {
             return Err(HarnessError::new(
                 "null pointers have no typed Rust equivalent; use the FFI contract tests",
@@ -797,7 +797,7 @@ impl UnitDiff for Runner {
                 } else {
                     Brep::new()
                 };
-                topology(&k, &i, &b, &second)
+                topology(&mut k, &i, &b, &second)
             }
         };
         Ok(output(i.op, result))

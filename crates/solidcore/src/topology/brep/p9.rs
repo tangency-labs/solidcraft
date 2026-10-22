@@ -83,25 +83,22 @@ impl SplitEdgeOutput {
 ///
 /// The first call, `GetRegions`, requires the B-rep's native owning-list order.
 /// An arena's allocation order cannot substitute for it. Ray selection and its
-/// single shell retry follow that individual dependency call. `world` supplies
-/// the same real geometry/cache context used by shell ray queries.
+/// single shell retry follow that individual dependency call. `query` (the B-rep's
+/// identities and cache) serves both the shell's ray fires and the B-rep's.
 ///
 /// # Errors
 /// Returns the owning unit's `Unported` error, without selecting a guessed region.
-pub fn find_infinite_region<O, W>(
+pub fn find_infinite_region(
     k: &mut Kernel,
     b: &mut Brep,
-    brep_id: crate::topology::BrepId,
+    query: &BrepQuery<'_>,
     shell: Option<ShellId>,
     bbox: Option<&crate::geom::extent3d::Extent3d>,
-    world: &W,
-) -> Result<Option<RegionId>>
-where
-    O: crate::geom::solution_array::SolutionObject + crate::intersect::point_class::ClassObject,
-    W: crate::topology::shell::ShellRayWorld<O>,
-{
+) -> Result<Option<RegionId>> {
     use crate::intersect::point_class::PointClassification;
+    use crate::topology::brep_cache::CacheObject;
     use crate::topology::shell::{ShellRayInput, ShellRayState};
+    let brep_id = query.identity().brep_id;
     let mut shell_to_test = shell;
     let mut supplied_box = bbox.copied();
     // The native recursive retry drops the optional shell AND bounding box. It
@@ -114,7 +111,7 @@ where
         let tolerance = b.tolerance();
         let mut state = ShellRayState {
             region: None,
-            classification: PointClassification::<O>::new(tolerance),
+            classification: PointClassification::<CacheObject>::new(tolerance),
         };
         let bounds = match supplied_box {
             Some(bounds) => bounds,
@@ -191,7 +188,7 @@ where
                 b,
                 brep_id,
                 shell,
-                world,
+                query,
                 ShellRayInput {
                     start: ray_start,
                     direction,
@@ -215,7 +212,7 @@ where
                     b,
                     brep_id,
                     shell,
-                    world,
+                    query,
                     ShellRayInput {
                         start: ray_start,
                         direction: point - ray_start,
@@ -234,7 +231,7 @@ where
                         b,
                         brep_id,
                         shell,
-                        world,
+                        query,
                         ShellRayInput {
                             start,
                             direction: point - start,
@@ -302,9 +299,8 @@ where
             }
             direction = ray_direction(direction)?;
             // (the rays solve on one cache: nothing edits the B-rep in between)
-            let query = BrepQuery::new(BrepIdentity::arena(brep_id));
             let mut fire = |b: &mut Brep, start: Point3, direction: Vec3| {
-                brep_ray_fire(k, &query, b, start, direction, tolerance, &mut state)
+                brep_ray_fire(k, query, b, start, direction, tolerance, &mut state)
             };
             if !fire(b, ray_start, direction)? {
                 // Native retries use edges[0], not the closest sampled edge.

@@ -1339,7 +1339,7 @@ pub fn ray_fire(
     let objects = BrepObjects {
         brep: b,
         brep_id,
-        cache,
+        cache: Some(cache),
         keys,
         owner_of,
     };
