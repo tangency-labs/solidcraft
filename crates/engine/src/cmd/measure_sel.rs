@@ -340,7 +340,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let v = m.measure().volume;
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "volume_mm3": v}))
         }
-        Sel::SketchCurve { id } => sketch_curve(sketch_of(s, &st, None, |sk| sk.curve_index(id).is_some())?, id),
+        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, &st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, &st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {

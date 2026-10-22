@@ -93,7 +93,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         } else if input.accept & crate::selection::SKETCH_LINES != 0 {
             vec![Sel::ExternalSketchCurve { sketch: s.world_state().sketches.last().unwrap().feature, id: path.clone() }]
         } else if input.accept & CURVES != 0 || command == "sheet.fold" && index == 0 {
-            vec![Sel::SketchCurve { id: path.clone() }]
+            vec![Sel::SketchCurve { id: path.clone(), sketch: None }]
         } else if input.accept & AXES != 0 {
             // The Revolve fixture's profile is in XY; its preview needs an axis in that plane.
             let axis = if command == "solid.revolve" { "Y" } else { "Z" };

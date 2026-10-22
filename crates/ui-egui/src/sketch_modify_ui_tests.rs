@@ -30,7 +30,7 @@ fn existing_patterns_reopen_from_menu_and_badge_and_edit_without_changing_surviv
         };
         let out = h.app.run(cmd, p).unwrap();
         let before = h.app.session.doc.to_json();
-        h.app.session.selection = vec![Sel::SketchCurve { id: "l2".into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: "l2".into(), sketch: None }];
         h.settle();
         let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
         let item = menu.iter().find(|item| item.id == "ui.editSketchPattern").expect("a copy offers Edit Sketch Pattern");
@@ -93,7 +93,7 @@ fn the_typed_factor_reaches_the_command_unchanged() {
     let h = rectangle();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true), SelInput::new("Base point", crate::selection::POINTS, false)];
-    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     let k = Mod::Scale { factor: "2.5".into() };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
@@ -110,7 +110,7 @@ fn an_expression_in_the_factor_field_is_evaluated() {
     h.app.run("parameters.add", json!({"name": "growth", "expression": "3", "unit": ""})).unwrap();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true)];
-    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     let out = commands(&h.app, &Mod::Scale { factor: "growth * 2".into() }, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out[0].1["factor"], json!(6.0));
 }
@@ -121,7 +121,7 @@ fn a_picked_base_point_loses_the_sketch_prefix_that_picking_adds() {
     let sid = h.app.session.active_sketch.unwrap();
     let ids = curve_ids(&h);
     let mut inputs = vec![SelInput::new("Entities", crate::selection::CURVES, true), SelInput::new("Base point", crate::selection::POINTS, false)];
-    inputs[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    inputs[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     let point = {
         let st = h.app.session.model.state();
         st.sketch(sid).unwrap().sketch.points.first().unwrap().id.clone()
@@ -138,7 +138,7 @@ fn an_empty_selection_or_a_bad_factor_is_an_error_the_window_shows() {
     let empty = vec![SelInput::new("Entities", crate::selection::CURVES, true)];
     assert!(commands(&h.app, &Mod::Scale { factor: "2".into() }, &empty, &serde_json::Map::new()).is_err());
     let mut filled = empty.clone();
-    filled[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    filled[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     for bad in ["0", "-2", "", "nonsense"] {
         let r = commands(&h.app, &Mod::Scale { factor: bad.into() }, &filled, &serde_json::Map::new());
         assert!(r.is_err(), "factor `{bad}` should not reach the command: {r:?}");
@@ -156,7 +156,7 @@ fn the_window_scales_the_picked_geometry_and_leaves_the_rest_alone() {
     h.step(&json!({"start": "sketch.scale"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
         d.kind = Kind::SketchModify(Mod::Scale { factor: "2".into() });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
@@ -209,8 +209,8 @@ fn the_two_picks_become_the_command() {
     let ids = curve_ids(&h);
     let (line, circle) = (ids[0].clone(), ids[1].clone());
     let mut inputs = mirror_inputs();
-    inputs[0].items = vec![Sel::SketchCurve { id: circle.clone() }];
-    inputs[1].items = vec![Sel::SketchCurve { id: line.clone() }];
+    inputs[0].items = vec![Sel::SketchCurve { id: circle.clone(), sketch: None }];
+    inputs[1].items = vec![Sel::SketchCurve { id: line.clone(), sketch: None }];
     let out = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].0, "sketch.mirror");
@@ -222,21 +222,21 @@ fn a_half_filled_window_is_an_error_instead_of_a_command() {
     let h = line_and_circle();
     let ids = curve_ids(&h);
     let mut only_entities = mirror_inputs();
-    only_entities[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
+    only_entities[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
     assert!(commands(&h.app, &Mod::Mirror, &only_entities, &serde_json::Map::new()).is_err());
     let mut only_line = mirror_inputs();
-    only_line[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    only_line[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     assert!(commands(&h.app, &Mod::Mirror, &only_line, &serde_json::Map::new()).is_err());
     // The AXES mask also takes an origin axis, which is no curve of this sketch.
     let mut origin_axis = mirror_inputs();
-    origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
+    origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
     origin_axis[1].items = vec![Sel::Axis { name: "Y".into() }];
     assert!(commands(&h.app, &Mod::Mirror, &origin_axis, &serde_json::Map::new()).is_err());
     // The line itself must not be in the entities: the old click flow could not express that
     // either, and the engine silently dropped it.
     let mut line_in_both = mirror_inputs();
-    line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
-    line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+    line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
+    line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     assert!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).is_err());
 }
 
@@ -248,8 +248,8 @@ fn the_window_reflects_the_picked_circle_across_the_line() {
     h.step(&json!({"start": "sketch.mirror"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
-        d.inputs[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
+        d.inputs[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        d.inputs[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     }
     // A frame with the picks in place: the dialog reads them when it next draws.
     h.frames(2);
@@ -269,7 +269,7 @@ fn the_window_reflects_the_picked_circle_across_the_line() {
 
 fn move_inputs(h: &Harness) -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Entities", CURVES | POINTS, true), SelInput::new("Center", POINTS, false)];
-    v[0].items = curve_ids(h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    v[0].items = curve_ids(h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     v
 }
 
@@ -304,7 +304,7 @@ fn the_context_menu_item_fills_the_window_from_the_selection() {
     h.app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": ids[0]}]})).unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(d.inputs[0].items, vec![Sel::SketchCurve { id: ids[0].clone() }]);
+    assert_eq!(d.inputs[0].items, vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }]);
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     let sid = h.app.session.active_sketch.unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
@@ -383,7 +383,7 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let sid = h.app.session.active_sketch.unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
@@ -413,8 +413,8 @@ fn escape_leaves_the_sketch_exactly_as_it_was() {
     h.step(&json!({"start": "sketch.mirror"})).unwrap();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![Sel::SketchCurve { id: before[1].clone() }];
-        d.inputs[1].items = vec![Sel::SketchCurve { id: before[0].clone() }];
+        d.inputs[0].items = vec![Sel::SketchCurve { id: before[1].clone(), sketch: None }];
+        d.inputs[1].items = vec![Sel::SketchCurve { id: before[0].clone(), sketch: None }];
     }
     h.frames(2);
     h.step(&json!({"key": "Escape"})).unwrap();
@@ -430,7 +430,7 @@ fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
     let mut h = rectangle();
     h.step(&json!({"start": "sketch.move"})).unwrap();
     // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
@@ -504,7 +504,7 @@ fn rectangular_pattern_window_opens_instead_of_a_click_tool() {
 fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_when_editing() {
     use solidcraft_engine::sketch::PatternAlignment;
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "4", "20", "2", "10");
     h.settle();
     let first = crate::scenario::handle_at("dialog:Spacing").unwrap();
@@ -549,7 +549,7 @@ fn rectangular_sections_flip_and_center_independently_and_restore_even_counts_wh
 #[test]
 fn typed_counts_and_spacings_reach_the_command_with_the_second_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "5", "20", "2", "15 mm");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
@@ -566,7 +566,7 @@ fn typed_counts_and_spacings_reach_the_command_with_the_second_direction() {
 #[test]
 fn a_picked_axis_becomes_an_in_plane_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
     rect(&mut h, "3", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
@@ -580,9 +580,9 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
     h.app.run("sketch.line", json!({"points":[[0,-20],[10,-20]],"ids":["dir1"]})).unwrap();
     h.app.run("sketch.line", json!({"points":[[0,-40],[6,-32]],"ids":["dir2"]})).unwrap();
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id }];
-    d.inputs[1].items = vec![Sel::SketchCurve { id: "dir1".into() }];
-    d.inputs[2].items = vec![Sel::SketchCurve { id: "dir2".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
+    d.inputs[1].items = vec![Sel::SketchCurve { id: "dir1".into(), sketch: None }];
+    d.inputs[2].items = vec![Sel::SketchCurve { id: "dir2".into(), sketch: None }];
     rect(&mut h, "3", "20", "2", "10");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
@@ -591,8 +591,8 @@ fn two_picked_lines_are_sent_as_live_references_and_restored_in_the_editor() {
     let out = h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "dir1".into() }]);
-    assert_eq!(d.inputs[2].items, vec![Sel::SketchCurve { id: "dir2".into() }]);
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "dir1".into(), sketch: None }]);
+    assert_eq!(d.inputs[2].items, vec![Sel::SketchCurve { id: "dir2".into(), sketch: None }]);
     let reopened = apply_commands(&h.app, d).unwrap();
     assert_eq!(reopened[0].1["direction2"], "dir2");
 }
@@ -616,7 +616,7 @@ fn sketch_pattern_tools_are_promoted_together_and_open_from_the_toolbar() {
 #[test]
 fn an_axis_perpendicular_to_the_sketch_is_reported_not_silently_replaced() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
     rect(&mut h, "3", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
@@ -631,7 +631,7 @@ fn an_axis_perpendicular_to_the_sketch_is_reported_not_silently_replaced() {
 fn a_count_expression_is_evaluated_rather_than_sent_as_a_string() {
     let (mut h, id) = open("sketch.pattern.rectangular");
     h.app.run("parameters.add", json!({"name": "n", "expression": "4", "unit": ""})).unwrap();
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     rect(&mut h, "n", "10", "1", "10");
     let d = h.app.dialog.clone().unwrap();
     let cmds = apply_commands(&h.app, &d).unwrap();
@@ -644,7 +644,7 @@ fn bad_counts_and_an_empty_selection_are_refused_before_the_command_runs() {
     rect(&mut h, "5", "20", "1", "20");
     let d = h.app.dialog.clone().unwrap();
     assert!(apply_commands(&h.app, &d).unwrap_err().contains("Select"));
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     for bad in ["0", "2.5", "501", "wat"] {
         rect(&mut h, bad, "20", "1", "20");
         let d = h.app.dialog.clone().unwrap();
@@ -661,7 +661,7 @@ fn bad_counts_and_an_empty_selection_are_refused_before_the_command_runs() {
 #[test]
 fn the_spacing_gets_a_canvas_arrow_along_the_pattern_direction() {
     let (mut h, id) = open("sketch.pattern.rectangular");
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id }];
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchCurve { id, sketch: None }];
     let d = h.app.dialog.clone().unwrap();
     let (_, dir) = crate::canvas::anchor(&h.app, &d).expect("an anchor on the picked curve");
     assert_eq!(dir, Some(solidcraft_engine::geom::Vec3::X));
@@ -690,7 +690,7 @@ fn open_circ() -> (crate::scenario::Harness, String) {
     };
     h.step(&json!({"start": "sketch.pattern.circular"})).unwrap();
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: curve }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: curve, sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: format!("{sid}:{centre}") }];
     (h, centre)
 }
@@ -807,7 +807,7 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     h.app.run("sketch.circle.center", json!({"center":[20,0],"radius":2,"id":"seed"})).unwrap();
     h.app.start("sketch.pattern.circular");
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "seed".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "seed".into(), sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: "origin".into() }];
     if let Kind::SketchModify(Mod::PatternCirc { count, .. }) = &mut d.kind {
         *count = "HoleAmount".into();

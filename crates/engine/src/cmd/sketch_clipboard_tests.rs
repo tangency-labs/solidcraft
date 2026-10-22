@@ -75,7 +75,7 @@ fn copy_paste_keeps_internal_constraints_and_dimensions_and_drops_outside_ones()
         .and_then(|d| d.param.clone())
         .unwrap();
     // The paste is selected.
-    let sel: Vec<_> = s.selection.iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect();
+    let sel: Vec<_> = s.selection.iter().filter_map(|x| if let Sel::SketchCurve { id, .. } = x { Some(id.clone()) } else { None }).collect();
     assert_eq!(sel, pasted);
     // The pasted rectangle is free to move (the original is held by the origin): dragging it moves it.
     run(&mut s, "sketch.drag", json!({"entity": pasted[0], "from": [p0[0].x, p0[0].y], "to": [p0[0].x + 5.0, p0[0].y + 5.0]}));
@@ -138,8 +138,10 @@ fn every_kind_of_sketch_geometry_pastes() {
     all.push(point_id.clone());
     all.push(text_curve);
     // Copy from the selection, as Ctrl+C does.
-    s.selection =
-        all.iter().map(|id| if *id == point_id { Sel::SketchPoint { id: id.clone() } } else { Sel::SketchCurve { id: id.clone() } }).collect();
+    s.selection = all
+        .iter()
+        .map(|id| if *id == point_id { Sel::SketchPoint { id: id.clone() } } else { Sel::SketchCurve { id: id.clone(), sketch: None } })
+        .collect();
     run(&mut s, "sketch.copy", json!({}));
     let out = run(&mut s, "sketch.paste", json!({"translate": [0, 100]}));
     let sk = sketch(&s, sid);

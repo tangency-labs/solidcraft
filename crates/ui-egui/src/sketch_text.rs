@@ -83,7 +83,7 @@ pub(crate) fn entity_for_selection(app: &SolveApp, selection: &Sel) -> Option<St
     let state = app.session.world_state();
     let ss = state.sketch(sid)?;
     let ids = match selection {
-        Sel::SketchCurve { id } => vec![id.clone()],
+        Sel::SketchCurve { id, .. } => vec![id.clone()],
         Sel::Profile { sketch, index } if *sketch == sid => ss.profiles.get(*index)?.curve_ids(),
         // A point of a letter's outline stands for its text (a double-click often lands on one).
         Sel::SketchPoint { id } => {
@@ -197,7 +197,11 @@ pub(crate) fn selected_link(app: &SolveApp) -> Option<String> {
 pub(crate) fn highlighted(app: &SolveApp) -> Vec<Sel> {
     let Some(Kind::Text(tx)) = app.dialog.as_ref().map(|dialog| &dialog.kind) else { return Vec::new() };
     let Ok(sk) = app.session.doc.sketch(tx.sketch) else { return Vec::new() };
-    sk.curves.iter().filter(|curve| curve.link.as_deref() == Some(tx.link.as_str())).map(|curve| Sel::SketchCurve { id: curve.id.clone() }).collect()
+    sk.curves
+        .iter()
+        .filter(|curve| curve.link.as_deref() == Some(tx.link.as_str()))
+        .map(|curve| Sel::SketchCurve { id: curve.id.clone(), sketch: None })
+        .collect()
 }
 
 /// A value shown in a field: rounded so binary noise does not show, with its unit.
@@ -248,7 +252,7 @@ fn dialog(tx: Box<Tx>) -> Dialog {
 
 fn inputs_for(tx: &Tx) -> Vec<SelInput> {
     let mut path = SelInput::new("Path", crate::selection::CURVES, false);
-    path.items.extend(tx.style.path.iter().map(|id| Sel::SketchCurve { id: id.clone() }));
+    path.items.extend(tx.style.path.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }));
     vec![path]
 }
 
@@ -256,7 +260,7 @@ fn inputs_for(tx: &Tx) -> Vec<SelInput> {
 pub(crate) fn sync_path(d: &mut Dialog) {
     let Kind::Text(k) = &mut d.kind else { return };
     let picked = d.inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
-        Sel::SketchCurve { id } => Some(id.clone()),
+        Sel::SketchCurve { id, .. } => Some(id.clone()),
         _ => None,
     });
     if picked != k.style.path {
@@ -711,7 +715,7 @@ mod tests {
         assert_eq!(tx(&h.app).link, link);
         let sk = h.app.session.doc.sketch(sid).unwrap();
         for curve in sk.curves.iter().filter(|curve| curve.link.as_deref() == Some(&link)) {
-            assert!(h.app.highlighted().contains(&Sel::SketchCurve { id: curve.id.clone() }));
+            assert!(h.app.highlighted().contains(&Sel::SketchCurve { id: curve.id.clone(), sketch: None }));
         }
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(highlighted(&h.app).is_empty());
@@ -733,7 +737,7 @@ mod tests {
         let before = outline(&h);
         assert!(before.len() > 4 && before.iter().all(|(_, l)| l.as_deref() == Some(link.as_str())));
         let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
-        h.app.session.selection = vec![Sel::SketchCurve { id: before[0].0.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: before[0].0.clone(), sketch: None }];
         let undo = h.app.session.undo.len();
         let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport)
             .into_iter()
@@ -871,7 +875,7 @@ mod tests {
             h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source,
             LinkSource::Text { text: "O".into(), at, height, angle, font: None, style: TextStyle::default(), exprs: Default::default() }
         );
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone(), sketch: None }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         let undo = h.app.session.undo.len();
@@ -899,7 +903,7 @@ mod tests {
         let reopen = |h: &mut Harness| {
             let sid = h.app.session.active_sketch.unwrap();
             let id = h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone();
-            h.app.session.selection = vec![Sel::SketchCurve { id }];
+            h.app.session.selection = vec![Sel::SketchCurve { id, sketch: None }];
             h.app.start("sketch.edit_text");
             h.frames(3);
         };
@@ -988,10 +992,10 @@ mod tests {
     fn text_editor_rejects_mixed_sources_and_leaves_with_document_or_command() {
         let (mut h, _, curve) = setup();
         let other = h.app.run("sketch.text", json!({"text":"O","at":[30,0],"height":10})).unwrap();
-        h.app.session.selection.push(Sel::SketchCurve { id: other["curves"][0].as_str().unwrap().into() });
+        h.app.session.selection.push(Sel::SketchCurve { id: other["curves"][0].as_str().unwrap().into(), sketch: None });
         assert!(selected_entity(&h.app).is_none());
         assert!(!crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport).iter().any(|item| item.id == "sketch.edit_text"));
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.edit_text");
         assert!(editing(&h.app));
         h.app.start("sketch.line");
@@ -1057,7 +1061,7 @@ mod tests {
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.doc.sketch(sid).unwrap();
         let id = sk.curves[sk.link_curves(link)[0]].id.clone();
-        h.app.session.selection = vec![Sel::SketchCurve { id }];
+        h.app.session.selection = vec![Sel::SketchCurve { id, sketch: None }];
         h.frames(3);
     }
 
@@ -1420,7 +1424,7 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1);
         // Reopened, the dialog shows them.
         let sid = h.app.session.active_sketch.unwrap();
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone(), sketch: None }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         assert_eq!(tx(&h.app).style, live);
@@ -1462,7 +1466,7 @@ mod tests {
         h.app.cam.distance = 120.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         assert_eq!(style_of(&h, &link).path, None, "the selected text is not its own path");

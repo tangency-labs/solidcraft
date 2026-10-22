@@ -72,7 +72,7 @@ pub(crate) fn highlighted(app: &SolveApp) -> Vec<Sel> {
     let Some(sk) = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok()) else {
         return vec![];
     };
-    sk.curves.iter().filter(|c| c.link.as_deref() == Some(link)).map(|c| Sel::SketchCurve { id: c.id.clone() }).collect()
+    sk.curves.iter().filter(|c| c.link.as_deref() == Some(link)).map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect()
 }
 
 /// Esc restores the document and both history stacks to the start of this gesture.
@@ -133,7 +133,7 @@ mod tests {
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before);
         let curve = h.app.session.doc.sketch(1).unwrap().curves[0].id.clone();
-        h.app.session.selection = vec![Sel::SketchCurve { id: curve }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: curve, sketch: None }];
         h.app.start("sketch.move");
         h.frames(3);
         replace(&mut h, "dialog:Distance X", "17");

@@ -54,8 +54,12 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
     use solidcraft_engine::Sel;
     for selection in [
         vec![Sel::SketchPoint { id: "origin".into() }],
-        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into() }],
-        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchPoint { id: "c1.center".into() }, Sel::SketchCurve { id: "c1".into() }],
+        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into(), sketch: None }],
+        vec![
+            Sel::SketchPoint { id: "origin".into() },
+            Sel::SketchPoint { id: "c1.center".into() },
+            Sel::SketchCurve { id: "c1".into(), sketch: None },
+        ],
     ] {
         let mut h = Harness::new();
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();

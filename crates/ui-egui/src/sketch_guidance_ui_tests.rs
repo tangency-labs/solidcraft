@@ -140,7 +140,7 @@ fn sketch_dialog_box_selection_adds_replaces_and_preserves_reference() {
         h.app.dialog.as_ref().unwrap().inputs[0]
             .items
             .iter()
-            .filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None })
+            .filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None })
             .collect::<Vec<_>>()
     };
     assert_eq!(sources(&h), vec!["l1", "l2"]);
@@ -148,7 +148,7 @@ fn sketch_dialog_box_selection_adds_replaces_and_preserves_reference() {
     assert_eq!(sources(&h), vec!["l1", "l2", "l4"]);
     step(&mut h, json!({"drag":[{"sketch":[-32,8]},{"sketch":[-13,12]}]}));
     assert_eq!(sources(&h), vec!["l1"]);
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::SketchCurve { id: "l3".into() }]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::SketchCurve { id: "l3".into(), sketch: None }]);
     step(&mut h, json!({"key":"Escape"}));
     step(&mut h, json!({"start":"sketch.offset"}));
     step(&mut h, json!({"drag":[{"sketch":[-32,8]},{"sketch":[-13,27]}]}));
@@ -170,12 +170,12 @@ fn sketch_modify_inputs_refuse_other_sketches_without_changing_hole_points() {
     }
     let input = crate::selection::SelInput::new("Hole points", crate::selection::POINTS, true);
     assert_eq!(
-        input.accepts(&Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcraft_engine::geom::Vec2::ZERO }, |_, _| false),
+        input.accepts(&Hit::SketchPoint { sketch: 2, id: "p1".into(), at: solidcraft_engine::geom::Vec2::ZERO }, None, |_, _| false),
         Some(Sel::SketchPoint { id: "2:p1".into() })
     );
     h.app.start("sketch.pattern.circular");
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "l1".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: "2:p1".into() }];
     assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
 }
@@ -194,12 +194,12 @@ fn sketch_preselected_points_toggle_once_and_empty_shift_box_keeps_reference() {
     d.pick(&h.app.session, selected);
     assert!(d.inputs[0].items.is_empty(), "clicking a preselection removes it instead of duplicating it");
     d.active = 1;
-    let reference = Sel::SketchCurve { id: "l3".into() };
+    let reference = Sel::SketchCurve { id: "l3".into(), sketch: None };
     d.pick(&h.app.session, reference.clone());
     d.take_box(&h.app.session, Vec::new(), true);
     assert_eq!(d.inputs[1].items, vec![reference]);
-    d.take_box(&h.app.session, vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "l2".into() }], true);
-    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "l1".into() }], "a box replaces a single reference with one item");
+    d.take_box(&h.app.session, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "l2".into(), sketch: None }], true);
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }], "a box replaces a single reference with one item");
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn sketch_modify_keeps_custom_point_ids_that_contain_colons() {
     h.app.run("sketch.point", json!({"point":[-40,0],"id":"2:centre"})).unwrap();
     h.app.start("sketch.pattern.circular");
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::SketchCurve { id: "l1".into() }];
+    d.inputs[0].items = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     d.inputs[1].items = vec![Sel::SketchPoint { id: "2:centre".into() }];
     let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands[0].1["center"], "2:centre");

@@ -119,14 +119,14 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     let mut known = None;
     for pick in picks {
         match pick {
-            Sel::ExternalSketchCurve { sketch, id } => {
+            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
                 if known.is_some_and(|k| k != *sketch) {
                     return Err("the lines must be in one sketch".into());
                 }
                 known = Some(*sketch);
                 lines.push(id.clone());
             }
-            Sel::SketchCurve { id } => lines.push(id.clone()),
+            Sel::SketchCurve { id, sketch: None } => lines.push(id.clone()),
             _ => {}
         }
     }

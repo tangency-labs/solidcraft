@@ -88,7 +88,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             Sel::Occurrence { path } => {
                 selected_occurrences.push(s.occurrence_placement(path)?.occurrence.to_string());
             }
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
+            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
             Sel::Feature { id } => {
                 if s.doc.feature(*id).is_none() {
                     return Err(bad(cmd, format!("no feature {id}")));

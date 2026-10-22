@@ -145,7 +145,7 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
 
 /// Selected curves of the active sketch.
 fn selected_curves(app: &SolveApp) -> Vec<String> {
-    app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect()
+    app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect()
 }
 
 /// The line types among the selected curves of the active sketch, indexed like the palette's
@@ -738,7 +738,7 @@ mod tests {
         h.app.run("sketch.centerline", json!({"curves":[center],"value":true})).unwrap();
         // Which of Normal, Construction, Centerline and Infinite the palette shows pressed.
         let pressed = |h: &mut crate::scenario::Harness, ids: &[&String]| {
-            h.app.session.selection = ids.iter().map(|id| Sel::SketchCurve { id: (*id).clone() }).collect();
+            h.app.session.selection = ids.iter().map(|id| Sel::SketchCurve { id: (*id).clone(), sketch: None }).collect();
             h.settle();
             let tree = h.output.accesskit_update.as_ref().unwrap();
             ["normal", "construction", "centerline", "infinite"]

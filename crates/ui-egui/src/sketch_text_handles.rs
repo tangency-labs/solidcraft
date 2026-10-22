@@ -392,7 +392,7 @@ mod tests {
         let result = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
-        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into(), sketch: None }];
         h.frames(3);
         (h, result["link"].as_str().unwrap().into())
     }
@@ -466,7 +466,7 @@ mod tests {
         h.call("ui.view", json!({"view":"top"}));
         // Keep the rotated resize target clear of the floating ribbon too.
         h.app.cam.distance = 90.0;
-        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into(), sketch: None }];
         h.frames(3);
         let height_expr = |h: &Harness| {
             let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();

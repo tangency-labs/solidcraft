@@ -329,7 +329,7 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     let mut selected: Vec<usize> = lines.iter().flat_map(|l| before.curves[before.curve_index(l).unwrap()].kind.point_ids()).collect();
     selected.sort_unstable();
     selected.dedup();
-    h.app.session.selection = lines.iter().map(|l| Sel::SketchCurve { id: (*l).into() }).collect();
+    h.app.session.selection = lines.iter().map(|l| Sel::SketchCurve { id: (*l).into(), sketch: None }).collect();
     h.app.session.selection.extend(selected.iter().map(|&p| Sel::SketchPoint { id: before.points[p].id.clone() }));
     h.call("ui.view", json!({"view": "top"}));
     h.app.cam.distance = 150.0;
@@ -357,7 +357,7 @@ fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
     run(&mut h, "sketch.create", json!({"plane": "XY"}));
     run(&mut h, "sketch.circle.center", json!({"center": [20, 20], "radius": 10, "id": "c1"}));
     // A window around the circle picks it and its centre: not a group to move.
-    h.app.session.selection = vec![Sel::SketchCurve { id: "c1".into() }, Sel::SketchPoint { id: "c1.center".into() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }, Sel::SketchPoint { id: "c1.center".into() }];
     h.call("ui.view", json!({"view": "top"}));
     h.app.cam.distance = 150.0;
     h.frames(3);

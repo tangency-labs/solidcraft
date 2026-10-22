@@ -25,7 +25,7 @@ fn labels(h: &Harness) -> Vec<String> {
 }
 
 fn curves(h: &Harness) -> Vec<String> {
-    h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect()
+    h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect()
 }
 
 /// Two lines of the sketch's own apart from each other (`l1` on x 0–15, `l2` on x 25–40, at

@@ -93,9 +93,10 @@ pub fn rail_inputs() -> [SelInput; 2] {
     [SelInput::new("Rail", CURVES, true), SelInput::new("Second Rail", CURVES, true)]
 }
 
-/// A feature's stored rails as the rail inputs' selections.
-pub fn rail_sels(rails: &[SweepRail]) -> [Vec<Sel>; 2] {
-    let sels = |i: usize| rails.get(i).map(|r| r.curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect()).unwrap_or_default();
+/// A feature's stored rails as the rail inputs' selections (`active`: the sketch being edited).
+pub fn rail_sels(rails: &[SweepRail], active: Option<u64>) -> [Vec<Sel>; 2] {
+    let sels =
+        |i: usize| rails.get(i).map(|r| r.curves.iter().map(|id| crate::selection::curve_pick(id, r.sketch.0, active)).collect()).unwrap_or_default();
     [sels(0), sels(1)]
 }
 
@@ -137,7 +138,7 @@ pub fn rail_params(app: &SolveApp, fit: usize, rails: [&[Sel]; 2], p: &mut Value
         if curves.is_empty() {
             continue;
         }
-        let sketch = crate::dialogs::curves_sketch(app, &curves, None).ok_or("each rail's curves must be in one sketch")?;
+        let sketch = crate::dialogs::picks_sketch(app, sels, None).ok_or("each rail's curves must be in one sketch")?;
         given.push(json!({"sketch": sketch, "curves": curves}));
     }
     if given.is_empty() {

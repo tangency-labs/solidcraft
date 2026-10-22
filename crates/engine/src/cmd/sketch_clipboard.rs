@@ -78,7 +78,7 @@ fn chosen(s: &Session, p: &Value) -> Vec<String> {
     s.selection
         .iter()
         .filter_map(|sel| match sel {
-            Sel::SketchCurve { id } | Sel::SketchPoint { id } => Some(id.clone()),
+            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } => Some(id.clone()),
             _ => None,
         })
         .collect()
@@ -321,8 +321,11 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The pasted geometry is selected, ready to move.
     if s.active_sketch == Some(target) {
-        s.selection =
-            curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).chain(lone.iter().map(|id| Sel::SketchPoint { id: id.clone() })).collect();
+        s.selection = curves
+            .iter()
+            .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+            .chain(lone.iter().map(|id| Sel::SketchPoint { id: id.clone() }))
+            .collect();
     }
     Ok(json!({"curves": curves, "points": lone, "constraints": constraints, "translate": [t.x, t.y], "sketch": info}))
 }
