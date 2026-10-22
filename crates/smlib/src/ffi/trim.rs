@@ -1,6 +1,6 @@
 //! The untrim and extend blocks of `capi/include/smlib.h` (`smlib_untrim_face`,
-//! `smlib_extend_sheet`; the fork's `capi/src/smlib_untrim.cpp` and `smlib_extend.cpp`), declared
-//! by hand. Part of the FFI boundary, like its parent: called only through [`crate::trim`].
+//! `smlib_extend_sheet`; the fork's `capi/src/smlib_untrim.cpp` and `smlib_extend.cpp`) and
+//! `smlib_face_points` (`smlib_imprint.cpp`, the pieces a trim chooses from), declared by hand. Part of the FFI boundary, like its parent: called only through [`crate::trim`].
 
 #![allow(unsafe_code)]
 
@@ -29,6 +29,7 @@ unsafe extern "C" {
         in_place: i32,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_face_points(body: *const RawBrep, out: *mut f64, n_faces: i64) -> i32;
     fn smlib_extend_sheet(sheet: *const RawBrep, point: *const f64, tol: f64, distance: f64, mode: i32, out: *mut *mut RawBrep) -> i32;
 }
 
@@ -54,5 +55,18 @@ pub fn untrim_face(body: &Handle, point: &[f64; 3], tol: f64, holes: Option<&[[f
 
 #[cfg(not(feature = "native"))]
 pub fn untrim_face(_: &Handle, _: &[f64; 3], _: f64, _: Option<&[[f64; 3]]>, _: bool, _: bool) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(feature = "native")]
+pub fn face_points(body: &Handle, n_faces: usize) -> Result<Vec<[f64; 3]>, i32> {
+    let n = i64::try_from(n_faces).map_err(|_| super::ERR_ARG)?;
+    let mut out = vec![[0.0f64; 3]; n_faces];
+    let s = unsafe { smlib_face_points(body.raw(), out.as_mut_ptr().cast::<f64>(), n) };
+    if s == super::OK { Ok(out) } else { Err(s) }
+}
+
+#[cfg(not(feature = "native"))]
+pub fn face_points(_: &Handle, _: usize) -> Result<Vec<[f64; 3]>, i32> {
     Err(NOT_BUILT)
 }

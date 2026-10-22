@@ -56,4 +56,12 @@ impl Brep {
             s => error(s),
         })
     }
+
+    /// A point inside each face, in SMLib's face order: on the face's surface, inside its trims
+    /// (`SmFace::CalculateAnInternalPoint`).
+    pub fn face_points(&self) -> Result<Vec<[f64; 3]>> {
+        init()?;
+        let [faces, _, _] = self.counts()?;
+        ffi::trim::face_points(&self.0, faces).map_err(error)
+    }
 }
