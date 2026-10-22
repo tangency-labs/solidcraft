@@ -12,8 +12,8 @@
 
 use std::collections::HashMap;
 
+use solidcraft_geom::brep::Surface;
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
-use truck_modeling as mt;
 
 use crate::body::Body;
 use crate::offset::{Surf, surf_of};
@@ -232,8 +232,7 @@ impl<'a> Clearance<'a> {
 
     /// The round surface (sphere, cylinder, cone, torus) a face lies on, if it is one.
     fn round_of(&self, face: u32) -> Option<Surf> {
-        let f = self.body.solid.face_iter().nth(face as usize)?;
-        surf_of(f, self.tol * 100.0)
+        surf_of(self.body.record(), face as usize)
     }
 
     /// How far the surface may stand off a triangle with its centroid at `p`, towards larger and towards smaller heights along `n`: a
@@ -255,38 +254,45 @@ impl<'a> Clearance<'a> {
         if self.body.is_mesh() {
             return Reach::Exact;
         }
-        crate::guard("face reach", || {
-            let Some(f) = self.body.solid.face_iter().nth(face as usize) else { return Ok(Reach::Around) };
-            let surface = f.oriented_surface();
-            if matches!(surface, mt::Surface::Plane(_)) {
-                return Ok(Reach::Exact);
-            }
-            if self.exact
-                && let Some((least, greatest)) = crate::planar_faces::control_net_span(&surface, along)
-                && (greatest <= lo || least >= hi)
-            {
-                return Ok(Reach::Never);
-            }
-            let round = surf_of(f, self.tol * 100.0);
-            // A flat face stored otherwise (a revolve's end: a line swept round its axis) is
-            // a plane all the same: its triangles lie in it.
-            if matches!(round, Some(Surf::Plane { .. })) {
-                return Ok(Reach::Exact);
-            }
-            let straight = matches!(round, Some(Surf::Cylinder { a, .. }) if a.dot(along).abs() > 1.0 - 1e-12)
-                || crate::prism::wall_along(&surface, along, self.tol * 10.0, &mut 262_144);
-            Ok(if straight {
-                Reach::Sideways
-            } else if round.and_then(|s| span(&s, along)).is_some_and(|(s0, s1)| s1 <= lo || s0 >= hi) {
-                Reach::Never
-            } else if let Some(Surf::Cylinder { convex, .. } | Surf::Cone { convex, .. } | Surf::Sphere { convex, .. }) = round {
-                Reach::Beyond { convex }
-            } else {
-                Reach::Around
-            })
-        })
-        .unwrap_or(Reach::Around)
+        let Some(face_record) = self.body.record().faces.get(face as usize) else { return Reach::Around };
+        let surface = &face_record.surface;
+        let round = self.round_of(face);
+        if matches!(round, Some(Surf::Plane { .. })) {
+            return Reach::Exact;
+        }
+        if self.exact
+            && let Some((least, greatest)) = control_net_span(surface, along)
+            && (greatest <= lo || least >= hi)
+        {
+            return Reach::Never;
+        }
+        let straight = matches!(round, Some(Surf::Cylinder { a, .. }) if a.dot(along).abs() > 1.0 - 1e-12)
+            || crate::prism::wall_along(surface, along, self.tol * 10.0, &mut 262_144);
+        if straight {
+            Reach::Sideways
+        } else if round.and_then(|s| span(&s, along)).is_some_and(|(s0, s1)| s1 <= lo || s0 >= hi) {
+            Reach::Never
+        } else if let Some(Surf::Cylinder { convex, .. } | Surf::Cone { convex, .. } | Surf::Sphere { convex, .. }) = round {
+            Reach::Beyond { convex }
+        } else {
+            Reach::Around
+        }
     }
+}
+
+/// The least and the greatest `along · p` over the control points of a B-spline or NURBS surface
+/// record; the surface lies between them (it is in the convex hull of its control net). `None`
+/// for any other surface.
+fn control_net_span(s: &Surface, along: Vec3) -> Option<(f64, f64)> {
+    let points: Vec<Vec3> = match s {
+        Surface::Spline { points, .. } => points.iter().flatten().map(|p| Vec3::from(*p)).collect(),
+        Surface::RationalSpline { homogeneous, .. } => {
+            // The hull holds the surface only where every weight is positive.
+            homogeneous.iter().flatten().map(|h| (h[3] > 0.0).then(|| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))).collect::<Option<_>>()?
+        }
+        _ => return None,
+    };
+    points.iter().map(|p| along.dot(*p)).fold(None, |acc, h| Some(acc.map_or((h, h), |(lo, hi): (f64, f64)| (lo.min(h), hi.max(h)))))
 }
 
 /// The whole extent of a round surface along `along`, where it has one.
