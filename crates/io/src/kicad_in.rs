@@ -291,6 +291,39 @@ pub fn is_kicad_path(path: &str) -> bool {
     Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("kicad_pro") || e.eq_ignore_ascii_case("kicad_pcb"))
 }
 
+/// The board's own thickness (mm), from its `(general (thickness …))`: the import options window
+/// shows it before the board is built. `None` when the file cannot be read or names no valid
+/// thickness.
+pub fn kicad_board_thickness(bytes: &[u8]) -> Option<f64> {
+    if bytes.len() > MAX_KICAD_BYTES {
+        return None;
+    }
+    let source = std::str::from_utf8(bytes).ok()?;
+    let tokens = tokenize(source).ok()?;
+    for (index, token) in tokens.iter().enumerate() {
+        if !matches!(token, Token::Atom("general")) {
+            continue;
+        }
+        let mut depth = 0usize;
+        for (offset, token) in tokens.iter().enumerate().skip(index + 1) {
+            match token {
+                Token::Open => depth += 1,
+                Token::Close if depth == 0 => break,
+                Token::Close => depth -= 1,
+                Token::Atom("thickness") => {
+                    let value = tokens.get(offset + 1).and_then(|token| match token {
+                        Token::Atom(value) => value.parse::<f64>().ok(),
+                        _ => None,
+                    })?;
+                    return (value.is_finite() && value > 0.0 && value <= 1000.0).then_some(value);
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 /// Resolve a selected KiCad project to its same-stem board, or keep a directly selected board.
 pub fn kicad_board_path(path: &Path) -> Result<PathBuf> {
     match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {

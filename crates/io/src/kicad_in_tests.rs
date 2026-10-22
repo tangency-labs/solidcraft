@@ -19,6 +19,13 @@ const BOARD: &str = r#"(kicad_pcb
 )"#;
 
 #[test]
+fn reads_the_board_thickness_without_building_the_board() {
+    assert_eq!(kicad_board_thickness(BOARD.as_bytes()), Some(1.6));
+    assert_eq!(kicad_board_thickness(b"(kicad_pcb (version 20240108))"), None);
+    assert_eq!(kicad_board_thickness(b"not a board"), None);
+}
+
+#[test]
 fn parses_thickness_footprint_properties_and_model_transform() {
     let board = parse_kicad_board(BOARD.as_bytes(), "test.kicad_pcb").unwrap();
     assert_eq!(board.name, "test");
