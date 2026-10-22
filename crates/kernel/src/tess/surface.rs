@@ -1,119 +1,112 @@
-//! Truck surfaces in the evaluator's form ([`EvalSurface`]), which the CPU and GPU evaluators
-//! share. Surfaces the evaluators cannot express (a revolved intersection curve) or that are
-//! too large for them give `None`; their faces are evaluated here instead.
+//! Surface records ([`brep::Surface`]) in the evaluator's form ([`EvalSurface`]), which the
+//! planner and the CPU and GPU evaluators share. Planes, splines and revolutions keep their
+//! own parameters ([`SurfaceEval`] holds them in that form already). A cylinder, cone, sphere
+//! or torus is the revolution it is, exactly: its generator (a line, or a circle as an exact
+//! rational arc) turned about its axis, the angle as the revolution's parameter. The planner
+//! finds a boundary's parameters by projecting its nodes, so the generator's own parameter
+//! need not be the record's height or latitude.
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::bspline::MAX_SPLINE_DEGREE;
-use solidcraft_geom::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
-use truck_meshalgo::prelude::*;
-use truck_modeling as mt;
+use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::brep::{self, Frame};
+use solidcraft_geom::tess::{EvalCurve, EvalSurface};
 
-use crate::body::from_p3;
+use crate::{KernelError, Result};
 
-/// `surface` in the evaluator's form, parameterised exactly as truck parameterises it.
-pub(crate) fn eval_surface(surface: &mt::Surface) -> Option<EvalSurface> {
-    let s = match surface {
-        mt::Surface::Plane(p) => {
-            EvalSurface::Plane { origin: from_p3(p.subs(0.0, 0.0)), du: from_v3(p.uder(0.0, 0.0)), dv: from_v3(p.vder(0.0, 0.0)) }
-        }
-        mt::Surface::BSplineSurface(b) => {
-            let ctrl = b.control_points().iter().map(|row| row.iter().map(|p| [p.x, p.y, p.z, 1.0]).collect()).collect();
-            nurbs(b.degrees(), b.knot_vecs(), ctrl)?
-        }
-        mt::Surface::NurbsSurface(n) => {
-            let ctrl = n.control_points().iter().map(|row| row.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()).collect();
-            nurbs((n.udegree(), n.vdegree()), n.knot_vecs(), ctrl)?
-        }
-        mt::Surface::RevolutedCurve(proc) => {
-            let rev = proc.entity();
-            let profile = eval_curve(rev.entity_curve())?;
-            let axis = from_v3(rev.axis()).normalized()?;
-            let m = proc.transform();
-            // cgmath is column-major: m[column][row].
-            let transform = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r], m[3][r]]);
-            if transform.iter().flatten().any(|x| !x.is_finite()) {
-                return None;
-            }
-            EvalSurface::Revolved { profile, origin: from_p3(rev.origin()), axis, transform, swap: !proc.orientation() }
-        }
+fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
+}
+
+/// No transform: the revolution as it is.
+const IDENTITY: [[f64; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+
+/// `surface` in the evaluator's form. `domain` is the face's parameter box in the record's
+/// parameters, `[[u0, u1], [v0, v1]]`: a cylinder's or cone's generator spans the face's
+/// heights (an unbounded line has no parameter box to project into).
+pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<EvalSurface> {
+    use std::f64::consts::{FRAC_PI_2, TAU};
+    let invalid = |what: &str| KernelError::Invalid(format!("tessellation: {what}"));
+    let axes = |f: &Frame| {
+        let (o, x, y) = (v3(f.origin), v3(f.x_axis), v3(f.y_axis));
+        (o, x, x.cross(y))
     };
-    Some(s)
-}
-
-fn from_v3(v: mt::Vector3) -> Vec3 {
-    Vec3::new(v.x, v.y, v.z)
-}
-
-fn knots(k: &mt::KnotVec) -> Option<Vec<f64>> {
-    let v: Vec<f64> = k.iter().copied().collect();
-    (v.len() <= MAX_EVAL_KNOTS && v.iter().all(|x| x.is_finite())).then_some(v)
-}
-
-/// Truck's `control_points[i][j]` (i along u) as the evaluator's u-fastest array.
-fn nurbs((pu, pv): (usize, usize), kv: &(mt::KnotVec, mt::KnotVec), rows: Vec<Vec<[f64; 4]>>) -> Option<EvalSurface> {
-    let nu = rows.len();
-    let nv = rows.first()?.len();
-    if pu == 0 || pv == 0 || pu > MAX_SPLINE_DEGREE || pv > MAX_SPLINE_DEGREE || nu.checked_mul(nv)? > MAX_EVAL_POINTS {
-        return None;
-    }
-    let mut ctrl = Vec::with_capacity(nu * nv);
-    for j in 0..nv {
-        for row in &rows {
-            ctrl.push(<[[f64; 4]]>::get(row, j).copied()?);
-        }
-    }
-    if ctrl.iter().flatten().any(|x| !x.is_finite()) {
-        return None;
-    }
-    let knots = [knots(&kv.0)?, knots(&kv.1)?];
-    if !(knots[0].len() == nu + pu + 1 && knots[1].len() == nv + pv + 1) {
-        return None;
-    }
-    let closed = [closed_along(0, &ctrl, [nu, nv], [pu, pv], &knots), closed_along(1, &ctrl, [nu, nv], [pu, pv], &knots)];
-    Some(EvalSurface::Nurbs { degree: [pu, pv], knots, count: [nu, nv], ctrl, closed })
-}
-
-/// Does the surface join itself along direction `d` (a tube's way round)? Its knots there must
-/// be clamped, so the ends of the range are the first and last rows of control points, and
-/// those two rows must be the same points: the join is then the parameter line `d = end`, and
-/// the direction is periodic.
-fn closed_along(d: usize, ctrl: &[[f64; 4]], count: [usize; 2], degree: [usize; 2], knots: &[Vec<f64>; 2]) -> bool {
-    let (n, p) = (count[d], degree[d]);
-    if n < 2 {
-        return false;
-    }
-    let Some(k) = knots.get(d) else { return false };
-    let Some((&a, &b)) = k.first().zip(k.last()) else { return false };
-    // Clamped: degree + 1 knots equal at each end, and a range to speak of.
-    if !(b > a && k.iter().take(p + 1).all(|x| *x == a) && k.iter().rev().take(p + 1).all(|x| *x == b)) {
-        return false;
-    }
-    // Control point `(i, j)` with `i` along u, as a point.
-    let at =
-        |i: usize, j: usize| ctrl.get(j * count[0] + i).and_then(|h| (h[3].abs() > 1e-300).then(|| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])));
-    let along_d = |x: usize, t: usize| if d == 0 { at(x, t) } else { at(t, x) };
-    let (mut extent, mut gap) = (0.0f64, 0.0f64);
-    for t in 0..count[1 - d] {
-        let (Some(first), Some(last)) = (along_d(0, t), along_d(n - 1, t)) else { return false };
-        extent = extent.max(first.len()).max(last.len());
-        gap = gap.max(first.dist(last));
-    }
-    gap <= 1e-9 * extent.max(1.0)
-}
-
-/// A profile curve in the evaluator's form (a line extends for ever, as truck's does).
-pub(crate) fn eval_curve(c: &mt::Curve) -> Option<EvalCurve> {
-    let (degree, kv, ctrl): (usize, Vec<f64>, Vec<[f64; 4]>) = match c {
-        mt::Curve::Line(l) => (1, vec![0.0, 0.0, 1.0, 1.0], vec![[l.0.x, l.0.y, l.0.z, 1.0], [l.1.x, l.1.y, l.1.z, 1.0]]),
-        mt::Curve::BSplineCurve(b) => (b.degree(), knots(b.knot_vec())?, b.control_points().iter().map(|p| [p.x, p.y, p.z, 1.0]).collect()),
-        mt::Curve::NurbsCurve(n) => (n.degree(), knots(n.knot_vec())?, n.control_points().iter().map(|h| [h.x, h.y, h.z, h.w]).collect()),
-        mt::Curve::IntersectionCurve(_) => return None,
+    let revolved = |profile: EvalCurve, origin: Vec3, axis: Vec3| -> Result<EvalSurface> {
+        let axis = axis.normalized().ok_or_else(|| invalid("an analytic surface's frame"))?;
+        Ok(EvalSurface::Revolved { profile, origin, axis, transform: IDENTITY, swap: false })
     };
-    let ok = (1..=MAX_SPLINE_DEGREE).contains(&degree)
-        && ctrl.len() <= MAX_EVAL_POINTS
-        && kv.len() == ctrl.len() + degree + 1
-        && ctrl.iter().flatten().all(|x| x.is_finite());
-    ok.then_some(EvalCurve { degree, knots: kv, ctrl })
+    // The generator of a cylinder or cone over the face's heights, run from the top down so the
+    // revolution's (generator, angle) normal is the record's natural normal (outward).
+    let generator = |at: &dyn Fn(f64) -> Vec3| -> Result<EvalCurve> {
+        let [h0, h1] = domain[1];
+        if !(h0.is_finite() && h1.is_finite() && h1 > h0) {
+            return Err(invalid("a cylinder or cone face with no height"));
+        }
+        let (a, b) = (at(h1), at(h0));
+        // Parameter −v: the generator at t is the surface at height −t.
+        Ok(EvalCurve { degree: 1, knots: vec![-h1, -h1, -h0, -h0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
+    };
+    match surface {
+        brep::Surface::Cylinder { frame, radius } => {
+            let (o, x, z) = axes(frame);
+            revolved(generator(&|h| o + x * *radius + z * h)?, o, z)
+        }
+        brep::Surface::Cone { frame, radius_at_origin, half_angle } => {
+            let (o, x, z) = axes(frame);
+            let slope = half_angle.tan();
+            revolved(generator(&|h| o + x * (radius_at_origin + h * slope) + z * h)?, o, z)
+        }
+        brep::Surface::Sphere { frame, radius } => {
+            let (o, x, z) = axes(frame);
+            // The meridian from the north pole to the south pole.
+            revolved(arc(o, x, z, *radius, [-FRAC_PI_2, FRAC_PI_2]).reversed(), o, z)
+        }
+        brep::Surface::Torus { frame, major_radius, minor_radius } => {
+            let (o, x, z) = axes(frame);
+            revolved(arc(o + x * *major_radius, x, z, *minor_radius, [0.0, TAU]).reversed(), o, z)
+        }
+        _ => match SurfaceEval::new(surface) {
+            Ok(SurfaceEval::Eval(e, _)) => Ok(e),
+            Ok(_) => Err(invalid("an analytic surface out of place")),
+            Err(e) => Err(KernelError::Failed(format!("not supported yet: tessellation: {e}"))),
+        },
+    }
+}
+
+/// The circle `centre + r (cos t x + sin t y)` for t in `angle`, as an exact rational quadratic
+/// spline over [0, 1], one span per quarter turn or less.
+fn arc(centre: Vec3, x: Vec3, y: Vec3, r: f64, angle: [f64; 2]) -> EvalCurve {
+    let span = angle[1] - angle[0];
+    let count = (span / std::f64::consts::FRAC_PI_2).ceil().clamp(1.0, 4.0) as usize;
+    let step = span / count as f64;
+    let weight = (step / 2.0).cos();
+    // A point at angle `t`, its radius divided by `scale` (the middle control point of a span
+    // lies 1 / cos(step / 2) out), as homogeneous coordinates of weight `w`.
+    let at = |t: f64, scale: f64, w: f64| {
+        let p = centre + x * (r * t.cos() / scale) + y * (r * t.sin() / scale);
+        [p.x * w, p.y * w, p.z * w, w]
+    };
+    let mut ctrl = vec![at(angle[0], 1.0, 1.0)];
+    let mut knots = vec![0.0; 3];
+    for i in 0..count {
+        let start = angle[0] + i as f64 * step;
+        ctrl.push(at(start + step / 2.0, weight, weight));
+        ctrl.push(at(start + step, 1.0, 1.0));
+        knots.extend(std::iter::repeat_n((i + 1) as f64 / count as f64, if i + 1 == count { 3 } else { 2 }));
+    }
+    EvalCurve { degree: 2, knots, ctrl }
+}
+
+/// A curve on [0, 1] run the other way: t becomes 1 − t.
+trait Reversed {
+    fn reversed(self) -> Self;
+}
+
+impl Reversed for EvalCurve {
+    fn reversed(mut self) -> Self {
+        self.ctrl.reverse();
+        self.knots = self.knots.iter().rev().map(|k| 1.0 - k).collect();
+        self
+    }
 }
 
 #[cfg(test)]

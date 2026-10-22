@@ -1,20 +1,19 @@
-//! Display tessellation: each face's triangulation in its own parameters, with every edge
-//! sampled once so neighbouring faces share their boundary points exactly, handed over as a
-//! [`TessPlan`] for the CPU or GPU evaluator.
+//! SolidCraft's mesher: each face of a schema 4 record ([`brep::Brep`]) triangulated in its own
+//! parameters, with every edge sampled once so neighbouring faces share their boundary points
+//! exactly, handed over as a [`TessPlan`] for the CPU or GPU evaluator.
 //!
-//! Per face, cheapest first:
-//! - planar faces: a constrained Delaunay triangulation of the edge nodes alone (a plane needs
-//!   no interior points);
-//! - faces whose boundary runs along their parameter box (cylinder halves, sphere and torus
-//!   patches, fillets): a structured grid zipped to the edge nodes;
-//! - four-cornered faces whose sides are not parameter lines (mitred fillet strips, cross
-//!   hole walls): a Coons blend of the four sides, zipped the same way;
-//! - anything else (trimmed faces, holes): constrained Delaunay with interior seeds and
-//!   Ruppert refinement.
-//!
-//! A face the planner cannot handle (its surface has no evaluable form, a boundary that does
-//! not project or crosses itself) fails the whole plan, and the caller meshes the body the
-//! old way.
+//! Per face:
+//! 1. a cheaper layout where the face suits one: planar faces whose boundary runs along their
+//!    parameter box, and curved ones, take a structured grid zipped to the edge nodes; a
+//!    four-cornered face whose sides are not parameter lines (mitred fillet strips, cross hole
+//!    walls) a Coons blend of its four sides; a trimmed face the patches of its cuts or the
+//!    iso-line grid cut along its motorcycle traces;
+//! 2. otherwise, the general method for every face: constrained Delaunay in the face's (u, v),
+//!    with interior seeds and Ruppert refinement, every node then evaluated on the exact
+//!    surface (and refined where a triangle sags off it);
+//! 3. a face even that refuses (its loops cross or do not close in (u, v), or wind round a
+//!    seam or pole) is an error naming the face and why. Its cause is upstream, in the face's
+//!    boundary or parameters, and is fixed there; there is no other mesher to fall back to.
 
 pub(crate) mod cdt;
 pub(crate) mod collar;
@@ -28,17 +27,15 @@ pub(crate) mod pieces;
 pub(crate) mod sag;
 pub(crate) mod seam;
 pub(crate) mod size;
-pub(crate) mod ssi;
 pub(crate) mod surface;
 pub(crate) mod uv;
 
 use std::collections::HashMap;
 
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::{self, Curve, Loop, Shell};
 use solidcraft_geom::tess::{EvalSurface, FacePlan, TessPlan};
-use truck_modeling as mt;
 
-use crate::body::{Solid, edge_order};
 use crate::{KernelError, Result};
 
 /// How the faces of a plan were meshed.
@@ -81,63 +78,111 @@ fn unsupported(what: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("not supported yet: tessellation: {what}"))
 }
 
-/// Plan the display tessellation of `solid` with chord tolerance `tol` and, when given, a
-/// facet angle no facet may turn more than (where it sags above the angle's floor).
-/// `boundary_tol`: how far the body's boundaries may lie off their surfaces (mm) as the file it
-/// was read from declares, `None` for a body this kernel built (see
-/// [`crate::body::Body::boundary_tol`]).
-pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_tol: Option<f64>) -> Result<(TessPlan, PlanStats)> {
-    let faces: Vec<&mt::Face> = solid.face_iter().collect();
-    let (edges, edge_faces) = edge_order(faces.iter().copied());
-    let rules = size::Rules::new(tol, size::extent(solid.vertex_iter().map(|v| crate::body::from_p3(v.point()))), turn, boundary_tol);
+/// The surface kind of a face, for an error that names it.
+fn kind(s: &brep::Surface) -> &'static str {
+    match s {
+        brep::Surface::Plane { .. } | brep::Surface::PlaneThrough { .. } => "plane",
+        brep::Surface::Cylinder { .. } => "cylinder",
+        brep::Surface::Cone { .. } => "cone",
+        brep::Surface::Sphere { .. } => "sphere",
+        brep::Surface::Torus { .. } => "torus",
+        brep::Surface::Spline { .. } => "spline",
+        brep::Surface::RationalSpline { .. } => "rational spline",
+        brep::Surface::PlacedRevolution { .. } => "revolution",
+    }
+}
+
+/// Whether each face's normal is its surface's natural normal, as the shell that uses it says
+/// (a face no shell lists keeps its surface's).
+fn forward_faces(b: &brep::Brep) -> Vec<bool> {
+    let mut forward = vec![true; b.faces.len()];
+    for shell in &b.shells {
+        if let Shell::Faces { faces, .. } = shell {
+            for f in faces {
+                if let Some(slot) = forward.get_mut(f.face as usize) {
+                    *slot = f.forward;
+                }
+            }
+        }
+    }
+    forward
+}
+
+/// The edges of each face's loops, in loop order.
+fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
+    f.loops.iter().flat_map(|l| match l {
+        Loop::Edges { edges } => edges.as_slice(),
+        Loop::Vertex { .. } => &[],
+    })
+}
+
+/// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
+/// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
+/// record's, in its order.
+pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
+    let faces = &b.faces;
+    let forward = forward_faces(b);
+    // The faces each edge bounds, each once, in the order of the edge's uses.
+    let edge_faces: Vec<Vec<usize>> = b
+        .edges
+        .iter()
+        .map(|e| {
+            let mut fs: Vec<usize> = Vec::with_capacity(e.uses.len());
+            for u in &e.uses {
+                if !fs.contains(&(u.face as usize)) {
+                    fs.push(u.face as usize);
+                }
+            }
+            fs
+        })
+        .collect();
+    let rules = size::Rules::new(tol, size::extent(b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))), turn);
     // Each face's surface and target side length, then every edge once at the smaller size of
     // its faces; faces then read their nodes. A planar face costs microseconds and a curved
     // one about a hundred, so the pool is used only where curved faces (or intersection
     // curves) make up the work.
-    let evals: Vec<Option<EvalSurface>> = faces.iter().map(|f| surface::eval_surface(&f.surface())).collect();
-    let curved = evals.iter().filter(|e| !matches!(e, Some(EvalSurface::Plane { .. }))).count();
-    let sizes =
-        crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |eval| Ok(eval.as_ref().map(|s| size::face_size(s, &uv::domain(s), &rules))));
-    let sized: Vec<(Option<EvalSurface>, Option<(f64, [f64; 2])>)> =
-        evals.into_iter().zip(sizes).map(|(e, s)| s.map(|s| (e, s))).collect::<Result<_>>()?;
-    let face_h = |f: usize| sized.get(f).and_then(|(_, s)| s.map(|(h, _)| h)).unwrap_or(rules.max_len);
+    let evals: Vec<EvalSurface> = faces
+        .iter()
+        .enumerate()
+        .map(|(fi, f)| surface::eval_surface(&f.surface, f.domain).map_err(|e| unsupported(format!("face {fi} ({}): {e}", kind(&f.surface)))))
+        .collect::<Result<_>>()?;
+    let curved = evals.iter().filter(|e| !matches!(e, EvalSurface::Plane { .. })).count();
+    let sizes: Vec<(f64, [f64; 2])> =
+        crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |s| Ok(size::face_size(s, &uv::domain(s), &rules)))
+            .into_iter()
+            .collect::<Result<_>>()?;
+    let face_h = |f: usize| sizes.get(f).map_or(rules.max_len, |(h, _)| *h);
     let edge_h: Vec<f64> = edge_faces.iter().map(|fs| fs.iter().map(|&f| face_h(f)).fold(rules.max_len, f64::min)).collect();
-    let jobs: Vec<(&mt::Edge, f64)> = edges.iter().zip(edge_h).collect();
-    let solved = edges.iter().filter(|e| matches!(e.curve(), mt::Curve::IntersectionCurve(_))).count();
-    let sampled = crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || edges.len() >= PARALLEL_EDGES, |(e, h)| {
-        Ok(edges::sample_edge(e, &rules, *h))
-    });
-    let mut nodes: HashMap<_, edges::Nodes> = HashMap::with_capacity(edges.len());
-    for (e, n) in edges.iter().zip(sampled) {
-        nodes.insert(e.id(), n?);
-    }
-    relax_crowded_faces(&faces, &jobs, &rules, &mut nodes);
-    divide_collapsed_faces(&faces, &jobs, &rules, &mut nodes);
-    let indexed: Vec<(usize, &mt::Face)> = faces.iter().copied().enumerate().collect();
-    // A face's boundary nodes, loop by loop (each edge's last node is the next edge's first),
-    // with their parameters on the face's surface where the edge knows them (an intersection
-    // edge on this face's surface).
-    type Boundary = (Vec<Vec<Vec3>>, Vec<Vec<Option<[f64; 2]>>>);
-    let boundary = |face: &mt::Face, eval: &EvalSurface, nodes: &HashMap<mt::EdgeID, edges::Nodes>| -> Result<Boundary> {
+    let jobs: Vec<(usize, f64)> = edge_h.into_iter().enumerate().collect();
+    let solved = b.edges.iter().filter(|e| matches!(e.curve, Curve::SurfaceIntersection { .. })).count();
+    let mut nodes: Vec<edges::Nodes> = crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
+        edges::sample_edge(b, *e, &rules, *h)
+    })
+    .into_iter()
+    .collect::<Result<_>>()?;
+    relax_crowded_faces(b, &jobs, &rules, &mut nodes)?;
+    let indexed: Vec<usize> = (0..faces.len()).collect();
+    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        let (Some(face), Some(eval), Some(size)) = (faces.get(fi), evals.get(fi), sizes.get(fi)) else {
+            return Err(unsupported(format!("face {fi}: missing")));
+        };
+        // Boundary nodes, loop by loop (each edge's last node is the next edge's first). A
+        // vertex loop (a pole) bounds no area and has no nodes of its own.
         let mut loops3: Vec<Vec<Vec3>> = Vec::new();
-        let mut known: Vec<Vec<Option<[f64; 2]>>> = Vec::new();
-        for wire in face.absolute_boundaries() {
-            let (mut pts, mut uvs) = (Vec::new(), Vec::new());
-            for e in wire.edge_iter() {
-                let n = nodes.get(&e.id()).ok_or_else(|| unsupported("edge without nodes"))?;
-                let (mut ep, mut eq) = (n.points.clone(), n.params_on(eval).unwrap_or_else(|| vec![None; n.points.len()]));
-                if !e.orientation() {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            let mut pts = Vec::new();
+            for oe in edges {
+                let n = nodes.get(oe.edge as usize).ok_or_else(|| unsupported(format!("face {fi}: edge {} without nodes", oe.edge)))?;
+                let mut ep = n.points.clone();
+                if !oe.forward {
                     ep.reverse();
-                    eq.reverse();
                 }
                 ep.pop();
-                eq.pop();
                 pts.extend(ep);
-                uvs.extend(eq);
             }
             if pts.len() >= 2 {
                 loops3.push(pts);
-                known.push(uvs);
             }
         }
         Ok((loops3, known))
@@ -157,95 +202,16 @@ pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_t
         let (eval, size) = surface_of(fi)?;
         let (loops3, known) = boundary(face, &eval, nodes)?;
         let mut stats = PlanStats::default();
-        let replan = |stats: &mut PlanStats| match plan_face(fi, &eval, &loops3, &known, rules, size, stats) {
-            Ok(fp) => Ok(fp),
-            // A boundary that doubles straight back on itself (a zero-width slit in the face,
-            // which some STEP writers leave where two surfaces were trimmed apart) encloses no
-            // area but crosses itself in (u, v). Dropping the slits leaves the same face.
-            Err(first) => {
-                let (slit3, slitq) = drop_slits(&loops3, &known, rules.tol * 1e-2);
-                if slit3 == loops3 {
-                    return Err(first);
-                }
-                // Nothing left but slits: a sliver face (two edges between the same two vertices,
-                // as STEP files write one) encloses no area, and the faces on either side already
-                // meet along its nodes.
-                if slit3.iter().all(|l| l.len() < 3) {
-                    return Ok(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() });
-                }
-                *stats = PlanStats::default();
-                plan_face(fi, &eval, &slit3, &slitq, rules, size, stats).map_err(|_| first)
-            }
-        };
-        let fp = replan(&mut stats)?;
-        Ok((oriented_face(face, fp), eval, stats))
-    };
-    let mut planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |(fi, face)| plan_one(*fi, face, &nodes, &rules));
-    // A face refused at this level of detail (a boundary that comes out degenerate, or that a
-    // triangulation cannot follow, between nodes too far apart) has its edges divided again,
-    // finer, and it and the faces beside those edges, which share their nodes, are planned
-    // again from them.
-    if planned.iter().any(Result::is_err) {
-        let index_of: HashMap<mt::EdgeID, usize> = edges.iter().enumerate().map(|(i, e)| (e.id(), i)).collect();
-        let face_edges: Vec<Vec<usize>> = faces
-            .iter()
-            .map(|f| f.absolute_boundaries().iter().flat_map(|w| w.edge_iter().filter_map(|e| index_of.get(&e.id()).copied())).collect())
-            .collect();
-        let mut finer: HashMap<usize, size::Rules> = HashMap::new();
-        for factor in REFINE_STEPS {
-            let refused: Vec<usize> = planned.iter().enumerate().filter(|(_, r)| r.is_err()).map(|(i, _)| i).collect();
-            if refused.is_empty() {
-                break;
-            }
-            let fine = rules.finer(factor);
-            let mut touched: Vec<usize> = refused.iter().filter_map(|f| face_edges.get(*f)).flatten().copied().collect();
-            touched.sort_unstable();
-            touched.dedup();
-            let resampled = crate::par::map("edge nodes", &touched, touched.len() >= PARALLEL_EDGES, |i| {
-                Ok(jobs.get(*i).map(|(e, h)| (e.id(), edges::sample_edge(e, &fine, *h / factor))))
-            });
-            for (id, n) in resampled.into_iter().flatten().flatten() {
-                nodes.insert(id, n);
-            }
-            finer.extend(refused.iter().map(|f| (*f, fine)));
-            // The faces sharing a divided edge read its new nodes.
-            let mut again: Vec<usize> = touched.iter().filter_map(|i| edge_faces.get(*i)).flatten().copied().collect();
-            again.sort_unstable();
-            again.dedup();
-            let again: Vec<(usize, &mt::Face)> = again.into_iter().filter_map(|f| faces.get(f).map(|face| (f, *face))).collect();
-            let results = crate::par::map("face tessellation", &again, again.len() >= PARALLEL_FACES, |(fi, face)| {
-                plan_one(*fi, face, &nodes, finer.get(fi).unwrap_or(&rules))
-            });
-            for ((f, _), r) in again.iter().zip(results) {
-                if let Some(slot) = planned.get_mut(*f) {
-                    *slot = r;
-                }
-            }
-        }
-    }
-    // A face refused however finely its edges are divided is filled flat from its boundary
-    // nodes (see `fallback`), so the rest of the body keeps its plan.
-    for (fi, slot) in planned.iter_mut().enumerate() {
-        if slot.is_ok() {
-            continue;
-        }
-        let (Some(face), Ok((eval, _))) = (faces.get(fi), surface_of(fi)) else { continue };
-        let Ok((loops3, _)) = boundary(face, &eval, &nodes) else { continue };
-        if let Some(fp) = fallback::fill(fi, &eval, &loops3, off_surface(&rules), rules.tol) {
-            *slot = Ok((oriented_face(face, fp), eval, PlanStats { filled: 1, ..PlanStats::default() }));
-        }
-    }
-    let oriented = |e: &mt::Edge| -> Option<Vec<Vec3>> {
-        let mut pts = nodes.get(&e.id())?.points.clone();
-        if !e.orientation() {
-            pts.reverse();
-        }
-        Some(pts)
-    };
+        let fp = plan_face(fi, kind(&face.surface), eval, &loops3, &rules, *size, &mut stats)?;
+        let fwd = forward.get(fi).copied().unwrap_or(true);
+        let fp =
+            FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
+        Ok((fp, stats))
+    });
     let mut plan = TessPlan::default();
     let mut stats = PlanStats::default();
-    for r in planned {
-        let (fp, eval, s) = r?;
+    for (r, eval) in planned.into_iter().zip(evals) {
+        let (fp, s) = r?;
         let surface = u32::try_from(plan.surfaces.len()).map_err(|_| unsupported("too many faces"))?;
         plan.surfaces.push(eval);
         plan.faces.push(FacePlan { surface: Some(surface), ..fp });
@@ -254,239 +220,48 @@ pub(crate) fn plan(solid: &Solid, tol: f64, turn: Option<size::Turn>, boundary_t
         stats.delaunay += s.delaunay;
         stats.filled += s.filled;
     }
-    plan.edges = edges.iter().filter_map(oriented).collect();
+    plan.edges = nodes.into_iter().map(|n| n.points).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
     Ok((plan, stats))
 }
 
-/// Whether every curved face's boundary lies on the face's surface, within `accept`: a point
-/// off the surface's own parameter range is off it. The planner needs this of every face; a
-/// blend that runs on past the end of a neighbouring round's surface does not have it.
-pub(crate) fn boundaries_on_surfaces(solid: &Solid, accept: f64) -> bool {
-    use mt::{BoundedCurve, ParametricCurve};
-    for face in solid.face_iter() {
-        let Some(eval) = surface::eval_surface(&face.surface()) else { continue };
-        if matches!(eval, EvalSurface::Plane { .. }) {
-            continue;
-        }
-        let dom = uv::domain(&eval);
-        let mut prev: Option<[f64; 2]> = None;
-        for e in face.edge_iter() {
-            let c = e.oriented_curve();
-            let (lo, hi) = c.range_tuple();
-            for k in 0..=32 {
-                let p = crate::body::from_p3(c.subs(lo + (hi - lo) * f64::from(k) / 32.0));
-                match uv::project(&eval, &dom, p, prev, accept) {
-                    Some(uv) => prev = Some(uv),
-                    None => return false,
-                }
-            }
-        }
-    }
-    true
-}
-
-/// Bounded work for the facet angle, as the reference mesher bounds it: a face whose boundary
-/// would get more than `MAX_ANGLE_BOUNDARY` segments has its curved edges sampled again at twice
-/// the angle, as often as it takes, down to the tolerance alone (a plate with a thousand small
-/// holes is not worth a hundred times the work to draw each hole round). An edge keeps one set
-/// of nodes for both its faces, at the coarser of their levels, so every rim of a crowded face
-/// gets the same share whatever the order of the faces.
-fn relax_crowded_faces(faces: &[&mt::Face], jobs: &[(&mt::Edge, f64)], rules: &size::Rules, nodes: &mut HashMap<mt::EdgeID, edges::Nodes>) {
-    use truck_meshalgo::tessellation::Deflection;
-    let Some(turn) = rules.turn else { return };
-    let h_of: HashMap<mt::EdgeID, (&mt::Edge, f64)> = jobs.iter().map(|(e, h)| (e.id(), (*e, *h))).collect();
-    let boundaries: Vec<Vec<mt::EdgeID>> =
-        faces.iter().map(|f| f.absolute_boundaries().iter().flat_map(|w| w.edge_iter().map(|e| e.id())).collect()).collect();
-    let mut level: HashMap<mt::EdgeID, u8> = HashMap::new();
-    for l in 1..=Deflection::MAX_RELAX {
-        let segments = |id: &mt::EdgeID| nodes.get(id).map_or(0, |n| n.points.len().saturating_sub(1));
-        let mut crowded: Vec<mt::EdgeID> = boundaries
+/// Bounded work for the facet angle: a face whose boundary would get more than
+/// [`size::MAX_ANGLE_BOUNDARY`] segments has its curved edges sampled again at twice the angle,
+/// as often as it takes, down to the tolerance alone (a plate with a thousand small holes is
+/// not worth a hundred times the work to draw each hole round). An edge keeps one set of nodes
+/// for both its faces, at the coarser of their levels, so every rim of a crowded face gets the
+/// same share whatever the order of the faces.
+fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Result<()> {
+    let Some(turn) = rules.turn else { return Ok(()) };
+    let boundaries: Vec<Vec<usize>> = b.faces.iter().map(|f| face_edges(f).map(|oe| oe.edge as usize).collect()).collect();
+    let curved = |e: usize| b.edges.get(e).is_some_and(|e| !matches!(e.curve, Curve::Line { .. }));
+    let mut level: Vec<u8> = vec![0; nodes.len()];
+    for l in 1..=size::MAX_RELAX {
+        let segments = |e: &usize| nodes.get(*e).map_or(0, |n| n.points.len().saturating_sub(1));
+        let mut crowded: Vec<usize> = boundaries
             .iter()
-            .filter(|ids| ids.iter().map(segments).sum::<usize>() > Deflection::MAX_ANGLE_BOUNDARY)
+            .filter(|es| es.iter().map(segments).sum::<usize>() > size::MAX_ANGLE_BOUNDARY)
             .flatten()
-            .filter(|id| level.get(*id).copied().unwrap_or(0) < l)
-            .filter(|id| h_of.get(*id).is_some_and(|(e, _)| !matches!(e.curve(), mt::Curve::Line(_))))
+            .filter(|e| level.get(**e).copied().unwrap_or(0) < l && curved(**e))
             .copied()
             .collect();
-        crowded.sort_unstable_by_key(|id| format!("{id:?}"));
+        crowded.sort_unstable();
         crowded.dedup();
         if crowded.is_empty() {
             break;
         }
         let relaxed = size::Rules { turn: turn.relaxed(l), ..*rules };
-        for id in crowded {
-            if let Some((e, h)) = h_of.get(&id) {
-                nodes.insert(id, edges::sample_edge(e, &relaxed, *h));
-                level.insert(id, l);
+        for e in crowded {
+            let Some(&(_, h)) = jobs.get(e) else { continue };
+            if let Some(slot) = nodes.get_mut(e) {
+                *slot = edges::sample_edge(b, e, &relaxed, h)?;
+            }
+            if let Some(slot) = level.get_mut(e) {
+                *slot = l;
             }
         }
     }
-}
-
-/// Every loop with its zero-width slits removed: wherever the boundary steps out to a node and
-/// straight back to where it came from, the pair is dropped. A slit encloses no area, so the
-/// face is the same without it, and without it the boundary no longer runs along itself. The
-/// two sides need only agree within `eps` (a hundredth of the chord tolerance): a STEP writer
-/// may draw them as two curves a few nanometres apart, which no mesh could tell apart anyway.
-fn drop_slits(loops3: &[Vec<Vec3>], known: &[Vec<Option<[f64; 2]>>], eps: f64) -> (Vec<Vec<Vec3>>, Vec<Vec<Option<[f64; 2]>>>) {
-    /// Slits dropped from one loop before giving up (the search is a scan per slit).
-    const MAX_SLITS: usize = 4096;
-    let mut out3: Vec<Vec<Vec3>> = Vec::with_capacity(loops3.len());
-    let mut outq: Vec<Vec<Option<[f64; 2]>>> = Vec::with_capacity(loops3.len());
-    for (li, pts) in loops3.iter().enumerate() {
-        let mut pts = pts.clone();
-        let mut qs = known.get(li).cloned().unwrap_or_else(|| vec![None; pts.len()]);
-        qs.resize(pts.len(), None);
-        for _ in 0..MAX_SLITS {
-            let n = pts.len();
-            if n < 3 {
-                break;
-            }
-            let same = |a: usize, b: usize| pts.get(a).zip(pts.get(b)).is_some_and(|(p, q)| p.dist(*q) <= eps);
-            let tip = (0..n).find(|&k| same((k + n - 1) % n, (k + 1) % n));
-            let Some(k) = tip else { break };
-            // Drop the tip and the node that repeats the one before it.
-            let mut drop = [k, (k + 1) % n];
-            drop.sort_unstable();
-            for &i in drop.iter().rev() {
-                if i < pts.len() {
-                    pts.remove(i);
-                }
-                if i < qs.len() {
-                    qs.remove(i);
-                }
-            }
-        }
-        if pts.len() >= 2 {
-            out3.push(pts);
-            outq.push(qs);
-        }
-    }
-    (out3, outq)
-}
-
-/// Boundary nodes a loop keeps only one of: nodes whose parameters land on the node before them.
-///
-/// A boundary that runs a little off its surface (a STEP file writes its curves and surfaces to
-/// its own uncertainty, so an edge may lie micrometres off the face it bounds) projects onto the
-/// nearest surface point. Around a convex corner of the surface every point of such an edge is
-/// nearest that corner, so a whole run of nodes comes out with the corner's parameters. The finer
-/// the chord tolerance, the more nodes the run holds, and a boundary that repeats a point in
-/// (u, v) encloses no area there and cannot be triangulated (#1721).
-///
-/// One node stands for the run. The nodes dropped are nearer to it than `SAME_NODE` on the
-/// surface, so the face is the same without them.
-fn drop_collapsed(l: &mut seam::Loop, speed: [f64; 2]) {
-    let eps = |d: usize| {
-        let s = speed.get(d).copied().unwrap_or(1.0);
-        if s.is_finite() && s > 0.0 { SAME_NODE / s } else { 0.0 }
-    };
-    let (eu, ev) = (eps(0), eps(1));
-    let same = |a: &[f64; 2], b: &[f64; 2]| (a[0] - b[0]).abs() <= eu && (a[1] - b[1]).abs() <= ev;
-    let (mut uv, mut pts) = (Vec::with_capacity(l.uv.len()), Vec::with_capacity(l.pts.len()));
-    for (q, p) in l.uv.iter().zip(&l.pts) {
-        if uv.last().is_some_and(|last| same(last, q)) {
-            continue;
-        }
-        uv.push(*q);
-        pts.push(*p);
-    }
-    // The loop is cyclic: its last node may land on its first.
-    while uv.len() > 2 && uv.last().zip(uv.first()).is_some_and(|(a, b)| same(a, b)) {
-        uv.pop();
-        pts.pop();
-    }
-    l.uv = uv;
-    l.pts = pts;
-}
-
-/// Bring every loop of a face into the same period as its outer boundary. A loop is projected
-/// on its own, and a periodic surface repeats, so a hole can come out a whole turn away from the
-/// boundary it lies in — where it no longer cuts the face, and the face is drawn over its hole.
-fn align_periods(loops: &mut [seam::Loop], dom: &uv::Domain) {
-    for d in 0..2 {
-        let Some(per) = dom.period.get(d).copied().flatten().filter(|p| *p > 0.0) else { continue };
-        let middle = |l: &seam::Loop| {
-            let (lo, hi) = l.uv.iter().filter_map(|q| q.get(d)).fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
-            0.5 * (lo + hi)
-        };
-        let Some(outer) = loops.first().map(middle) else { continue };
-        if !outer.is_finite() {
-            continue;
-        }
-        for l in loops.iter_mut().skip(1) {
-            let shift = ((outer - middle(l)) / per).round() * per;
-            if shift != 0.0 && shift.is_finite() {
-                for q in l.uv.iter_mut() {
-                    if let Some(x) = q.get_mut(d) {
-                        *x += shift;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Nodes a face's boundary needs before it can hold a triangle.
-const MIN_BOUNDARY_NODES: usize = 3;
-
-/// A face whose whole boundary comes to fewer than three nodes has no triangle to stand on: it is
-/// a sliver no wider than the tolerance (a chord with the shallow arc beside it, which the edge
-/// sampler rightly leaves as one segment each). Its edges are sampled again, halved until the
-/// boundary has nodes enough, so the sliver is drawn instead of failing the whole body's plan.
-/// The nodes stay shared, so the faces beside it follow the same points.
-fn divide_collapsed_faces(faces: &[&mt::Face], jobs: &[(&mt::Edge, f64)], rules: &size::Rules, nodes: &mut HashMap<mt::EdgeID, edges::Nodes>) {
-    /// Halvings before giving up (a boundary of two edges reaches four nodes in one).
-    const MAX_HALVINGS: usize = 8;
-    let h_of: HashMap<mt::EdgeID, (&mt::Edge, f64)> = jobs.iter().map(|(e, h)| (e.id(), (*e, *h))).collect();
-    for f in faces {
-        let ids: Vec<mt::EdgeID> = f.absolute_boundaries().iter().flat_map(|w| w.edge_iter().map(|e| e.id())).collect();
-        let count = |nodes: &HashMap<mt::EdgeID, edges::Nodes>| {
-            ids.iter().map(|id| nodes.get(id).map_or(0, |n| n.points.len().saturating_sub(1))).sum::<usize>()
-        };
-        if count(nodes) >= MIN_BOUNDARY_NODES {
-            continue;
-        }
-        for _ in 0..MAX_HALVINGS {
-            for id in &ids {
-                let Some((e, h)) = h_of.get(id) else { continue };
-                let longest =
-                    nodes.get(id).map_or(0.0, |n| n.points.windows(2).filter_map(|w| Some(w.first()?.dist(*w.get(1)?))).fold(0.0, f64::max));
-                let finer = if longest > 0.0 { (longest * 0.5).min(*h) } else { *h };
-                nodes.insert(*id, edges::sample_edge(e, rules, finer));
-            }
-            if count(nodes) >= MIN_BOUNDARY_NODES {
-                break;
-            }
-        }
-    }
-}
-
-/// How far a boundary node may lie off its surface and still be projected onto it (see the note
-/// in [`plan_face`]).
-fn off_surface(rules: &size::Rules) -> f64 {
-    (rules.extent * ON_SURFACE).max(rules.boundary_tol.unwrap_or(0.0)).max(1e-6)
-}
-
-/// Whether a face of `solid` has a loop that runs along a seam edge between two distinct
-/// vertices and straight back along it, the two uses one after the other (they meet at a pole):
-/// a whole sphere as one face bounded by its meridian alone, as SMLib writes it, or a sphere
-/// face whose meridian is split where a trim crosses it. Truck's mesher projects both uses onto
-/// one parameter line and meshes nothing; the display plan opens the loop across the period
-/// ([`open_pole_to_pole`], and [`open_at_pole`] for a seam from one pole to a rim).
-pub(crate) fn has_pole_to_pole_seam(solid: &Solid) -> bool {
-    solid.face_iter().any(|f| {
-        f.boundaries().iter().any(|w| {
-            let edges: Vec<&mt::Edge> = w.edge_iter().collect();
-            let n = edges.len();
-            n >= 2
-                && (0..n).any(|k| match (edges.get(k), edges.get((k + 1) % n)) {
-                    (Some(a), Some(b)) => a.id() == b.id() && a.orientation() != b.orientation() && a.front() != a.back(),
-                    _ => false,
-                })
-        })
-    })
+    Ok(())
 }
 
 /// Twice the signed area of a parameter polygon.
@@ -636,9 +411,9 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 fn plan_face(
     fi: usize,
+    kind: &str,
     s: &EvalSurface,
     loops3: &[Vec<Vec3>],
-    known: &[Vec<Option<[f64; 2]>>],
     rules: &size::Rules,
     size: (f64, [f64; 2]),
     stats: &mut PlanStats,
@@ -646,26 +421,17 @@ fn plan_face(
     let tol = rules.tol;
     let (h, speed) = size;
     let dom = uv::domain(s);
-    // How far a boundary node may lie off its surface and still be projected onto it: a property
-    // of the body, not of the mesh asked for, so a finer chord tolerance never refuses a boundary
-    // a coarser one accepted, and zooming in never drops a face (#1721). A hundredth of the body,
-    // or more where the file it was read from declares more; a file's declared accuracy never
-    // lowers it, since writers' edges stray farther from their surfaces than they declare.
-    let accept = off_surface(rules);
-    let fail = |why: &str| unsupported(format!("face {fi}: {why}"));
+    let accept = (tol * 10.0).max(1e-6);
+    let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
     // Project every loop, unwrapping periodic parameters along it.
     let mut projected: Vec<seam::Loop> = Vec::with_capacity(loops3.len());
     for (li, pts) in loops3.iter().enumerate() {
         let mut luv: Vec<[f64; 2]> = Vec::with_capacity(pts.len());
         let mut prev: Option<[f64; 2]> = None;
         for (k, p) in pts.iter().enumerate() {
-            // Known parameters (an intersection edge's), else a projection seeded by the
-            // previous node.
-            let given = known.get(li).and_then(|l| l.get(k)).copied().flatten();
-            let mut q = match given {
-                Some(q) => q,
-                None => uv::project(s, &dom, *p, prev, accept).ok_or_else(|| fail("boundary does not lie on the surface"))?,
-            };
+            // A projection seeded by the previous node.
+            let mut q = uv::project(s, &dom, *p, prev, accept)
+                .ok_or_else(|| fail(&format!("boundary node {k} of loop {li} at {p:?} does not lie on the surface")))?;
             if let Some(pr) = prev {
                 for d in 0..2 {
                     q[d] = uv::unwrap(q[d], pr[d], dom.period[d]);
