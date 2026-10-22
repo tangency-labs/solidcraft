@@ -1,6 +1,6 @@
 //! Is a body one valid solid? The kernel regression rig (`tests/kernel-cases`) asks this of every
 //! result: the schema 4 record's structure and geometry (`Brep::validate`, `check_geometry`),
-//! and, with the `smlib` feature, SMLib's own check of the same record.
+//! and SMLib's own check of the same record.
 
 use crate::{Body, brep_record};
 
@@ -9,7 +9,7 @@ use crate::{Body, brep_record};
 pub struct Validity {
     /// The record: structure, then geometry against topology within tolerances.
     pub record: Result<(), String>,
-    /// SMLib's `check(All)` of the record; `None` in a build without SMLib.
+    /// SMLib's `check(All)` of the record.
     pub smlib: Option<SmlibCheck>,
 }
 
@@ -39,7 +39,6 @@ pub fn validity(body: &Body) -> Validity {
     Validity { record: checked, smlib: smlib_validity(body) }
 }
 
-#[cfg(feature = "smlib")]
 fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
     let b = match crate::smlib_body(body) {
         Ok(b) => b,
@@ -55,23 +54,8 @@ fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
     })
 }
 
-#[cfg(not(feature = "smlib"))]
-fn smlib_validity(_: &Body) -> Option<SmlibCheck> {
-    None
-}
-
 /// Whether this build links SMLib (the `smlib` feature).
 pub fn smlib_built() -> bool {
     cfg!(feature = "smlib")
 }
 
-/// The kernel this process runs on ([`crate::backend`]): `"default"` (truck) or `"smlib"`, and
-/// `"invalid"` where [`crate::KERNEL_ENV`] names neither or names SMLib in a build without it.
-/// The regression rig refuses to grade a kernel the process isn't running.
-pub fn boolean_kernel() -> &'static str {
-    match crate::backend() {
-        Ok(crate::Backend::Truck) => "default",
-        Ok(crate::Backend::Smlib) => "smlib",
-        Err(_) => "invalid",
-    }
-}

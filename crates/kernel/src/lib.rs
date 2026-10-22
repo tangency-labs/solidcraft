@@ -13,7 +13,6 @@
 #![forbid(unsafe_code)]
 
 mod assemble;
-mod backend;
 mod blend;
 mod blend_corner;
 mod blend_fit;
@@ -83,7 +82,6 @@ mod loft_rails_tests;
 mod loft_region_tests;
 mod matchsurf;
 mod measure;
-mod measure_backend;
 mod mesh_convert;
 mod meshbody;
 #[cfg(test)]
@@ -115,7 +113,6 @@ pub mod provenance;
 mod record;
 mod seam_faces;
 mod sew;
-#[cfg(feature = "smlib")]
 mod smlib_boolean;
 mod smlib_sweeps;
 #[cfg(test)]
@@ -155,7 +152,6 @@ mod validity;
 pub mod watch;
 mod whole_face;
 
-pub use backend::{Backend, KERNEL_ENV, backend};
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_max, fillet_max_each};
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -189,7 +185,6 @@ pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
-#[cfg(feature = "smlib")]
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
@@ -223,7 +218,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
-pub use validity::{SmlibCheck, Validity, boolean_kernel, smlib_built, validity};
+pub use validity::{SmlibCheck, Validity, smlib_built, validity};
 pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -243,16 +238,9 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
-/// The native kernel call running right now (SMLib, with the `smlib` feature), for crash reports.
+/// The native kernel call running right now (SMLib), for crash reports.
 pub fn native_call_in_flight() -> Option<String> {
-    #[cfg(feature = "smlib")]
-    {
-        solidcraft_smlib::current_call()
-    }
-    #[cfg(not(feature = "smlib"))]
-    {
-        None
-    }
+    solidcraft_smlib::current_call()
 }
 
 thread_local! {
