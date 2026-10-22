@@ -360,12 +360,15 @@ fn brep_bounding_box(
     tight: bool,
     expand_by_zone_tol_3d: bool,
 ) -> Result<Extent3d> {
-    let _ = (k, b, approx, tight, expand_by_zone_tol_3d);
-    // UNPORTED(query.brep): SmBrep::CalculateBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::CalculateBoundingBox",
-        "query.brep",
-    ))
+    crate::query::brep::calculate_bounding_box(
+        k,
+        b,
+        crate::query::brep::BoundingBoxOptions {
+            approx,
+            tight,
+            expand_by_zone_tol_3d,
+        },
+    )
 }
 
 /// `SmEdgeuse::NormalizedEvaluate(t, bParameterSpaceEval, rPoint, &rFirstDeriv,
