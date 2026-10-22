@@ -18,6 +18,9 @@
 //! interval and tolerance. The graph export carries only whether an edge use's maximum
 //! edge/face gap is set, not its length (a B-rep read with `rebuild` has it set), so the
 //! distance `GetOrCreateUVTrimCurve` reports for an existing curve is not compared then.
+//! `EvaluateBinormal` builds the face's trimmed surface cache; on the tiny adversarial
+//! surfaces that tree passes the port's `MAX_SUBDIVISION_NODES` bound (upstream subdivides
+//! on), and those cases are deferred to `surface.surface_cache_p3`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -363,6 +366,9 @@ fn run_rust_op(
     }
 }
 
+/// The operation of the port's surface cache subdivision bound.
+const SUBDIVIDE_OP: &str = "surface::surface_cache::p3::SurfaceCache::subdivide_to_tolerances";
+
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut s = match setup(i)? {
         Ok(s) => s,
@@ -378,6 +384,17 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
+                // the port's bound on the surface cache tree (`MAX_SUBDIVISION_NODES`),
+                // reached through the face's trimmed surface cache that `EvaluateBinormal`
+                // builds; upstream subdivides on (plan/findings.md, surface.surface_cache_p3)
+                SolidError::InvalidInput { operation, reason }
+                    if operation == SUBDIVIDE_OP && reason.contains("MAX_SUBDIVISION_NODES") =>
+                {
+                    Ok(Output::deferred(
+                        "surface.surface_cache_p3",
+                        "SmSurfaceCache::SubdivideToTolerances past MAX_SUBDIVISION_NODES (port bound)",
+                    ))
+                }
                 SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }

@@ -1,4 +1,5 @@
-//! `cargo run --example primitives`: builds a box, cylinder, cone and pyramid in pure
+//! `cargo run --example primitives`: builds a box, cylinder, cone, pyramid, sphere and
+//! torus (with the sphere's no-pole and partial and the torus's partial variants) in pure
 //! Rust and proves each is a closed manifold solid with the analytic Euler
 //! characteristic, volume, area and bounding box. Exits non-zero if any check fails.
 //!
@@ -9,7 +10,7 @@ mod checks;
 
 fn main() -> Result<(), String> {
     let mut failed = 0;
-    for spec in checks::specs() {
+    for spec in checks::specs().into_iter().chain(checks::curved_specs()) {
         println!("== {}", spec.name);
         println!(
             "   analytic: volume {:.12} area {:.12} bbox {:?}",

@@ -1,6 +1,7 @@
 //! Shared checks for the `primitives` example and the `primitives_solid` test: build a
-//! box, cylinder, cone and pyramid through the public API and prove each is a closed
-//! manifold solid with the analytic volume, area and bounding box.
+//! box, cylinder, cone and pyramid, and a sphere and a torus with their variants, through
+//! the public API and prove each is a closed manifold solid with the analytic
+//! Euler-Poincare characteristic, volume, area and bounding box.
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
@@ -31,6 +32,9 @@ pub struct Spec {
     pub bbox: (Point3, Point3),
     /// Expected (faces, edges, vertices), when fixed by the construction.
     pub counts: Option<(usize, usize, usize)>,
+    /// Euler-Poincare characteristic `2 * (shells - genus)`: 2 for a ball, 0 for a
+    /// solid torus.
+    pub euler: i64,
     build: fn(&mut Kernel) -> solidcore::Result<Brep>,
 }
 
@@ -63,6 +67,7 @@ pub fn specs() -> Vec<Spec> {
             area: 2.0 * (5.0 * 10.0 + 5.0 * 20.0 + 10.0 * 20.0),
             bbox: (o, Point3::new(5.0, 10.0, 20.0)),
             counts: Some((6, 12, 8)),
+            euler: 2,
             build: |k| api::create_box(k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0, 20.0),
         },
         Spec {
@@ -71,6 +76,7 @@ pub fn specs() -> Vec<Spec> {
             area: 2.0 * PI * rb * rb + 2.0 * PI * rb * h,
             bbox: (Point3::new(-rb, -rb, 0.0), Point3::new(rb, rb, h)),
             counts: None,
+            euler: 2,
             build: |k| api::create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 5.0, 20.0),
         },
         Spec {
@@ -79,6 +85,7 @@ pub fn specs() -> Vec<Spec> {
             area: PI * (rb + rt) * slant + PI * rb * rb + PI * rt * rt,
             bbox: (Point3::new(-rb, -rb, 0.0), Point3::new(rb, rb, h)),
             counts: None,
+            euler: 2,
             build: |k| api::create_cone(k, Point3::new(0.0, 0.0, 0.0), 5.0, 2.0, 20.0),
         },
         Spec {
@@ -90,7 +97,79 @@ pub fn specs() -> Vec<Spec> {
                 Point3::new(l / 2.0, l / 2.0, h),
             ),
             counts: Some((5, 8, 5)),
+            euler: 2,
             build: |k| api::create_pyramid(k, Point3::new(0.0, 0.0, 0.0), 5.0, 20.0),
+        },
+    ]
+}
+
+/// Sphere r 3 (with poles, without poles, and its 0..90 degree wedge) and torus R 5 r 1.5
+/// (whole and its 0..90 degree sector), centred off the origin.
+pub fn curved_specs() -> Vec<Spec> {
+    let (r, big, small) = (3.0_f64, 5.0_f64, 1.5_f64);
+    let o = big + small;
+    let sphere_box = (
+        Point3::new(1.0 - r, -2.0 - r, 0.5 - r),
+        Point3::new(1.0 + r, -2.0 + r, 0.5 + r),
+    );
+    vec![
+        Spec {
+            name: "sphere r3",
+            volume: 4.0 / 3.0 * PI * r * r * r,
+            area: 4.0 * PI * r * r,
+            bbox: sphere_box,
+            counts: None,
+            euler: 2,
+            build: |k| api::create_sphere(k, Point3::new(1.0, -2.0, 0.5), 3.0),
+        },
+        Spec {
+            name: "sphere r3 (no pole)",
+            volume: 4.0 / 3.0 * PI * r * r * r,
+            area: 4.0 * PI * r * r,
+            bbox: sphere_box,
+            counts: None,
+            euler: 2,
+            build: |k| api::create_sphere_no_pole(k, Point3::new(1.0, -2.0, 0.5), 3.0),
+        },
+        Spec {
+            name: "partial sphere r3 0..90",
+            // a quarter of the ball; a quarter of the sphere plus two half discs
+            volume: PI * r * r * r / 3.0,
+            area: PI * r * r + PI * r * r,
+            bbox: (
+                Point3::new(1.0, -2.0, 0.5 - r),
+                Point3::new(1.0 + r, -2.0 + r, 0.5 + r),
+            ),
+            counts: None,
+            euler: 2,
+            build: |k| api::create_partial_sphere(k, Point3::new(1.0, -2.0, 0.5), 3.0, 0.0, 90.0),
+        },
+        Spec {
+            name: "torus R5 r1.5",
+            volume: 2.0 * PI * PI * big * small * small,
+            area: 4.0 * PI * PI * big * small,
+            bbox: (
+                Point3::new(-o, 1.0 - o, -1.0 - small),
+                Point3::new(o, 1.0 + o, -1.0 + small),
+            ),
+            counts: None,
+            euler: 0,
+            build: |k| api::create_torus(k, Point3::new(0.0, 1.0, -1.0), 5.0, 1.5),
+        },
+        Spec {
+            name: "partial torus R5 r1.5 0..90",
+            // a quarter of the ring plus its two end discs
+            volume: PI * PI * big * small * small / 2.0,
+            area: PI * PI * big * small + 2.0 * PI * small * small,
+            bbox: (
+                Point3::new(0.0, 1.0, -1.0 - small),
+                Point3::new(o, 1.0 + o, -1.0 + small),
+            ),
+            counts: None,
+            euler: 2,
+            build: |k| {
+                api::create_partial_torus(k, Point3::new(0.0, 1.0, -1.0), 5.0, 1.5, 0.0, 90.0)
+            },
         },
     ]
 }
@@ -137,12 +216,13 @@ pub fn check(spec: &Spec) -> Result<Report, String> {
     if !r.manifold_solid {
         return Err(format!("not a closed manifold solid: {r:?}"));
     }
-    // Euler-Poincare for one closed genus-0 shell: V - E + F - (L - F) = 2. With one
-    // loop per face (no rings) this is V - E + F = 2.
+    // Euler-Poincare for one closed shell of genus g: V - E + F - (L - F) = 2 - 2g. With
+    // one loop per face (no rings) this is V - E + F.
     let chi = v as i64 - e as i64 + f as i64 - (lo as i64 - f as i64);
-    if chi != 2 {
+    if chi != spec.euler {
         return Err(format!(
-            "Euler-Poincare V-E+F-(L-F) = {chi}, expected 2: {r:?}"
+            "Euler-Poincare V-E+F-(L-F) = {chi}, expected {}: {r:?}",
+            spec.euler
         ));
     }
     if let Some(c) = spec.counts {
