@@ -2393,12 +2393,6 @@ impl PathSeg {
                 PathSeg::Curve { plane, seg } => {
                     seg.polyline(1e-2).windows(2).map(|q| PathSeg::Line { a: plane.to_world(q[0]), b: plane.to_world(q[1]) }).collect()
                 }
-                PathSeg::Cubic { p } => std::iter::once(p[0])
-                    .chain(crate::point_path::cubic_polyline(&p, 1e-2))
-                    .collect::<Vec<_>>()
-                    .windows(2)
-                    .map(|q| PathSeg::Line { a: q[0], b: q[1] })
-                    .collect(),
                 _ => vec![*s],
             })
             .collect()

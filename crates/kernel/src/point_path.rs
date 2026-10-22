@@ -1,8 +1,8 @@
 //! Sweep paths through 3D sketch curves ([`PointPath`]): polylines (linked, projected and
 //! included curves, which reach the kernel as their points) and drawn 3D splines, which it gets
-//! as their fit points and so exactly ([`solidcraft_geom::catmull_rom`]). Truck sweeps the
-//! path's polyline ([`PointPath::points`]: the splines' samples); SMLib follows the path's
-//! segments ([`PointPath::segs`]), each spline span exactly as a [`PathSeg::Cubic`].
+//! as their fit points and so exactly ([`solidcraft_geom::catmull_rom`]). SMLib follows the
+//! path's segments ([`PointPath::segs`]), each spline span exactly as a [`PathSeg::Cubic`];
+//! [`PointPath::points`] is its polyline, for what takes points (rails, curve networks).
 
 use solidcraft_geom::bspline::{ArcLength, CurveN};
 use solidcraft_geom::catmull_rom;
@@ -114,14 +114,11 @@ impl PointPath {
     }
 }
 
-/// [`crate::sweep_path_with`] along a path through 3D sketch curves. Truck sweeps the path's
-/// polyline ([`PointPath::points`]); SMLib follows its splines exactly and its polylines as lines.
+/// Sweep a planar region along a path through 3D sketch curves: its splines exactly, its
+/// polylines as lines (through SMLib).
 pub fn sweep_point_path_with(plane: &Plane, region: &Region2, path: &PointPath, ctl: &SweepControl) -> Result<Body> {
     ctl.check()?;
-    if crate::backend()? == crate::Backend::Smlib {
-        return crate::sweep_path::smlib_sweep_points(plane, region, path, ctl);
-    }
-    crate::sweep_path_with(plane, region, &path.points(), ctl)
+    crate::sweep_path::smlib_sweep_points(plane, region, path, ctl)
 }
 
 /// A cubic Bézier in space (a [`PathSeg::Cubic`]): its point at `x` (0…1).
