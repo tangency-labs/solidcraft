@@ -7,9 +7,8 @@
 //! that does fit. After the build, the volume taken away is checked against the wedges too.
 
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
 
-use crate::blend::{ChamferSide, plane_normal, vtx};
+use crate::blend::{ChamferSide, Faces};
 use crate::body::Body;
 use crate::{KernelError, Result};
 
@@ -61,7 +60,7 @@ struct Frame {
     /// The faces (indices in the body's face order) the blend may meet: the two beside the
     /// edge and every face at its ends.
     allowed: Vec<usize>,
-    ends: [mt::VertexID; 2],
+    ends: [u32; 2],
     /// Another edge of the two faces runs on from an end tangentially: the blend runs on along
     /// that chain past this edge.
     chained: bool,
@@ -262,21 +261,15 @@ struct Selection {
     coarse: (f64, f64),
 }
 
+/// The selection on `body` as SMLib blends it: its record's faces and edges, in their order (the
+/// mesh's edges and faces are in the same order).
 fn select(body: &Body, pts: &[Vec3]) -> Result<Selection> {
-    // As the blends take it: coplanar neighbours as one face, collinear pieces as one edge.
-    let healed = crate::boolean_record::healed(body)?;
-    crate::guard("blend fit", || select_in(&healed, pts))
-}
-
-fn select_in(body: &Body, pts: &[Vec3]) -> Result<Selection> {
     let size = body.size();
     let chord = (size * 1e-3).max(1e-4);
     let mesh = body.mesh(&crate::MeshTolerance::chord(chord))?;
-    let solid = &*body.solid;
-    let faces: Vec<&mt::Face> = solid.face_iter().collect();
-    let planar: Vec<bool> = faces.iter().map(|f| plane_normal(f).is_some()).collect();
-    let all = Body::unique_edges(solid);
-    let mut taken: Vec<mt::EdgeID> = Vec::new();
+    let rec = Faces::of(body)?;
+    let planar: Vec<bool> = (0..rec.rec.faces.len()).map(|f| rec.plane_normal(f).is_some()).collect();
+    let mut taken: Vec<usize> = Vec::new();
     let mut frames = Vec::new();
     for p in pts {
         // The edge nearest the point, as the blends pick it.
@@ -286,12 +279,12 @@ fn select_in(body: &Body, pts: &[Vec3]) -> Result<Selection> {
             .enumerate()
             .map(|(i, poly)| (i, poly.windows(2).filter_map(|w| Some(p.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
-        // Points on the same edge (pieces healed into one) count once.
-        let frame = match best.and_then(|(i, dist)| all.get(i).filter(|_| dist <= size * 0.05 + 1e-3)) {
-            Some(e) if taken.contains(&e.id()) => continue,
-            Some(e) => {
-                taken.push(e.id());
-                frame(&faces, e)
+        // Points on the same edge count once.
+        let frame = match best.filter(|(i, dist)| *i < rec.rec.edges.len() && *dist <= size * 0.05 + 1e-3) {
+            Some((e, _)) if taken.contains(&e) => continue,
+            Some((e, _)) => {
+                taken.push(e);
+                frame(&rec, e)
             }
             None => None,
         };
@@ -303,38 +296,39 @@ fn select_in(body: &Body, pts: &[Vec3]) -> Result<Selection> {
     Ok(Selection { frames, tris, planar, size, chord, coarse })
 }
 
-fn frame(faces: &[&mt::Face], e: &mt::Edge) -> Option<Frame> {
-    if !matches!(e.curve(), mt::Curve::Line(_)) {
+fn frame(rec: &Faces, e: usize) -> Option<Frame> {
+    if !rec.straight(e) {
         return None;
     }
-    let id = e.id();
-    let ends = [e.front().id(), e.back().id()];
-    let (p0, p1) = (vtx(e.absolute_front()), vtx(e.absolute_back()));
+    let ends = rec.rec.edges.get(e)?.vertices;
+    let (p0, p1) = rec.ends(e)?;
     let d = (p1 - p0).normalized()?;
-    // Each face along the edge: its outward normal and the direction into it (its boundary runs
-    // counter-clockwise about the normal, so the face lies to the left of the edge's use).
+    // Each face along the edge: its outward normal and the direction into it (the face lies to
+    // the left of its loop seen from its surface's natural normal).
     let mut beside = Vec::new();
     let mut allowed = Vec::new();
     let mut chained = false;
-    for (i, f) in faces.iter().enumerate() {
-        let mut uses: Vec<mt::Edge> = f.boundaries().iter().flat_map(|w| w.edge_iter()).filter(|x| x.id() == id).cloned().collect();
-        let at_end = f.boundaries().iter().flat_map(|w| w.edge_iter()).any(|x| ends.contains(&x.front().id()) || ends.contains(&x.back().id()));
+    for i in 0..rec.rec.faces.len() {
+        let at_end = rec.uses(i).any(|x| rec.rec.edges.get(x.edge as usize).is_some_and(|y| y.vertices.iter().any(|v| ends.contains(v))));
         if at_end {
             allowed.push(i);
         }
+        let mut uses: Vec<_> = rec.uses(i).filter(|x| x.edge as usize == e).collect();
         if uses.is_empty() {
             continue;
         }
-        let n = plane_normal(f)?;
+        let n = rec.plane_normal(i)?;
         let u = uses.pop()?;
         if !uses.is_empty() {
             return None;
         }
-        let dir = (vtx(u.back()) - vtx(u.front())).normalized()?;
-        beside.push((n, n.cross(dir).normalized()?));
-        chained |= f.boundaries().iter().flat_map(|w| w.edge_iter()).filter(|x| x.id() != id).any(|x| {
-            ends.iter().any(|v| *v == x.front().id() && tangent_at(x, false).is_some_and(|t| t.dot(d).abs() > 1.0 - 1e-6))
-                || ends.iter().any(|v| *v == x.back().id() && tangent_at(x, true).is_some_and(|t| t.dot(d).abs() > 1.0 - 1e-6))
+        beside.push((n, rec.into_face(i, u)?));
+        chained |= rec.uses(i).filter(|x| x.edge as usize != e).any(|x| {
+            let Some(other) = rec.rec.edges.get(x.edge as usize) else { return false };
+            let [a, b] = other.vertices;
+            let x = x.edge as usize;
+            (ends.contains(&a) && rec.tangent(x, false).is_some_and(|t| t.dot(d).abs() > 1.0 - 1e-6))
+                || (ends.contains(&b) && rec.tangent(x, true).is_some_and(|t| t.dot(d).abs() > 1.0 - 1e-6))
         });
     }
     let [(na, ta), (nb, tb)] = beside[..] else { return None };
@@ -343,15 +337,6 @@ fn frame(faces: &[&mt::Face], e: &mt::Edge) -> Option<Frame> {
         return None;
     }
     Some(Frame { p0, p1, ta, tb, na, nb, allowed, ends, chained })
-}
-
-/// The unit tangent of an edge (as used) at its start or end.
-fn tangent_at(e: &mt::Edge, at_end: bool) -> Option<Vec3> {
-    use mt::{BoundedCurve, ParametricCurve};
-    let c = e.oriented_curve();
-    let (t0, t1) = c.range_tuple();
-    let d = c.der(if at_end { t1 } else { t0 });
-    Vec3::new(d.x, d.y, d.z).normalized()
 }
 
 /// What a blend that doesn't fit runs into.
@@ -431,17 +416,9 @@ fn step(v: f64) -> f64 {
     10f64.powf(v.log10().floor() - 3.0)
 }
 
-/// Why a blend of `edges` at `size` doesn't fit `body` and the largest size that does (to
-/// three significant digits; `None` when not even the smallest step fits), or `None` when it
-/// fits or the check can't tell (edges other than straight ones between planar faces).
-fn misfit(body: &Body, edges: &[Vec3], size: Size) -> Result<Option<(Clash, Option<f64>)>> {
-    if body.is_mesh() || edges.is_empty() || !size.value().is_finite() || size.value() <= 0.0 {
-        return Ok(None);
-    }
-    misfit_in(&select(body, edges)?, size)
-}
-
-/// [`misfit`] on the selection.
+/// Why a blend at `size` doesn't fit the selection and the largest size that does (to three
+/// significant digits; `None` when not even the smallest step fits), or `None` when it fits or
+/// the check can't tell (edges other than straight ones between planar faces).
 fn misfit_in(sel: &Selection, size: Size) -> Result<Option<(Clash, Option<f64>)>> {
     if sel.frames.iter().all(Option::is_none) || !size.value().is_finite() || size.value() <= 0.0 {
         return Ok(None);
@@ -493,27 +470,19 @@ fn check_in(sel: &Selection, size: Size) -> Result<()> {
     Err(KernelError::TooLarge(format!("{} mm is too large for this {what}: {into}{}", show(size.value()), fits_note(size, largest))))
 }
 
-/// A blend's refusal `e`, with the largest size that fits added when the size is why.
-pub(crate) fn explain(body: &Body, edges: &[Vec3], size: Size, e: KernelError) -> KernelError {
-    let note = match misfit(body, edges, size) {
-        Ok(Some((_, largest @ Some(_)))) => fits_note(size, largest),
-        _ => return e,
-    };
-    match e {
-        KernelError::TooLarge(m) => KernelError::TooLarge(format!("{m}{note}")),
-        KernelError::Failed(m) => KernelError::Failed(format!("{m}{note}")),
-        other => other,
-    }
-}
-
-/// A blend of `edges` at `size` that turned `input` into `out`, if it fits ([`check`]) and
-/// changes no more than it can ([`check_volume`]).
-pub(crate) fn accept(input: &Body, out: Body, edges: &[Vec3], size: Size) -> Result<Body> {
-    if input.is_mesh() || out.is_mesh() || edges.is_empty() {
-        return Ok(out);
+/// The blend `build` makes of `edges` at `size` on `input`: refused before it is built when it
+/// would not fit ([`check`]), and after when it changes more than the blends can
+/// ([`check_volume`]) or goes the wrong way.
+pub(crate) fn fit(input: &Body, edges: &[Vec3], size: Size, build: impl FnOnce() -> Result<Body>) -> Result<Body> {
+    if input.is_mesh() || edges.is_empty() {
+        return build();
     }
     let sel = select(input, edges)?;
     check_in(&sel, size)?;
+    let out = build()?;
+    if out.is_mesh() {
+        return Ok(out);
+    }
     let out = volume_in(&sel, input, out, size)?;
     right_way(input, out, edges, size)
 }
@@ -523,22 +492,22 @@ pub(crate) fn accept(input: &Body, out: Body, edges: &[Vec3], size: Size) -> Res
 /// directions into each face across the edge at `p`. `None` unless that is clear-cut: faces
 /// meeting at a few degrees of tangent or of a knife edge, an edge not between two faces.
 fn convex_at(body: &Body, p: Vec3) -> Option<bool> {
-    use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
     let tol = (body.size() * 1e-4).max(1e-4);
     let (i, _) = body.nearest_edge(p, tol).ok()??;
-    let edge = Body::unique_edges(&body.solid).into_iter().nth(i)?;
+    let rec = Faces::of(body).ok()?;
+    let edge = rec.rec.edges.get(i)?;
+    let t = nearest_parameter(&edge.curve, edge.interval, p)?;
+    let along = crate::blend::curve_tangent(&edge.curve, t)?;
+    let on = solidcraft_geom::brep::eval::CurveEval::new(&edge.curve).ok()?.point(t)?;
+    let accept = (body.size() * 1e-3).max(1e-3);
     let mut sides = Vec::new();
-    for f in body.solid.face_iter() {
-        for e in f.boundary_iters().into_iter().flatten().filter(|e| e.id() == edge.id()) {
-            let c = e.oriented_curve();
-            let (t0, t1) = c.range_tuple();
-            let t = c.search_nearest_parameter(crate::body::p3(p), None, 100)?.clamp(t0.min(t1), t0.max(t1));
-            let d = c.der(t);
-            let dir = Vec3::new(d.x, d.y, d.z).normalized()?;
-            let (_, n, _) = crate::curveblend::project(f, p, None)?;
-            // A face's boundary runs counter-clockwise about its outward normal: its inside is
-            // to the left of the edge.
-            sides.push((n, n.cross(dir).normalized()?));
+    for f in rec.faces_of(i) {
+        let f = f as usize;
+        for u in rec.uses(f).filter(|u| u.edge as usize == i) {
+            let dir = if u.forward { along } else { along * -1.0 };
+            // The face lies to the left of its loop seen from its surface's natural normal.
+            let (n, natural) = (rec.normal_at(f, on, accept)?, rec.natural_normal_at(f, on, accept)?);
+            sides.push((n, natural.cross(dir).normalized()?));
         }
     }
     let [(n1, t1), (n2, t2)] = sides[..] else { return None };
@@ -586,6 +555,30 @@ fn right_way(input: &Body, out: Body, edges: &[Vec3], size: Size) -> Result<Body
         )));
     }
     Ok(out)
+}
+
+/// The parameter of the point of `c` within `interval` nearest `p`: the nearest of 33 evenly
+/// spaced starts, refined by Gauss-Newton steps on the distance.
+fn nearest_parameter(c: &solidcraft_geom::brep::Curve, interval: [f64; 2], p: Vec3) -> Option<f64> {
+    let e = solidcraft_geom::brep::eval::CurveEval::new(c).ok()?;
+    let [lo, hi] = interval;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return None;
+    }
+    let at = |k: usize| lo + (hi - lo) * k as f64 / 32.0;
+    let mut t = (0..=32).map(at).filter_map(|t| Some((t, e.point(t)?.dist(p)))).min_by(|a, b| a.1.total_cmp(&b.1))?.0;
+    for _ in 0..32 {
+        let (q, d) = (e.point(t)?, crate::blend::curve_derivative(c, t)?);
+        if !(d.len2() > 0.0) {
+            break;
+        }
+        let step = (p - q).dot(d) / d.len2();
+        t = (t + step).clamp(lo, hi);
+        if step.abs() <= (hi - lo) * 1e-12 {
+            break;
+        }
+    }
+    Some(t)
 }
 
 /// After a blend of `edges` at `size` turned `input` into `out`: refused when the volume taken
