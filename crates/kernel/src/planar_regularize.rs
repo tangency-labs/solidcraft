@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 /// Points along a record edge (ends and three inside).
 fn edge_points(e: &brep::Edge) -> Vec<Vec3> {
-    let Ok(c) = CurveEval::new(&e.curve) else { return Vec::new() };
+    let Ok(c) = CurveEval::new(e.parameters()) else { return Vec::new() };
     let [t0, t1] = e.interval;
     (0..=4).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 4.0)).collect()
 }
@@ -18,7 +18,7 @@ fn edge_points(e: &brep::Edge) -> Vec<Vec3> {
 /// The point halfway along a record edge's interval.
 fn edge_middle(e: &brep::Edge) -> Option<Vec3> {
     let [t0, t1] = e.interval;
-    CurveEval::new(&e.curve).ok()?.point(0.5 * (t0 + t1))
+    CurveEval::new(e.parameters()).ok()?.point(0.5 * (t0 + t1))
 }
 
 fn failed(e: impl std::fmt::Display) -> KernelError {

@@ -120,6 +120,13 @@ kernel traces it again. Its point at t is the point of both surfaces in the plan
 through the leader's point at t, normal to the leader there (truck's `subs`
 converges to it within 10⁻⁶ mm).
 
+An edge on a `line`, `circle` or `ellipse` may also carry `nurbs`, a `spline`
+or `rational_spline`: the NURBS form it is parameterised on, as SMLib holds it
+(every SMLib conic is a B-spline curve, the trims on it in that NURBS's
+parameter, not the angle). The edge's interval and its pcurves' parameter are
+then the NURBS's, and `curve` only says what the edge is (centre, radius). This
+mirrors a face's `nurbs`: faces and edges are held as SMLib holds them.
+
 ### Surfaces
 
 Natural normals are ∂S/∂u × ∂S/∂v.

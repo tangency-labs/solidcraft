@@ -132,8 +132,16 @@ pub struct OrientedEdge {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Edge {
+    /// What the edge is: its curve as the producer names it (a line, a circle…).
     pub curve: Curve,
-    /// The modelled interval in the curve's own parameter, min < max.
+    /// The NURBS form the edge is parameterised on, when it differs from `curve`'s own
+    /// parameter: a circle or ellipse as SMLib holds it (every SMLib conic is a B-spline curve,
+    /// the trims on it in that NURBS's parameter). When given, `interval` and the pcurves' parameter
+    /// are this curve's, and `curve` only says what it is; it is a `Spline` or `RationalSpline` and
+    /// `curve` is a line, circle or ellipse (docs/native-brep.md, "Curves").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nurbs: Option<Curve>,
+    /// The modelled interval in the edge's parameter ([`Edge::parameters`]), min < max.
     pub interval: [f64; 2],
     /// `[start, end]`, at interval min and max; equal for a closed edge.
     pub vertices: [u32; 2],
@@ -478,6 +486,14 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
     }
 }
 
+impl Edge {
+    /// The curve the edge's parameter is on: its NURBS form when it has one, else its curve.
+    /// Everything that evaluates the edge at a parameter goes through this.
+    pub fn parameters(&self) -> &Curve {
+        self.nurbs.as_ref().unwrap_or(&self.curve)
+    }
+}
+
 impl Face {
     /// The surface the face's (u, v) are on: its NURBS form when it has one, else its surface.
     /// Everything that evaluates the face's domain or pcurves goes through this.
@@ -505,7 +521,15 @@ impl Brep {
         }
         for e in &self.edges {
             curve(&e.curve, 0, &mut budget)?;
-            interval(&e.interval, curve_natural(&e.curve))?;
+            if let Some(n) = &e.nurbs {
+                curve(n, 0, &mut budget)?;
+                require(matches!(n, Curve::Spline { .. } | Curve::RationalSpline { .. }), "NURBS form is not a NURBS")?;
+                require(
+                    matches!(e.curve, Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. }),
+                    "NURBS form on a curve that is not a line, circle or ellipse",
+                )?;
+            }
+            interval(&e.interval, curve_natural(e.parameters()))?;
             require(e.vertices.iter().all(|&v| (v as usize) < self.vertices.len()), "edge vertices")?;
             tolerance(e.tolerance)?;
             budget.add(e.uses.len())?;

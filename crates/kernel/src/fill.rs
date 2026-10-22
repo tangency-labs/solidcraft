@@ -303,7 +303,7 @@ impl Beside {
         let edge = record.edges.get(self.edge).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
         let [a, z] = edge.interval;
         let tau = if self.forward { t } else { a + z - t };
-        let curve = CurveEval::new(&edge.curve).map_err(|e| KernelError::Invalid(e.to_string()))?;
+        let curve = CurveEval::new(edge.parameters()).map_err(|e| KernelError::Invalid(e.to_string()))?;
         let Some((p, d)) = curve.derivs(tau) else { return Ok(None) };
         let Some(tangent) = (d * if self.forward { 1.0 } else { -1.0 }).normalized() else { return Ok(None) };
         let uv =
@@ -442,7 +442,7 @@ fn picked_loop(record: &b::Brep, at: &[Vec3], reach: f64) -> Result<Vec<(usize, 
 fn nearest_edge(record: &b::Brep, p: Vec3, reach: f64) -> Option<usize> {
     let mut best: Option<(f64, usize)> = None;
     for (i, e) in record.edges.iter().enumerate() {
-        let Ok(c) = CurveEval::new(&e.curve) else { continue };
+        let Ok(c) = CurveEval::new(e.parameters()) else { continue };
         let [t0, t1] = e.interval;
         for k in 0..=32 {
             let Some(q) = c.point(t0 + (t1 - t0) * k as f64 / 32.0) else { continue };
@@ -468,7 +468,7 @@ struct Side {
 impl Side {
     fn new(record: &b::Brep, e: usize, forward: bool) -> Result<Side> {
         let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
-        let curve = CurveEval::new(&edge.curve).map_err(|err| KernelError::Invalid(format!("edge {e} cannot be sampled: {err}")))?;
+        let curve = CurveEval::new(edge.parameters()).map_err(|err| KernelError::Invalid(format!("edge {e} cannot be sampled: {err}")))?;
         let v = edge.vertices[if forward { 0 } else { 1 }];
         let start = record.vertices.get(v as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]));
         let start = start.ok_or_else(|| KernelError::Failed("patch: vertex reference".into()))?;
@@ -785,7 +785,7 @@ fn middle(vertices: &mut Vec<[f64; 3]>, made: &mut std::collections::HashMap<usi
     if let Some(v) = made.get(&k) {
         return Ok(*v);
     }
-    let p = CurveEval::new(&edge.curve).ok().and_then(|c| c.point(t)).ok_or_else(|| KernelError::Failed("patch: an edge has no middle".into()))?;
+    let p = CurveEval::new(edge.parameters()).ok().and_then(|c| c.point(t)).ok_or_else(|| KernelError::Failed("patch: an edge has no middle".into()))?;
     let v = u32::try_from(vertices.len()).map_err(|_| KernelError::Failed("patch: vertex budget".into()))?;
     vertices.push([p.x, p.y, p.z]);
     made.insert(k, v);
@@ -882,7 +882,7 @@ mod tests {
             let b::Loop::Edges { edges } = l else { continue };
             for u in edges {
                 let e = &r.edges[u.edge as usize];
-                let c = CurveEval::new(&e.curve).unwrap();
+                let c = CurveEval::new(e.parameters()).unwrap();
                 let [t0, t1] = e.interval;
                 for k in 0..=24 {
                     worst = worst.max(to_surface(&face.surface, c.point(t0 + (t1 - t0) * k as f64 / 24.0).unwrap()));
@@ -1252,7 +1252,7 @@ mod tests {
             .filter(|e| e.uses.len() == 1)
             .map(|e| {
                 let [t0, t1] = e.interval;
-                CurveEval::new(&e.curve).unwrap().point(0.5 * (t0 + t1)).unwrap()
+                CurveEval::new(e.parameters()).unwrap().point(0.5 * (t0 + t1)).unwrap()
             })
             .collect()
     }

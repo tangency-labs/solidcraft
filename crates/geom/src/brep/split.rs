@@ -31,7 +31,7 @@ impl Brep {
         for (e, (edge, ts)) in self.edges.iter().zip(cuts.iter_mut()).enumerate() {
             ts.sort_by(f64::total_cmp);
             ts.dedup();
-            let curve = if ts.is_empty() { None } else { Some(CurveEval::new(&edge.curve).map_err(|_| Invalid("a split edge's curve"))?) };
+            let curve = if ts.is_empty() { None } else { Some(CurveEval::new(edge.parameters()).map_err(|_| Invalid("a split edge's curve"))?) };
             let [a, b] = edge.interval;
             let mut ends = vec![edge.vertices[0]];
             for &t in ts.iter() {

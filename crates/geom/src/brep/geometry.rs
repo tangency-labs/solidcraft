@@ -106,7 +106,7 @@ impl Brep {
         let mut points = Vec::with_capacity(self.edges.len());
         for (i, e) in self.edges.iter().enumerate() {
             let at = Record::Edge(index(i));
-            let curve = CurveEval::new(&e.curve).map_err(|err| unevaluable(at, err))?;
+            let curve = CurveEval::new(e.parameters()).map_err(|err| unevaluable(at, err))?;
             let [t0, t1] = e.interval;
             let p = [t0, 0.5 * (t0 + t1), t1].map(|t| curve.point(t).ok_or(t));
             let p = match p {

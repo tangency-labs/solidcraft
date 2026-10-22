@@ -71,7 +71,7 @@ mod tests {
             if rec.plane_normal(f).is_some() || rec.plane_normal(g).is_some() {
                 continue;
             }
-            let c = CurveEval::new(&e.curve).unwrap();
+            let c = CurveEval::new(e.parameters()).unwrap();
             let [t0, t1] = e.interval;
             for k in 1..10 {
                 let p = c.point(t0 + (t1 - t0) * k as f64 / 10.0).unwrap();

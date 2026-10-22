@@ -143,6 +143,7 @@ impl Brep {
         }
         for e in &mut out.edges {
             e.curve = motion.curve(&e.curve);
+            e.nurbs = e.nurbs.as_ref().map(|n| motion.curve(n));
         }
         for v in &mut out.vertices {
             v.point = motion.point(v.point);

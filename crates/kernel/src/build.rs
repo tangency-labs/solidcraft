@@ -842,6 +842,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
             let e = u32::try_from(edges.len()).map_err(|_| bad("size"))?;
             let (li, k) = (u32::try_from(li).map_err(|_| bad("size"))?, u32::try_from(k).map_err(|_| bad("size"))?);
             edges.push(rec::Edge {
+                nurbs: None,
                 curve,
                 interval,
                 vertices: [start, end],
@@ -866,7 +867,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
             ids.iter()
                 .filter_map(|&e| {
                     let edge = edges.get(e as usize)?;
-                    Some(pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward: true, tolerance, given: None })
+                    Some(pcurve::EdgeUse { edge: e, curve: edge.parameters(), interval: edge.interval, forward: true, tolerance, given: None })
                 })
                 .collect()
         })

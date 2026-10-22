@@ -967,7 +967,7 @@ fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2],
     let tolerance = parts.tolerance;
     let mut given = Vec::with_capacity(uses.len());
     for (curve, interval, vertices, forward, pc) in uses {
-        parts.edges.push(b::Edge { curve, interval, vertices, tolerance, uses: Vec::new() });
+        parts.edges.push(b::Edge { nurbs: None, curve, interval, vertices, tolerance, uses: Vec::new() });
         given.push((forward, pc.map(|(a, z)| uv_line(a, z, interval))));
     }
     let loop_uses = parts
@@ -977,7 +977,7 @@ fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2],
         .enumerate()
         .map(|(i, (e, (forward, pc)))| {
             let edge = u32::try_from(i).map_err(|_| KernelError::Failed("ruled surface: an edge".into()))?;
-            Ok(b::pcurve::EdgeUse { edge, curve: &e.curve, interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
+            Ok(b::pcurve::EdgeUse { edge, curve: e.parameters(), interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
         })
         .collect::<Result<Vec<_>>>()?;
     let pcurves = b::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
@@ -1296,7 +1296,7 @@ mod tests {
             .edges
             .iter()
             .filter(|e| {
-                let c = solidcraft_geom::brep::eval::CurveEval::new(&e.curve).unwrap();
+                let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
                 on(c.point(0.5 * (e.interval[0] + e.interval[1])).unwrap())
             })
             .count()

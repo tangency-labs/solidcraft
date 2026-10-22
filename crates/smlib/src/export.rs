@@ -1162,7 +1162,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
     for ((&e, vertices), uses) in edge_order.iter().zip(edge_vertices).zip(edge_uses) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
         let source = edge_source.get(e as usize).copied().ok_or_else(|| invalid("edge"))?;
-        edge_records.push(b::Edge { curve: edge.curve.clone(), interval: edge.interval, vertices, tolerance: tolerances.edge(source), uses });
+        edge_records.push(b::Edge { nurbs: None, curve: edge.curve.clone(), interval: edge.interval, vertices, tolerance: tolerances.edge(source), uses });
     }
     let mut face_records = Vec::with_capacity(face_order.len());
     for (fi, &f) in face_order.iter().enumerate() {
@@ -1481,7 +1481,7 @@ fn pcurves(
 fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
     let records: Vec<b::Edge> =
-        edges.iter().map(|e| b::Edge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() }).collect();
+        edges.iter().map(|e| b::Edge { nurbs: None, curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() }).collect();
     let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
     let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();

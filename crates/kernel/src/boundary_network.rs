@@ -258,7 +258,7 @@ fn chain_curves(label: &str, r: &Brep, chain: &Chain) -> Result<Vec<(CurveEval, 
         .iter()
         .map(|&(e, forward)| {
             let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge reference")))?;
-            let c = CurveEval::new(&edge.curve).map_err(|err| KernelError::Invalid(format!("{label}: {err}")))?;
+            let c = CurveEval::new(edge.parameters()).map_err(|err| KernelError::Invalid(format!("{label}: {err}")))?;
             let [t0, t1] = edge.interval;
             Ok((c, if forward { [t0, t1] } else { [t1, t0] }))
         })
@@ -450,7 +450,7 @@ fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<Body> {
             let interval = [w[0], w[1]];
             let edge = index(parts.edges.len())?;
             let vertices = [index(e[0])?, index(e[1])?];
-            parts.edges.push(solidcraft_geom::brep::Edge { curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
+            parts.edges.push(solidcraft_geom::brep::Edge { nurbs: None, curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
             pieces.push(solidcraft_geom::brep::OrientedEdge { edge, forward, pcurve: uv_line(uv(w[0]), uv(w[1]), interval) });
         }
         if !forward {

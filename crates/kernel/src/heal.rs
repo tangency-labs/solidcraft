@@ -35,7 +35,7 @@ pub(crate) fn on_split_line(pts: &[Vec3], keep: &[Vec<Vec3>]) -> bool {
 /// (the middle one at the middle of its interval).
 pub(crate) fn edge_points(b: &Brep, e: u32) -> Vec<Vec3> {
     let Some(edge) = b.edges.get(e as usize) else { return Vec::new() };
-    let Ok(c) = CurveEval::new(&edge.curve) else { return Vec::new() };
+    let Ok(c) = CurveEval::new(edge.parameters()) else { return Vec::new() };
     let [t0, t1] = edge.interval;
     (0..=4).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 4.0)).collect()
 }

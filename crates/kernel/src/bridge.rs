@@ -175,7 +175,7 @@ impl ChainLine {
         let fail = || KernelError::Failed("bridge: an edge has no point".into());
         for (i, &(e, forward)) in chain.iter().enumerate() {
             let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
-            let c = CurveEval::new(&edge.curve).map_err(|err| KernelError::Failed(format!("bridge: {err}")))?;
+            let c = CurveEval::new(edge.parameters()).map_err(|err| KernelError::Failed(format!("bridge: {err}")))?;
             let [t0, t1] = edge.interval;
             let (a, z) = if forward { (t0, t1) } else { (t1, t0) };
             for k in 0..=PER_EDGE {
@@ -776,7 +776,7 @@ fn support_faces(r: &Brep, chain: &Chain, leave: Vec3, size: f64) -> Result<Vec<
     let mut out = Vec::with_capacity(chain.len());
     for &(e, _) in chain {
         let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
-        let mid = CurveEval::new(&edge.curve)
+        let mid = CurveEval::new(edge.parameters())
             .ok()
             .and_then(|c| c.point(0.5 * (edge.interval[0] + edge.interval[1])))
             .ok_or_else(|| KernelError::Failed("bridge: an edge has no point".into()))?;

@@ -1272,7 +1272,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     }
     let record_edges = edges
         .iter()
-        .map(|e| b::Edge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() })
+        .map(|e| b::Edge { nurbs: None, curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() })
         .collect();
     let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
     let loose = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: record_faces, edges: record_edges, vertices: record_vertices };

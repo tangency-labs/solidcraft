@@ -83,7 +83,7 @@ pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
     }
     let record = b.record();
     let e = record.edges.get(edge)?;
-    let c = CurveEval::new(&e.curve).ok()?;
+    let c = CurveEval::new(e.parameters()).ok()?;
     let [t0, t1] = e.interval;
     let (start, end) = (c.point(t0)?, c.point(t1)?);
     if let Curve::Circle { frame, radius } = &e.curve {

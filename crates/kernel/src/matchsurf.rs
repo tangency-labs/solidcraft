@@ -345,7 +345,7 @@ fn chain_polyline(r: &b::Brep, chain: &Chain) -> Result<Vec<Vec3>> {
     let mut out = Vec::with_capacity(chain.len() * (PER_EDGE + 1));
     for &(e, forward) in chain {
         let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
-        let c = CurveEval::new(&edge.curve).map_err(|err| KernelError::Failed(format!("match: {err}")))?;
+        let c = CurveEval::new(edge.parameters()).map_err(|err| KernelError::Failed(format!("match: {err}")))?;
         let [t0, t1] = edge.interval;
         let (a, z) = if forward { (t0, t1) } else { (t1, t0) };
         for k in 0..=PER_EDGE {
@@ -420,7 +420,7 @@ fn side_edges(r: &b::Brep, face: usize, patch: &Patch, side: Side, tol: f64) -> 
         for u in edges {
             let e = u.edge as usize;
             let Some(edge) = r.edges.get(e) else { continue };
-            let Ok(c) = CurveEval::new(&edge.curve) else { continue };
+            let Ok(c) = CurveEval::new(edge.parameters()) else { continue };
             let Some(p) = c.point(0.5 * (edge.interval[0] + edge.interval[1])) else { continue };
             let Some(uv) = patch.parameters(p) else { continue };
             if patch.surface.point(uv).is_none_or(|q| q.dist(p) > tol) {

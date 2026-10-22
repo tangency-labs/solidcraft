@@ -42,7 +42,7 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         }
         // The circle's parameter is its angle: the wall spans the edge's interval about the
         // angle of its middle (a whole turn, from the seam, for a wall in one piece).
-        let c = CurveEval::new(&e.curve).ok()?;
+        let c = CurveEval::new(e.parameters()).ok()?;
         let [t0, t1] = e.interval;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
@@ -509,7 +509,7 @@ fn face_axial_bounds(b: &Brep, face: usize, o: Vec3, axis: Vec3) -> Result<Optio
         let edge = b.edges.get(e as usize).ok_or_else(|| fail("edge"))?;
         match &edge.curve {
             Curve::Line { .. } => {
-                let c = CurveEval::new(&edge.curve).map_err(|e| fail(&e.to_string()))?;
+                let c = CurveEval::new(edge.parameters()).map_err(|e| fail(&e.to_string()))?;
                 for t in edge.interval {
                     let z = height(c.point(t).ok_or_else(|| fail("edge point"))?);
                     add(z, z)?;

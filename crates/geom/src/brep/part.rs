@@ -225,7 +225,8 @@ impl Brep {
                 Ok(edge)
             })
             .collect::<Result<Vec<_>>>()?;
-        let new_vertices = vertices.old.iter().map(|&v| self.vertices.get(v as usize).cloned().ok_or(Invalid("vertex reference"))).collect::<Result<_>>()?;
+        let new_vertices =
+            vertices.old.iter().map(|&v| self.vertices.get(v as usize).cloned().ok_or(Invalid("vertex reference"))).collect::<Result<_>>()?;
         let brep = Brep {
             version: self.version,
             tolerance: self.tolerance,
