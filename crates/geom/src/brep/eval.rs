@@ -333,6 +333,23 @@ impl CurveEval {
 
     /// Point and derivative of a polyline (truck's: the segment from ⌊t⌋, the last one at the
     /// end) or a spline.
+    /// The point and first derivative at `t`; `None` for a traced intersection (its tangent
+    /// is not held).
+    pub fn derivs(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        if !t.is_finite() {
+            return None;
+        }
+        match self {
+            CurveEval::Line { start, end } => Some((*start + (*end - *start) * t, *end - *start)),
+            CurveEval::Conic { axes: a, radii } => {
+                let (s, c) = t.sin_cos();
+                Some((a.o + a.x * (radii[0] * c) + a.y * (radii[1] * s), a.y * (radii[1] * c) - a.x * (radii[0] * s)))
+            }
+            CurveEval::Polyline(_) | CurveEval::Spline(_) => self.leader(t),
+            CurveEval::Intersection(_) => None,
+        }
+    }
+
     fn leader(&self, t: f64) -> Option<(Vec3, Vec3)> {
         match self {
             CurveEval::Polyline(p) => {
