@@ -208,8 +208,18 @@ fn resolve_uncached(
             }
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::OnSurface { sketch: *sketch, curve: curve.clone(), body: name, at: q };
-            wires = crate::project3d::onto_face(&mesh, f, &pts, plane.normal());
-            exact = vec![Vec::new(); wires.len()];
+            match st.bodies.get(bi).filter(|b| !b.body.is_mesh()) {
+                // A solid's face: SMLib's projection of the sketch curve itself.
+                Some(target) => {
+                    let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
+                    (wires, exact) = projected_wires(target, q, ss, &segs, plane.normal(), size)?;
+                }
+                // A mesh body has only its triangles: the curve projected onto them.
+                None => {
+                    wires = crate::project3d::onto_face(&mesh, f, &pts, plane.normal());
+                    exact = vec![Vec::new(); wires.len()];
+                }
+            }
             Vec::new()
         }
         LinkSource::Intersection { a, b } => {
@@ -332,6 +342,39 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
         .filter(|edge| !matches!(edge.curve, solidcraft_geom::brep::Curve::SurfaceIntersection { .. }))
         .map(|edge| vec![WireCurve { curve: edge.curve.clone(), interval: edge.interval }])
         .unwrap_or_default()
+}
+
+/// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
+/// the face) onto the face of `target` at `at`: SMLib's projection, the pieces that meet end to
+/// end joined into one wire each, every wire its points (for display) and its exact curves.
+fn projected_wires(
+    target: &crate::ModelBody,
+    at: Vec3,
+    ss: &crate::eval::SolvedSketch,
+    segs: &[Seg2],
+    normal: Vec3,
+    size: f64,
+) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
+    let from = segs.first().map(|s| ss.plane.to_world(s.start())).unwrap_or(at);
+    let toward = if (at - from).dot(normal) < 0.0 { normal * -1.0 } else { normal };
+    let curves = crate::kernel::project_onto_face(&target.body, at, &ss.plane, segs, toward)?;
+    let tol = size * 1e-6;
+    let (mut wires, mut exact): (Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>) = (Vec::new(), Vec::new());
+    for (curve, interval) in curves {
+        let pts = crate::kernel::PathPiece::Segs(crate::kernel::curve_path(&curve, interval)?).points();
+        let (Some(start), Some(_)) = (pts.first().copied(), pts.last()) else { continue };
+        match (wires.last_mut(), exact.last_mut()) {
+            (Some(w), Some(e)) if w.last().is_some_and(|end| end.dist(start) <= tol) => {
+                w.extend(pts.into_iter().skip(1));
+                e.push(WireCurve { curve, interval });
+            }
+            _ => {
+                wires.push(pts);
+                exact.push(vec![WireCurve { curve, interval }]);
+            }
+        }
+    }
+    Ok((wires, exact))
 }
 
 /// Curve `ci` of the solved sketch `ss` as its exact pieces in space, in the order its polyline
