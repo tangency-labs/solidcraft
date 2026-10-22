@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::types::{
     AngleExpr, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FromPoint, IdOrName, LengthExpr, OperationParam, Point3,
-    PointExpr3, ProfilesParam, StringList, ThinSideParam, ToPoint, present,
+    PointExpr3, ProfilesParam, StringList, ThinSideParam, ToPoint, TouchingParam, present,
 };
 
 /// Add a box primitive.
@@ -38,6 +38,9 @@ pub struct BoxParams {
     /// The bodies a join, cut or intersect works on. Default: the bodies the box meets.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of solids that only touch or don't touch. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies taking part (the same as `targets` for a primitive).
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -135,6 +138,9 @@ pub struct ExtrudeParams {
     /// that body.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of solids that only touch or don't touch. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies taking part; overrides the default scope.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -166,6 +172,28 @@ pub struct ExtrudeParams {
     pub thickness2: Option<LengthExpr>,
 }
 
+/// Something a feature's result tells the user without stopping them, with an action to take.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FeatureNotice {
+    /// The text to show.
+    pub message: String,
+    /// How the solids kept apart met: `along_edge`, `at_point` or `apart`.
+    pub contact: String,
+    /// The command that changes the feature as the notice offers.
+    pub action: NoticeAction,
+}
+
+/// A command a notice offers to run.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoticeAction {
+    /// The action's label.
+    pub label: String,
+    /// The command's id.
+    pub command: String,
+    /// Its parameters.
+    pub params: Value,
+}
+
 /// What a feature command returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FeatureResult {
@@ -184,6 +212,11 @@ pub struct FeatureResult {
     /// A warning from the evaluation (a Boolean that needed a retry, a reference found again
     /// elsewhere), or `null`.
     pub warning: Option<String>,
+    /// A join that kept solids as separate bodies because they only touch along an edge or at a
+    /// point, or don't touch (its `touching: separate`): what to tell the user, and the edit that
+    /// makes them one body instead. Left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<FeatureNotice>,
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

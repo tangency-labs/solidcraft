@@ -284,7 +284,8 @@ fn buried_join_end_ignores_bodies_in_other_components() {
         run(&mut s, "sketch.create", json!({"plane": "XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "join", "body_name": "Tab"}));
+        // Child's box is apart from the tab: `touching: one_body` keeps them one body to measure.
+        run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "join", "body_name": "Tab", "touching": "one_body"}));
         let got = volume(&s, if own_body { "Child" } else { "Tab" });
         let expected = 64.0 + if own_body { 800.0 } else { 0.0 };
         assert!((got - expected).abs() < 1e-6, "{got}");
@@ -1010,11 +1011,11 @@ fn multi_target_join_keeps_nearby_bodies_and_original_absorption_order() {
     }
 }
 
-/// Two posts joined into one body while apart, trimmed by a cut that splits neither, then joined
-/// to a case they stand on. The cut split the joined posts into "Posts" and "Posts (1)" without
-/// saying so (`created_bodies` was empty), and the join then took only "Posts", leaving the other
-/// post behind as a body of its own. A cut that does cut a body in two still makes two bodies,
-/// and its reply names the new one.
+/// Two posts joined into one body while apart (`touching: one_body`), trimmed by a cut that
+/// splits neither, then joined to a case they stand on. The cut split the joined posts into
+/// "Posts" and "Posts (1)" without saying so (`created_bodies` was empty), and the join then took
+/// only "Posts", leaving the other post behind as a body of its own. A cut that does cut a body in
+/// two still makes two bodies, and its reply names the new one.
 #[test]
 fn cut_keeps_posts_joined_while_apart_in_one_body() {
     let mut s = Session::default();
@@ -1022,7 +1023,7 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
     s.execute("solid.box", &json!({"length": 60, "width": 40, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Case"})).unwrap();
     s.execute("solid.box", &post("Posts", -20.0)).unwrap();
     s.execute("solid.box", &post("Post2", 20.0)).unwrap();
-    s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Post2"], "operation": "join"})).unwrap();
+    s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Post2"], "operation": "join", "touching": "one_body"})).unwrap();
     s.execute("solid.box", &json!({"length": 80, "width": 20, "height": 10, "center": [0, 0, 40], "operation": "new", "body_name": "Trim"})).unwrap();
     let cut = s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Trim"], "operation": "cut"})).unwrap();
     // Each post loses its top 5 mm: 10 x 10 x 25 left of each.
@@ -1063,7 +1064,7 @@ fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
             .unwrap();
         s.execute("solid.box", &post("Posts", -20.0)).unwrap();
         s.execute("solid.box", &post("Post2", 20.0)).unwrap();
-        s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Post2"], "operation": "join"})).unwrap();
+        s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Post2"], "operation": "join", "touching": "one_body"})).unwrap();
         s.execute("solid.box", &json!({"length": 80, "width": 20, "height": 10, "center": [0, 0, 40], "operation": "new", "body_name": "Trim"}))
             .unwrap();
         s.execute("solid.combine", &json!({"target": "Posts", "tools": ["Trim"], "operation": "cut"})).unwrap();

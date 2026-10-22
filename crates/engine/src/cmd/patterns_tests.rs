@@ -705,7 +705,9 @@ fn copies_of_a_primitive_cut_only_its_targets() {
 }
 
 /// #3378: a pattern or mirror of a join whose targets the join merged into one body copies onto
-/// that body, as before #2755, instead of looking for the target the join used up.
+/// that body, as before #2755, instead of looking for the target the join used up. The spoke
+/// starts 1 mm inside the hub, so it shares volume with both (one tangent to the hub would only
+/// touch it along a line, and the join would keep the hub a body of its own).
 #[test]
 fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
     for (copy, n) in [
@@ -717,7 +719,7 @@ fn copies_of_a_join_that_merged_its_targets_join_the_merged_body() {
         run(&mut s, "solid.cylinder", json!({"radius": 63, "height": 3, "base": [0, 0, 0], "axis": "Y", "operation": "cut", "targets": ["rim"]}));
         run(&mut s, "solid.cylinder", json!({"radius": 12, "height": 3, "base": [0, 0, 0], "axis": "Y", "body_name": "hub"}));
         let v0 = volume(&mut s);
-        let spoke = json!({"length": 52, "width": 3, "height": 2.5, "corner": [12, 0, -1.25], "operation": "join", "targets": ["rim", "hub"], "name": "spoke"});
+        let spoke = json!({"length": 53, "width": 3, "height": 2.5, "corner": [11, 0, -1.25], "operation": "join", "targets": ["rim", "hub"], "name": "spoke"});
         run(&mut s, "solid.box", spoke);
         let v1 = volume(&mut s);
         let (id, p) = (copy[0].as_str().unwrap_or_default(), copy[1].clone());

@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoxParams>(),
-        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "width"],
+        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
     );
     assert_keys(
         input_schema_for::<ExtrudeParams>(),
@@ -43,6 +43,7 @@ fn schemas_and_the_key_check_agree() {
             "through_all",
             "to",
             "to_offset",
+            "touching",
         ],
     );
 }
@@ -90,6 +91,7 @@ fn feature_result_serializes_like_the_old_reply() {
             warning: warning.clone(),
             ms,
             param_warnings: vec![],
+            notice: None,
         };
         assert_eq!(serde_json::to_value(&new).ok(), Some(old));
     }

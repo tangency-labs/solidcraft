@@ -69,7 +69,11 @@ fn a_piece_of_a_body_inside_another_is_still_found() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [5, 5, 5], "operation": "new", "body_name": "Pieces"}));
-    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [30, 5, 5], "operation": "join", "targets": ["Pieces"]}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 2, "width": 2, "height": 2, "corner": [30, 5, 5], "operation": "join", "targets": ["Pieces"], "touching": "one_body"}),
+    );
     let st = s.world_state().unwrap();
     let pieces = st.bodies.iter().find(|b| b.name == "Pieces").map(|b| b.body.shell_count());
     assert_eq!(pieces, Some(2), "the two cubes are one body in two pieces");
