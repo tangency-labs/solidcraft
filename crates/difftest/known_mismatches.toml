@@ -1,0 +1,12 @@
+# Known Rust-vs-C++ mismatches (see crates/difftest/src/known.rs).
+#
+# A case listed here still fails its comparison; difftest reports it as
+# `known-mismatch` (summary line `known_mismatch=N`, report `"known_mismatch"`) and
+# the unit is at best `partial`, never green. A listed case that passes, defers or no
+# longer exists fails the unit: remove its entry when the port is fixed. Every entry
+# needs a plan/findings.md entry. Never list a case just to get CI green.
+#
+# [[mismatch]]
+# unit = "curve.curve_p1"
+# case = "gen0042"
+# why = "C++ succeeds with 0 points, Rust returns status_3 (plan/findings.md: ...)"

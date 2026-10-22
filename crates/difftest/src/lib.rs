@@ -15,6 +15,7 @@ pub mod fixtures;
 pub mod fuzz;
 pub mod jobs;
 pub mod json;
+pub mod known;
 pub mod output;
 pub mod plan;
 pub mod report;

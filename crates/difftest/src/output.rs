@@ -9,8 +9,13 @@ use solidcore::SolidError;
 /// * `values`: floating-point arrays, compared with the 1e-9 relative rule.
 /// * `ints`: integer arrays (indices, counts, flags), compared exactly.
 /// * `topology`: compared exactly (same counts and order).
-/// * `error`: a normalised error string; if either side errors, both must
-///   report the same string (values are then not compared).
+/// * `error`: the operation's status: `None` is success, otherwise a normalised
+///   error string (upstream `SmStatus` on the C++ side, `SolidError` mapped the
+///   same way on the Rust side). It is always compared: if either side errors,
+///   both must report the same string (values are then not compared). A runner
+///   must never turn a Rust `Err` into an empty or default output (see
+///   [`Output::from_result`]); a pass that compared nothing but this status is
+///   counted as *vacuous* in the summary line.
 /// * `deferred`: set only by the Rust side (via [`Output::deferred`] or
 ///   [`Output::unported`]) when the port reached code that is not ported yet
 ///   ([`SolidError::Unported`]). The case is then *deferred*: neither pass nor
@@ -103,6 +108,23 @@ impl Output {
         match e {
             SolidError::Unported { upstream, unit } => Some(Self::deferred(*unit, *upstream)),
             _ => None,
+        }
+    }
+
+    /// Maps a Rust-side result to an output so that the operation's status is always
+    /// compared: `Ok(v)` becomes `ok(v)`; `Unported` defers the case; any other error
+    /// becomes [`Output::err`]`(normalise(&e))`, which the C++ side must match with the
+    /// same normalised status (a C++ success against a Rust error fails, even when both
+    /// outputs would otherwise be empty). Never map an `Err` to an empty or default
+    /// output instead: that turns a Rust failure into a vacuous pass.
+    pub fn from_result<T>(
+        r: solidcore::Result<T>,
+        normalise: impl FnOnce(&SolidError) -> String,
+        ok: impl FnOnce(T) -> Self,
+    ) -> Self {
+        match r {
+            Ok(v) => ok(v),
+            Err(e) => Self::unported(&e).unwrap_or_else(|| Self::err(normalise(&e))),
         }
     }
 

@@ -449,11 +449,11 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
         None => view_transform_for_vector(Vec3::new(i.view[0], i.view[1], i.view[2]))?,
         Some([z, x]) => {
             let mut a = Axis2Placement::default();
-            let _ = a.set_step_canonical(
+            a.set_step_canonical(
                 Vec3::new(i.view[0], i.view[1], i.view[2]),
                 Vec3::new(z[0], z[1], z[2]),
                 Vec3::new(x[0], x[1], x[2]),
-            );
+            )?;
             a
         }
     };

@@ -55,6 +55,11 @@ pub struct CaseDiff {
     pub values_compared: usize,
     /// Number of integers, topology ids and adjacency entries compared.
     pub exact_compared: usize,
+    /// Compared items where at least one side is not zero: floats or integers other
+    /// than `0`, and every topology id or adjacency entry. A passing case with
+    /// `nonzero_compared == 0` agreed only on zeros (e.g. `count = 0`), which a Rust
+    /// error swallowed into a default would also produce; reported, never gated.
+    pub nonzero_compared: usize,
 }
 
 impl CaseDiff {
@@ -146,6 +151,9 @@ pub fn compare(cpp: &Output, rust: &Output, floors: &[AbsFloor]) -> CaseDiff {
         let floor = floors.iter().find(|f| f.key == key).map(|f| f.abs);
         for (i, (&x, &y)) in a.iter().zip(b.iter()).enumerate() {
             d.values_compared += 1;
+            if x != 0.0 || y != 0.0 {
+                d.nonzero_compared += 1;
+            }
             let r = rel_err(x, y);
             if r > d.max_rel_err || r.is_nan() {
                 d.max_rel_err = r;
@@ -173,7 +181,12 @@ pub fn compare(cpp: &Output, rust: &Output, floors: &[AbsFloor]) -> CaseDiff {
     // Topology.
     match (&cpp.topology, &rust.topology) {
         (None, None) => {}
-        (Some(a), Some(b)) => compare_topology(&mut d, a, b),
+        (Some(a), Some(b)) => {
+            let (exact, nonzero) = (d.exact_compared, d.nonzero_compared);
+            compare_topology(&mut d, a, b);
+            // topology ids are indices: every compared entry is a real result
+            d.nonzero_compared = nonzero + (d.exact_compared - exact);
+        }
         (a, _) => d.push(missing("topology", a.is_some())),
     }
     d
@@ -229,6 +242,9 @@ fn exact_list(d: &mut CaseDiff, field: &str, a: &[i64], b: &[i64]) {
     }
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
         d.exact_compared += 1;
+        if *x != 0 || *y != 0 {
+            d.nonzero_compared += 1;
+        }
         if x != y {
             d.push(Mismatch {
                 field: format!("{field}[{i}]"),
@@ -309,5 +325,31 @@ mod tests {
         assert_eq!((e.values_compared, e.exact_compared), (0, 0));
         assert!(!e.pass());
         assert!(compare(&Output::err("x"), &Output::err("x"), &[]).pass());
+    }
+
+    #[test]
+    fn status_is_compared_even_with_empty_outputs() {
+        // C++ genuinely found nothing; Rust failed and produced nothing.
+        let cpp = Output::new().values("points", Vec::<f64>::new());
+        let rust = Output::from_result(
+            Err::<Vec<f64>, _>(solidcore::SolidError::sm_err("test")),
+            |_| "status_3".into(),
+            |v| Output::new().values("points", v),
+        );
+        let d = compare(&cpp, &rust, &[]);
+        assert!(!d.pass());
+        assert_eq!(d.mismatches[0].field, "error");
+        let ok = Output::from_result(
+            Ok::<Vec<f64>, solidcore::SolidError>(Vec::new()),
+            |_| "status_3".into(),
+            |v| Output::new().values("points", v),
+        );
+        let d = compare(&cpp, &ok, &[]);
+        assert!(d.pass());
+        assert_eq!((d.values_compared, d.nonzero_compared), (0, 0));
+        let zero = Output::new().int("n", 0).scalar("t", 0.0);
+        assert_eq!(compare(&zero, &zero, &[]).nonzero_compared, 0);
+        let topo = Output::new().topology(Topology::new().count("faces", 1));
+        assert_eq!(compare(&topo, &topo, &[]).nonzero_compared, 1);
     }
 }

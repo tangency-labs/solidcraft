@@ -39,7 +39,15 @@ fn case_json(c: &CaseResult) -> Value {
     if c.both_errored {
         m.insert("both_errored".into(), json!(true));
     }
-    if c.fail() {
+    if c.is_vacuous() {
+        m.insert("vacuous".into(), json!(true));
+    } else if c.pass() && !c.both_errored && c.diff.nonzero_compared == 0 {
+        m.insert("only_zeros".into(), json!(true));
+    }
+    if let Some(why) = &c.known_mismatch {
+        m.insert("known_mismatch".into(), json!(why));
+    }
+    if c.fail() || c.is_known_mismatch() {
         m.insert("inputs".into(), c.inputs.clone());
         m.insert("mismatch_count".into(), json!(c.diff.mismatch_count));
         let mm: Vec<Value> = c
@@ -94,6 +102,10 @@ pub fn unit_report(r: &UnitResult) -> Value {
         .collect();
     m.insert("deferred_by_unit".into(), Value::Object(by_unit));
     m.insert("cases_both_errored".into(), json!(errored));
+    m.insert("cases_vacuous".into(), json!(r.vacuous()));
+    if r.known_mismatches() > 0 {
+        m.insert("cases_known_mismatch".into(), json!(r.known_mismatches()));
+    }
     m.insert("max_rel_err".into(), num(r.max_rel_err()));
     m.insert(
         "cases".into(),
@@ -115,15 +127,16 @@ pub fn write_unit_report(dir: &Path, r: &UnitResult) -> Result<PathBuf, HarnessE
 }
 
 /// One-line summary, e.g.
-/// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16 with_values=36 no_values=4`.
+/// `PASS harness.selftest cases=40 passed=40 failed=0 deferred=0 max_rel_err=1.1e-16 with_values=36 no_values=4 vacuous=1`.
 /// The status word is `PASS` (green), `PARTIAL` or `FAIL`; `with_values` / `no_values`
 /// split the passing cases into those that compared at least one value and those that
-/// compared nothing (the same error on both sides, or empty outputs); with deferred
+/// compared nothing (the same error on both sides, or empty outputs); `vacuous` counts
+/// the `no_values` cases where both sides succeeded, so only the status agreed; with deferred
 /// cases the line ends with ` blocked_by=<unit>(<cases>),...`.
 pub fn summary_line(r: &UnitResult) -> String {
     let with_values = r.passed_with_values();
     let mut s = format!(
-        "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e} with_values={with_values} no_values={}",
+        "{} {} cases={} passed={} failed={} deferred={} max_rel_err={:e} with_values={with_values} no_values={} vacuous={}",
         match r.status() {
             UnitStatus::Green => "PASS",
             UnitStatus::Partial => "PARTIAL",
@@ -135,10 +148,14 @@ pub fn summary_line(r: &UnitResult) -> String {
         r.failed(),
         r.deferred(),
         r.max_rel_err(),
-        r.passed() - with_values
+        r.passed() - with_values,
+        r.vacuous()
     );
     if r.rejected() > 0 {
         let _ = write!(s, " rejected={}", r.rejected());
+    }
+    if r.known_mismatches() > 0 {
+        let _ = write!(s, " known_mismatch={}", r.known_mismatches());
     }
     let blocked: Vec<String> = r
         .deferred_by_unit()

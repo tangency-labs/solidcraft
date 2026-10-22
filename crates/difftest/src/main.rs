@@ -359,6 +359,19 @@ fn main() -> ExitCode {
                 .unwrap_or_default();
             println!("  case {} [{}]: {first}", c.name, c.source.describe());
         }
+        for c in res.cases.iter().filter(|c| c.is_known_mismatch()) {
+            let first = c
+                .diff
+                .mismatches
+                .first()
+                .map(|m| format!("{}: cpp={} rust={}", m.field, m.cpp, m.rust))
+                .unwrap_or_default();
+            println!(
+                "  known-mismatch {} [{}]: {first}",
+                c.name,
+                c.source.describe()
+            );
+        }
         let plan_status = plan_units
             .iter()
             .find(|p| p.id == id.as_str())
@@ -366,8 +379,11 @@ fn main() -> ExitCode {
         match res.status() {
             UnitStatus::Fail => failed += 1,
             UnitStatus::Partial if plan_status == Some("green") => {
-                // A green unit must have zero deferred cases (AGENTS.md 4a).
-                println!("  FAIL {id}: plan status is green but cases are deferred");
+                // A green unit must have zero deferred cases and known mismatches
+                // (AGENTS.md 4a).
+                println!(
+                    "  FAIL {id}: plan status is green but cases are deferred or known mismatches"
+                );
                 failed += 1;
             }
             UnitStatus::Partial => partial += 1,
