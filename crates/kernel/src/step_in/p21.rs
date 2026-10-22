@@ -1,6 +1,6 @@
 //! The Part 21 parser lives in `solidcraft-step`; this reads with the kernel's progress watch.
 
-pub use solidcraft_step::p21::{Entity, Exchange, Param, Record};
+pub use solidcraft_step::p21::{Entity, Exchange, Param};
 
 struct Watched(std::sync::Arc<dyn crate::watch::Watch>);
 
