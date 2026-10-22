@@ -38,3 +38,5 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # Snapshot tests decode the pictures to compare them with a tolerance.
 image = { workspace = true }
+# Tests measure meshes at their own tolerances.
+solidcraft-kernel = { workspace = true }

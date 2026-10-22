@@ -4,8 +4,7 @@
 //! result's boundaries are the operands' curves, cut at their crossings and never refitted.
 //! Also the test of whether a record surface is a wall swept along a direction.
 
-use solidcraft_geom::brep::Surface;
-use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Plane, Region2, Seg2, Vec2};
 
 use crate::body::Body;
 use crate::{BoolOp, KernelError, Result};
@@ -111,6 +110,8 @@ struct Regions {
 
 #[cfg(feature = "smlib")]
 mod sheets {
+    use solidcraft_geom::Vec3;
+    use solidcraft_geom::brep::Surface;
     use solidcraft_geom::Loop2;
     use solidcraft_geom::brep::Loop;
     use solidcraft_smlib::{BooleanOp, Brep};
