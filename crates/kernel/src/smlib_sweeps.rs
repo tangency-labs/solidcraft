@@ -71,14 +71,20 @@ pub(crate) struct Draft {
 }
 
 #[cfg(feature = "smlib")]
-pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, sweep, sweep_controlled};
+pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sweep, sweep_controlled};
+
+/// The error of an SMLib operation in a build without SMLib.
+#[cfg(not(feature = "smlib"))]
+pub(crate) fn not_built() -> KernelError {
+    not_supported("this build has no SMLib (feature `smlib`)")
+}
 
 #[cfg(not(feature = "smlib"))]
 mod stubs {
     use super::*;
 
-    fn not_built() -> KernelError {
-        not_supported("this build has no SMLib (feature `smlib`)")
+    pub(crate) fn solid_from_record(_: &solidcraft_geom::brep::Brep, _: &str) -> Result<Body> {
+        Err(not_built())
     }
     pub(crate) fn extrude(_: &Plane, _: &[Piece], _: Option<&Region2>, _: f64, _: f64, _: f64, _: Option<Draft>) -> Result<Body> {
         Err(not_built())
@@ -106,7 +112,7 @@ mod stubs {
     }
 }
 #[cfg(not(feature = "smlib"))]
-pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, sweep, sweep_controlled};
+pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sweep, sweep_controlled};
 
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
@@ -181,6 +187,13 @@ mod imp {
             return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
         }
         crate::native::body_from_smlib(brep)
+    }
+
+    /// The solid a schema 4 record describes, taken by SMLib as a modeller's own record (no
+    /// healing) and checked there.
+    pub(crate) fn solid_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
+        let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
+        body_of(&brep, what)
     }
 
     /// A point a wall is known by: on its edge in the start plane, or inside it; and the piece
