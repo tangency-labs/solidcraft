@@ -1,5 +1,6 @@
 //! SMLib's sweeps: extrusion (straight or drafted), revolution, sweep along a path, loft through
-//! sections and the screw sweep of a thread or coil. Profiles, paths and sections are lists of
+//! sections, the screw sweep of a thread or coil, and the sweep of a profile placed at stations
+//! (one that twists, scales or follows guide rails along its path). Profiles, paths and sections are lists of
 //! [`Curve`]s; each sweep returns a new body.
 //!
 //! With `cap`, the profile's loops close the ends and the result must be a closed manifold solid
@@ -41,6 +42,31 @@ pub enum SweepFrame {
     /// It only moves along the path, keeping its orientation.
     Translate,
 }
+
+/// How the ends of a [`Brep::sweep_stations`] close.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ends {
+    /// Left open: the swept sheet.
+    Open,
+    /// Capped by the first and last sections: a closed solid.
+    Capped,
+    /// Joined: the last section lies on the first (a sweep round a closed path), the walls' ends
+    /// glued to their starts into a closed solid.
+    Joined,
+}
+
+/// An affine map of a [`Brep::sweep_stations`] station: a point `x` goes to `m · x + t`, `m`
+/// given by its columns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Affine {
+    pub m: [[f64; 3]; 3],
+    pub t: [f64; 3],
+}
+
+/// Most stations of one [`Brep::sweep_stations`] (the C API's limit).
+pub const MAX_STATIONS: usize = ffi::sweeps::SWEEP_MAX_STATIONS;
+/// Most profile curves times stations of one [`Brep::sweep_stations`] (the C API's limit).
+pub const MAX_STATION_CURVES: usize = ffi::sweeps::SWEEP_MAX_STATION_CURVES;
 
 /// Most curves one list may hold (the C API's limit).
 pub const MAX_CURVES: usize = ffi::sweeps::CURVE_MAX_CURVES;
@@ -145,6 +171,24 @@ impl Brep {
         let sizes: Vec<i64> = sections.iter().map(|s| i64::try_from(s.len()).map_err(|_| Error::Argument)).collect::<Result<_>>()?;
         let degree = i32::try_from(degree).map_err(|_| Error::Argument)?;
         ffi::sweeps::loft(&l.raw(), &sizes, degree, cap).map(Brep).map_err(error)
+    }
+
+    /// The planar `profile` placed by each of `stations` in turn (2…[`MAX_STATIONS`], each
+    /// section exactly the profile's image), its walls skinned through the sections, cubic
+    /// across them: one wall per profile curve. `ends` says how the ends close.
+    pub fn sweep_stations(profile: &[Curve], stations: &[Affine], ends: Ends) -> Result<Brep> {
+        init()?;
+        if !(2..=MAX_STATIONS).contains(&stations.len()) || profile.len().saturating_mul(stations.len()) > MAX_STATION_CURVES {
+            return Err(Error::Argument);
+        }
+        let l = List::of(profile)?;
+        let maps: Vec<f64> = stations.iter().flat_map(|s| s.m.iter().flatten().chain(&s.t).copied()).collect();
+        let ends = match ends {
+            Ends::Open => ffi::sweeps::ENDS_OPEN,
+            Ends::Capped => ffi::sweeps::ENDS_CAPPED,
+            Ends::Joined => ffi::sweeps::ENDS_JOINED,
+        };
+        ffi::sweeps::sweep_stations(&l.raw(), &maps, ends).map(Brep).map_err(error)
     }
 
     /// `profile` carried by a screw motion about the axis through `origin` along `direction`:
