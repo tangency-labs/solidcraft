@@ -5,6 +5,7 @@
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
+use crate::draft_corners::DraftCorner;
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
 use crate::sweep_path::RailFit;
 use crate::{KernelError, Result};
@@ -23,6 +24,11 @@ fn numbered_region(r: &Region2) -> Result<NumberedRegion> {
 /// A region numbered on its own and oriented as the builders build it.
 fn oriented(r: &Region2) -> Result<NumberedRegion> {
     numbered_region(r).map(|n| n.oriented())
+}
+
+/// The outer loop a tapered extrusion takes: counterclockwise, collinear lines merged.
+pub(crate) fn oriented_outer(r: &Region2) -> Result<Loop2> {
+    Ok(oriented(r)?.map_loops(|l| l.merged_lines(continues_straight)).outer.lp)
 }
 
 pub(crate) fn region_ok(r: &Region2) -> Result<()> {
@@ -746,9 +752,10 @@ fn with_start(s: &Seg2, x: Vec2) -> Seg2 {
 const MEET_SAMPLES: usize = 48;
 
 /// Extrude one region by `length` along `dir_sign` × the plane normal with a taper angle
-/// (radians; positive grows the profile).
-pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64) -> Result<Body> {
-    extrude_tapered_between(plane, region, 0.0, length, 0.0, dir_sign, taper)
+/// (radians; positive grows the profile), its sharp corners closed by `corner`
+/// ([`crate::draft_corners`] says what each rule gives at each corner).
+pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64, corner: DraftCorner) -> Result<Body> {
+    extrude_tapered_between(plane, region, 0.0, length, 0.0, dir_sign, taper, corner)
 }
 
 /// [`extrude_tapered`] from `from` to `to` along `dir_sign` × the plane normal, the region
@@ -757,7 +764,17 @@ pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f
 /// grown by the taper. With a `foot` (a height, less than `to - from`), the sides stand
 /// straight for that height above `from` and only then slope, up to the same top: a face the
 /// solid stands on can then be pushed into the body it joins, as a prism's can.
-pub fn extrude_tapered_between(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64, dir_sign: f64, taper: f64) -> Result<Body> {
+#[allow(clippy::too_many_arguments)]
+pub fn extrude_tapered_between(
+    plane: &Plane,
+    region: &Region2,
+    from: f64,
+    to: f64,
+    foot: f64,
+    dir_sign: f64,
+    taper: f64,
+    corner: DraftCorner,
+) -> Result<Body> {
     let (from, to, foot, taper) = (finite(from, "start")?, finite(to, "distance")?, finite(foot, "foot")?, finite(taper, "taper")?);
     if to - from <= 1e-6 {
         return Err(KernelError::Invalid("extrude distance is zero".into()));
@@ -769,12 +786,13 @@ pub fn extrude_tapered_between(plane: &Plane, region: &Region2, from: f64, to: f
         return Err(KernelError::Invalid("taper must be between −90° and 90°".into()));
     }
     region_ok(region)?;
-    smlib_tapered(plane, region, from, to, foot, dir_sign.signum(), taper)
+    smlib_tapered(plane, region, from, to, foot, dir_sign.signum(), taper, corner)
 }
 
 /// [`extrude_tapered_between`] through SMLib's draft extrusion: one loop (SMLib's takes no
 /// holes), its section at `from` the profile offset by the taper, after any straight foot.
-fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64, sign: f64, taper: f64) -> Result<Body> {
+#[allow(clippy::too_many_arguments)]
+fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64, sign: f64, taper: f64, corner: DraftCorner) -> Result<Body> {
     if !region.holes.is_empty() {
         return Err(crate::smlib_sweeps::refuse("draft extrusion of a profile with holes (SMLib's takes one loop)"));
     }
@@ -787,7 +805,7 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
         let segs = segs.ok_or_else(|| crate::smlib_sweeps::refuse("draft extrusion that starts before its profile where the taper closes a side"))?;
         NumberedLoop { lp: Loop2 { segs }, from: outer.from }
     };
-    let draft = (taper != 0.0).then_some(crate::smlib_sweeps::Draft { taper, foot });
+    let draft = (taper != 0.0).then_some(crate::smlib_sweeps::Draft { taper, foot, corner });
     crate::smlib_sweeps::extrude(plane, &crate::smlib_sweeps::pieces([&bottom]), Some(region), from * sign, to - from, sign, draft)
 }
 

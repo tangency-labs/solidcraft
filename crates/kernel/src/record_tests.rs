@@ -309,7 +309,7 @@ fn revolve_with_an_edge_on_the_axis() {
 #[test]
 fn tapered_extrusion() {
     let r = Region2 { outer: rotated(&rect(0.0, 0.0, 20.0, 10.0).reversed(), 1), holes: vec![] };
-    let b = crate::extrude_tapered(&Plane::XY, &r, 10.0, 1.0, 0.1).unwrap();
+    let b = crate::extrude_tapered(&Plane::XY, &r, 10.0, 1.0, 0.1, crate::DraftCorner::default()).unwrap();
     let want: Vec<Vec<FaceOrigin>> = points(&b)
         .iter()
         .map(|pts| {

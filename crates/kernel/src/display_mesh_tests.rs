@@ -328,7 +328,7 @@ fn round_faces_of_every_kind_are_divided_by_the_angle() {
     let bodies = [
         ("sphere", crate::sphere(Vec3::ZERO, 4.0).unwrap()),
         ("torus", crate::torus(Vec3::ZERO, 6.0, 2.0).unwrap()),
-        ("cone", crate::extrude_tapered(&Plane::XY, &disc, 6.0, 1.0, -0.3).unwrap()),
+        ("cone", crate::extrude_tapered(&Plane::XY, &disc, 6.0, 1.0, -0.3, crate::DraftCorner::default()).unwrap()),
     ];
     // The most the surface normal turns along one side of a triangle of a curved face.
     let turn = |b: &Body, m: &Mesh| {

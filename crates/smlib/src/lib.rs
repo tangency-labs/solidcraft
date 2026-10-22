@@ -34,7 +34,7 @@ pub use measure::{MEASURE_ACCURACY, MassProperties};
 pub use ops::{Blend, BooleanOp, ChamferSecond, MAX_POINTS};
 
 /// Why an SMLib call failed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     /// SMLib's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
@@ -58,6 +58,8 @@ pub enum Error {
     /// The answer is not exact in the input's geometry (a box that would wrap round its
     /// surface, an analytic surface whose speed across a side varies along it).
     NotExact,
+    /// A drafted extrusion could not close the corner (or wall) at `at` on its profile, for `why`.
+    Corner { why: sweeps::CornerRefusal, at: [f64; 3] },
     /// A C++ exception (most likely out of memory) was caught at the boundary.
     Exception,
     /// The C API is a different version from the one this crate was written against.
@@ -82,6 +84,16 @@ impl std::fmt::Display for Error {
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
+            Error::Corner { why, at } => {
+                let at = format!("({:.4}, {:.4}, {:.4})", at[0], at[1], at[2]);
+                match why {
+                    sweeps::CornerRefusal::Apart => write!(f, "the draft's continued curves do not meet at the corner at {at}"),
+                    sweeps::CornerRefusal::WallCloses => write!(f, "the draft closes the wall at {at} before the far end"),
+                    sweeps::CornerRefusal::NotExact => {
+                        write!(f, "the draft cannot continue the walls at the corner at {at} exactly (only a line's or an arc's wall continues)")
+                    }
+                }
+            }
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
             Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),

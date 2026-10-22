@@ -66,6 +66,8 @@ pub(crate) struct Draft {
     /// A height (less than the distance) the walls first stand straight for, before they slope
     /// on to the same far end ([`crate::extrude_tapered_between`]'s foot).
     pub foot: f64,
+    /// How the sharp corners close.
+    pub corner: crate::DraftCorner,
 }
 
 pub(crate) use imp::{
@@ -81,7 +83,7 @@ pub(crate) fn refuse(what: &str) -> KernelError {
 mod imp {
     use std::collections::BTreeSet;
 
-    use solidcraft_smlib::sweeps::{Affine, Curve, Ends, SweepFrame};
+    use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
     use solidcraft_geom::Vec2;
@@ -93,6 +95,14 @@ mod imp {
 
     fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
         KernelError::Failed(format!("SMLib {what}: {e}"))
+    }
+
+    fn corner(c: crate::DraftCorner) -> DraftCorner {
+        match c {
+            crate::DraftCorner::PreserveCurvature => DraftCorner::Curvature,
+            crate::DraftCorner::Tangent => DraftCorner::Tangent,
+            crate::DraftCorner::Round => DraftCorner::Round,
+        }
     }
 
     fn p(v: Vec3) -> [f64; 3] {
@@ -380,8 +390,9 @@ mod imp {
             }
             let knee = plane.offset(from + sign.signum() * foot);
             let lean = -(distance * d.taper.tan() / (distance - foot)).atan();
-            let prism = Brep::extrude(&c, p(dir), foot, 0.0, true).map_err(|e| failed("extrude", e))?;
-            let slope = Brep::extrude(&curves(&knee, pieces)?, p(dir), distance - foot, lean, true).map_err(|e| failed("extrude", e))?;
+            let prism = Brep::extrude(&c, p(dir), foot, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
+            let slope =
+                Brep::extrude(&curves(&knee, pieces)?, p(dir), distance - foot, lean, corner(d.corner), true).map_err(|e| failed("extrude", e))?;
             let brep = prism.boolean(&slope, solidcraft_smlib::BooleanOp::Union).map_err(|e| failed("extrude", e))?;
             let brep = brep.ok_or_else(|| failed("extrude", "nothing is left"))?;
             let body = body_of(&brep, "extrude")?;
@@ -405,7 +416,8 @@ mod imp {
         }
         // SMLib's draft is positive inward; the kernel's taper grows the profile.
         let lean = draft.map_or(0.0, |d| -d.taper);
-        let brep = Brep::extrude(&c, p(dir), distance, lean, true).map_err(|e| failed("extrude", e))?;
+        let rule = draft.map_or(DraftCorner::default(), |d| corner(d.corner));
+        let brep = Brep::extrude(&c, p(dir), distance, lean, rule, true).map_err(|e| failed("extrude", e))?;
         let body = body_of(&brep, "extrude")?;
         // Half-way along a straight wall lies over its segment; a drafted one has moved.
         let inside = if draft.is_none() { seeds(&base, pieces, |q| q + dir * (distance * 0.5)) } else { Vec::new() };
@@ -601,7 +613,7 @@ mod imp {
         let h = size * 0.5;
         let c = [at + (u + v) * h, at + (v - u) * h, at - (u + v) * h, at + (u - v) * h];
         let square: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p(c[i]), end: p(c[(i + 1) % 4]) }).collect();
-        Brep::extrude(&square, p(normal), size, 0.0, true).map_err(|e| failed("mitre", e))
+        Brep::extrude(&square, p(normal), size, 0.0, DraftCorner::default(), true).map_err(|e| failed("mitre", e))
     }
 
     fn combined(a: &Brep, b: &Brep, op: solidcraft_smlib::BooleanOp, what: &str) -> Result<Brep> {

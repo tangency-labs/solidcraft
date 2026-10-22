@@ -1266,7 +1266,11 @@ mod imp {
     }
 
     pub(super) fn extruded(base: &Plane, chain: &[Numbered], n: Vec3, distance: f64) -> Result<Brep> {
-        checked(&SmBrep::extrude(&curves(base, chain)?, a3(n), distance, 0.0, false).map_err(sm("surface extrude"))?, "surface extrude")
+        checked(
+            &SmBrep::extrude(&curves(base, chain)?, a3(n), distance, 0.0, solidcraft_smlib::sweeps::DraftCorner::default(), false)
+                .map_err(sm("surface extrude"))?,
+            "surface extrude",
+        )
     }
 
     pub(super) fn revolved(plane: &Plane, chain: &[Numbered], origin: Vec3, axis: Vec3, angle: f64) -> Result<Brep> {

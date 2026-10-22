@@ -34,6 +34,7 @@ mod coplanar_tests;
 mod corner_g2;
 mod delete_face;
 mod distance;
+mod draft_corners;
 mod emboss;
 #[cfg(test)]
 mod face_source_tests;
@@ -167,6 +168,7 @@ pub use continuity::{
 pub use corner_g2::{CornerPatch, corner_g2_patch, seam_error};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
+pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,

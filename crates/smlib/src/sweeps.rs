@@ -34,6 +34,32 @@ pub enum Curve {
     },
 }
 
+/// How a drafted [`Brep::extrude`] closes the gap its offset opens at a sharp corner of the
+/// profile. Where the offsets overlap instead, all three trim them where they cross.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DraftCorner {
+    /// Each wall continues as itself (a line's plane, an arc's cone) until it meets its
+    /// neighbour: every section is the profile's curves offset and continued as themselves.
+    #[default]
+    Curvature,
+    /// Each offset curve continues straight along its end tangent: a flat face each side.
+    Tangent,
+    /// An arc about the corner: a cone about it.
+    Round,
+}
+
+/// Why [`DraftCorner::Curvature`] could not close a corner ([`Error::Corner`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerRefusal {
+    /// The continued curves do not meet (two parallel lines, two circles that part).
+    Apart,
+    /// A wall closes before the far end: its neighbours meet across it, or its arc shrinks to its
+    /// centre.
+    WallCloses,
+    /// A curve there is neither a line nor an arc: its wall has no exact continuation.
+    NotExact,
+}
+
 /// How the profile is carried along a [`Brep::sweep`] path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SweepFrame {
@@ -141,10 +167,30 @@ impl Brep {
     /// The planar `profile` extruded `distance` along the unit `direction` (square to its plane).
     /// `draft` (radians) leans the walls: positive inward, negative outward; a drafted profile is
     /// one closed loop, its curves in order, and `direction` is its normal (either way round).
-    pub fn extrude(profile: &[Curve], direction: [f64; 3], distance: f64, draft: f64, cap: bool) -> Result<Brep> {
+    /// `corner` closes a drafted profile's sharp corners; a corner it cannot close is
+    /// [`Error::Corner`] (or [`Error::NotExact`] where a curve there is neither a line nor an
+    /// arc, under [`DraftCorner::Curvature`]).
+    pub fn extrude(profile: &[Curve], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Brep> {
         init()?;
         let l = List::of(profile)?;
-        ffi::sweeps::extrude(&l.raw(), &direction, distance, draft, cap).map(Brep).map_err(error)
+        let rule = match corner {
+            DraftCorner::Curvature => ffi::sweeps::DRAFT_CORNER_CURVATURE,
+            DraftCorner::Tangent => ffi::sweeps::DRAFT_CORNER_TANGENT,
+            DraftCorner::Round => ffi::sweeps::DRAFT_CORNER_ROUND,
+        };
+        let mut at = [f64::NAN; 3];
+        ffi::sweeps::extrude(&l.raw(), &direction, distance, draft, rule, cap, &mut at).map(Brep).map_err(|s| {
+            let why = match s {
+                ffi::sweeps::ERR_CORNER_APART => Some(CornerRefusal::Apart),
+                ffi::sweeps::ERR_WALL_CLOSES => Some(CornerRefusal::WallCloses),
+                ffi::trim::ERR_NOT_EXACT => Some(CornerRefusal::NotExact),
+                _ => None,
+            };
+            match why {
+                Some(why) if at.iter().all(|x| x.is_finite()) => Error::Corner { why, at },
+                _ => error(s),
+            }
+        })
     }
 
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the

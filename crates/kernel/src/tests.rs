@@ -442,7 +442,7 @@ fn tapered_extrudes() {
         outer: Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]),
         holes: vec![],
     };
-    let b = extrude_tapered(&Plane::XY, &sq, 30.0, 1.0, 10f64.to_radians()).unwrap();
+    let b = extrude_tapered(&Plane::XY, &sq, 30.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default()).unwrap();
     let top = 40.0 + 2.0 * 30.0 * 10f64.to_radians().tan();
     let v = 30.0 / 3.0 * (1600.0 + top * top + 40.0 * top);
     let m = measure(&b).unwrap();
@@ -450,13 +450,13 @@ fn tapered_extrudes() {
     assert_eq!(m.merged.faces, 6);
     // Inward taper on a circle (a cone frustum), downward.
     let c = Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![] };
-    let b = extrude_tapered(&Plane::XY, &c, 10.0, -1.0, -20f64.to_radians()).unwrap();
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, -1.0, -20f64.to_radians(), crate::DraftCorner::default()).unwrap();
     let r2 = 10.0 - 10.0 * 20f64.to_radians().tan();
     let v = PI * 10.0 / 3.0 * (100.0 + r2 * r2 + 10.0 * r2);
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
-    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians()).is_err(), "closes the profile");
+    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
 }
 
 /// A slot (two lines and two half-circles, tangent) tapered inward: every edge moves in by
@@ -472,7 +472,7 @@ fn tapered_extrude_of_lines_and_arcs() {
             Seg2::Arc { center: Vec2::ZERO, radius: r, start: PI / 2.0, sweep: PI },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let (a0, p, t) = (2.0 * r * l + PI * r * r, 2.0 * l + 2.0 * PI * r, a.tan());
     let v = a0 * h - p * t * h * h / 2.0 + PI * t * t * h.powi(3) / 3.0;
     let m = measure(&b).unwrap();
@@ -486,7 +486,7 @@ fn tapered_extrude_of_lines_and_arcs() {
             Seg2::Line { a: Vec2::new(0.0, r), b: Vec2::ZERO },
         ],
     };
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a).unwrap_err();
+    let e = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a, crate::DraftCorner::default()).unwrap_err();
     assert!(e.to_string().contains("arc meets another edge at a corner"), "{e}");
 }
 
@@ -511,7 +511,7 @@ fn tapered_extrude_of_arcs_meeting_at_corners() {
             Seg2::Arc { center: Vec2::new(c, 0.0), radius: w0, start: at(c, x, -y), sweep: 2.0 * at(c, x, y) },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: lobed, holes: vec![] }, h, -1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: lobed, holes: vec![] }, h, -1.0, -a, crate::DraftCorner::default()).unwrap();
     // Union of the circle and two lobes: the circle plus each lobe less its lens with the circle.
     let area = |d: f64| {
         let (r, w) = (r0 - d, w0 - d);
@@ -543,7 +543,7 @@ fn tapered_extrude_of_conics() {
             Seg2::Conic { a: p(0.0, -r), apex: p(r, -r), b: p(r, 0.0), w },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let r1 = r - h * a.tan();
     let v = PI * h / 3.0 * (r * r + r1 * r1 + r * r1);
     let m = measure(&b).unwrap();
@@ -569,7 +569,7 @@ fn tapered_extrude_of_cubics_is_close_to_the_true_offset() {
         ],
     };
     let (area, perimeter) = (disc.signed_area().abs(), disc.segs.iter().map(|s| s.length()).sum::<f64>());
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let t = a.tan();
     let v = area * h - perimeter * t * h * h / 2.0 + PI * t * t * h.powi(3) / 3.0;
     let m = measure(&b).unwrap();
@@ -584,7 +584,7 @@ fn tapered_extrude_swallows_a_short_tip() {
     let (h, a) = (2.0, 5f64.to_radians());
     let d = h * a.tan();
     let pts = [Vec2::new(0.0, -2.0), Vec2::new(20.0, -0.01), Vec2::new(20.0, 0.01), Vec2::new(0.0, 2.0)];
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     // The top: the three long lines moved in by d (to their left, the loop running
     // counter-clockwise), meeting each other.
     let moved = |p: Vec2, q: Vec2| {
@@ -613,7 +613,7 @@ fn tapered_extrude_between_with_a_foot() {
         holes: vec![],
     };
     let (from, to, foot) = (-2.0, 10.0, 0.5);
-    let b = extrude_tapered_between(&Plane::XY, &sq, from, to, foot, 1.0, a).unwrap();
+    let b = extrude_tapered_between(&Plane::XY, &sq, from, to, foot, 1.0, a, crate::DraftCorner::default()).unwrap();
     let side = |z: f64| 40.0 + 2.0 * z * a.tan();
     let (s0, s1, rise) = (side(from), side(to), to - from - foot);
     let v = foot * s0 * s0 + rise / 3.0 * (s0 * s0 + s1 * s1 + s0 * s1);
@@ -621,7 +621,10 @@ fn tapered_extrude_between_with_a_foot() {
     assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     assert!((m.bbox.min.z - from).abs() < 1e-6 && (m.bbox.max.z - to).abs() < 1e-6, "{:?}", m.bbox);
     assert_eq!(m.merged.faces, 10);
-    assert!(extrude_tapered_between(&Plane::XY, &sq, from, to, 7.0, 1.0, a).is_err(), "a foot taller than half the solid");
+    assert!(
+        extrude_tapered_between(&Plane::XY, &sq, from, to, 7.0, 1.0, a, crate::DraftCorner::default()).is_err(),
+        "a foot taller than half the solid"
+    );
 }
 
 /// A taper steeper than a profile's details is refused, and says why: a slot narrower than the
@@ -638,10 +641,11 @@ fn tapered_extrude_refuses_a_taper_steeper_than_the_details() {
         Vec2::new(4.9, 10.0),
         Vec2::new(0.0, 10.0),
     ]);
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, 10f64.to_radians()).unwrap_err();
+    let e = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default())
+        .unwrap_err();
     assert!(e.to_string().contains("the taper closes the profile"), "{e}");
     let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![Loop2::circle(Vec2::ZERO, 0.3).reversed()] };
-    let e = extrude_tapered(&Plane::XY, &ring, 2.0, 1.0, 10f64.to_radians()).unwrap_err();
+    let e = extrude_tapered(&Plane::XY, &ring, 2.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default()).unwrap_err();
     assert!(e.to_string().contains("the taper closes the profile"), "{e}");
 }
 
