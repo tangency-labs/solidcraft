@@ -25,6 +25,7 @@ pub(crate) mod browser;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
+mod cloud;
 mod compare;
 mod compare_picture;
 #[cfg(test)]
@@ -383,6 +384,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
+    v.extend(cloud::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
