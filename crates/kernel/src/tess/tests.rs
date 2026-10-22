@@ -715,8 +715,10 @@ fn the_halves_of_a_split_smlib_coil_measure_as_the_whole() {
     // π r² · 2πR · turns; SMLib's wall is a spline within a ten-thousandth of the pitch.
     let (whole, analytic) = (volume(&coil), PI * 2.0 * PI * 20.0 * 6.0);
     assert!((whole - analytic).abs() < 3e-3 * analytic, "coil {whole} vs {analytic}");
+    // The halves are held to the closed form itself: the whole coil's one wall is meshed
+    // within 3e-3 of it, which made the whole a looser yardstick than the truth.
     let halves = volume(&upper) + volume(&lower);
-    assert!((halves - whole).abs() < 1e-3 * whole, "halves {halves} vs the whole {whole}");
+    assert!((halves - analytic).abs() < 1e-3 * analytic, "halves {halves} vs {analytic} (the whole measures {whole})");
 }
 
 /// Thinning keeps a grid within its cap whatever the rounding, both ends of each direction,
