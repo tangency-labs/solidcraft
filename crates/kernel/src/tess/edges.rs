@@ -16,6 +16,9 @@ const MAX_DEPTH: u32 = 24;
 /// An edge's nodes, from its start vertex (interval min) to its end vertex (interval max).
 pub(crate) struct Nodes {
     pub points: Vec<Vec3>,
+    /// The curve's parameter at each node (the edge's interval, ends included): where each
+    /// face's pcurve of the edge gives the node's (u, v).
+    pub params: Vec<f64>,
 }
 
 /// Nodes of edge `ei` of `b` from its start to its end: every chord within the tolerance of
@@ -32,6 +35,10 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     };
     let (front, back) = (vertex(0)?, vertex(1)?);
     let tol = rules.tol;
+    let [t0, t1] = edge.interval;
+    if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
+        return Err(fail(format!("interval [{t0}, {t1}]")));
+    }
     if matches!(edge.curve, Curve::Line { .. }) {
         // Evenly, as few segments as keep each at most `h`. The ends are the vertices' own
         // points: `front + (back − front) · 1` is not `back` to the last bit, and the face that
@@ -39,14 +46,12 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         // forwards takes the next edge's first node (the vertex) — a crack.
         let n = if h > 0.0 { (front.dist(back) / h).ceil().clamp(1.0, (MAX_EDGE_NODES - 1) as f64) as usize } else { 1 };
         let mut pts: Vec<Vec3> = (0..=n).map(|i| front + (back - front) * (i as f64 / n as f64)).collect();
-        if let Some(p) = pts.last_mut() {
+        let mut params: Vec<f64> = (0..=n).map(|i| t0 + (t1 - t0) * (i as f64 / n as f64)).collect();
+        if let (Some(p), Some(t)) = (pts.last_mut(), params.last_mut()) {
             *p = back;
+            *t = t1;
         }
-        return Ok(Nodes { points: pts });
-    }
-    let [t0, t1] = edge.interval;
-    if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
-        return Err(fail(format!("interval [{t0}, {t1}]")));
+        return Ok(Nodes { points: pts, params });
     }
     let curve = CurveEval::new(&edge.curve).map_err(|e| fail(e.to_string()))?;
     let at =
@@ -67,7 +72,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         mid: Option<Vec3>,
         depth: u32,
     }
-    let mut out: Vec<Vec3> = vec![front];
+    let mut out: Vec<(f64, Vec3)> = vec![(t0, front)];
     let mut stack: Vec<Seg> = Vec::with_capacity(64);
     for (i, w) in ends.windows(2).enumerate().rev() {
         let (Some(&pa), Some(&pb)) = (w.first(), w.get(1)) else { continue };
@@ -94,13 +99,13 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
             stack.push(Seg { a: m, b, pa: pm, pb, mid: Some(q3), depth: sg.depth + 1 });
             stack.push(Seg { a, b: m, pa, pb: pm, mid: Some(q1), depth: sg.depth + 1 });
         } else {
-            out.push(pb);
+            out.push((b, pb));
         }
     }
     if let Some(p) = out.last_mut() {
-        *p = back;
+        *p = (t1, back);
     }
-    Ok(Nodes { points: out })
+    Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect() })
 }
 
 /// Angle (radians) between two directions; zero when either is empty.
