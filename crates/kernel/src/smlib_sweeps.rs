@@ -71,7 +71,7 @@ pub(crate) struct Draft {
 }
 
 #[cfg(feature = "smlib")]
-pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sweep, sweep_controlled};
+pub(crate) use imp::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sphere, sweep, sweep_controlled};
 
 /// The error of an SMLib operation in a build without SMLib.
 #[cfg(not(feature = "smlib"))]
@@ -84,6 +84,9 @@ mod stubs {
     use super::*;
 
     pub(crate) fn solid_from_record(_: &solidcraft_geom::brep::Brep, _: &str) -> Result<Body> {
+        Err(not_built())
+    }
+    pub(crate) fn sphere(_: Vec3, _: f64) -> Result<Body> {
         Err(not_built())
     }
     pub(crate) fn extrude(_: &Plane, _: &[Piece], _: Option<&Region2>, _: f64, _: f64, _: f64, _: Option<Draft>) -> Result<Body> {
@@ -112,7 +115,7 @@ mod stubs {
     }
 }
 #[cfg(not(feature = "smlib"))]
-pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sweep, sweep_controlled};
+pub(crate) use stubs::{extrude, loft, loft_rails, loft_to_point, revolve, screw, solid_from_record, sphere, sweep, sweep_controlled};
 
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
@@ -194,6 +197,15 @@ mod imp {
     pub(crate) fn solid_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(&brep, what)
+    }
+
+    /// SMLib's sphere about `center`, each face swept from the arc (segment 0) of the half disc
+    /// a sphere revolves.
+    pub(crate) fn sphere(center: Vec3, radius: f64) -> Result<Body> {
+        let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
+        let body = body_of(&brep, "sphere")?;
+        let faces = body.face_count();
+        record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), Default::default())
     }
 
     /// A point a wall is known by: on its edge in the start plane, or inside it; and the piece

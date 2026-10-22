@@ -11,7 +11,7 @@ use truck_modeling as mt;
 
 use crate::body::{Body, p3};
 use crate::build::{NetFit, interpolate_net};
-use crate::numbered::{NumberedLoop, NumberedRegion};
+use crate::numbered::NumberedLoop;
 use crate::record::{self, Side};
 use crate::{KernelError, Result, guard};
 
