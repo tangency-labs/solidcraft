@@ -60,10 +60,11 @@
 //! - **Statuses.** Statuses upstream ignores are ignored, except
 //!   [`SolidError::Unported`], which always propagates (also where
 //!   `FindInteriorCurves` skips a node pair whose `ComputePointValues` fails).
-//! - **Unported callees.** `SmSurface::LocalSurfaceIntersect`
-//!   (`surface.surface_p11`), `SmSurfaceIntersector::ComputePointValues`
-//!   (`intersect.surface_intersector_p2`) and `TraceCurve`
-//!   (`intersect.surface_intersector_p4`) return [`SolidError::Unported`].
+//! - **Base virtuals.** `FindInteriorCurves` calls the base `ComputePointValues` and
+//!   `TraceCurve` ([`SurfaceIntersector`] parts 2 and 4); the only virtual they reach
+//!   that this class overrides, `ComputeSingularityPoint`, dispatches through the
+//!   base's `advanced` flag. The start point is a zero-filled arena point
+//!   (`GetNewElement`, [`TsectPnt::zeroed`]).
 //! - **Recursion.** `SolveBranch` nests at most once per tree node; deeper nesting
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`].
@@ -566,9 +567,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
             // make a SmTSectPnt for the intersection solution
             let uv_pts = [uv, Point2::new(start[2], start[3])];
-            let start_tsp = self.base.alloc_point(TsectPnt::new());
+            let start_tsp = self.base.alloc_point(TsectPnt::zeroed());
             self.base.curve_trace_direction = 1.0;
-            match compute_point_values(&mut self.base, uv_pts, start_tsp) {
+            match compute_point_values(k, &mut self.base, uv_pts, start_tsp) {
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => continue,
                 Ok(()) => {}
@@ -579,7 +580,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             self.base.start_point = Some(start_tsp);
 
             // do the trace
-            trace_curve(&mut self.base, start_tsp, &mut out.curves_3d)?;
+            trace_curve(k, &mut self.base, start_tsp, &out.curves_3d)?;
 
             // when appropriate - trace in the other direction as well
             if !self.base.curve_is_closed
@@ -588,7 +589,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             {
                 self.base.reverse_curve_direction()?;
                 self.base.curve_trace_direction *= -1.0;
-                trace_curve(&mut self.base, start_tsp, &mut out.curves_3d)?;
+                trace_curve(k, &mut self.base, start_tsp, &out.curves_3d)?;
 
                 // restore the curve direction (upstream multiplies by 1.0)
                 self.base.reverse_curve_direction()?;
@@ -920,36 +921,31 @@ fn drop_points_to_tangent_plane(
     )
 }
 
-// ---- unported callees ---------------------------------------------------------------------
-
-/// `ComputePointValues(uv_pts, *point, NULL)`.
+/// `ComputePointValues(uv_pts, *point, NULL)` on the arena point `point` (virtual:
+/// the base body, which calls this class's `ComputeSingularityPoint` override through
+/// the intersector's `advanced` flag).
 fn compute_point_values(
-    _si: &mut SurfaceIntersector<'_>,
-    _uv_pts: [Point2; 2],
-    _point: TsectId,
+    k: &Kernel,
+    si: &mut SurfaceIntersector<'_>,
+    uv_pts: [Point2; 2],
+    point: TsectId,
 ) -> Result<()> {
-    // UNPORTED(intersect.surface_intersector_p2): SmSurfaceIntersector::ComputePointValues
-    Err(SolidError::unported(
-        "SmSurfaceIntersector::ComputePointValues",
-        "intersect.surface_intersector_p2",
-    ))
+    let mut p = si.point(point)?.clone();
+    let r = si.compute_point_values(k, uv_pts, &mut p, None, None);
+    *si.point_mut(point)? = p;
+    r
 }
 
-/// `TraceCurve(*start, r3DCurves)`.
+/// `TraceCurve(*start, r3DCurves)`: the base `SmSurfaceIntersector::TraceCurve` (not
+/// overridden); its only virtual call this class overrides, `ComputeSingularityPoint`
+/// inside `ComputePointValues`, dispatches through the `advanced` flag.
 fn trace_curve(
-    _si: &mut SurfaceIntersector<'_>,
-    _start: TsectId,
-    _curves_3d: &mut Vec<Curve>,
+    k: &Kernel,
+    si: &mut SurfaceIntersector<'_>,
+    start: TsectId,
+    curves_3d: &[Curve],
 ) -> Result<()> {
-    // (SurfaceIntersector::trace_curve, part 4, is the basic intersector's: its
-    // ComputePointValues calls the basic ComputeSingularityPoint, not this class's
-    // override, so it cannot stand in for the advanced intersector's TraceCurve until
-    // the intersector parts dispatch their virtual calls)
-    // UNPORTED(intersect.surface_intersector_p4): SmSurfaceIntersector::TraceCurve
-    Err(SolidError::unported(
-        "SmSurfaceIntersector::TraceCurve",
-        "intersect.surface_intersector_p4",
-    ))
+    si.trace_curve(k, start, curves_3d)
 }
 
 /// `FlushCurve(r3DCurves, rSurface1UVCurves, rSurface2UVCurves, rCurveTypes,

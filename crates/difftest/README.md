@@ -464,9 +464,11 @@ errors (unreadable case, report not writable); verdicts never fail the run.
     (`CreateCanonical`), `SmSphere`, `SmTorus`, and `SmBSplineSurface` over an NLib net
     filled directly; `SmApiGetOrCreateContext()`; natural UV domains; edges on;
     `SmApproxTol3d(tol)` (or `NULL` for `default`); `SmSurface::GlobalSurfaceIntersect`.
-  * `rust`: the same surfaces with solidcore's types and `Surface::global_surface_intersect`.
-    A surface kind that is not a `SurfaceKind` yet (cylinder, cone, sphere, torus) or any
-    `SolidError::Unported` makes the case `DEFERRED`, never a faked result.
+  * `rust`: the same surfaces with solidcore's types (`Plane`, `Cone` as cylinder and
+    `create_canonical` cone, `Sphere`, `Torus`, each with its NURB made as the runner's
+    `GetNaturalUVDomain()` does, and `BSplineSurface`) and
+    `Surface::global_surface_intersect`. Any `SolidError::Unported` makes the case
+    `DEFERRED`, never a faked result.
   * Both sample every 3D and UV curve at 4001 uniform parameters of its natural interval
     and evaluate each surface at its UV samples, and write the runner's JSON
     (`{xyz, uv1, uv2, s1_at_uv, s2_at_uv, type}` per curve) to

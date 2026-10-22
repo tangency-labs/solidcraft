@@ -3,13 +3,13 @@
 //! * `cpp`: upstream SMLib through `solidcore_ffi::units::ssi_corpus` (shim
 //!   `harness/cpp/shim/ssi_corpus.cpp`, which mirrors the corpus runner's `gsi` mode);
 //! * `rust`: the same surfaces built with solidcore's own types and
-//!   [`Surface::global_surface_intersect`], sampled the same way. Surface kinds that are
-//!   not a [`solidcore::surface::surface::SurfaceKind`] yet, and every
-//!   [`SolidError::Unported`] on the way, make the case deferred for Rust.
+//!   [`Surface::global_surface_intersect`], sampled the same way. Every
+//!   [`SolidError::Unported`] on the way makes the case deferred for Rust.
 
 use std::time::Instant;
 
 use solidcore::curve::curve::Curve;
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
 use solidcore::geom::vector2d::{Point2, Vec2};
@@ -18,8 +18,11 @@ use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
+use solidcore::surface::sphere::{Sphere, SphereOptions};
 use solidcore::surface::surface::Surface;
+use solidcore::surface::torus::{Torus, TorusOptions};
 use solidcore::SolidError;
 use solidcore_ffi::units::ssi_corpus::{self as ffi, SsiSurface, SsiSurfaceIn};
 use solidcore_ffi::FfiError;
@@ -271,14 +274,33 @@ fn deferred_output(case: &SsiCase, tol: Option<f64>, unit: &str, symbol: &str) -
     }
 }
 
-/// Builds a corpus surface with solidcore's types, or names the unit that must land first.
-fn rust_surface(spec: &SurfaceSpec) -> Result<Result<Surface, Deferred>, String> {
-    let deferred = |unit: &str, symbol: &str| {
-        Ok(Err(Deferred {
+/// The result of making an analytic surface's NURB in place, as the C++ runner's
+/// `GetNaturalUVDomain()` does (`GetOrCreateGwNurbPointer` through a const cast): an
+/// unported step defers the case.
+fn nurb_made(r: Result<(), SolidError>, what: &str) -> Result<Result<(), Deferred>, String> {
+    match r {
+        Ok(()) => Ok(Ok(())),
+        Err(SolidError::Unported { upstream, unit }) => Ok(Err(Deferred {
             unit: unit.into(),
-            symbol: symbol.into(),
-        }))
-    };
+            symbol: upstream.into(),
+        })),
+        Err(e) => Err(format!("{what}: {e}")),
+    }
+}
+
+/// The runner's `unit_cross` (same operation order): the unit vector along `a x b`.
+fn unit_cross(a: Vec3, b: Vec3) -> Vec3 {
+    let c = [
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    ];
+    let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+    Vec3::new(c[0] / l, c[1] / l, c[2] / l)
+}
+
+/// Builds a corpus surface with solidcore's types, or names the unit that must land first.
+fn rust_surface(k: &Kernel, spec: &SurfaceSpec) -> Result<Result<Surface, Deferred>, String> {
     match spec {
         SurfaceSpec::Plane {
             origin,
@@ -341,28 +363,120 @@ fn rust_surface(spec: &SurfaceSpec) -> Result<Result<Surface, Deferred>, String>
                 .map_err(|e| format!("nurbs: {e}"))?;
             Ok(Ok(Surface::from(BSplineSurface::from_nurb(sur, false))))
         }
-        // UNPORTED(surface.surface_p2): common cone intersection adapters remain
-        // separate from the concrete numerical port and retained SurfaceKind.
-        SurfaceSpec::Cylinder { .. } => deferred(
-            "surface.surface_p2",
-            "SmCylinder common intersection dispatch adapter",
-        ),
-        SurfaceSpec::Cone { .. } => deferred(
-            "surface.surface_p2",
-            "SmCone common intersection dispatch adapter",
-        ),
-        // SmSphere is ported (surface.sphere) but has no SurfaceKind variant (the
-        // "DISPATCH GAP" in its plan notes); the enum is surface.surface_p2's
-        SurfaceSpec::Sphere { .. } => deferred(
-            "surface.surface_p2",
-            "SurfaceKind::Sphere (SmSphere dispatch through SmSurface)",
-        ),
-        // SmTorus is ported (surface.torus, green) but has no SurfaceKind variant (the
-        // "DISPATCH GAP" in its plan notes); the enum is surface.surface_p2's
-        SurfaceSpec::Torus { .. } => deferred(
-            "surface.surface_p2",
-            "SurfaceKind::Torus (SmTorus dispatch through SmSurface)",
-        ),
+        SurfaceSpec::Cylinder {
+            origin,
+            xaxis,
+            yaxis,
+            radius,
+            angle,
+            height,
+        } => {
+            let z = unit_cross(v3(*xaxis), v3(*yaxis));
+            let o = v3(*origin) + z * height[0];
+            let mut cyl = Cone::new_cylinder_bounded(
+                o,
+                v3(*xaxis),
+                v3(*yaxis),
+                *radius,
+                angle[0],
+                angle[1],
+                height[1] - height[0],
+                false,
+                false,
+                false,
+            );
+            Ok(nurb_made(cyl.make_nurb(k), "cylinder")?.map(|()| Surface::from(cyl)))
+        }
+        SurfaceSpec::Cone {
+            apex,
+            xaxis,
+            yaxis,
+            half_angle_deg,
+            height,
+        } => {
+            // apex-based description: radius(h) = h * tan(half_angle), h in [h0, h1]
+            // along z, full 360 degree rotation
+            let z = unit_cross(v3(*xaxis), v3(*yaxis));
+            let t = (half_angle_deg * std::f64::consts::PI / 180.0).tan();
+            let o = v3(*apex) + z * height[0];
+            let pl = Axis2Placement::new(o, v3(*xaxis), v3(*yaxis));
+            match Cone::create_canonical(
+                k,
+                &pl,
+                height[0] * t,
+                height[1] * t,
+                height[1] - height[0],
+                false,
+                false,
+            ) {
+                Ok(cone) => Ok(Ok(Surface::from(cone))),
+                Err(SolidError::Unported { upstream, unit }) => Ok(Err(Deferred {
+                    unit: unit.into(),
+                    symbol: upstream.into(),
+                })),
+                Err(e) => Err(format!("cone: {e}")),
+            }
+        }
+        SurfaceSpec::Sphere {
+            center,
+            xaxis,
+            yaxis,
+            radius,
+            lon,
+            lat,
+        } => {
+            let anal = Extent2d::from_bounds(lon[0], lat[0], lon[1], lat[1]);
+            let mut sphere = match Sphere::new(
+                k,
+                v3(*center),
+                v3(*xaxis),
+                v3(*yaxis),
+                anal,
+                *radius,
+                SphereOptions::default(),
+            ) {
+                Ok(s) => s,
+                Err(SolidError::Unported { upstream, unit }) => {
+                    return Ok(Err(Deferred {
+                        unit: unit.into(),
+                        symbol: upstream.into(),
+                    }))
+                }
+                Err(e) => return Err(format!("sphere: {e}")),
+            };
+            Ok(nurb_made(sphere.make_nurb(k), "sphere")?.map(|()| Surface::from(sphere)))
+        }
+        SurfaceSpec::Torus {
+            center,
+            xaxis,
+            yaxis,
+            major_radius,
+            minor_radius,
+            major,
+            minor,
+        } => {
+            let anal = Extent2d::from_bounds(major[0], minor[0], major[1], minor[1]);
+            let mut torus = match Torus::new(
+                k,
+                v3(*center),
+                v3(*xaxis),
+                v3(*yaxis),
+                anal,
+                *major_radius,
+                *minor_radius,
+                TorusOptions::default(),
+            ) {
+                Ok(s) => s,
+                Err(SolidError::Unported { upstream, unit }) => {
+                    return Ok(Err(Deferred {
+                        unit: unit.into(),
+                        symbol: upstream.into(),
+                    }))
+                }
+                Err(e) => return Err(format!("torus: {e}")),
+            };
+            Ok(nurb_made(torus.make_nurb(k), "torus")?.map(|()| Surface::from(torus)))
+        }
     }
 }
 
@@ -408,7 +522,7 @@ pub fn run_rust(case: &SsiCase, tol: Option<f64>) -> Result<RawOutput, EngineFai
         ffi_surface(spec, *dom)
             .encode()
             .map_err(|e| EngineFailure::Build(e.to_string()))?;
-        match rust_surface(spec).map_err(EngineFailure::Build)? {
+        match rust_surface(&k, spec).map_err(EngineFailure::Build)? {
             Ok(s) => {
                 let d = match dom {
                     Some(d) => Extent2d::from_bounds(d[0], d[2], d[1], d[3]),
