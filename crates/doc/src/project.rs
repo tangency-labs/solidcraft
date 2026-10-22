@@ -243,8 +243,24 @@ fn resolve_uncached(
             }
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Iso { body: name, at: q, dir: dir.clone() };
-            wires = crate::project3d::iso_curve(&mesh, f, q, dir);
-            exact = vec![Vec::new(); wires.len()];
+            let along = match dir.trim().to_ascii_lowercase().as_str() {
+                "u" => Some(true),
+                "v" => Some(false),
+                _ => None,
+            };
+            match (st.bodies.get(bi).filter(|b| !b.body.is_mesh()), along) {
+                // A solid's face along its own parameter: the surface's isoparametric curve.
+                (Some(target), Some(along_u)) => {
+                    let face = usize::try_from(f).map_err(|_| DocError::Invalid("face index exceeds platform limit".into()))?;
+                    (wires, exact) = exact_wires(crate::kernel::iso_curves(&target.body, face, q, along_u)?)?;
+                }
+                // Along an explicit direction (the face cut by a plane), or on a mesh body: its
+                // triangles' section.
+                _ => {
+                    wires = crate::project3d::iso_curve(&mesh, f, q, dir);
+                    exact = vec![Vec::new(); wires.len()];
+                }
+            }
             Vec::new()
         }
         LinkSource::Spun { body, origin, dir } => {
@@ -373,6 +389,17 @@ fn projected_wires(
                 exact.push(vec![WireCurve { curve, interval }]);
             }
         }
+    }
+    Ok((wires, exact))
+}
+
+/// Record curves as wires, one each: its points (for display) and the curve itself.
+fn exact_wires(curves: Vec<(solidcraft_geom::brep::Curve, [f64; 2])>) -> Result<(Vec<Vec<Vec3>>, Vec<Vec<WireCurve>>)> {
+    let mut wires = Vec::with_capacity(curves.len());
+    let mut exact = Vec::with_capacity(curves.len());
+    for (curve, interval) in curves {
+        wires.push(crate::kernel::PathPiece::Segs(crate::kernel::curve_path(&curve, interval)?).points());
+        exact.push(vec![WireCurve { curve, interval }]);
     }
     Ok((wires, exact))
 }
