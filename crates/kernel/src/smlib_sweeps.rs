@@ -71,7 +71,7 @@ pub(crate) struct Draft {
 }
 
 #[cfg(feature = "smlib")]
-pub(crate) use imp::{body_from_record, extrude, loft, loft_rails, loft_to_point, revolve, screw, sphere, sweep, sweep_controlled};
+pub(crate) use imp::{body_from_record, curve, extrude, loft, loft_rails, loft_to_point, revolve, screw, sphere, sweep, sweep_controlled};
 
 /// The error of an SMLib operation in a build without SMLib.
 #[cfg(not(feature = "smlib"))]
@@ -145,7 +145,7 @@ mod imp {
     }
 
     /// The segment in 3D on `plane`, as SMLib's curve.
-    fn curve(plane: &Plane, s: &Seg2) -> Result<Curve> {
+    pub(crate) fn curve(plane: &Plane, s: &Seg2) -> Result<Curve> {
         let w = |q: Vec2| p(plane.to_world(q));
         let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
         let bezier = |pts: &[Vec2], weights: &[f64]| {
