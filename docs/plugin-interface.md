@@ -30,11 +30,15 @@ Added by this proposal:
   edits the design.
 - G3. Permissions are known before any plugin code runs: they come from the static `plugin.json`, not
   from a `manifest()` export.
-- G4. A plugin can never crash the app or damage a design: traps, timeouts and limit breaches end the
-  call with an error, and a failed transaction leaves the design unchanged.
+- G4. A plugin cannot crash the app or damage a design through its code or its host calls: traps,
+  timeouts and limit breaches end the call with an error, and a failed transaction leaves the design
+  unchanged. Two costs stay in the app's own process and are bounded by caps, not by the sandbox:
+  compiling a component (its file size, 6.2) and opening an importer's output (the normal checks for
+  an untrusted design file, 9a).
 
 Non-goals for `0.1` (each has a place in section 13): parametric plugin features
-(`FeatureKind::Plugin`, docs/plugins.md phase 2), file importers/exporters, plugin-defined icons or
+(`FeatureKind::Plugin`, docs/plugins.md phase 2), file exporters (importers are designed in section
+9a behind the unstable feature `file-formats`), plugin-defined icons or
 artwork, the browser build, long-running background jobs (CAM, FEA), real-time co-editing, signing and
 a plugin index.
 
@@ -330,6 +334,64 @@ world panel-plugin {
     export command;
     export panel;
 }
+
+/// The file an importer converts, and the files next to it. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface input {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// The file being imported: its name without folders, and its size in bytes.
+    @unstable(feature = file-formats)
+    record file-info { name: string, size: u64 }
+
+    /// Read at most 8 MiB at `offset`. `path` is "" for the file being imported, or a path
+    /// relative to its folder (only with `reads_input_folder`; no `..`, no absolute paths, no
+    /// hidden files).
+    @unstable(feature = file-formats)
+    read: func(path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+
+    /// The size of such a file, or none when it does not exist or may not be read.
+    @unstable(feature = file-formats)
+    size: func(path: string) -> result<option<u64>, plugin-error>;
+}
+
+/// Where an importer writes the converted design. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface output {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// Append bytes of the `.solidcraft` design: at most 8 MiB per call, 256 MiB in all.
+    @unstable(feature = file-formats)
+    write: func(bytes: list<u8>) -> result<_, plugin-error>;
+}
+
+/// File importers. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface importer {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+    @unstable(feature = file-formats)
+    use input.{file-info};
+
+    /// Convert `main`, writing the design through `output`, and return the loss report (plain
+    /// text, at most 64 KiB). An error or a trap fails this one import.
+    @unstable(feature = file-formats)
+    import-design: func(main: file-info) -> result<string, plugin-error>;
+}
+
+/// A plugin that converts files from other formats into SolidCraft designs.
+@unstable(feature = file-formats)
+world importer-plugin {
+    import log;
+    @unstable(feature = file-formats)
+    import input;
+    @unstable(feature = file-formats)
+    import output;
+    @unstable(feature = file-formats)
+    export importer;
+}
 ```
 
 Notes on the shape:
@@ -355,6 +417,13 @@ Notes on the shape:
   catches removed commands before any code runs; changed parameters surface as command errors with
   the engine's message. Command contracts (`crates/engine/src/schema`, #2829) are how this becomes
   checkable; the author guide points plugin authors at `engine.describe` for commands that have one.
+- **Unstable parts.** Items marked `@unstable(feature = file-formats)` (the importer, section 9a) are
+  visible to authors and tools (`wasm-tools component wit --features file-formats`) but are not part
+  of the `0.1` promise: a host links them only once it implements that feature, and they may change
+  until the mark is removed. Every item inside a gated interface carries the mark, as WIT requires.
+  wasmtime 50's `bindgen!` has no feature switch and generates the gated items too (checked: the
+  `importer-plugin` world binds under `#![forbid(unsafe_code)]`), so gating on the host is a matter
+  of not linking them before S3b.
 - **Imports are linked for every plugin of a world;** a call without the permission returns `denied`.
   A component that imports an interface its world does not have fails to load (wasmtime link error,
   reported on the Plugins page).
@@ -407,7 +476,7 @@ still refused):
 |---|---|
 | `api` | `"0.1"`; the host refuses an unknown major (and, while `0.x`, an unknown minor) |
 | `component` | a file name (no separators) inside the folder, at most 16 MiB (6.2) |
-| `world` | `command-plugin` or `panel-plugin`; checked against the component's exports at load |
+| `world` | `command-plugin`, `panel-plugin`, or `importer-plugin` (only on a host with the `file-formats` feature, 9a); checked against the component's exports at load |
 | `entries` | 0-64; `name` `[a-z0-9_-]{1,32}`, unique; `label` 1-80 chars; `kind` `transaction` (default) or `action`; a `plugin.run` or `host.request-execute` of an unlisted or `action` entry, or a `plugin.act` of a `transaction` entry, is `invalid` |
 | `panel` | required for `panel-plugin`, refused otherwise; `label` 1-40 chars |
 | `commands` | 0-256 engine command ids, each byte-equal to a `CommandSpec::id` in this build (`find_command` also matches case-insensitively, so the host compares the found spec's `id` with the listed one); otherwise the plugin does not load and the page says which id is missing. `engine.run` compares the same way |
@@ -415,6 +484,10 @@ still refused):
 | `permissions.clock` | real wall clock in WASI |
 | `permissions.net` | 0-8 origins, each exactly `https://host[:port]` (no path, no wildcard, no IP literals, no `localhost`); optional `secret` with `name` `[a-z0-9_-]{1,32}`, `label` 1-40 chars, `header` from a fixed set (`Authorization`, `X-Api-Key`, `Private-Token`), `prefix` at most 16 chars |
 | `limits.memory_mib` | 16-256, default 64 |
+| `limits.stack_kib` | 512-16384, default 512 (wasmtime's default); the plugin's wasm stack (6.2) |
+| `limits.component_mib` | 1-16 in 0.1, default 16; the maximum rises only after S2's measurement (6.2) |
+| `formats` | `importer-plugin` only: 1-16 file extensions (`[a-z0-9]{1,16}`, without the dot), each with a `label`; an extension that another enabled importer already lists makes the later plugin refuse to load, with a message naming both |
+| `reads_input_folder` | `importer-plugin` only, default false: lets `input.read` open files next to the imported one (assemblies, 9a); shown on the approval screen |
 | `limits.transaction_seconds` | 1-120, default 10 |
 
 No `icon` in 0.1: plugin artwork would bypass the asset rules. Panels use a generic plugin icon from
@@ -434,7 +507,8 @@ the right outcome for a plugin it cannot run.
   change your open designs with these commands: ...", "can send data to https://api.github.com",
   "keeps up to 4 MiB on this computer", "can read the clock", "may keep the window busy for up to
   N seconds per change" (`limits.transaction_seconds`), "may use up to N MiB of memory"
-  (`limits.memory_mib`). The approval stores a hash of
+  (`limits.memory_mib`); for an importer, "opens files with these extensions: ..." and, with
+  `reads_input_folder`, "may read other files in the same folder as a file you import". The approval stores a hash of
   (`commands`, `permissions`, `limits`, `world`, and each entry's `name` and `kind`) in preferences
   (`approved_plugins: {id: hash}`, max 256 entries). A plugin update that changes any of these needs a
   new approval; a code-only update with the same permissions does not (the sandbox bounds it to what was
@@ -458,7 +532,7 @@ the right outcome for a plugin it cannot run.
   on the UI or session thread, once per change of the file (keyed by its size, modification time and
   SHA-256). The page keeps reading only plugin.json each frame, as today, and shows "checking..."
   until the compile reports. `Component::new` cannot be stopped from outside, so a compile that takes
-  longer than 60 s is reported as failed and its result dropped when it ends; because compiles are
+  longer than 60 s per started 16 MiB of component is reported as failed and its result dropped when it ends; because compiles are
   serial and only for approved plugins, at most one such compile runs at a time. A `plugin.run` or `plugin.act` that arrives
   while its plugin is still compiling fails at once with "the plugin is still loading". No
   compiled-code cache: `Component::deserialize` is `unsafe` and the workspace forbids `unsafe`.
@@ -470,7 +544,8 @@ the right outcome for a plugin it cannot run.
 
 | Limit | Value |
 |---|---|
-| Component file | 16 MiB in 0.1. Compiling runs in the app's process, and the compiler's memory is not covered by any `Store` limit, so the file cap is what bounds it; S2 measures the peak compile memory of a 16 MiB component and records it, and raising the cap (needed for bundled interpreters such as componentize-py) waits for that measurement or for a cheaper compiler tier (Winch, Pulley) |
+| Component file | `limits.component_mib`, at most 16 MiB in 0.1. Compiling runs in the app's process, and the compiler's memory is not covered by any `Store` limit, so the file cap is what bounds it. S2 measures peak compile memory and time on a real large component (an all-formats importer of 28-42 MB was reported in #1221) and only then raises the maximum, with 64 MiB as the target and the expected compile time on the approval screen; Winch or Pulley are the fallbacks if Cranelift costs too much. With no compiled-code cache (6.1), every app start compiles again, in the background after approval |
+| Wasm stack | `limits.stack_kib` (512 KiB-16 MiB, default 512 KiB) as `Config::max_wasm_stack`. Stack limits belong to a wasmtime `Engine`, so every plugin gets its own `Engine`. With async calls the fiber stack (`Config::async_stack_size`, which must not be smaller) is the wasm stack plus 2 MiB, because that difference is what host functions run in and overflowing it aborts the process (wasmtime 50 docs of both settings). Deeper recursion traps the call |
 | Linear memory | `limits.memory_mib` (16-256 MiB, default 64) for the sum of all the component's linear memories. `StoreLimits::memory_size` applies to each memory separately (wasmtime 50 `limits.rs:232-235`), so the host uses its own `ResourceLimiter` whose `memory_growing` refuses growth that would take the total over the cap; at most 4 memories, 10 000 table elements, 16 instances |
 | Transaction wall time | `limits.transaction_seconds` (default 10 s, max 120 s), counted from the call, engine work included; checked between commands (a started engine command finishes, 6.3) |
 | Handler wall time | 30 s per call, network waits included |
@@ -666,7 +741,7 @@ No error path panics; every wasmtime call returns a `Result` that the host maps.
 |---|---|---|---|
 | `PluginHost` trait, manifest types, policy checks, panel/pin data types | `crates/engine/src/plugin/` | L4 | builds (no wasmtime) |
 | `plugin.run`, `plugin.act`, `plugin.panel`, `plugin.list` | `crates/engine/src/cmd/plugin.rs` | L4 | disabled without a host |
-| wasmtime host, workers, WASI context, net, store | new `crates/plugin-host` | L5 | wasmtime (with its `async` feature), wasmtime-wasi, tokio (already in the workspace) and ureq under `cfg(not(target_arch = "wasm32"))`; the crate is an empty stub on wasm32 |
+| wasmtime host (one `Engine` per plugin, 6.2), workers, WASI context, net, store | new `crates/plugin-host` | L5 | wasmtime (with its `async` feature), wasmtime-wasi, tokio (already in the workspace) and ureq under `cfg(not(target_arch = "wasm32"))`; the crate is an empty stub on wasm32 |
 | Plugins page (approve, secrets, open), panel window, pins | `crates/ui-egui/src/plugins.rs` + `plugin_panel.rs` | L5 | panel code builds; the page already shows a desktop-only note |
 | Installing the host | `apps/solidcraft` (desktop), `apps/solidcraft-cli` (transactions and actions; no panels) | exempt | - |
 
@@ -892,6 +967,42 @@ visible to the token; a 403 or 429 with rate-limit headers says when to try agai
 - Re-pinning a detached note; editing note text; a "created on an older revision" badge once designs
   have a persistent revision id (PDM).
 
+## 9a. Importer plugins (`importer-plugin`, unstable)
+
+Asked for in #1221 by the author of an importer that converts other CAD formats into `.solidcraft`
+designs and already builds unchanged as a `wasm32-wasip2` component. Designed now so authors can build
+against it; implemented after S3 (step S3b) and marked `@unstable(feature = file-formats)` in the WIT
+until then.
+
+- **Calls.** `importer.import-design(main)` gets the imported file's name (no folders) and size. The
+  plugin reads the file in pieces with `input.read("", offset, len)` and writes the converted design
+  with `output.write`, so neither the input nor the output passes through one host call, and the
+  8 MiB per-call copy limit of 6.2 holds. It returns the loss report as plain text.
+- **Assemblies.** With `reads_input_folder`, `input.read` and `input.size` also open files by a path
+  relative to the imported file's folder, read-only and only during the call. The host refuses
+  absolute paths, `..`, hidden files and anything that is not a regular file, and opens only files
+  that are still inside that folder once symlinks are resolved, checked on the opened handle rather
+  than only on the name. A single-file format does not ask for this.
+- **Rights.** The world imports only `log`, `input` and `output` (plus the closed WASI context of
+  section 4): no `engine`, `store` or `net`. An importer never sees or changes an open design.
+- **Where it runs.** On the plugin's worker, like an action, never on the window thread. Two ways in,
+  both commands: opening a file whose extension a plugin lists in `formats` (`doc.open`, the Open
+  dialog, drag and drop, MCP `open`, `solidcraft-cli run` and `eval`), and
+  `plugin.import {plugin, path}`. The input path first passes the caller's path scope (MCP folders,
+  the CLI's), as for a built-in format; the agent chat gate asks before `plugin.import`, as it does
+  for `doc.*`.
+- **Result.** The written bytes open as a new, unsaved design through the normal open path, with all
+  of its checks for an untrusted file, and the host names the design after the input's stem. The
+  report is shown to the user (plain text, at most 64 KiB) and returned to MCP and CLI callers.
+- **Limits.** 120 s per import; guest memory up to `limits.memory_mib`; reads of at most 8 MiB per
+  call, 1 GiB and 4 096 files per import; output 256 MiB; report 64 KiB. A trap, a timeout or a
+  limit fails that import with "the importer failed on this file", and the next import gets a fresh
+  instance (section 3).
+- **Clock.** Decoders get WASI's real monotonic clock; the wall clock reads the Unix epoch unless the
+  plugin asks for `clock`, so conversions do not depend on the date.
+- **Cost.** A large all-formats importer pays its compile on every app start (no compiled-code cache,
+  6.1); one plugin per format keeps that small.
+
 ## 10. Steps (one PR each)
 
 | Step | Content | Done when |
@@ -899,6 +1010,7 @@ visible to the token; a 403 or 429 with rate-limit headers says when to try agai
 | S1 | this document and `wit/solidcraft-plugin.wit` (this PR); docs/plugins.md's milestone 1 then points here | maintainer agrees on the shape in #1221 |
 | S2 | engine seam + `plugin.run` + `crates/plugin-host` (load, limits, WASI context, transactions, policy, store) + plugin.json v1 parsing and approval on the Plugins page | tests T1-T9 pass; size and compile time measured |
 | S3 | handlers, `net` + secrets, `host.request-execute`, action entries and `plugin.act`, panel window, pins, `plugin.panel`, `plugin.list` | tests T10-T15; screenshots of a test panel |
+| S3b | importers (9a): `input`, `output`, `plugin.import`, routing of `formats` in `doc.open`, `reads_input_folder`; the `@unstable` mark goes once a real importer runs through it | tests T17-T20 |
 | S4 | spur-gear example + author guide + CI job that builds `examples/plugins/*` for `wasm32-wasip2` and runs the integration test | T16 |
 | S5 | review-notes plugin | section 9 acceptance |
 | S6 | rename the package to `solidcraft:plugin@1.0.0` after S4 and S5 shipped in a release and at least one outside author built against 0.x | API freeze note in docs |
@@ -960,6 +1072,17 @@ feature), so they need no guest toolchain.
 - T15 panel and marker caps: an over-long list ends the call with `limit`; the previous panel stays.
 - T16 (S4) the spur gear built from source runs through `plugin.run` and produces one body whose
   volume matches the analytic gear volume within 0.5 %.
+- T17 (S3b) an importer reads a test file in 1 MiB pieces and its result opens as a new unsaved design
+  named after the input; a malformed `.solidcraft` result is refused by the normal open checks and
+  leaves no tab behind.
+- T18 with `reads_input_folder`, a part file next to the input is readable; `..`, an absolute path, a
+  hidden file and a symlink that leads out of the folder are `denied`; without the flag, every path
+  other than "" is `denied`.
+- T19 a decoder trap fails that import with "the importer failed on this file" and the next import
+  succeeds on a fresh instance; recursion deeper than `stack_kib` traps the call and the app keeps
+  running.
+- T20 two importers listing the same extension: the second does not load, and the Plugins page names
+  both.
 
 ## 12. Threat model
 
@@ -977,7 +1100,8 @@ Frozen depth for 0.1 (findings beyond this are out of scope, not defects):
   themselves (handled by keeping wasmtime current); a plugin wasting its own approved budgets (it is
   stopped by the limits, nothing more); what a plugin does with data on an origin the user approved;
   social engineering on the approval screen beyond showing the permissions plainly.
-- In: escaping the permissions; reading or writing files; reaching servers other than those that hold
+- In: escaping the permissions; reading files other than an imported one (and its folder with
+  `reads_input_folder`); writing files; reaching servers other than those that hold
   a certificate for an approved origin (section 6.5);
   reading secrets; editing the design from a handler; leaving a partial edit; growing app memory or
   time without bound; crashing through any host function input.
@@ -1003,8 +1127,8 @@ Frozen depth for 0.1 (findings beyond this are out of scope, not defects):
   `CommandSpec`.
 - Events by subscription: the engine has none; the coalesced `design-changed` over `Session.revision`
   covers the pilots.
-- Later interfaces (each as a new interface in `1.x` with `@since`): `file-format` world
-  (importer/exporter), `feature` world (`evaluate` for parametric features per docs/plugins.md),
+- Later interfaces (each as a new interface in `1.x` with `@since`): an exporter world (importers
+  are in 9a), `feature` world (`evaluate` for parametric features per docs/plugins.md),
   background jobs with progress (CAM, FEA, slicer), viewport overlays beyond pins (toolpaths), plugin
   workspaces, the browser host (docs/web-runtime.md), signing and an index.
 

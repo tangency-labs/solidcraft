@@ -178,3 +178,61 @@ world panel-plugin {
     export command;
     export panel;
 }
+
+/// The file an importer converts, and the files next to it. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface input {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// The file being imported: its name without folders, and its size in bytes.
+    @unstable(feature = file-formats)
+    record file-info { name: string, size: u64 }
+
+    /// Read at most 8 MiB at `offset`. `path` is "" for the file being imported, or a path
+    /// relative to its folder (only with `reads_input_folder`; no `..`, no absolute paths, no
+    /// hidden files).
+    @unstable(feature = file-formats)
+    read: func(path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+
+    /// The size of such a file, or none when it does not exist or may not be read.
+    @unstable(feature = file-formats)
+    size: func(path: string) -> result<option<u64>, plugin-error>;
+}
+
+/// Where an importer writes the converted design. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface output {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+
+    /// Append bytes of the `.solidcraft` design: at most 8 MiB per call, 256 MiB in all.
+    @unstable(feature = file-formats)
+    write: func(bytes: list<u8>) -> result<_, plugin-error>;
+}
+
+/// File importers. Unstable: feature `file-formats`.
+@unstable(feature = file-formats)
+interface importer {
+    @unstable(feature = file-formats)
+    use types.{plugin-error};
+    @unstable(feature = file-formats)
+    use input.{file-info};
+
+    /// Convert `main`, writing the design through `output`, and return the loss report (plain
+    /// text, at most 64 KiB). An error or a trap fails this one import.
+    @unstable(feature = file-formats)
+    import-design: func(main: file-info) -> result<string, plugin-error>;
+}
+
+/// A plugin that converts files from other formats into SolidCraft designs.
+@unstable(feature = file-formats)
+world importer-plugin {
+    import log;
+    @unstable(feature = file-formats)
+    import input;
+    @unstable(feature = file-formats)
+    import output;
+    @unstable(feature = file-formats)
+    export importer;
+}
