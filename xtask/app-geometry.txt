@@ -824,10 +824,10 @@ crates/io/src/design.rs:decode_mesh triangles
 crates/io/src/design.rs:encode_complex triangles
 crates/io/src/design.rs:encode_mesh triangles
 crates/io/src/design.rs:encode_preview triangles
-crates/io/src/design.rs:read_document_within triangles
 crates/io/src/design.rs:read_preview triangles
 crates/io/src/design.rs:validate_mesh hypot,triangles
 crates/io/src/design/native_cache.rs:geometry_preview triangles
+crates/io/src/design/package.rs:decode_with triangles
 crates/io/src/dxf.rs:Affine::uniform dot
 crates/io/src/dxf/text_entity.rs:mtext_placement atan2
 crates/io/src/excellon.rs:Reader::arc hypot
