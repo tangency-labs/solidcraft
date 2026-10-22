@@ -341,13 +341,6 @@ mod tests {
         BooleanOperation::Slice,
     ];
 
-    fn unported_unit(e: &SolidError) -> &'static str {
-        match e {
-            SolidError::Unported { unit, .. } => unit,
-            _ => "",
-        }
-    }
-
     #[test]
     fn kernel_operation_mapping() {
         for op in ALL {
@@ -459,9 +452,12 @@ mod tests {
     fn lists_and_trees_reach_the_merge() {
         let mut k = Kernel::default();
         let e = boolean_lists(&mut k, &[Brep::new()], &[], &[Brep::new()], &[], 1).unwrap_err();
-        // the list operands are copied (topology.brep_p3); the merge then reaches
-        // topology.brep_p4
-        assert_eq!(unported_unit(&e), "topology.brep_p4");
+        // the list operands are copied (topology.brep_p3) and the merge engine runs
+        // (topology.brep_p4 is ported); on empty operands it fails in the engine
+        assert!(
+            !e.is_unported() && e.operation().starts_with("boolean::merge"),
+            "{e:?}"
+        );
         let mut breps = vec![Some(Brep::new()), Some(Brep::new())];
         let tree = vec![0, 1, -1];
         // The merge is constructed and runs.

@@ -13,6 +13,7 @@
 //! | [`make_manifold`] | `SmBrep::MakeManifold` |
 //! | [`remove_topological_edges_and_vertices`] | `SmBrep::RemoveTopologicalEdgesAndVertices` |
 //! | [`remove_faces`] | `SmBrep::RemoveFaces` |
+//! | [`remove_faces_notified`] | `SmBrep::RemoveFaces` (caller's records) |
 //! | [`stitch_and_orient`] | `SmBrep::StitchAndOrient` |
 //! | [`squeeze_face`] | `SmBrep::SqueezeFace` |
 //! | [`transform`] | `SmBrep::Transform(const SmAxis2Placement&, ...)` (the 4x4 matrix overload is not owned by this unit) |
@@ -461,11 +462,7 @@ fn delete_vertex(
     use crate::topology::brep::p4;
     match notifications {
         Some(env) => {
-            let mut d = p4::DeleteEnv {
-                records: &mut *env.records,
-                attributes: &mut *env.attributes,
-                key_of: env.key_of,
-            };
+            let mut d = p4::DeleteEnv::from_notify(env);
             p4::delete_vertex(k, b, &mut d, vertex)
         }
         None => p4::with_local_env(|d| p4::delete_vertex(k, b, d, vertex)),
@@ -483,11 +480,7 @@ fn delete_edge_with(
     use crate::topology::brep::p4;
     match notifications {
         Some(env) => {
-            let mut d = p4::DeleteEnv {
-                records: &mut *env.records,
-                attributes: &mut *env.attributes,
-                key_of: env.key_of,
-            };
+            let mut d = p4::DeleteEnv::from_notify(env);
             p4::delete_edge(k, b, &mut d, edge, surface_to_keep)
         }
         None => p4::with_local_env(|d| p4::delete_edge(k, b, d, edge, surface_to_keep)),
@@ -1959,6 +1952,22 @@ pub fn remove_faces(
     })
 }
 
+/// [`remove_faces`] under the caller's notification environment `env` (the objects'
+/// `SmTopology` records and attributes), instead of the kernel's ([`plain_edit`]).
+///
+/// # Errors
+///
+/// Those of [`remove_faces`].
+pub fn remove_faces_notified(
+    k: &mut Kernel,
+    b: &mut Brep,
+    editing_enabled: bool,
+    faces: &[FaceId],
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<()> {
+    remove_faces_in(k, b, editing_enabled, faces, env)
+}
+
 /// [`remove_faces`] under the edit's notification environment ([`plain_edit`]).
 fn remove_faces_in(
     k: &mut Kernel,
@@ -1988,12 +1997,12 @@ fn remove_faces_in(
         }
         for edge in all_edges {
             if crate::topology::edge::is_wire(b, edge)? {
-                delete_edge_with(k, b, edge, None, None)?;
+                delete_edge_with(k, b, edge, None, Some(&mut *env))?;
             }
         }
         for vertex in all_vertices {
             if vertex::is_shell_vertex(b, vertex)? {
-                delete_vertex(k, b, vertex, None)?;
+                delete_vertex(k, b, vertex, Some(&mut *env))?;
             }
         }
         Ok(())

@@ -249,13 +249,9 @@ fn make_wire_edge_vertex(
 }
 
 /// `DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`), with the caller's
-/// notification records, attributes and identities (the context is the kernel's).
+/// notification records, attributes and identities (and context, else the kernel's).
 fn delete_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId, env: &mut ed::NotifyEnv<'_>) -> Result<()> {
-    let mut d = p4::DeleteEnv {
-        records: &mut *env.records,
-        attributes: &mut *env.attributes,
-        key_of: env.key_of,
-    };
+    let mut d = p4::DeleteEnv::from_notify(env);
     p4::delete_edge(k, b, &mut d, e, None)
 }
 

@@ -34,7 +34,7 @@ use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p10::{
-    make_topology_from_data, project_and_trim, remove_all_topology, test_closure_split_region,
+    make_topology_from_data, project_and_trim, remove_all_topology_notified, test_closure_split_region,
     MakeTopologyOptions, ProjectAndTrimOptions, ProjectEnv, TopologyEnv, TrimType,
     HEALER_VERSION,
 };
@@ -536,7 +536,15 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         }
         OpIn::RemoveAll { editing } => {
             b.set_editing_enabled(editing);
-            match remove_all_topology(&mut k, &mut b) {
+            // the runner's records: the merged and deleted objects propagate their
+            // flags and user values into the survivors, as upstream's objects do
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut store,
+                context: None,
+                key_of: &key_of,
+            };
+            match remove_all_topology_notified(&mut k, &mut b, &mut env) {
                 Ok(()) => out.push(Item::Int(0)),
                 Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
                 Err(e) => out.push(Item::Int(status(&e))),

@@ -171,24 +171,16 @@ fn plane_failed(e: SolidError) -> SolidError {
     }
 }
 
-// ---- unported callees -----------------------------------------------------------------
+// ---- B-rep editing callees -------------------------------------------------------------
 
-/// `DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`).
-fn delete_edge(_b: &mut Brep, _e: EdgeId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
+/// `DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`; unit `topology.brep_p4`).
+fn delete_edge(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, e: EdgeId) -> Result<()> {
+    super::p4::delete_edge(k, b, &mut super::p4::DeleteEnv::from_notify(env), e, None)
 }
 
-/// `DeleteVertex(vertex)`.
-fn delete_vertex(_b: &mut Brep, _v: VertexId) -> Result<()> {
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
-    Err(SolidError::unported(
-        "SmBrep::DeleteVertex",
-        "topology.brep_p4",
-    ))
+/// `DeleteVertex(vertex)` (unit `topology.brep_p4`).
+fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId) -> Result<()> {
+    super::p4::delete_vertex(k, b, &mut super::p4::DeleteEnv::from_notify(env), v)
 }
 
 // ---- CreateFaceInRegionFromSurface ----------------------------------------------------
@@ -703,10 +695,10 @@ pub fn create_faces_with_curves(
             // For the outermost loop, the edges and vertices need to be deleted too:
             if l == big_loop {
                 for e in loop_edges.into_iter().flatten() {
-                    ignore_status(delete_edge(b, e))?;
+                    ignore_status(delete_edge(k, b, fenv.env, e))?;
                 }
                 for v in loop_vertices.into_iter().flatten() {
-                    ignore_status(delete_vertex(b, v))?;
+                    ignore_status(delete_vertex(k, b, fenv.env, v))?;
                 }
             }
         }

@@ -85,7 +85,7 @@
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::a_object::BREP_TYPE;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
-use crate::geom::context::{MarkLock, ALL_MARKS};
+use crate::geom::context::{Context, MarkLock, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
@@ -130,6 +130,20 @@ pub struct DeleteEnv<'a> {
     pub attributes: &'a mut AttributeStore,
     /// The identity each topology entity is notified under.
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+    /// The context the objects notify (`GetContext`); `None` for the kernel's.
+    pub context: Option<&'a mut Context>,
+}
+
+impl<'a> DeleteEnv<'a> {
+    /// The [`DeleteEnv`] over a [`NotifyEnv`]'s records, attributes and identities.
+    pub fn from_notify(env: &'a mut NotifyEnv<'_>) -> Self {
+        DeleteEnv {
+            records: &mut *env.records,
+            attributes: &mut *env.attributes,
+            key_of: env.key_of,
+            context: env.context.as_deref_mut(),
+        }
+    }
 }
 
 impl core::fmt::Debug for DeleteEnv<'_> {
@@ -152,6 +166,7 @@ pub(crate) fn with_local_env<T>(f: impl FnOnce(&mut DeleteEnv<'_>) -> Result<T>)
         records: &mut records,
         attributes: &mut attributes,
         key_of: &loopuse::notify_ref,
+        context: None,
     };
     f(&mut env)
 }
@@ -181,7 +196,7 @@ fn brep_notify(
     let mut n = NotifyEnv {
         records: env.records,
         attributes: env.attributes,
-        context: Some(&mut k.context),
+        context: Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
         key_of,
     };
     brep2::notify(b, &mut n, None, operation, data)
@@ -207,7 +222,7 @@ fn face_notify(
     let mut n = NotifyEnv {
         records: env.records,
         attributes: env.attributes,
-        context: Some(&mut k.context),
+        context: Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
         key_of,
     };
     face3::notify(b, f, &mut n, None, operation, data)
@@ -385,13 +400,10 @@ fn brep_get_curves(b: &Brep) -> Result<Vec<EdgeId>> {
     Ok(out)
 }
 
-/// `SmBrep::UnLockBoundingBox`.
-fn unlock_bounding_box(_b: &mut Brep) -> Result<()> {
-    // UNPORTED(query.brep): SmBrep::UnLockBoundingBox
-    Err(SolidError::unported(
-        "SmBrep::UnLockBoundingBox",
-        "query.brep",
-    ))
+/// `SmBrep::UnLockBoundingBox` (unit `query.brep`).
+fn unlock_bounding_box(b: &mut Brep) -> Result<()> {
+    crate::query::brep::unlock_bounding_box(b);
+    Ok(())
 }
 
 // ---- helpers -------------------------------------------------------------------------------
@@ -603,7 +615,7 @@ fn notify_edge(k: &mut Kernel, b: &mut Brep, env: &mut DeleteEnv<'_>, e: EdgeId)
     let mut n = NotifyEnv {
         records: env.records,
         attributes: env.attributes,
-        context: Some(&mut k.context),
+        context: Some(env.context.as_deref_mut().unwrap_or(&mut k.context)),
         key_of,
     };
     edge::notify(
@@ -1708,17 +1720,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stitch_stops_at_the_unported_bounding_box_lock() {
+    fn stitch_of_an_empty_brep_stitches_nothing() {
         let mut k = Kernel::default();
         let mut b = Brep::new();
-        let r = stitch_faces(&mut k, &mut b, 1e-3, None, false);
-        assert!(matches!(
-            r,
-            Err(SolidError::Unported {
-                unit: "query.brep",
-                ..
-            })
-        ));
+        let r = stitch_faces(&mut k, &mut b, 1e-3, None, false).unwrap();
+        assert_eq!(r.stitched_edges, 0);
+        assert_eq!(r.lamina_edges, 0);
+        assert_eq!(r.max_vertex_edge_gap, 0.0);
+        assert_eq!(r.max_edge_face_trim_curve_gap, 0.0);
     }
 
     #[test]

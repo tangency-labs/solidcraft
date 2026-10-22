@@ -104,6 +104,7 @@ fn delete_env<'a>(copy: &'a mut VertexCopy<'_>) -> DeleteEnv<'a> {
         records: &mut *copy.records,
         attributes: &mut *copy.attributes,
         key_of: copy.destination_key,
+        context: None,
     }
 }
 

@@ -333,22 +333,18 @@ fn delete_edge(
     e: EdgeId,
     surface_to_keep: Option<FaceId>,
 ) -> Result<()> {
-    let _ = (k, b, env, e, surface_to_keep);
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge
-    Err(SolidError::unported(
-        "SmBrep::DeleteEdge",
-        "topology.brep_p4",
-    ))
+    super::p4::delete_edge(
+        k,
+        b,
+        &mut super::p4::DeleteEnv::from_notify(env),
+        e,
+        surface_to_keep,
+    )
 }
 
 /// `SmBrep::DeleteVertex(pVertex)` (unit `topology.brep_p4`).
 fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId) -> Result<()> {
-    let _ = (k, b, env, v);
-    // UNPORTED(topology.brep_p4): SmBrep::DeleteVertex
-    Err(SolidError::unported(
-        "SmBrep::DeleteVertex",
-        "topology.brep_p4",
-    ))
+    super::p4::delete_vertex(k, b, &mut super::p4::DeleteEnv::from_notify(env), v)
 }
 
 /// `SmBrep::CalculateBoundingBox(rBox, bApprox, bTight, bExpandByZoneTol3d)` (unit

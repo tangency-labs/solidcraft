@@ -852,6 +852,7 @@ impl UnitDiff for Runner {
             records: &mut records,
             attributes: &mut attributes,
             key_of: &key_of,
+            context: None,
         };
         let keep = u32::try_from(i.keep).ok().map(FaceId::from_index);
         let target = u32::try_from(i.target).unwrap_or(u32::MAX);

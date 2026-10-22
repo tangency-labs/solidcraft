@@ -12,6 +12,7 @@
 //! | [`project_and_trim`]              | `SmBrep::ProjectAndTrim`                         |
 //! | [`TrimType`]                      | `SmTrimType`                                     |
 //! | [`remove_all_topology`]           | `SmBrep::RemoveAllTopology`                      |
+//! | [`remove_all_topology_notified`]  | `SmBrep::RemoveAllTopology` (caller's records)  |
 //! | [`test_closure_split_region`]     | `SmBrep::TestClosureSplitRegion(SmBoolean, SmEdge*, ...)` |
 //! | [`HEALER_VERSION`]                | `SM_HEALER_VERSION`                              |
 //!
@@ -2117,10 +2118,11 @@ fn brep_wire_edges(b: &Brep) -> Result<Vec<EdgeId>> {
     p1::wire_edges(b, None)
 }
 
-/// `SmBrep::DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`); `RemoveAllTopology`
-/// holds no notification state, so it runs on call-local records.
-fn delete_edge(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    p4::with_local_env(|env| p4::delete_edge(k, b, env, e, None))
+/// `SmBrep::DeleteEdge(edge)` (default `pOptSurfaceToKeep = NULL`), notifying through
+/// `env`.
+fn delete_edge(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, e: EdgeId) -> Result<()> {
+    let mut d = p4::DeleteEnv::from_notify(env);
+    p4::delete_edge(k, b, &mut d, e, None)
 }
 
 /// `GetShellVertices` ([`crate::topology::brep::p2::shell_vertices`], no attribute filter).
@@ -2128,12 +2130,15 @@ fn brep_shell_vertices(b: &Brep) -> Result<Vec<VertexId>> {
     crate::topology::brep::p2::shell_vertices(b, None)
 }
 
-/// `SmBrep::DeleteVertex(vertex)`, on call-local records (as [`delete_edge`]).
-fn delete_vertex(k: &mut Kernel, b: &mut Brep, v: VertexId) -> Result<()> {
-    p4::with_local_env(|env| p4::delete_vertex(k, b, env, v))
+/// `SmBrep::DeleteVertex(vertex)`, notifying through `env` (as [`delete_edge`]).
+fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId) -> Result<()> {
+    let mut d = p4::DeleteEnv::from_notify(env);
+    p4::delete_vertex(k, b, &mut d, v)
 }
 
-/// `SmBrep::RemoveAllTopology`: deletes every face, wire edge and shell vertex.
+/// `SmBrep::RemoveAllTopology`: deletes every face, wire edge and shell vertex,
+/// notifying through the kernel's callbacks (a caller without `SmTopology` records of
+/// its own; see [`remove_all_topology_notified`]).
 ///
 /// # Errors
 ///
@@ -2144,18 +2149,39 @@ pub fn remove_all_topology(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     if !b.editing_enabled() {
         return Err(SolidError::sm_err(OP_REMOVE));
     }
+    crate::topology::brep::p3::with_kernel_callbacks(k, b, remove_all_topology_notified)
+}
+
+/// [`remove_all_topology`] notifying the caller's `env` (the objects' `SmTopology`
+/// records and attributes), so merged and deleted objects propagate their flags and
+/// user values as upstream's objects do.
+///
+/// # Errors
+///
+/// Those of [`remove_all_topology`].
+pub fn remove_all_topology_notified(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
+    // check state - m_bEditingEnabled must be on
+    if !b.editing_enabled() {
+        return Err(SolidError::sm_err(OP_REMOVE));
+    }
 
     let faces = brep_faces(b)?;
-    remove_faces(k, b, &faces)?; // increments unlocked mark value
+    let editing = b.editing_enabled();
+    // increments unlocked mark value
+    super::p5::remove_faces_notified(k, b, editing, &faces, env)?;
 
     for e in brep_wire_edges(b)? {
         // status ignored upstream
-        ignored(delete_edge(k, b, e))?;
+        ignored(delete_edge(k, b, env, e))?;
     }
 
     for v in brep_shell_vertices(b)? {
         // status ignored upstream
-        ignored(delete_vertex(k, b, v))?;
+        ignored(delete_vertex(k, b, env, v))?;
     }
     Ok(())
 }
@@ -2786,8 +2812,7 @@ mod tests {
         assert_eq!(r, ClosureSplit::default());
         assert!(remove_all_topology(&mut k, &mut b).is_err());
         b.set_editing_enabled(true);
-        assert!(remove_all_topology(&mut k, &mut b)
-            .unwrap_err()
-            .is_unported());
+        // topology.brep_p4 (SmBrep::DeleteEdge and friends) is ported
+        assert!(remove_all_topology(&mut k, &mut b).is_ok());
     }
 }
