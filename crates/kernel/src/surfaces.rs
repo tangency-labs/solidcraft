@@ -1,533 +1,621 @@
 //! Surface bodies (open shells) and the operations that turn them into solids: Patch (a face
 //! filling a closed loop of edges — planar, or B-spline patches for a loop that is not — or a
-//! planar sketch region), Stitch (surfaces sharing edges sewn
-//! into one body, a solid when they close), Trim (a surface cut by a tool, one side kept),
-//! Thicken (a surface offset along its normals into a solid), copying faces out of a body, and
-//! sheets swept from sketch curves (surface extrude, revolve, sweep and loft).
+//! planar sketch region), Stitch (surfaces sharing edges sewn into one body, a solid when they
+//! close), Thicken (a surface offset along its normals into a solid), copying, removing, turning
+//! over and taking apart faces of a body, extending a planar surface, and sheets swept from sketch
+//! curves (surface extrude, revolve, sweep and loft).
+//!
+//! Everything works on the body's schema 4 record. Taking faces out of a body, turning them over
+//! and making a flat face are exact on the record ([`Parts`] puts any set of faces, edges and
+//! vertices into a record's canonical order). Sweeps, stitching and offsets are SMLib's: each piece
+//! of a sheet goes to SMLib on its own (a chain of a sweep, a column of a loft, a face of an
+//! offset), the pieces' records are joined, and where pieces share edges SMLib stitches them.
+//!
+//! History is exact. A face taken from a body is that face (Kept), its edges the body's; a sheet's
+//! wall comes from the profile segments its edges in the start plane lie along; a stitched or
+//! offset face carries the tag of the face it was made from through SMLib.
 
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 
-use mt::{BoundedCurve, InnerSpace, MetricSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
-use solidcraft_geom::{Plane, Region2, Seg2, UnitVec3, Vec2, Vec3};
-use truck_modeling as mt;
+use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::{self as b, Brep, Curve2};
+use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
 
-use crate::body::{Body, from_p3, p3};
-use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv};
-use crate::record::{self, Rebuild, Side, rebuilt_body};
-use crate::{KernelError, Result, guard};
+use crate::body::Body;
+use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
+use crate::{KernelError, Result, record};
 
 impl Body {
-    /// A surface body: some shell does not close.
+    /// A surface body: some shell does not close (an edge bounds a face on one side only).
     pub fn is_surface(&self) -> bool {
-        !self.is_mesh() && self.solid.boundaries().iter().any(|s| s.shell_condition() != mt::ShellCondition::Closed)
+        !self.is_mesh() && crate::native::brep_record(self).is_ok_and(|r| r.edges.iter().any(|e| e.uses.len() == 1))
     }
 }
 
-/// A body of faces as they are (no orientation fix: a surface has no inside).
-pub(crate) fn surface_body(faces: Vec<mt::Face>) -> Body {
-    surface_of(mt::Shell::from(faces))
+fn invalid(what: impl Into<String>) -> KernelError {
+    KernelError::Invalid(what.into())
 }
 
-/// A body of a shell as it is.
-fn surface_of(shell: mt::Shell) -> Body {
-    Body {
-        solid: std::sync::Arc::new(mt::Solid::new_unchecked(vec![shell])),
-        size: 0.0,
-        boundary_tol: None,
-        volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-        coarse_missing: None,
-        mesh: None,
-        color: None,
-        paint: None,
-        splits: None,
-        face_sources: None,
-        history: None,
-        display_of: None,
-        meshes: None,
-        phased: false,
-        tolerances: None,
-        regularization_protected: false,
+fn failed(what: impl Into<String>) -> KernelError {
+    KernelError::Failed(what.into())
+}
+
+fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
+}
+
+fn a3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn index(i: usize) -> Result<u32> {
+    u32::try_from(i).map_err(|_| KernelError::TooLarge("a record index".into()))
+}
+
+// ---- Records of faces -------------------------------------------------------------------
+
+/// Faces, edges and vertices to be put into one record: each face with whether its shell uses it
+/// along its surface's natural normal, its loops naming `edges` and `vertices` by position here.
+/// Edges' `uses` are ignored ([`Parts::canonical`] works them out).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Parts {
+    pub tolerance: f64,
+    pub vertices: Vec<b::Vertex>,
+    pub edges: Vec<b::Edge>,
+    pub faces: Vec<(b::Face, bool)>,
+}
+
+/// A record made by [`Parts::canonical`], with where each of its faces and edges came from
+/// (`faces[i]`: the part face of record face i; `edges` likewise). Parts no face uses are left out.
+pub(crate) struct Canonical {
+    pub brep: Brep,
+    pub faces: Vec<usize>,
+    pub edges: Vec<usize>,
+}
+
+/// Where the parts of each record [`Parts::joined`] took begin: faces, edges, vertices.
+type Offsets = Vec<[usize; 3]>;
+
+/// The record (by index) and its own index of a part numbered by `offsets` (`kind` 0 for faces, 1
+/// for edges).
+fn owner(offsets: &Offsets, part: usize, kind: usize) -> Option<(usize, usize)> {
+    let k = offsets.iter().rposition(|o| o[kind] <= part)?;
+    Some((k, part - offsets.get(k)?[kind]))
+}
+
+impl Parts {
+    /// Every face of `records` in one set of parts, each record's faces, edges and vertices after
+    /// the ones before it.
+    pub(crate) fn joined(records: &[&Brep]) -> Result<(Parts, Offsets)> {
+        let mut parts = Parts { tolerance: records.iter().map(|r| r.tolerance).fold(0.0, f64::max), ..Parts::default() };
+        let mut offsets = Vec::with_capacity(records.len());
+        for r in records {
+            offsets.push([parts.faces.len(), parts.edges.len(), parts.vertices.len()]);
+            let faces: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, false)).collect();
+            parts.add(r, &faces)?;
+        }
+        Ok((parts, offsets))
+    }
+
+    /// The faces `picked` of `r` (each with whether to turn it over), on `r`'s own edges and
+    /// vertices.
+    pub(crate) fn of(r: &Brep, picked: &[(usize, bool)]) -> Result<Parts> {
+        let mut parts = Parts { tolerance: r.tolerance, ..Parts::default() };
+        parts.add(r, picked)?;
+        Ok(parts)
+    }
+
+    /// Adds the faces `picked` of `r` with all of `r`'s edges and vertices, after the ones here.
+    fn add(&mut self, r: &Brep, picked: &[(usize, bool)]) -> Result<()> {
+        let (e0, v0) = (self.edges.len(), self.vertices.len());
+        let sides = face_sides(r);
+        let shift = |i: u32, by: usize| index(i as usize + by);
+        self.vertices.extend(r.vertices.iter().cloned());
+        for e in &r.edges {
+            let vertices = [shift(e.vertices[0], v0)?, shift(e.vertices[1], v0)?];
+            self.edges.push(b::Edge { vertices, uses: Vec::new(), ..e.clone() });
+        }
+        for &(f, turn) in picked {
+            let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;
+            let forward = sides.get(f).copied().unwrap_or(true) != turn;
+            let loops = face
+                .loops
+                .iter()
+                .map(|l| {
+                    Ok(match l {
+                        b::Loop::Edges { edges } => b::Loop::Edges {
+                            edges: edges.iter().map(|u| Ok(b::OrientedEdge { edge: shift(u.edge, e0)?, ..u.clone() })).collect::<Result<_>>()?,
+                        },
+                        b::Loop::Vertex { vertex } => b::Loop::Vertex { vertex: shift(*vertex, v0)? },
+                    })
+                })
+                .collect::<Result<_>>()?;
+            self.faces.push((b::Face { loops, ..face.clone() }, forward));
+        }
+        Ok(())
+    }
+
+    /// The edges a face's loops use, in order.
+    fn uses_of(f: &b::Face) -> impl Iterator<Item = u32> + '_ {
+        f.loops.iter().flat_map(|l| match l {
+            b::Loop::Edges { edges } => edges.iter().map(|u| u.edge).collect::<Vec<_>>(),
+            b::Loop::Vertex { .. } => Vec::new(),
+        })
+    }
+
+    /// The faces in shells: faces joined by an edge are in one shell, shells in the order of their
+    /// first face, each shell's faces in part order.
+    fn shells(&self) -> Result<Vec<Vec<usize>>> {
+        let n = self.faces.len();
+        let mut root: Vec<usize> = (0..n).collect();
+        let find = |root: &[usize], mut i: usize| {
+            while let Some(&g) = root.get(i).filter(|g| **g != i) {
+                i = g;
+            }
+            i
+        };
+        let mut first: Vec<Option<usize>> = vec![None; self.edges.len()];
+        for (fi, (f, _)) in self.faces.iter().enumerate() {
+            for e in Parts::uses_of(f) {
+                let slot = first.get_mut(e as usize).ok_or_else(|| invalid("an edge reference"))?;
+                match *slot {
+                    None => *slot = Some(fi),
+                    Some(other) => {
+                        let (a, c) = (find(&root, other), find(&root, fi));
+                        if let Some(g) = root.get_mut(a.max(c)) {
+                            *g = a.min(c);
+                        }
+                    }
+                }
+            }
+        }
+        let mut shells: Vec<Vec<usize>> = Vec::new();
+        let mut shell_of: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for fi in 0..n {
+            let s = *shell_of.entry(find(&root, fi)).or_insert_with(|| {
+                shells.push(Vec::new());
+                shells.len() - 1
+            });
+            if let Some(list) = shells.get_mut(s) {
+                list.push(fi);
+            }
+        }
+        Ok(shells)
+    }
+
+    /// The parts as one record in canonical order (docs/native-brep.md, "Canonical order"): shells
+    /// as [`Parts::shells`] groups them, a closed shell enclosing a region of its own; edges in
+    /// first appearance walking faces, loops and uses (backwards on a face used against its
+    /// natural normal), each edge's uses in that order; vertices in first appearance walking
+    /// edges, then vertex loops.
+    pub(crate) fn canonical(&self) -> Result<Canonical> {
+        if self.faces.is_empty() {
+            return Err(invalid("no faces"));
+        }
+        let shells = self.shells()?;
+        let order: Vec<usize> = shells.iter().flatten().copied().collect();
+        let face = |fi: usize| self.faces.get(fi).ok_or_else(|| invalid("a face reference"));
+        let mut edge_new: Vec<Option<u32>> = vec![None; self.edges.len()];
+        let mut edges_old: Vec<usize> = Vec::new();
+        let mut uses: Vec<Vec<b::EdgeUseRef>> = Vec::new();
+        for (nf, &fi) in order.iter().enumerate() {
+            let (f, forward) = face(fi)?;
+            for (li, l) in f.loops.iter().enumerate() {
+                let b::Loop::Edges { edges } = l else { continue };
+                let k = edges.len();
+                for step in 0..k {
+                    let p = if *forward { step } else { k - 1 - step };
+                    let Some(u) = edges.get(p) else { continue };
+                    let slot = edge_new.get_mut(u.edge as usize).ok_or_else(|| invalid("an edge reference"))?;
+                    let ne = match *slot {
+                        Some(ne) => ne,
+                        None => {
+                            let ne = index(edges_old.len())?;
+                            *slot = Some(ne);
+                            edges_old.push(u.edge as usize);
+                            uses.push(Vec::new());
+                            ne
+                        }
+                    };
+                    let at = b::EdgeUseRef { face: index(nf)?, r#loop: index(li)?, position: index(p)?, upper: !u.forward };
+                    if let Some(list) = uses.get_mut(ne as usize) {
+                        list.push(at);
+                    }
+                }
+            }
+        }
+        let mut vertex_new: Vec<Option<u32>> = vec![None; self.vertices.len()];
+        let mut vertices: Vec<b::Vertex> = Vec::new();
+        let mut visit = |v: u32, vertices: &mut Vec<b::Vertex>| -> Result<u32> {
+            let slot = vertex_new.get_mut(v as usize).ok_or_else(|| invalid("a vertex reference"))?;
+            if let Some(nv) = *slot {
+                return Ok(nv);
+            }
+            let nv = index(vertices.len())?;
+            *slot = Some(nv);
+            vertices.push(self.vertices.get(v as usize).cloned().ok_or_else(|| invalid("a vertex reference"))?);
+            Ok(nv)
+        };
+        let mut edges = Vec::with_capacity(edges_old.len());
+        for (old, uses) in edges_old.iter().zip(uses) {
+            let e = self.edges.get(*old).ok_or_else(|| invalid("an edge reference"))?;
+            let ends = [visit(e.vertices[0], &mut vertices)?, visit(e.vertices[1], &mut vertices)?];
+            edges.push(b::Edge { vertices: ends, uses, ..e.clone() });
+        }
+        let mut faces = Vec::with_capacity(order.len());
+        for &fi in &order {
+            let (f, _) = face(fi)?;
+            let mut loops = Vec::with_capacity(f.loops.len());
+            for l in &f.loops {
+                loops.push(match l {
+                    b::Loop::Edges { edges } => b::Loop::Edges {
+                        edges: edges
+                            .iter()
+                            .map(|u| {
+                                let edge = edge_new.get(u.edge as usize).copied().flatten().ok_or_else(|| invalid("an edge reference"))?;
+                                Ok(b::OrientedEdge { edge, ..u.clone() })
+                            })
+                            .collect::<Result<_>>()?,
+                    },
+                    b::Loop::Vertex { vertex } => b::Loop::Vertex { vertex: visit(*vertex, &mut vertices)? },
+                });
+            }
+            faces.push(b::Face { loops, ..f.clone() });
+        }
+        let mut numbered = 0usize;
+        let mut shell_records = Vec::with_capacity(shells.len());
+        let mut regions = vec![b::Region { shells: Vec::new(), void: false }];
+        for (s, members) in shells.iter().enumerate() {
+            let mut count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+            let mut list = Vec::with_capacity(members.len());
+            for &fi in members {
+                let (f, forward) = face(fi)?;
+                for e in Parts::uses_of(f) {
+                    *count.entry(e).or_default() += 1;
+                }
+                list.push(b::OrientedFace { face: index(numbered)?, forward: *forward });
+                numbered += 1;
+            }
+            shell_records.push(b::Shell::Faces { faces: list, wires: Vec::new() });
+            let s = index(s)?;
+            if let Some(infinite) = regions.first_mut() {
+                infinite.shells.push(s);
+            }
+            if count.values().all(|c| *c >= 2) {
+                regions.push(b::Region { shells: vec![s], void: false });
+            }
+        }
+        let brep = Brep { version: b::VERSION, tolerance: self.tolerance, regions, shells: shell_records, faces, edges, vertices };
+        brep.validate().map_err(|e| failed(format!("faces into a record: {e}")))?;
+        Ok(Canonical { brep, faces: order, edges: edges_old })
     }
 }
 
-/// A body from faces: a solid when they close, else a surface; with the history of the
-/// operation that made the faces from `operands` as `rec` records.
-pub(crate) fn body_of(faces: Vec<mt::Face>, operands: &[&mt::Solid], rec: &Rebuild) -> Result<Body> {
-    let shell = mt::Shell::from(faces);
-    if shell.shell_condition() == mt::ShellCondition::Closed {
-        crate::record::rebuilt(mt::Solid::new_unchecked(vec![shell]), operands, rec)
-    } else {
-        Ok(rebuilt_body(surface_of(shell), operands, rec))
+/// Whether each face of `r` is used along its surface's natural normal (by its first oriented
+/// face).
+fn face_sides(r: &Brep) -> Vec<bool> {
+    let mut side = vec![None; r.faces.len()];
+    for s in &r.shells {
+        if let b::Shell::Faces { faces, .. } = s {
+            for f in faces {
+                if let Some(slot) = side.get_mut(f.face as usize) {
+                    slot.get_or_insert(f.forward);
+                }
+            }
+        }
     }
+    side.into_iter().map(|s| s.unwrap_or(true)).collect()
 }
+
+/// The history of a record over `operands` operands: its faces' `faces`, each edge's origins as
+/// `edge` gives them (from the edge's index, the faces it bounds, ascending, and `faces`).
+fn record_history(r: &Brep, operands: usize, faces: Vec<FaceProv>, edge: impl Fn(usize, &[usize], &[FaceProv]) -> Vec<EdgeOrigin>) -> History {
+    let between = r.edges.iter().map(|e| e.uses.iter().map(|u| u.face as usize).collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>());
+    let edges = between.enumerate().map(|(i, between)| EdgeProv { origins: edge(i, &between, &faces), faces: between }).collect();
+    History { operands, faces, edges }
+}
+
+/// The parameter box of a face's loops: the box of its pcurves' control points (each pcurve lies
+/// within its control polygon).
+fn uv_box(loops: &[b::Loop]) -> Option<[[f64; 2]; 2]> {
+    let mut bx = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for l in loops {
+        let b::Loop::Edges { edges } = l else { continue };
+        for u in edges {
+            let pts: Vec<[f64; 2]> = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.clone(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+            };
+            for p in pts {
+                for (d, x) in bx.iter_mut().zip(p) {
+                    d[0] = d[0].min(x);
+                    d[1] = d[1].max(x);
+                }
+            }
+        }
+    }
+    bx.iter().all(|d| d[0].is_finite() && d[1] > d[0]).then_some(bx)
+}
+
+/// A body of a record this module built, and whether it numbers its faces and edges as the
+/// record does (so a history in the record's order is the body's).
+fn record_body(r: &Brep) -> Result<(Body, bool)> {
+    imp::record_body(r)
+}
+
+/// `body` with the history `h` over operands of `counts` faces and edges when its order is the
+/// record's, else with none.
+fn with_history(body: Body, same_order: bool, h: History, counts: &[(usize, usize)]) -> Result<Body> {
+    if same_order { body.with_history_counts(h, counts) } else { Ok(body.without_history()) }
+}
+
+/// A surface body of the record `r` (faces another builder made) with no history.
+pub(crate) fn surface_body(r: &Brep) -> Result<Body> {
+    record_body(r).map(|(body, _)| body.without_history())
+}
+
+/// The faces `picked` of `body` (its record `r`; each with whether to turn it over) as their own
+/// body, each the body's face (Kept), every edge the body's.
+fn taken(body: &Body, r: &Brep, picked: &[(usize, bool)]) -> Result<Body> {
+    let c = Parts::of(r, picked)?.canonical()?;
+    let faces = c.faces.iter().map(|p| picked.get(*p).map_or(0, |(f, _)| *f)).map(|f| record::from_face(0, f, Change::Kept)).collect();
+    let h = record_history(&c.brep, 1, faces, |e, _, _| c.edges.get(e).map(|&edge| EdgeOrigin::Edge { operand: 0, edge }).into_iter().collect());
+    let (result, same) = record_body(&c.brep)?;
+    with_history(result, same, h, &record::counts(&[body]))
+}
+
+// ---- Patches ----------------------------------------------------------------------------
 
 /// A planar surface filling a sketch region. Its history has no operands: the face is new.
 pub fn patch_region(plane: &Plane, region: &Region2) -> Result<Body> {
-    let f = crate::build::face(plane, region)?;
-    let mut rec = Rebuild::default();
-    rec.made(&f, Vec::new());
-    Ok(rebuilt_body(surface_body(vec![f]), &[], &rec))
-}
-
-/// A chain's edge seeds numbered across all the chains: the segment at `i` of the chain that
-/// starts at segment `offset` is segment `offset + i`.
-fn numbered(seeds: &[(mt::EdgeID, usize)], offset: usize) -> Vec<(mt::EdgeID, Vec<usize>)> {
-    seeds.iter().map(|(id, i)| (*id, vec![offset + i])).collect()
-}
-
-/// The faces truck swept from the edges `seeds`, each with the segments under the edge whose
-/// column it lies in (none where the faces don't follow the pattern; see [`record::follow`]).
-fn swept_sides(shell: &mt::Shell, seeds: &[(mt::EdgeID, Vec<usize>)], fixed: &[mt::VertexID]) -> Vec<Side> {
-    let provs = record::columns(shell.face_iter(), seeds, None, record::Column::ToEnd, fixed);
-    shell.face_iter().enumerate().map(|(k, f)| (f.clone(), provs.as_ref().and_then(|p| p.get(k).cloned().flatten()))).collect()
-}
-
-/// A body of a sheet builder's faces: a surface, or a solid where they close; with the history
-/// of a body built from the chains' segments (none unless every face's is known).
-fn sheet_body(sides: Vec<Side>) -> Result<Body> {
-    let history: Option<Vec<FaceProv>> = sides.iter().map(|(_, p)| p.clone()).collect();
-    let shell = mt::Shell::from(sides.into_iter().map(|(f, _)| f).collect::<Vec<_>>());
-    if shell.shell_condition() == mt::ShellCondition::Closed {
-        return match crate::body::Solid::try_new(vec![shell.clone()]) {
-            Ok(solid) => record::attach(Body::new(solid)?, &[], history, Default::default()),
-            Err(_) => crate::record::rebuilt(mt::Solid::new_unchecked(vec![shell]), &[], &Rebuild::default()),
-        };
-    }
-    record::attach(surface_of(shell), &[], history, Default::default())
-}
-
-/// Most curve chains one surface extrude takes.
-const MAX_CHAINS: usize = 10_000;
-
-/// A surface extruded from chains of sketch segments on `plane`: each chain (open, or closed
-/// such as a profile's boundary) moved straight from `start` to `end` along the plane normal
-/// (offsets in mm). The walls it sweeps form one surface body with no caps. Its history has no
-/// operands: every face is new.
-pub fn extrude_sheet(plane: &Plane, chains: &[Vec<Seg2>], start: f64, end: f64) -> Result<Body> {
     if !crate::build::frame_ok(plane) {
-        return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
+        return Err(invalid("patch frame is not finite and orthonormal"));
     }
-    if !(start.is_finite() && end.is_finite() && start.abs() < 1e7 && end.abs() < 1e7) {
-        return Err(KernelError::Invalid("extrude distance is not finite".into()));
-    }
-    let (lo, hi) = if end >= start { (start, end) } else { (end, start) };
-    if hi - lo < 1e-6 {
-        return Err(KernelError::Invalid("extrude distance is zero".into()));
-    }
-    if chains.is_empty() || chains.len() > MAX_CHAINS {
-        return Err(KernelError::Invalid("pick the curves or profiles to extrude".into()));
-    }
-    let base = plane.offset(lo);
-    let along = crate::body::v3(plane.normal() * (hi - lo));
-    let mut sides = Vec::new();
-    let mut offset = 0;
-    for chain in chains {
-        let (wire, seeds) = crate::build::chain_wire_seeds(&base, chain)?;
-        let walls: mt::Shell = guard("surface extrude", || Ok(mt::builder::tsweep(&wire, along)))?;
-        sides.extend(swept_sides(&walls, &numbered(&seeds, offset), &[]));
-        offset += chain.len();
-    }
-    sheet_body(sides)
+    let tolerance = tolerance_of(region.outer.segs.iter().map(|s| plane.to_world(s.start())));
+    let mut parts = Parts { tolerance, ..Parts::default() };
+    // Seen from the plane's normal the outer loop runs counter-clockwise, holes clockwise.
+    let holes = region.holes.iter().map(|h| h.ccw().reversed());
+    let loops = std::iter::once(region.outer.ccw()).chain(holes).map(|lp| sketch_loop(&mut parts, plane, &lp.segs)).collect::<Result<Vec<_>>>()?;
+    let domain = uv_box(&loops).ok_or_else(|| invalid("the region has no area"))?;
+    parts.faces.push((b::Face { surface: crate::freeform::plane_surface(plane), domain, loops }, true));
+    let c = parts.canonical()?;
+    let h = record_history(&c.brep, 0, vec![record::generated(Vec::new())], |_, _, _| Vec::new());
+    let (body, same) = record_body(&c.brep)?;
+    with_history(body, same, h, &[])
 }
 
-/// A surface revolved from chains of sketch segments on `plane` about the sketch line through
-/// `axis_origin` along `axis_dir`: each chain turned from `start` through `sweep` radians (a
-/// full turn at most), positive angles carrying it toward the sketch normal. A chain end on the
-/// axis stays put there (a cone's apex, a sphere's pole). The walls form one surface body with
-/// no caps, or a solid where they close (a full turn of a closed curve, or of a curve from the
-/// axis back to it); its history has no operands: every face is new.
-pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
-    use std::f64::consts::TAU;
-    if !crate::build::frame_ok(plane) || !axis_origin.is_finite() || !axis_dir.is_finite() {
-        return Err(KernelError::Invalid("revolve frame is not finite and orthonormal".into()));
+/// A record tolerance for geometry spanning `points`: 10⁻⁶ of its size, at least 10⁻⁵ mm (the
+/// kernel's working tolerance).
+fn tolerance_of(points: impl Iterator<Item = Vec3>) -> f64 {
+    let mut bx = solidcraft_geom::Aabb3::EMPTY;
+    for p in points {
+        bx.add(p);
     }
-    if !(start.is_finite() && sweep.is_finite() && start.abs() <= TAU && sweep.abs() <= TAU + 1e-9) {
-        return Err(KernelError::Invalid("revolve angles must be finite, a full turn at most".into()));
-    }
-    if sweep.abs() < 1e-6 {
-        return Err(KernelError::Invalid("revolve angle is zero".into()));
-    }
-    if chains.is_empty() || chains.len() > MAX_CHAINS {
-        return Err(KernelError::Invalid("pick the curves or profiles to revolve".into()));
-    }
-    let d = axis_dir.normalized().ok_or_else(|| KernelError::Invalid("revolve axis has no direction".into()))?;
-    let side = |p: Vec2| d.cross(p - axis_origin);
-    let on_axis = |p: Vec2| side(p).abs() < 1e-7;
-    let (origin, n) = (plane.to_world(axis_origin), plane.normal());
-    let axis = plane.dir_to_world(d).normalized().ok_or_else(|| KernelError::Invalid("revolve frame has no axis".into()))?;
-    let mut sides = Vec::new();
-    let mut offset = 0;
-    for chain in chains {
-        // On one side of the axis; the point farthest from it fixes the turning sense.
-        let pts: Vec<Vec2> = chain.iter().flat_map(|s| s.polyline(1e-3)).collect();
-        if pts.iter().any(|p| side(*p) < -1e-7) && pts.iter().any(|p| side(*p) > 1e-7) {
-            return Err(KernelError::Invalid("the curves cross the revolve axis".into()));
-        }
-        let far = pts.iter().copied().max_by(|a, b| side(*a).abs().total_cmp(&side(*b).abs())).filter(|p| !on_axis(*p));
-        let Some(far) = far else { return Err(KernelError::Invalid("the curves lie on the revolve axis".into())) };
-        let radial = plane.to_world(far) - origin;
-        let a = if axis.cross(radial).dot(n) < 0.0 { -axis } else { axis };
-        let (first, last) = match (chain.first(), chain.last()) {
-            (Some(f), Some(l)) => (f.start(), l.end()),
-            _ => return Err(KernelError::Invalid("an empty curve chain".into())),
-        };
-        let closed = first.dist(last) <= 1e-6;
-        if closed && pts.iter().any(|p| on_axis(*p)) {
-            return Err(KernelError::Invalid("not supported yet: a closed curve touching the revolve axis".into()));
-        }
-        // The chain starts `start` round: its sketch frame turned there, so the wire's own edges
-        // are the ones swept (and its faces can be followed back to them).
-        let turn = |v: Vec3| crate::build::rotate_about(v, Vec3::ZERO, a, start);
-        let turned = Plane { origin: crate::build::rotate_about(plane.origin, origin, a, start), x: turn(plane.x), y: turn(plane.y) };
-        let (wire, seeds) = crate::build::chain_wire_seeds(&turned, chain)?;
-        let fixed: Vec<mt::VertexID> = [(on_axis(first), wire.front_vertex()), (on_axis(last), wire.back_vertex())]
-            .into_iter()
-            .filter_map(|(apex, v)| v.filter(|_| apex).map(|v| v.id()))
-            .collect();
-        let walls: mt::Shell = guard("surface revolve", || {
-            Ok(match (on_axis(first), on_axis(last)) {
-                (true, _) => mt::builder::cone(&wire, crate::body::v3(a), mt::Rad(sweep)),
-                (false, true) => mt::builder::cone(&wire.inverse(), crate::body::v3(a), mt::Rad(sweep)),
-                (false, false) => mt::builder::rsweep(&wire, p3(origin), crate::body::v3(a), mt::Rad(sweep)),
-            })
-        })?;
-        sides.extend(swept_sides(&walls, &numbered(&seeds, offset), &fixed));
-        offset += chain.len();
-    }
-    sheet_body(sides)
+    (bx.diagonal() * 1e-6).max(1e-5)
 }
 
-/// A surface swept from chains of sketch segments on `plane` along a path that starts near
-/// them. Along a path whose direction runs on across every joint, lines slide the chains and
-/// arcs turn them, exactly; any other path (curves followed as polylines) goes through
-/// [`sweep_sheet_points`]. The walls form one surface body with no caps (a solid where they
-/// close); its history has no operands: every face is new.
-pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg]) -> Result<Body> {
-    use crate::PathSeg;
-    if !crate::build::frame_ok(plane) {
-        return Err(KernelError::Invalid("sweep frame is not finite and orthonormal".into()));
+/// One closed loop of sketch segments on `plane` added to `parts` as an edge loop on the plane's
+/// surface: one edge per segment, each segment's start a vertex.
+fn sketch_loop(parts: &mut Parts, plane: &Plane, segs: &[Seg2]) -> Result<b::Loop> {
+    if segs.is_empty() || segs.len() > 100_000 {
+        return Err(invalid("a loop needs 1…100000 curves"));
     }
-    if chains.is_empty() || chains.len() > MAX_CHAINS {
-        return Err(KernelError::Invalid("pick the curves or profiles to sweep".into()));
+    let v0 = parts.vertices.len();
+    for s in segs {
+        parts.vertices.push(b::Vertex { point: a3(plane.to_world(s.start())), tolerance: parts.tolerance });
     }
-    let path = &PathSeg::flattened(path)[..];
-    if path.is_empty() || path.len() > 1000 {
-        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
+    let mut edges = Vec::with_capacity(segs.len());
+    for (i, s) in segs.iter().enumerate() {
+        let (curve, pcurve) = crate::freeform::segment(plane, s)?;
+        let vertices = [index(v0 + i)?, index(v0 + (i + 1) % segs.len())?];
+        let edge = index(parts.edges.len())?;
+        parts.edges.push(b::Edge { curve, interval: crate::freeform::INTERVAL, vertices, tolerance: parts.tolerance, uses: Vec::new() });
+        edges.push(b::OrientedEdge { edge, forward: true, pcurve });
     }
-    let ends: Vec<(Vec3, Vec3)> =
-        path.iter().map(PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
-    if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
-        return sweep_sheet_points(plane, chains, &crate::build::path_polyline(path)?);
-    }
-    let mut sides = Vec::new();
-    let mut offset = 0;
-    for chain in chains {
-        let (mut cur, seeds) = crate::build::chain_wire_seeds(plane, chain)?;
-        // Each edge's segments: the next stretch of the path starts from the edges the last one
-        // carried them onto, in the same order.
-        let mut seeds = numbered(&seeds, offset);
-        for seg in path {
-            let (part, map): (mt::Shell, Box<dyn Fn(Vec3) -> Vec3>) = match *seg {
-                PathSeg::Line { a, b } => {
-                    (guard("surface sweep", || Ok(mt::builder::tsweep(&cur, crate::body::v3(b - a))))?, Box::new(move |p| p + (b - a)))
-                }
-                PathSeg::Arc { center, axis, angle, .. } => {
-                    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("a path arc has no axis".into()))?;
-                    let part = guard("surface sweep", || Ok(mt::builder::rsweep(&cur, p3(center), crate::body::v3(k), mt::Rad(angle))))?;
-                    (part, Box::new(move |p| crate::build::rotate_about(p, center, k, angle)))
-                }
-                // The path was flattened: no curves are left.
-                PathSeg::Curve { .. } | PathSeg::Bezier(_) => return Err(KernelError::Invalid("a free-form path curve".into())),
-            };
-            let next = far_wire(&part, &cur, map.as_ref())?;
-            sides.extend(swept_sides(&part, &seeds, &[]));
-            seeds = next.edge_iter().map(|e| e.id()).zip(seeds.into_iter().map(|(_, n)| n)).collect();
-            cur = next;
-        }
-        offset += chain.len();
-    }
-    sheet_body(sides)
+    Ok(b::Loop::Edges { edges })
 }
 
-/// A surface swept from chains of sketch segments on `plane` along a 3D polyline path: one smooth
-/// B-spline wall per segment where the path has no corners, else ruled walls between the path's
-/// points, mitred at the corners (see [`sweep_sheet`]).
-pub fn sweep_sheet_points(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3]) -> Result<Body> {
-    sweep_sheet_points_with(plane, chains, path, &crate::SweepControl::default())
-}
-
-/// [`sweep_sheet`] with sweep options. The default options are exactly [`sweep_sheet`]; any
-/// other orientation, a twist or an end scale follow the path as a polyline through stations
-/// (see [`sweep_sheet_points_with`]).
-pub fn sweep_sheet_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
-    if ctl.is_default() {
-        return sweep_sheet(plane, chains, path);
-    }
-    let path = &crate::PathSeg::flattened(path)[..];
-    ctl.check()?;
-    if path.is_empty() || path.len() > 1000 {
-        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
-    }
-    if path.iter().any(|s| s.tangents().is_none()) {
-        return Err(KernelError::Invalid("a path segment has no direction".into()));
-    }
-    sweep_sheet_points_with(plane, chains, &crate::build::path_polyline(path)?, ctl)
-}
-
-/// [`sweep_sheet_points`] with sweep options: orientation, twist and end scale.
-pub fn sweep_sheet_points_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3], ctl: &crate::SweepControl) -> Result<Body> {
-    ctl.check()?;
-    if !crate::build::frame_ok(plane) {
-        return Err(KernelError::Invalid("sweep frame is not finite and orthonormal".into()));
-    }
-    if chains.is_empty() || chains.len() > MAX_CHAINS {
-        return Err(KernelError::Invalid("pick the curves or profiles to sweep".into()));
-    }
-    let ruled = sheet_body(crate::sweep_path::ruled_sheet(plane, chains, path, ctl)?)?;
-    // Smooth walls where the path has no corners, kept when their area agrees with the ruled
-    // walls' (a fit that went wrong falls back to those).
-    if let Ok(Some(sides)) = crate::sweep_path::smooth_sheet(plane, chains, path, ctl)
-        && let Ok(smooth) = sheet_body(sides)
-        && let (Ok(a), Ok(b)) = (crate::measure(&smooth), crate::measure(&ruled))
-        && (a.area - b.area).abs() <= 0.02 * b.area.abs()
-    {
-        return Ok(smooth);
-    }
-    Ok(ruled)
-}
-
-/// The far side of a sweep of the wire `start`: for each of its edges, in order and the same
-/// way round, the edge of `swept` that `map` carries it onto (matched by its ends and middle).
-fn far_wire(swept: &mt::Shell, start: &mt::Wire, map: &dyn Fn(Vec3) -> Vec3) -> Result<mt::Wire> {
-    let near = |p: Vec3, q: Vec3| p.dist(q) <= 1e-6 * (1.0 + p.len().max(q.len()));
-    let mid = |e: &mt::Edge| {
-        let c = e.oriented_curve();
-        let (t0, t1) = c.range_tuple();
-        from_p3(c.subs((t0 + t1) / 2.0))
-    };
-    let mut out = Vec::new();
-    for e in start.edge_iter() {
-        let (a, b, m) = (map(from_p3(e.front().point())), map(from_p3(e.back().point())), map(mid(e)));
-        let found = swept.edge_iter().find_map(|f| {
-            let (fa, fb) = (from_p3(f.front().point()), from_p3(f.back().point()));
-            if !near(mid(&f), m) {
-                None
-            } else if near(fa, a) && near(fb, b) {
-                Some(f)
-            } else if near(fa, b) && near(fb, a) {
-                Some(f.inverse())
-            } else {
-                None
-            }
-        });
-        out.push(found.ok_or_else(|| KernelError::Failed("sweep: lost the curves along the path".into()))?);
-    }
-    Ok(out.into())
-}
-
-/// A surface lofted through two or more sections, each a chain of sketch segments on its plane,
-/// all open or all closed: ruled between two sections, one smooth face per segment through
-/// three or more. Closed sections are matched as the solid loft matches them; open ones are
-/// split to the same number of segments (longest first) and each turned to run the way the one
-/// before it does. Walls only, no caps; the history has no operands: every face is new.
-pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
-    loft_sheet_with_rails(sections, &[], crate::RailFit::Scale)
-}
-
-/// [`loft_sheet`] following one or two guide rails (polylines from the first section to the last,
-/// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
-/// sections between. Without rails, the plain sheet loft.
-pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
-    if sections.len() < 2 || sections.len() > 50 {
-        return Err(KernelError::Invalid("a loft needs 2…50 sections".into()));
-    }
-    let closed: Vec<bool> = sections
-        .iter()
-        .map(|(_, c)| match (c.first(), c.last()) {
-            (Some(f), Some(l)) if c.len() <= 4096 => Ok(l.end().dist(f.start()) <= 1e-6),
-            _ => Err(KernelError::Invalid("a loft section has no curves, or too many".into())),
-        })
-        .collect::<Result<_>>()?;
-    let all_closed = closed.iter().all(|c| *c);
-    if !all_closed && closed.iter().any(|c| *c) {
-        return Err(KernelError::Invalid("the loft sections must be all open or all closed".into()));
-    }
-    for (plane, chain) in sections {
-        // Checks the frame, the numbers and that each chain runs end to end.
-        if !crate::build::frame_ok(plane) {
-            return Err(KernelError::Invalid("a loft section's frame is not finite and orthonormal".into()));
-        }
-        crate::build::chain_wire(plane, chain)?;
-    }
-    let (wires, sources, reversed) = if all_closed {
-        let loops: Vec<(Plane, solidcraft_geom::Loop2)> = sections.iter().map(|(p, c)| (*p, solidcraft_geom::Loop2 { segs: c.clone() })).collect();
-        crate::build::loft_wires(&loops)?
-    } else {
-        let n = sections.iter().map(|(_, c)| c.len()).max().unwrap_or(0);
-        let mut wires = Vec::with_capacity(sections.len());
-        let mut sources = Vec::with_capacity(sections.len());
-        let mut prev: Option<(Vec3, Vec3)> = None;
-        // Segments are numbered through the sections in the order given.
-        let mut offset = 0;
-        for (plane, chain) in sections {
-            // Each piece with the segment it is (part of).
-            let mut segs: Vec<(Seg2, usize)> = chain.iter().enumerate().map(|(i, s)| (*s, offset + i)).collect();
-            offset += chain.len();
-            // Split the longest segment in half until the counts match.
-            while segs.len() < n {
-                let Some(i) = segs.iter().enumerate().max_by(|a, b| a.1.0.length().total_cmp(&b.1.0.length())).map(|(i, _)| i) else { break };
-                let (s, k) = segs[i];
-                let (a, b) = s.split_half();
-                segs.splice(i..=i, [(a, k), (b, k)]);
-            }
-            let ends = |c: &[(Seg2, usize)]| c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.0.start()), plane.to_world(l.0.end())));
-            if let (Some((ps, pe)), Some((s, e))) = (prev, ends(&segs))
-                && s.dist(ps) + e.dist(pe) > s.dist(pe) + e.dist(ps)
-            {
-                segs = segs.iter().rev().map(|(s, k)| (s.reversed(), *k)).collect();
-            }
-            prev = ends(&segs);
-            let pieces: Vec<Seg2> = segs.iter().map(|(s, _)| *s).collect();
-            wires.push(crate::build::uniform_chain_wire(plane, &pieces, false)?);
-            sources.push(segs.iter().map(|(_, k)| vec![*k]).collect::<Vec<_>>());
-        }
-        (wires, sources, false)
-    };
-    let mut planes: Vec<Plane> = sections.iter().map(|(p, _)| *p).collect();
-    if reversed {
-        planes.reverse();
-    }
-    let faces = guard("surface loft", || {
-        let all = crate::loft_rails::railed_wires(&planes, &wires, all_closed, rails, fit)?;
-        // A plain loft falls back to ruled faces where the smooth one fails; a railed one has to
-        // follow its rails.
-        let smooth = if all.len() >= 3 { Some(crate::build::smooth_loft_faces(&all, &sources, all_closed)) } else { None };
-        match smooth {
-            Some(Ok(f)) => Ok(f),
-            Some(Err(e)) if !rails.is_empty() => Err(e),
-            _ => crate::build::ruled_loft_faces(&wires, &sources),
-        }
-    })?;
-    sheet_body(faces)
-}
-
-/// The edge of a body nearest a point (by samples along each edge).
-pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<mt::Edge> {
-    let mut best: Option<(f64, mt::Edge)> = None;
-    for e in body.solid.edge_iter() {
-        let c = e.curve();
-        let (t0, t1) = c.range_tuple();
+/// The edge of a body nearest a point (by samples along each edge), within 5% of the body's size:
+/// its index in the body's edge order.
+pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<usize> {
+    let r = crate::native::brep_record(body).ok()?;
+    let mut best: Option<(f64, usize)> = None;
+    for (i, e) in r.edges.iter().enumerate() {
+        let Ok(c) = CurveEval::new(&e.curve) else { continue };
+        let [t0, t1] = e.interval;
         for k in 0..=32 {
-            let d = from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 32.0)).dist(p);
-            if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                best = Some((d, e.clone()));
+            let Some(q) = c.point(t0 + (t1 - t0) * k as f64 / 32.0) else { continue };
+            let d = q.dist(p);
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, i));
             }
         }
     }
     best.filter(|(d, _)| *d <= body.size() * 0.05 + 1e-6).map(|(_, e)| e)
 }
 
+/// A chain of a body's edges: each edge (its index in the body's edge order) and whether the
+/// chain runs along it.
+pub(crate) type Chain = Vec<(usize, bool)>;
+
 /// A surface filling a closed loop of a body's edges (each picked by a point on it): one face on
-/// the body's own edges, planar when the loop is certainly planar ([`crate::plane_fit`]), else a
-/// B-spline height field over the loop's plane ([`crate::fill`]; loops that do not bound one are
-/// refused). Its history is over `[body]`: the face is new, its edges the body's own.
+/// the body's own edges, planar when every edge's curve lies in one plane by its own definition
+/// (its control points, or its circle's frame), else a B-spline patch ([`crate::fill`]; loops that
+/// do not bound one are refused). Its history is over `[body]`: the face is new, its edges the
+/// body's own.
 pub fn patch_edges(body: &Body, at: &[Vec3]) -> Result<Body> {
     body.require_brep("patch")?;
     if at.is_empty() || at.len() > 10_000 {
-        return Err(KernelError::Invalid("pick the edges of a closed loop".into()));
+        return Err(invalid("pick the edges of a closed loop"));
     }
-    guard("patch", || {
-        let chain = picked_loop(body, at)?;
-        let Some(face) = crate::plane_fit::planar_face(&chain, crate::fill::planarity_tolerance(body))? else {
-            // Not certainly planar: a fitted surface.
-            return crate::fill::fill_loop(body, &chain);
-        };
-        // A new face on the body's own edges.
-        let mut rec = Rebuild::default();
-        rec.made(&face, Vec::new());
-        Ok(rebuilt_body(surface_body(vec![face]), &[&body.solid], &rec))
-    })
+    let r = crate::native::brep_record(body)?;
+    let chain = picked_loop(body, at)?;
+    let Some(plane) = chain_plane(&r, &chain, crate::fill::planarity_tolerance(body))? else {
+        return crate::fill::fill_loop(body, &chain);
+    };
+    let surface = crate::freeform::plane_surface(&plane);
+    let mut parts = Parts { tolerance: r.tolerance, vertices: r.vertices.clone(), ..Parts::default() };
+    parts.edges = r.edges.iter().map(|e| b::Edge { uses: Vec::new(), ..e.clone() }).collect();
+    let mut uses = Vec::with_capacity(chain.len());
+    for &(e, forward) in &chain {
+        let edge = r.edges.get(e).ok_or_else(|| invalid("an edge reference"))?;
+        uses.push(b::pcurve::EdgeUse {
+            edge: index(e)?,
+            curve: &edge.curve,
+            interval: edge.interval,
+            forward,
+            tolerance: edge.tolerance,
+            given: None,
+        });
+    }
+    let pcurves = b::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("patch: {e}")))?;
+    let edges = chain
+        .iter()
+        .zip(pcurves.into_iter().flatten())
+        .map(|(&(e, forward), pcurve)| Ok(b::OrientedEdge { edge: index(e)?, forward, pcurve }))
+        .collect::<Result<Vec<_>>>()?;
+    let loops = vec![b::Loop::Edges { edges }];
+    let domain = uv_box(&loops).ok_or_else(|| invalid("the loop encloses no area"))?;
+    parts.faces.push((b::Face { surface, domain, loops }, true));
+    let c = parts.canonical()?;
+    let h = record_history(&c.brep, 1, vec![record::generated(Vec::new())], |e, _, _| {
+        c.edges.get(e).map(|&edge| EdgeOrigin::Edge { operand: 0, edge }).into_iter().collect()
+    });
+    let (result, same) = record_body(&c.brep)?;
+    with_history(result, same, h, &record::counts(&[body]))
 }
 
-/// The edges of `body` picked by points on them, chained into one closed loop (each turned to
-/// run along it). Call it under [`guard`]: sampling an intersection curve can fail in truck.
-pub(crate) fn picked_loop(body: &Body, at: &[Vec3]) -> Result<Vec<mt::Edge>> {
+/// The plane every curve of `chain` lies in by its definition, within `tol` (lines and splines by
+/// their control points, circles and ellipses by their frames), its axes turned so that the chain
+/// runs counter-clockwise about its normal; `None` when there is none.
+fn chain_plane(r: &Brep, chain: &Chain, tol: f64) -> Result<Option<Plane>> {
+    let edge = |e: usize| r.edges.get(e).ok_or_else(|| invalid("an edge reference"));
+    let mut points: Vec<Vec3> = Vec::new();
+    let mut axes: Vec<(Vec3, Vec3)> = Vec::new();
+    for &(e, _) in chain {
+        match &edge(e)?.curve {
+            b::Curve::Line { start, end } => points.extend([v3(*start), v3(*end)]),
+            b::Curve::Polyline { points: p } | b::Curve::Spline { points: p, .. } => points.extend(p.iter().map(|q| v3(*q))),
+            b::Curve::RationalSpline { homogeneous, .. } => {
+                points.extend(homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])))
+            }
+            b::Curve::Circle { frame, .. } | b::Curve::Ellipse { frame, .. } => {
+                points.push(v3(frame.origin));
+                axes.push((v3(frame.origin), v3(frame.x_axis).cross(v3(frame.y_axis))));
+            }
+            b::Curve::SurfaceIntersection { .. } => return Ok(None),
+        }
+    }
+    let Some(&p0) = points.first() else { return Ok(None) };
+    // The normal: a circle's axis, else the widest cross product of the points about the first.
+    let normal = axes.first().map(|(_, n)| *n).or_else(|| {
+        let far = points.iter().copied().max_by(|a, c| a.dist(p0).total_cmp(&c.dist(p0)))?;
+        points.iter().map(|q| (far - p0).cross(*q - p0)).max_by(|a, c| a.len().total_cmp(&c.len()))
+    });
+    let Some(n) = normal.and_then(|n| n.normalized()) else { return Ok(None) };
+    let on = |q: Vec3| (q - p0).dot(n).abs() <= tol;
+    if !points.iter().all(|q| on(*q)) || axes.iter().any(|(c, a)| !on(*c) || a.cross(n).len() > 1e-9 * a.len().max(1.0)) {
+        return Ok(None);
+    }
+    // Which way round the chain runs about `n`: the turn of points along it.
+    let mut ring: Vec<Vec3> = Vec::new();
+    for &(e, forward) in chain {
+        let x = edge(e)?;
+        let c = CurveEval::new(&x.curve).map_err(|err| failed(format!("patch: {err}")))?;
+        let [t0, t1] = x.interval;
+        for k in 0..16 {
+            let f = k as f64 / 16.0;
+            ring.push(c.point(if forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f }).ok_or_else(|| failed("patch: an edge has no point"))?);
+        }
+    }
+    let turn: f64 = ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, c)| (*a - p0).cross(*c - p0).dot(n)).sum();
+    let n = if turn < 0.0 { n * -1.0 } else { n };
+    let x = (if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).cross(n).normalized().ok_or_else(|| failed("patch plane"))?;
+    Ok(Plane::new(p0, x, n.cross(x)))
+}
+
+/// The edges of `body` picked by points on them, chained into one closed loop (each turned to run
+/// along it).
+pub(crate) fn picked_loop(body: &Body, at: &[Vec3]) -> Result<Chain> {
     match picked_chain(body, at)? {
         (chain, true) => Ok(chain),
-        (_, false) => Err(KernelError::Invalid("the edges do not form a closed loop".into())),
+        (_, false) => Err(invalid("the edges do not form a closed loop")),
     }
 }
 
-/// The edges of `body` picked by points on them, chained end to end (each turned to run along
-/// the chain), and whether the chain closes: a closed loop starts with the last edge picked; an
-/// open chain runs from the free end met first in pick order. Edges that branch, or form more
-/// than one chain, are refused. Call it under [`guard`], as [`picked_loop`].
-pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Vec<mt::Edge>, bool)> {
-    let mut edges: Vec<mt::Edge> = Vec::new();
+/// The edges of `body` picked by points on them, chained end to end (each turned to run along the
+/// chain), and whether the chain closes: a closed loop starts with the last edge picked; an open
+/// chain runs from the free end met first in pick order. Edges that branch, or form more than one
+/// chain, are refused.
+pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Chain, bool)> {
+    let r = crate::native::brep_record(body)?;
+    let mut edges: Vec<usize> = Vec::new();
     for p in at {
-        let e = edge_near(body, *p).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
-        if !edges.iter().any(|x| x.id() == e.id()) {
+        let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))?;
+        if !edges.contains(&e) {
             edges.push(e);
         }
     }
-    let mut uses: HashMap<mt::VertexID, usize> = HashMap::new();
-    for e in &edges {
-        *uses.entry(e.front().id()).or_default() += 1;
-        *uses.entry(e.back().id()).or_default() += 1;
+    let ends = |e: usize| r.edges.get(e).map(|x| x.vertices);
+    let mut uses: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for &e in &edges {
+        for v in ends(e).ok_or_else(|| invalid("an edge reference"))? {
+            *uses.entry(v).or_default() += 1;
+        }
     }
     if uses.values().any(|n| *n > 2) {
-        return Err(KernelError::Invalid("the edges branch: pick one chain".into()));
+        return Err(invalid("the edges branch: pick one chain"));
     }
-    let free = |v: &mt::Vertex| uses.get(&v.id()) == Some(&1);
-    let open_end = edges.iter().find_map(|e| [e.front(), e.back()].into_iter().find(|v| free(v)).cloned());
+    let open_end = edges.iter().find_map(|&e| ends(e)?.into_iter().find(|v| uses.get(v) == Some(&1)));
     let mut pool = edges;
-    let (first, closed) = match &open_end {
+    let (first, closed) = match open_end {
         Some(v) => {
-            let k = pool.iter().position(|e| e.front().id() == v.id() || e.back().id() == v.id());
-            let e = k.map(|k| pool.remove(k)).ok_or_else(|| KernelError::Invalid("no edges".into()))?;
-            (if e.front().id() == v.id() { e } else { e.inverse() }, false)
+            let k = pool.iter().position(|&e| ends(e).is_some_and(|x| x.contains(&v))).ok_or_else(|| invalid("no edges"))?;
+            let e = pool.remove(k);
+            ((e, ends(e).is_some_and(|x| x[0] == v)), false)
         }
-        None => (pool.pop().ok_or_else(|| KernelError::Invalid("no edges".into()))?, true),
+        None => ((pool.pop().ok_or_else(|| invalid("no edges"))?, true), true),
     };
-    let start = first.front().id();
-    let mut at_v = first.back().clone();
+    let head = |(e, forward): (usize, bool)| ends(e).map(|x| if forward { x[1] } else { x[0] });
+    let start = ends(first.0).map(|x| if first.1 { x[0] } else { x[1] });
+    let mut at_v = head(first);
     let mut chain = vec![first];
-    while !(closed && at_v.id() == start) {
-        let Some(k) = pool.iter().position(|e| e.front().id() == at_v.id() || e.back().id() == at_v.id()) else { break };
+    while !(closed && at_v == start) {
+        let Some(v) = at_v else { break };
+        let Some(k) = pool.iter().position(|&e| ends(e).is_some_and(|x| x.contains(&v))) else { break };
         let e = pool.remove(k);
-        let e = if e.front().id() == at_v.id() { e } else { e.inverse() };
-        at_v = e.back().clone();
-        chain.push(e);
+        let link = (e, ends(e).is_some_and(|x| x[0] == v));
+        at_v = head(link);
+        chain.push(link);
     }
     if !pool.is_empty() {
         let what = if closed { "the edges form more than one loop" } else { "the edges form more than one chain" };
-        return Err(KernelError::Invalid(what.into()));
+        return Err(invalid(what));
     }
     Ok((chain, closed))
 }
 
-/// Faces of a body copied out as a surface body (faces picked by points on them). Its history is
-/// over `[body]`: the faces and their edges are the body's.
-pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
-    body.require_brep("copy faces")?;
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
-    let mut chosen = Vec::new();
-    for p in at {
-        // The face whose mesh passes nearest the point.
-        let i = nearest_face(body, *p)?;
-        if !chosen.contains(&i) {
-            chosen.push(i);
+// ---- Faces of a body --------------------------------------------------------------------
+
+/// Index of the face nearest a point (over its mesh triangles).
+pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
+    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
+    let mut best: Option<(f64, u32)> = None;
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let Some([a, b, c]) = m.tri(t) else { continue };
+        let d = ((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p));
+        if best.is_none_or(|(x, _)| d < x) {
+            best = Some((d, *f));
         }
     }
-    let copied = surface_body(chosen.into_iter().filter_map(|i| faces.get(i).map(|f| (*f).clone())).collect());
-    Ok(rebuilt_body(copied, &[&body.solid], &Rebuild::default()))
+    best.map(|(_, f)| f as usize).ok_or_else(|| invalid("no face there"))
 }
 
-/// The faces picked by points on them (each once, in the order picked); every face when no
-/// point is given.
+/// The faces picked by points on them (each once, in the order picked); every face when no point
+/// is given.
 fn picked_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     if at.len() > 10_000 {
-        return Err(KernelError::Invalid("too many faces picked".into()));
+        return Err(invalid("too many faces picked"));
     }
     if at.is_empty() {
         return Ok((0..body.face_count()).collect());
@@ -542,663 +630,825 @@ fn picked_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(chosen)
 }
 
-/// A body's faces taken apart: each picked face (by points on it; every face when none are
-/// given) its own surface body, and the faces left, if any, one surface body. A solid comes
-/// apart into surfaces. Histories are over `[body]`: each face is the body's.
-pub fn unstitch(body: &Body, at: &[Vec3]) -> Result<(Vec<Body>, Option<Body>)> {
-    body.require_brep("unstitch")?;
-    let chosen = picked_faces(body, at)?;
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
-    if faces.len() < 2 {
-        return Err(KernelError::Invalid("the body has one face: nothing to unstitch".into()));
+/// Faces of a body copied out as a surface body (faces picked by points on them). Its history is
+/// over `[body]`: the faces and their edges are the body's.
+pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
+    body.require_brep("copy faces")?;
+    if at.is_empty() {
+        return Err(invalid("pick the faces to copy"));
     }
-    let piece = |picked: Vec<mt::Face>| rebuilt_body(surface_body(picked), &[&body.solid], &Rebuild::default());
-    let pieces: Vec<Body> = chosen.iter().filter_map(|i| faces.get(*i)).map(|f| piece(vec![(*f).clone()])).collect();
-    let rest: Vec<mt::Face> = faces.iter().enumerate().filter(|(i, _)| !chosen.contains(i)).map(|(_, f)| (*f).clone()).collect();
-    Ok((pieces, (!rest.is_empty()).then(|| piece(rest))))
+    let chosen = picked_faces(body, at)?;
+    let r = crate::native::brep_record(body)?;
+    taken(body, &r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
-/// A surface body with the picked faces (by points on them; every face when none are given)
-/// turned over: their normals point the other way. A solid is refused (its faces face out).
-/// The history is over `[body]`: each face is the body's, turned over or not.
+/// A body's faces taken apart: each picked face (by points on it; every face when none are given)
+/// its own surface body, and the faces left, if any, one surface body. A solid comes apart into
+/// surfaces. Histories are over `[body]`: each face is the body's.
+pub fn unstitch(body: &Body, at: &[Vec3]) -> Result<(Vec<Body>, Option<Body>)> {
+    body.require_brep("unstitch")?;
+    let r = crate::native::brep_record(body)?;
+    if r.faces.len() < 2 {
+        return Err(invalid("the body has one face: nothing to unstitch"));
+    }
+    let chosen = picked_faces(body, at)?;
+    let pieces = chosen.iter().map(|f| taken(body, &r, &[(*f, false)])).collect::<Result<Vec<_>>>()?;
+    let rest: Vec<(usize, bool)> = (0..r.faces.len()).filter(|f| !chosen.contains(f)).map(|f| (f, false)).collect();
+    let rest = if rest.is_empty() { None } else { Some(taken(body, &r, &rest)?) };
+    Ok((pieces, rest))
+}
+
+/// A surface body with the picked faces (by points on them; every face when none are given) turned
+/// over: their normals point the other way. A solid is refused (its faces face out). The history
+/// is over `[body]`: each face is the body's, turned over or not.
 pub fn reverse_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     body.require_brep("reverse normal")?;
     if !body.is_surface() {
-        return Err(KernelError::Invalid("a solid's faces face out: unstitch it into surfaces first".into()));
+        return Err(invalid("a solid's faces face out: unstitch it into surfaces first"));
     }
     let chosen = picked_faces(body, at)?;
-    let mut rec = Rebuild::default();
-    let faces: Vec<mt::Face> = body
-        .solid
-        .face_iter()
-        .enumerate()
-        .map(|(i, f)| {
-            if !chosen.contains(&i) {
-                return f.clone();
-            }
-            let turned = f.inverse();
-            rec.whole(&turned, f);
-            turned
-        })
-        .collect();
-    Ok(rebuilt_body(surface_body(faces), &[&body.solid], &rec))
+    let r = crate::native::brep_record(body)?;
+    taken(body, &r, &(0..r.faces.len()).map(|f| (f, chosen.contains(&f))).collect::<Vec<_>>())
 }
 
-/// A body with some of its faces (indices in its face order) taken away and the gap left open:
-/// a surface body of the faces left. Deleting every face is refused. The history is over
-/// `[body]`: each face left is the body's.
+/// A body with some of its faces (indices in its face order) taken away and the gap left open: a
+/// surface body of the faces left. Deleting every face is refused. The history is over `[body]`:
+/// each face left is the body's.
 pub fn remove_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     body.require_brep("Delete Face")?;
     if faces.is_empty() {
-        return Err(KernelError::Invalid("no faces given".into()));
+        return Err(invalid("no faces given"));
     }
-    let left: Vec<mt::Face> = body.solid.face_iter().enumerate().filter(|(i, _)| !faces.contains(i)).map(|(_, f)| f.clone()).collect();
+    let r = crate::native::brep_record(body)?;
+    let left: Vec<(usize, bool)> = (0..r.faces.len()).filter(|f| !faces.contains(f)).map(|f| (f, false)).collect();
     if left.is_empty() {
-        return Err(KernelError::Invalid("that would delete every face of the body".into()));
+        return Err(invalid("that would delete every face of the body"));
     }
-    Ok(rebuilt_body(surface_body(left), &[&body.solid], &Rebuild::default()))
+    taken(body, &r, &left)
 }
 
-/// Index of the face nearest a point (over its mesh triangles).
-pub(crate) fn nearest_face(body: &Body, p: Vec3) -> Result<usize> {
-    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
-    let mut best: Option<(f64, u32)> = None;
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let d = ((a + b + c) / 3.0).dist(p).min(a.dist(p)).min(b.dist(p)).min(c.dist(p));
-        if best.is_none_or(|(x, _)| d < x) {
-            best = Some((d, *f));
+/// `h`, a history over one record whose faces and edges came from the parts `c` numbers, carried
+/// to the records `offsets` took them from: each face origin through `face`, each edge origin to
+/// the record edge it was (`None` where an origin has no record behind it).
+fn carried(h: &History, c: &Canonical, offsets: &Offsets, operands: usize, face: impl Fn(usize, usize) -> FaceOrigin) -> Option<History> {
+    let back = |o: FaceOrigin| -> std::result::Result<FaceOrigin, ()> {
+        match o {
+            FaceOrigin::Face { face: f, .. } => c.faces.get(f).and_then(|p| owner(offsets, *p, 0)).map(|(k, i)| face(k, i)).ok_or(()),
+            other => Ok(other),
         }
-    }
-    best.map(|(_, f)| f as usize).ok_or_else(|| KernelError::Invalid("no face there".into()))
+    };
+    let faces = h
+        .faces
+        .iter()
+        .map(|f| Some(FaceProv { origins: f.origins.iter().map(|o| back(*o).ok()).collect::<Option<_>>()?, change: f.change }))
+        .collect::<Option<Vec<_>>>()?;
+    let edges = h
+        .edges
+        .iter()
+        .map(|e| {
+            let origins = e
+                .origins
+                .iter()
+                .map(|o| match o {
+                    EdgeOrigin::Edge { edge, .. } => {
+                        let (operand, edge) = c.edges.get(*edge).and_then(|p| owner(offsets, *p, 1))?;
+                        Some(EdgeOrigin::Edge { operand, edge })
+                    }
+                    EdgeOrigin::Meet { a, b } => Some(EdgeOrigin::Meet { a: a.try_map(back).ok()?, b: b.try_map(back).ok()? }),
+                })
+                .collect::<Option<_>>()?;
+            Some(EdgeProv { faces: e.faces.clone(), origins })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(History { operands, faces, edges })
 }
 
-/// Sew surface bodies along edges that coincide (within `tol`): one body, a solid when the
-/// faces close up. Faces are turned so that neighbours agree. The result's history is over
-/// `bodies`: each face the one it was sewn from, each edge the edges sewn into it.
+/// Sew surface bodies along edges that coincide (within `tol`; the bodies' working tolerance when
+/// not positive): one body, a solid when the faces close up. SMLib turns the faces so that
+/// neighbours agree (outward on a solid). The result's history is over `bodies`: each face the one
+/// it was sewn from, each edge the edges sewn into it.
 pub fn stitch(bodies: &[&Body], tol: f64) -> Result<Body> {
     if bodies.is_empty() {
-        return Err(KernelError::Invalid("nothing to stitch".into()));
+        return Err(invalid("nothing to stitch"));
     }
     for b in bodies {
         b.require_brep("stitch")?;
     }
     let size = bodies.iter().map(|b| b.size()).fold(0.0, f64::max);
     let tol = if tol.is_finite() && tol > 0.0 { tol } else { size * 1e-6 + 1e-6 };
-    guard("stitch", || {
-        let faces: Vec<mt::Face> = bodies.iter().flat_map(|b| b.solid.face_iter().cloned().collect::<Vec<_>>()).collect();
-        // Shared vertices by position, shared edges by their ends and middle.
-        let mut verts: Vec<mt::Vertex> = Vec::new();
-        let mut vmap: HashMap<mt::VertexID, mt::Vertex> = HashMap::new();
-        let mut canon = |v: &mt::Vertex, verts: &mut Vec<mt::Vertex>| -> mt::Vertex {
-            if let Some(c) = vmap.get(&v.id()) {
-                return c.clone();
-            }
-            let p = v.point();
-            let c = match verts.iter().find(|u| u.point().distance(p) <= tol) {
-                Some(u) => u.clone(),
-                None => {
-                    verts.push(v.clone());
-                    v.clone()
-                }
-            };
-            vmap.insert(v.id(), c.clone());
-            c
-        };
-        let mut edges: Vec<(mt::Edge, mt::Point3)> = Vec::new();
-        let mut out = Vec::with_capacity(faces.len());
-        let mut rec = Rebuild::default();
-        for f in &faces {
-            let mut wires = Vec::new();
-            for w in f.absolute_boundaries() {
-                let mut nw = Vec::new();
-                for e in w.edge_iter() {
-                    let abs = if e.orientation() { e.clone() } else { e.inverse() };
-                    let (a, b) = (canon(abs.front(), &mut verts), canon(abs.back(), &mut verts));
-                    let c = abs.curve();
-                    let (t0, t1) = c.range_tuple();
-                    let mid = c.subs(0.5 * (t0 + t1));
-                    let found = edges.iter().find_map(|(x, m)| {
-                        if m.distance(mid) > tol * 10.0 {
-                            return None;
-                        }
-                        if x.front().id() == a.id() && x.back().id() == b.id() {
-                            Some(x.clone())
-                        } else if x.front().id() == b.id() && x.back().id() == a.id() {
-                            Some(x.inverse())
-                        } else {
-                            None
-                        }
-                    });
-                    let ne = match found {
-                        Some(x) => x,
-                        None => {
-                            let x = mt::Edge::new_unchecked(&a, &b, c);
-                            edges.push((x.clone(), mid));
-                            x
-                        }
-                    };
-                    rec.piece(&ne, &abs);
-                    nw.push(if e.orientation() { ne } else { ne.inverse() });
-                }
-                wires.push(mt::Wire::from(nw));
-            }
-            let mut nf = mt::Face::new_unchecked(wires, f.surface());
-            if !f.orientation() {
-                nf.invert();
-            }
-            rec.whole(&nf, f);
-            out.push(nf);
-        }
-        // Neighbours run their shared edges opposite ways.
-        let mut uses: HashMap<mt::EdgeID, Vec<(usize, bool)>> = HashMap::new();
-        for (i, f) in out.iter().enumerate() {
-            for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-                uses.entry(e.id()).or_default().push((i, e.orientation()));
-            }
-        }
-        let mut flip: Vec<Option<bool>> = vec![None; out.len()];
-        for s in 0..out.len() {
-            if flip[s].is_some() {
-                continue;
-            }
-            flip[s] = Some(false);
-            let mut stack = vec![s];
-            while let Some(i) = stack.pop() {
-                let fl = flip[i].unwrap_or(false);
-                let Some(f) = out.get(i) else { continue };
-                for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-                    let d = e.orientation() != fl;
-                    for &(j, dj) in uses.get(&e.id()).into_iter().flatten() {
-                        if j != i && flip[j].is_none() {
-                            flip[j] = Some(dj == d);
-                            stack.push(j);
-                        }
-                    }
-                }
-            }
-        }
-        let out: Vec<mt::Face> = out.into_iter().zip(flip).map(|(f, fl)| if fl == Some(true) { f.inverse() } else { f }).collect();
-        let operands: Vec<&mt::Solid> = bodies.iter().map(|b| &*b.solid).collect();
-        body_of(out, &operands, &rec)
-    })
+    let records = bodies.iter().map(|b| crate::native::brep_record(b)).collect::<Result<Vec<_>>>()?;
+    let (parts, offsets) = Parts::joined(&records.iter().collect::<Vec<_>>())?;
+    let c = parts.canonical()?;
+    let (body, h) = imp::stitched(&c.brep, tol)?;
+    let h = h.and_then(|h| carried(&h, &c, &offsets, bodies.len(), |operand, face| FaceOrigin::Face { operand, face }));
+    Ok(body.with_checked_history(h, &record::counts(bodies)))
 }
-
-/// How a face moves along its normal: a plane slides, a circular cylinder changes radius.
-#[derive(Clone, Copy)]
-pub(crate) enum Offset {
-    Plane { n: Vec3 },
-    Cylinder { o: Vec3, axis: UnitVec3, r: f64, out: f64 },
-}
-
-impl Offset {
-    pub(crate) fn of(f: &mt::Face) -> Option<Offset> {
-        match crate::splitface::analytic_field(&f.oriented_surface())? {
-            crate::splitface::Analytic::Plane { n } => Some(Offset::Plane { n }),
-            crate::splitface::Analytic::Cylinder { o, axis, r, out } => Some(Offset::Cylinder { o, axis, r, out }),
-        }
-    }
-    pub(crate) fn map(&self, p: Vec3, d: f64) -> Vec3 {
-        match *self {
-            Offset::Plane { n } => p + n * d,
-            // Scaled about the axis (control points of a NURBS circle stay exact).
-            Offset::Cylinder { o, axis, r, out } => {
-                let v = p - o;
-                let radial = v - axis * v.dot(axis);
-                p + radial * (out * d / r)
-            }
-        }
-    }
-}
-
-fn map_pt(off: &Offset, p: mt::Point3, d: f64) -> mt::Point3 {
-    p3(off.map(from_p3(p), d))
-}
-
-/// A curve moved by an offset (control points mapped; exact for lines, and for circles square
-/// to a cylinder's axis or in a plane).
-pub(crate) fn map_curve(off: &Offset, c: &mt::Curve, d: f64) -> Result<mt::Curve> {
-    if let Some(moved) = map_control_points(c, |p| off.map(p, d)) {
-        return Ok(moved);
-    }
-    // Anything else: a cubic through moved samples.
-    let (t0, t1) = c.range_tuple();
-    let pts: Vec<Vec3> = (0..=32).map(|k| off.map(from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 32.0)), d)).collect();
-    Ok(mt::Curve::BSplineCurve(crate::build::interpolate_cubic(&pts).ok_or_else(|| KernelError::Failed("offset edge".into()))?))
-}
-
-/// A line, B-spline or NURBS curve with its control points mapped by `f` (the exact image of
-/// the curve under an affine `f`); `None` for a curve without control points (an
-/// intersection curve).
-pub(crate) fn map_control_points(c: &mt::Curve, f: impl Fn(Vec3) -> Vec3) -> Option<mt::Curve> {
-    let map = |p: mt::Point3| p3(f(from_p3(p)));
-    Some(match c {
-        mt::Curve::Line(l) => mt::Curve::Line(mt::Line(map(l.0), map(l.1))),
-        mt::Curve::BSplineCurve(b) => {
-            let pts: Vec<mt::Point3> = b.control_points().iter().map(|p| map(*p)).collect();
-            mt::Curve::BSplineCurve(mt::BSplineCurve::new(b.knot_vec().clone(), pts))
-        }
-        mt::Curve::NurbsCurve(n) => {
-            let nb = n.non_rationalized();
-            let pts: Vec<mt::Vector4> = nb
-                .control_points()
-                .iter()
-                .map(|h| {
-                    let w = h.w;
-                    let q = map(mt::Point3::new(h.x / w, h.y / w, h.z / w));
-                    mt::Vector4::new(q.x * w, q.y * w, q.z * w, w)
-                })
-                .collect();
-            mt::Curve::NurbsCurve(mt::NurbsCurve::new(mt::BSplineCurve::new(nb.knot_vec().clone(), pts)))
-        }
-        mt::Curve::IntersectionCurve(_) => return None,
-    })
-}
-
-/// A surface moved by an offset (control points mapped; exact for planes and NURBS cylinders).
-pub(crate) fn map_surface(off: &Offset, s: &mt::Surface, d: f64) -> Result<mt::Surface> {
-    Ok(match s {
-        mt::Surface::Plane(pl) => {
-            let (o, a, b) = (pl.origin(), pl.u_axis(), pl.v_axis());
-            let o2 = map_pt(off, o, d);
-            mt::Surface::Plane(mt::Plane::new(o2, o2 + a, o2 + b))
-        }
-        mt::Surface::BSplineSurface(b) => {
-            let rows: Vec<Vec<mt::Point3>> = b.control_points().iter().map(|r| r.iter().map(|p| map_pt(off, *p, d)).collect()).collect();
-            mt::Surface::BSplineSurface(mt::BSplineSurface::new((b.uknot_vec().clone(), b.vknot_vec().clone()), rows))
-        }
-        mt::Surface::NurbsSurface(n) => {
-            let nb = n.non_rationalized();
-            let rows: Vec<Vec<mt::Vector4>> = nb
-                .control_points()
-                .iter()
-                .map(|r| {
-                    r.iter()
-                        .map(|h| {
-                            let w = h.w;
-                            let q = map_pt(off, mt::Point3::new(h.x / w, h.y / w, h.z / w), d);
-                            mt::Vector4::new(q.x * w, q.y * w, q.z * w, w)
-                        })
-                        .collect()
-                })
-                .collect();
-            mt::Surface::NurbsSurface(mt::NurbsSurface::new(mt::BSplineSurface::new((nb.uknot_vec().clone(), nb.vknot_vec().clone()), rows)))
-        }
-        _ => return Err(KernelError::Invalid("not supported yet: thickening this kind of surface".into())),
-    })
-}
-
-/// How far Thicken's fitted faces may stray from the true offset (mm).
-const THICKEN_TOLERANCE: f64 = 0.01;
 
 /// A surface body thickened into a solid: offset along the faces' normals by `thickness`
-/// (negative: against them), or by half each way when `symmetric`. Planes and circular
-/// cylinders move exactly, other faces onto fitted surfaces (see `surface_offset`); a thickness
-/// that would fold a face over is refused. Neighbouring faces must meet smoothly (their offsets
-/// agree).
+/// (negative: against them), or by half each way when `symmetric`, by SMLib's thicken
+/// ([`crate::offset_backend::thicken`]).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
-    #[cfg(feature = "smlib")]
-    if crate::backend()? == crate::Backend::Smlib {
-        return crate::offset_backend::thicken(body, thickness, symmetric);
-    }
-    if !(thickness.is_finite() && thickness.abs() > 1e-9) {
-        return Err(KernelError::Invalid("thickness must be non-zero".into()));
-    }
-    let (d0, d1) = if symmetric { (-thickness / 2.0, thickness / 2.0) } else { (0.0, thickness) };
-    let (lo, hi) = (d0.min(d1), d0.max(d1));
-    let size = body.size();
-    let tol = size * 1e-7 + 1e-9;
-    guard("thicken", || {
-        let faces: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
-        if faces.is_empty() {
-            return Err(KernelError::Invalid("nothing to thicken".into()));
-        }
-        // Planes and circular cylinders move exactly; other faces onto surfaces fitted within the
-        // offset tolerance (Offset Surface's).
-        let offs: Vec<crate::surface_offset::FaceMover> =
-            faces.iter().map(|f| crate::surface_offset::FaceMover::new(f, &[lo, hi], THICKEN_TOLERANCE)).collect::<Result<_>>()?;
-        let near = |a: Vec3, b: Vec3| a.dist(b) <= tol * 1e3;
-        // Each side's copies of every vertex and edge. Faces that move one to the same place share
-        // the copy (they meet smoothly there); across a sharp edge each face has its own.
-        let mut vcopies: [HashMap<mt::VertexID, Vec<mt::Vertex>>; 2] = [HashMap::new(), HashMap::new()];
-        let mut ecopies: [HashMap<mt::EdgeID, Vec<mt::Edge>>; 2] = [HashMap::new(), HashMap::new()];
-        // Each face's copies, by side: (face, vertex) → vertex, (face, edge) → edge.
-        let mut vof: [HashMap<(usize, mt::VertexID), mt::Vertex>; 2] = [HashMap::new(), HashMap::new()];
-        let mut eof: [HashMap<(usize, mt::EdgeID), mt::Edge>; 2] = [HashMap::new(), HashMap::new()];
-        // The faces using each edge, in order.
-        let mut users: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
-        let mut abs_edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
-        for (fi, (f, off)) in faces.iter().zip(&offs).enumerate() {
-            for e in f.absolute_boundaries().iter().flat_map(|w| w.edge_iter()) {
-                let abs = if e.orientation() { e.clone() } else { e.inverse() };
-                let list = users.entry(abs.id()).or_default();
-                if !list.contains(&fi) {
-                    list.push(fi);
-                }
-                abs_edges.entry(abs.id()).or_insert_with(|| abs.clone());
-                for (side, d) in [lo, hi].into_iter().enumerate() {
-                    for v in [abs.front(), abs.back()] {
-                        if vof[side].contains_key(&(fi, v.id())) {
-                            continue;
-                        }
-                        let at = off.point(from_p3(v.point()), d)?;
-                        let list = vcopies[side].entry(v.id()).or_default();
-                        let copy = match list.iter().find(|c| near(from_p3(c.point()), at)) {
-                            Some(c) => c.clone(),
-                            None => {
-                                let c = mt::Vertex::new(p3(at));
-                                list.push(c.clone());
-                                c
-                            }
-                        };
-                        vof[side].insert((fi, v.id()), copy);
-                    }
-                    let (Some(a), Some(b)) = (vof[side].get(&(fi, abs.front().id())).cloned(), vof[side].get(&(fi, abs.back().id())).cloned()) else {
-                        continue;
-                    };
-                    let c = abs.curve();
-                    let (t0, t1) = c.range_tuple();
-                    let mid = off.point(from_p3(c.subs(0.5 * (t0 + t1))), d)?;
-                    let list = ecopies[side].entry(abs.id()).or_default();
-                    let shared = list.iter().find(|m| {
-                        m.front().id() == a.id() && m.back().id() == b.id() && {
-                            let mc = m.curve();
-                            let (s0, s1) = mc.range_tuple();
-                            near(from_p3(mc.subs(0.5 * (s0 + s1))), mid)
-                        }
-                    });
-                    let copy = match shared {
-                        Some(m) => m.clone(),
-                        None => {
-                            let m = mt::Edge::new_unchecked(&a, &b, off.curve(&c, d)?);
-                            list.push(m.clone());
-                            m
-                        }
-                    };
-                    eof[side].insert((fi, abs.id()), copy);
-                }
-            }
-        }
-        // Lines joining a vertex's copy on one side to its copy on the other, once each.
-        let mut risers: HashMap<(mt::VertexID, mt::VertexID), mt::Edge> = HashMap::new();
-        let mut riser = |a: &mt::Vertex, b: &mt::Vertex| -> mt::Edge {
-            risers.entry((a.id(), b.id())).or_insert_with(|| mt::Edge::new_unchecked(a, b, mt::Curve::Line(mt::Line(a.point(), b.point())))).clone()
-        };
-        let moved_face = |fi: usize, f: &mt::Face, off: &crate::surface_offset::FaceMover, side: usize, d: f64| -> Result<mt::Face> {
-            let wires: Vec<mt::Wire> = f
-                .absolute_boundaries()
-                .iter()
-                .map(|w| {
-                    w.edge_iter()
-                        .filter_map(|e| {
-                            let abs_id = if e.orientation() { e.id() } else { e.inverse().id() };
-                            let m = eof[side].get(&(fi, abs_id))?.clone();
-                            Some(if e.orientation() { m } else { m.inverse() })
-                        })
-                        .collect::<Vec<_>>()
-                        .into()
-                })
-                .collect();
-            let mut nf = mt::Face::new_unchecked(wires, off.surface(d)?);
-            if !f.orientation() {
-                nf.invert();
-            }
-            Ok(nf)
-        };
-        let mut out = Vec::new();
-        // History (one operand, the surface): a copy at no distance is the face itself, a copy
-        // further out its offset, a wall is made along the edge it stands on, a corner patch from
-        // the sharp edges that meet at its corner.
-        let operand = crate::record::Operand::new(body);
-        let edge_index = &operand.edges;
-        let mut history = Vec::new();
-        let copy = |i: usize, d: f64| {
-            if d == 0.0 {
-                crate::record::from_face(0, i, Change::Kept)
-            } else {
-                crate::record::generated(vec![FaceOrigin::Offset { operand: 0, face: i }])
-            }
-        };
-        let edge_origin = |id: &mt::EdgeID| -> Result<FaceOrigin> {
-            let edge = edge_index.get(id).copied().ok_or_else(|| KernelError::Failed("thicken: an edge outside the surface".into()))?;
-            Ok(FaceOrigin::Edge { operand: 0, edge })
-        };
-        for (i, (f, off)) in faces.iter().zip(&offs).enumerate() {
-            // The lower copy faces back, the upper one forward.
-            out.push(moved_face(i, f, off, 0, lo)?.inverse());
-            out.push(moved_face(i, f, off, 1, hi)?);
-            history.extend([copy(i, lo), copy(i, hi)]);
-            // Walls along free edges, outward across the edge.
-            for w in f.boundaries() {
-                for e in w.edge_iter() {
-                    let abs_id = if e.orientation() { e.id() } else { e.inverse().id() };
-                    if users.get(&abs_id).map_or(0, Vec::len) != 1 {
-                        continue;
-                    }
-                    let (Some(le), Some(he)) = (eof[0].get(&(i, abs_id)), eof[1].get(&(i, abs_id))) else { continue };
-                    let (le, he) = if e.orientation() { (le.clone(), he.clone()) } else { (le.inverse(), he.inverse()) };
-                    let (sa, sb) = (riser(le.front(), he.front()), riser(le.back(), he.back()));
-                    // A → B low, B → B' up, B' → A' high back, A' → A down.
-                    let wire: mt::Wire = vec![le.clone(), sb, he.inverse(), sa.inverse()].into();
-                    let ruled = mt::builder::homotopy(&le, &he);
-                    let surf = ruled.surface();
-                    // The wall's outward normal: across the edge, away from the face.
-                    let c = le.oriented_curve();
-                    let (t0, t1) = c.range_tuple();
-                    let tm = 0.5 * (t0 + t1);
-                    let p = c.subs(tm);
-                    let tangent = c.der(tm);
-                    let n =
-                        f.oriented_surface().search_nearest_parameter(p, None, 50).map(|(u, v)| f.oriented_surface().normal(u, v)).unwrap_or(tangent);
-                    let outward = tangent.cross(n);
-                    let sn = surf.search_nearest_parameter(p, None, 50).map(|(u, v)| surf.normal(u, v)).unwrap_or(outward);
-                    let wall = if sn.dot(outward) >= 0.0 {
-                        mt::Face::new_unchecked(vec![wire], surf)
-                    } else {
-                        let mut x = mt::Face::new_unchecked(vec![wire.inverse()], surf);
-                        x.invert();
-                        x
-                    };
-                    out.push(wall);
-                    history.push(crate::record::generated(vec![edge_origin(&abs_id)?]));
-                }
-            }
-        }
-        // Sharp edges: where the two faces' copies of an edge part on a side, a wall closes the
-        // gap; where they would cross (an inside corner on that side), refused.
-        let mut sharp_at: HashMap<mt::VertexID, Vec<mt::EdgeID>> = HashMap::new();
-        let mut gaps = Vec::new();
-        for (id, fs) in &users {
-            let [fa, fb] = fs.as_slice() else { continue };
-            let Some(abs) = abs_edges.get(id) else { continue };
-            for (side, d) in [lo, hi].into_iter().enumerate() {
-                let (Some(ea), Some(eb)) = (eof[side].get(&(*fa, *id)), eof[side].get(&(*fb, *id))) else { continue };
-                if ea.id() == eb.id() {
-                    continue;
-                }
-                // Which way the faces bend across the edge: each lies behind the other's normal
-                // (convex toward the normals) or in front of it.
-                let c = abs.curve();
-                let (t0, t1) = c.range_tuple();
-                let p = from_p3(c.subs(0.5 * (t0 + t1)));
-                let normal = |fi: usize| -> Option<Vec3> {
-                    let s = faces.get(fi)?.oriented_surface();
-                    let (u, v) = s.search_nearest_parameter(p3(p), None, 50)?;
-                    Some(from_p3(mt::Point3::new(0.0, 0.0, 0.0) + s.normal(u, v)))
-                };
-                let centre = |fi: usize| -> Option<Vec3> {
-                    let pts: Vec<Vec3> =
-                        faces.get(fi)?.absolute_boundaries().iter().flat_map(|w| w.vertex_iter().map(|v| from_p3(v.point()))).collect();
-                    Some(pts.iter().fold(Vec3::ZERO, |a, q| a + *q) * (1.0 / pts.len().max(1) as f64))
-                };
-                let (Some(na), Some(ca), Some(cb)) = (normal(*fa), centre(*fa), centre(*fb)) else {
-                    return Err(KernelError::Failed("thicken: the faces at a sharp edge".into()));
-                };
-                // Convex toward the normals: the other face falls away behind this one's normal.
-                let convex = na.dot(cb - p) < 0.0 && normal(*fb).is_some_and(|nb| nb.dot(ca - p) < 0.0);
-                if convex != (d > 0.0) {
-                    return Err(KernelError::Invalid(
-                        "not supported yet: thickening into an inside corner across a sharp edge (try the other side, or symmetric off)".into(),
-                    ));
-                }
-                gaps.push((*id, side, ea.clone(), eb.clone()));
-                for v in [abs.front(), abs.back()] {
-                    let list = sharp_at.entry(v.id()).or_default();
-                    if !list.contains(id) {
-                        list.push(*id);
-                    }
-                }
-            }
-        }
-        // Each gap wall runs along one face's copy of the edge and back along the other's, joined
-        // at the ends by lines between the two copies of each end vertex. It is turned so that it
-        // crosses the first face's copy the other way from that face.
-        let mut links: HashMap<(mt::VertexID, mt::VertexID), mt::Edge> = HashMap::new();
-        let mut link = |a: &mt::Vertex, b: &mt::Vertex| -> mt::Edge {
-            if let Some(e) = links.get(&(b.id(), a.id())) {
-                return e.inverse();
-            }
-            links.entry((a.id(), b.id())).or_insert_with(|| mt::Edge::new_unchecked(a, b, mt::Curve::Line(mt::Line(a.point(), b.point())))).clone()
-        };
-        let used_forward = |faces: &[mt::Face], e: &mt::Edge| -> Option<bool> {
-            faces
-                .iter()
-                .flat_map(|f| f.boundaries().into_iter().flat_map(|w| w.edge_iter().cloned().collect::<Vec<_>>()))
-                .find(|x| x.id() == e.id())
-                .map(|x| x.front().id() == e.front().id())
-        };
-        for (id, _side, ea, eb) in gaps {
-            let wire: mt::Wire = vec![ea.clone(), link(ea.back(), eb.back()), eb.inverse(), link(eb.front(), ea.front())].into();
-            let surf = mt::builder::homotopy(&ea, &eb).surface();
-            let wall = mt::Face::new_unchecked(vec![wire], surf);
-            let wall = if used_forward(&out, &ea).unwrap_or(false) { wall.inverse() } else { wall };
-            out.push(wall);
-            history.push(crate::record::generated(vec![edge_origin(&id)?]));
-        }
-        // Corners: whatever is left open is closed by plane patches (where three faces meet at a
-        // sharp corner, a triangle), each from the sharp edges meeting there.
-        let open = mt::Shell::from(out.clone()).extract_boundaries();
-        for w in open {
-            let patch = mt::builder::try_attach_plane(&[w.inverse()])
-                .map_err(|_| KernelError::Invalid("not supported yet: thickening a corner where the gap does not close flat".into()))?;
-            let mut origins = Vec::new();
-            for v in w.vertex_iter() {
-                for (vid, list) in &sharp_at {
-                    let at = vcopies.iter().flat_map(|m| m.get(vid).into_iter().flatten()).any(|c| c.id() == v.id());
-                    if at {
-                        for e in list {
-                            let o = edge_origin(e)?;
-                            if !origins.contains(&o) {
-                                origins.push(o);
-                            }
-                        }
-                    }
-                }
-            }
-            if origins.is_empty() {
-                return Err(KernelError::Failed("the thickened surface does not close".into()));
-            }
-            out.push(patch);
-            history.push(crate::record::generated(origins));
-        }
-        let shell = mt::Shell::from(out);
-        if shell.shell_condition() != mt::ShellCondition::Closed {
-            return Err(KernelError::Failed("the thickened surface does not close".into()));
-        }
-        // The edges copied at no distance are the surface's own edges, rebuilt.
-        let mut copies = HashMap::new();
-        for (side, d) in [lo, hi].into_iter().enumerate() {
-            if d != 0.0 {
-                continue;
-            }
-            for (id, list) in &ecopies[side] {
-                if let Some(&edge) = edge_index.get(id) {
-                    for c in list {
-                        copies.insert(c.id(), EdgeOrigin::Edge { operand: 0, edge });
-                    }
-                }
-            }
-        }
-        crate::record::attach(Body::new(mt::Solid::new_unchecked(vec![shell]))?, &[operand], Some(history), copies)
-    })
+    imp::thicken(body, thickness, symmetric)
 }
 
-/// A planar surface extended: the chosen straight edges (picked by points on them) move
-/// outward in the face's plane by `distance`, their neighbours lengthened to meet them. The
-/// result's history is over `[body]`: the face and each edge the one it was moved from.
+/// The faces `picked` of `body` (indices in its face order) offset one by one by SMLib, each onto
+/// its surface's offset by `distance` along its normal, and stitched where their offsets meet
+/// within `tolerance` (neighbours meeting smoothly stay joined; across a sharp edge they come
+/// apart): see [`crate::offset_surface`]. A distance of zero copies the faces. Each face is the
+/// offset of the one it came from.
+pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, tolerance: f64) -> Result<Body> {
+    let r = crate::native::brep_record(body)?;
+    if distance == 0.0 {
+        return taken(body, &r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
+    }
+    let moved = picked.iter().map(|f| imp::offset_face(&r, *f, distance)).collect::<Result<Vec<_>>>()?;
+    let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
+    let c = parts.canonical()?;
+    let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
+    let offset = |k: usize, _: usize| FaceOrigin::Offset { operand: 0, face: picked.get(k).copied().unwrap_or(0) };
+    let faces = h
+        .and_then(|h| carried(&h, &c, &offsets, 1, offset))
+        .map(|h| h.faces.into_iter().map(|f| FaceProv { change: Change::Generated, ..f }).collect::<Vec<_>>());
+    let rec = crate::native::brep_record(&result)?;
+    let h = faces.map(|faces| record_history(&rec, 1, faces, |_, between, faces| record::meeting(between, faces)));
+    Ok(result.with_checked_history(h, &record::counts(&[body])))
+}
+
+/// A planar surface extended: the chosen straight edges (picked by points on them) move outward in
+/// the face's plane by `distance`, their neighbours lengthened to meet them. The result's history
+/// is over `[body]`: the face is the body's face rebuilt, each edge the one it was moved from.
 pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     body.require_brep("extend")?;
     if !(distance.is_finite() && distance > 0.0) {
-        return Err(KernelError::Invalid("the extension distance must be positive".into()));
+        return Err(invalid("the extension distance must be positive"));
     }
-    let faces: Vec<mt::Face> = body.solid.face_iter().cloned().collect();
-    let [face] = faces.as_slice() else { return Err(KernelError::Invalid("not supported yet: extending a surface of more than one face".into())) };
-    let Some(crate::splitface::Analytic::Plane { n }) = crate::splitface::analytic_field(&face.oriented_surface()) else {
-        return Err(KernelError::Invalid("not supported yet: extending a surface that is not planar".into()));
+    let r = crate::native::brep_record(body)?;
+    let [face] = r.faces.as_slice() else { return Err(invalid("not supported yet: extending a surface of more than one face")) };
+    let (origin, du, dv) = match face.surface {
+        b::Surface::Plane { origin, u_axis, v_axis } => (v3(origin), v3(u_axis), v3(v_axis)),
+        b::Surface::PlaneThrough { origin, u_point, v_point } => (v3(origin), v3(u_point) - v3(origin), v3(v_point) - v3(origin)),
+        _ => return Err(invalid("not supported yet: extending a surface that is not planar")),
     };
-    let chosen: Vec<mt::EdgeID> = at
+    // The outer loop runs counter-clockwise about the surface's natural normal.
+    let n = du.cross(dv).normalized().ok_or_else(|| invalid("a planar face with no normal"))?;
+    let [b::Loop::Edges { edges: rim }] = face.loops.as_slice() else { return Err(invalid("not supported yet: extending a surface with holes")) };
+    let chosen: Vec<usize> = at.iter().map(|p| edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))).collect::<Result<_>>()?;
+    let m = rim.len();
+    // Each edge as a line (point, direction along the loop), moved outward when chosen.
+    let mut lines = Vec::with_capacity(m);
+    for u in rim {
+        let e = r.edges.get(u.edge as usize).ok_or_else(|| invalid("an edge reference"))?;
+        let b::Curve::Line { start, end } = e.curve else { return Err(invalid("not supported yet: extending a surface with curved edges")) };
+        let at_t = |t: f64| v3(start) + (v3(end) - v3(start)) * t;
+        let (a, z) = if u.forward { (at_t(e.interval[0]), at_t(e.interval[1])) } else { (at_t(e.interval[1]), at_t(e.interval[0])) };
+        let d = (z - a).normalized().ok_or_else(|| invalid("a zero-length edge"))?;
+        // Outward: right of the edge seen along the normal (the face is on its left).
+        let shift = if chosen.contains(&(u.edge as usize)) { distance } else { 0.0 };
+        lines.push((a + d.cross(n) * shift, d));
+    }
+    // Corners: where consecutive lines meet.
+    let meet = |(p, d): (Vec3, Vec3), (q, e): (Vec3, Vec3)| -> Option<Vec3> {
+        let c = d.cross(e);
+        let cc = c.dot(c);
+        (cc >= 1e-24).then(|| p + d * ((q - p).cross(e).dot(c) / cc))
+    };
+    let mut parts = Parts { tolerance: r.tolerance, ..Parts::default() };
+    for i in 0..m {
+        let (Some(prev), Some(cur)) = (lines.get((i + m - 1) % m), lines.get(i)) else { continue };
+        parts.vertices.push(b::Vertex { point: a3(meet(*prev, *cur).unwrap_or(cur.0)), tolerance: r.tolerance });
+    }
+    for i in 0..m {
+        let (Some(a), Some(z)) = (parts.vertices.get(i), parts.vertices.get((i + 1) % m)) else { continue };
+        let curve = b::Curve::Line { start: a.point, end: z.point };
+        parts.edges.push(b::Edge {
+            curve,
+            interval: [0.0, 1.0],
+            vertices: [index(i)?, index((i + 1) % m)?],
+            tolerance: r.tolerance,
+            uses: Vec::new(),
+        });
+    }
+    let uses = parts
+        .edges
         .iter()
-        .map(|p| edge_near(body, *p).map(|e| e.id()).ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}"))))
-        .collect::<Result<_>>()?;
-    guard("extend", || {
-        let bounds = face.boundaries();
-        let [outer] = bounds.as_slice() else { return Err(KernelError::Invalid("not supported yet: extending a surface with holes".into())) };
-        let edges: Vec<mt::Edge> = outer.edge_iter().cloned().collect();
-        let m = edges.len();
-        // Each edge as a line (point, direction) moved outward when chosen.
-        let mut lines = Vec::with_capacity(m);
-        for e in &edges {
-            let (a, b) = (from_p3(e.front().point()), from_p3(e.back().point()));
-            if !matches!(e.curve(), mt::Curve::Line(_)) {
-                return Err(KernelError::Invalid("not supported yet: extending a surface with curved edges".into()));
-            }
-            let d = (b - a).normalized().ok_or_else(|| KernelError::Invalid("a zero-length edge".into()))?;
-            // Outward: right of the edge seen along the normal (the face is on its left).
-            let out = d.cross(n);
-            let shift = if chosen.contains(&e.id()) || chosen.contains(&e.inverse().id()) { distance } else { 0.0 };
-            lines.push((a + out * shift, d));
+        .enumerate()
+        .map(|(i, e)| {
+            Ok(b::pcurve::EdgeUse { edge: index(i)?, curve: &e.curve, interval: e.interval, forward: true, tolerance: e.tolerance, given: None })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
+    let pcurves = b::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
+    let edges = pcurves
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(i, pcurve)| Ok(b::OrientedEdge { edge: index(i)?, forward: true, pcurve }))
+        .collect::<Result<Vec<_>>>()?;
+    let loops = vec![b::Loop::Edges { edges }];
+    let domain = uv_box(&loops).ok_or_else(|| invalid("the extended face has no area"))?;
+    let forward = face_sides(&r).first().copied().unwrap_or(true);
+    parts.faces.push((b::Face { surface, domain, loops }, forward));
+    let c = parts.canonical()?;
+    let h = record_history(&c.brep, 1, vec![record::from_face(0, 0, Change::Modified)], |e, _, _| {
+        c.edges.get(e).and_then(|p| rim.get(*p)).map(|u| EdgeOrigin::Edge { operand: 0, edge: u.edge as usize }).into_iter().collect()
+    });
+    let (result, same) = record_body(&c.brep)?;
+    with_history(result, same, h, &record::counts(&[body]))
+}
+
+// ---- Sheets swept from sketch curves ------------------------------------------------------
+
+/// Most curve chains one surface sweep takes.
+const MAX_CHAINS: usize = 10_000;
+
+/// A sketch segment with its number across all the chains (chain after chain).
+type Numbered = (Seg2, usize);
+
+/// The chains' segments, numbered on across the chains.
+fn numbered(chains: &[Vec<Seg2>]) -> Vec<Vec<Numbered>> {
+    let mut next = 0;
+    chains
+        .iter()
+        .map(|c| {
+            c.iter()
+                .map(|s| {
+                    next += 1;
+                    (*s, next - 1)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn check_chains(chains: &[Vec<Seg2>], what: &str) -> Result<()> {
+    if chains.is_empty() || chains.len() > MAX_CHAINS {
+        return Err(invalid(format!("pick the curves or profiles to {what}")));
+    }
+    for c in chains {
+        if c.is_empty() || c.len() > 4096 {
+            return Err(invalid("a curve chain has no curves, or too many"));
         }
-        // Corners: where consecutive lines meet.
-        let meet = |(p, d): (Vec3, Vec3), (q, e): (Vec3, Vec3)| -> Option<Vec3> {
-            let w = q - p;
-            let c = d.cross(e);
-            let cc = c.dot(c);
-            if cc < 1e-24 {
-                return None;
-            }
-            Some(p + d * (w.cross(e).dot(c) / cc))
-        };
-        let mut corners = Vec::with_capacity(m);
-        for i in 0..m {
-            let (Some(prev), Some(cur)) = (lines.get((i + m - 1) % m), lines.get(i)) else { continue };
-            let p = meet(*prev, *cur).unwrap_or(cur.0);
-            corners.push(mt::Vertex::new(p3(p)));
+        if c.iter().any(|s| !(s.start().is_finite() && s.end().is_finite())) {
+            return Err(invalid("a curve chain is not finite"));
         }
-        let mut rec = Rebuild::default();
-        let wire: mt::Wire = (0..m)
-            .filter_map(|i| {
-                let (a, b, old) = (corners.get(i)?, corners.get((i + 1) % m)?, edges.get(i)?);
-                let e = mt::Edge::new_unchecked(a, b, mt::Curve::Line(mt::Line(a.point(), b.point())));
-                rec.piece(&e, old);
-                Some(e)
+        if c.windows(2).any(|w| w[0].end().dist(w[1].start()) > 1e-6) {
+            return Err(invalid("a curve chain has a gap: its curves must run end to end"));
+        }
+    }
+    Ok(())
+}
+
+/// The faces of the sheet `r` swept from `pieces` that start on `start`: each face comes from the
+/// pieces its edges lying in `start` run along (the edges' middles on the pieces' curves), none
+/// where no edge does.
+fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
+    let mut from: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); r.faces.len()];
+    for e in &r.edges {
+        let Some(mid) = CurveEval::new(&e.curve).ok().and_then(|c| c.point(0.5 * (e.interval[0] + e.interval[1]))) else { continue };
+        let near = 4.0 * e.tolerance.max(r.tolerance);
+        if start.height(mid).abs() > near {
+            continue;
+        }
+        let o = mid - start.origin;
+        let q = Vec2::new(o.dot(start.x), o.dot(start.y));
+        for (s, number) in pieces {
+            if s.point_at(s.closest_param(q)).dist(q) <= near {
+                for u in &e.uses {
+                    if let Some(set) = from.get_mut(u.face as usize) {
+                        set.insert(*number);
+                    }
+                }
+            }
+        }
+    }
+    from.iter().map(|set| if set.is_empty() { record::generated(Vec::new()) } else { record::profile(set.iter()) }).collect()
+}
+
+/// A sheet of SMLib's pieces (each a record with its faces' history), joined into one record and,
+/// with `stitch`, sewn where pieces share edges (at ten times the pieces' tolerance).
+fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
+    let records: Vec<&Brep> = pieces.iter().map(|(r, _)| r).collect();
+    let (parts, offsets) = Parts::joined(&records)?;
+    let c = parts.canonical()?;
+    let prov = |part: usize| owner(&offsets, part, 0).and_then(|(k, i)| pieces.get(k)?.1.get(i).cloned());
+    let faces: Option<Vec<FaceProv>> = c.faces.iter().map(|p| prov(*p)).collect();
+    if !stitch {
+        let (body, same) = record_body(&c.brep)?;
+        return record::attach(body, &[], faces.filter(|_| same), Default::default());
+    }
+    let (body, h) = imp::stitched(&c.brep, c.brep.tolerance * 10.0)?;
+    // A stitched face keeps the tag of the joined record's face it was.
+    let sewn = h.zip(faces).and_then(|(h, faces)| {
+        h.faces
+            .iter()
+            .map(|f| match f.origins.as_slice() {
+                [FaceOrigin::Face { face, .. }] => faces.get(*face).cloned(),
+                _ => None,
             })
-            .collect::<Vec<_>>()
-            .into();
-        let mut f = mt::builder::try_attach_plane(&[wire]).map_err(|e| KernelError::Failed(format!("extend: {e}")))?;
-        if f.oriented_surface().normal(0.0, 0.0).dot(crate::body::v3(n)) < 0.0 {
-            f = f.inverse();
+            .collect::<Option<Vec<_>>>()
+    });
+    record::attach(body, &[], sewn, Default::default())
+}
+
+/// A surface extruded from chains of sketch segments on `plane`: each chain (open, or closed such
+/// as a profile's boundary) moved straight from `start` to `end` along the plane normal (offsets in
+/// mm). The walls it sweeps form one surface body with no caps. Its history has no operands:
+/// every face is new, from the segments it was swept from.
+pub fn extrude_sheet(plane: &Plane, chains: &[Vec<Seg2>], start: f64, end: f64) -> Result<Body> {
+    if !crate::build::frame_ok(plane) {
+        return Err(invalid("extrude frame is not finite and orthonormal"));
+    }
+    if !(start.is_finite() && end.is_finite() && start.abs() < 1e7 && end.abs() < 1e7) {
+        return Err(invalid("extrude distance is not finite"));
+    }
+    let (lo, hi) = if end >= start { (start, end) } else { (end, start) };
+    if hi - lo < 1e-6 {
+        return Err(invalid("extrude distance is zero"));
+    }
+    check_chains(chains, "extrude")?;
+    let base = plane.offset(lo);
+    let n = plane.normal().normalized().ok_or_else(|| invalid("extrude frame has no normal"))?;
+    let pieces = numbered(chains)
+        .into_iter()
+        .map(|chain| {
+            let r = imp::extruded(&base, &chain, n, hi - lo)?;
+            let h = swept_from(&r, &base, &chain);
+            Ok((r, h))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    sheet_of(pieces, false)
+}
+
+/// A surface revolved from chains of sketch segments on `plane` about the sketch line through
+/// `axis_origin` along `axis_dir`: each chain turned from `start` through `sweep` radians (a full
+/// turn at most), positive angles carrying it toward the sketch normal. A chain end on the axis
+/// stays put there (a cone's apex, a sphere's pole). The walls form one surface body with no caps,
+/// or a solid where they close (a full turn of a closed curve, or of a curve from the axis back to
+/// it); its history has no operands: every face is new.
+pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
+    use std::f64::consts::TAU;
+    if !crate::build::frame_ok(plane) || !axis_origin.is_finite() || !axis_dir.is_finite() {
+        return Err(invalid("revolve frame is not finite and orthonormal"));
+    }
+    if !(start.is_finite() && sweep.is_finite() && start.abs() <= TAU && sweep.abs() <= TAU + 1e-9) {
+        return Err(invalid("revolve angles must be finite, a full turn at most"));
+    }
+    if sweep.abs() < 1e-6 {
+        return Err(invalid("revolve angle is zero"));
+    }
+    check_chains(chains, "revolve")?;
+    let d = axis_dir.normalized().ok_or_else(|| invalid("revolve axis has no direction"))?;
+    let side = |p: Vec2| d.cross(p - axis_origin);
+    let on_axis = |p: Vec2| side(p).abs() < 1e-7;
+    let (origin, n) = (plane.to_world(axis_origin), plane.normal());
+    let axis = plane.dir_to_world(d).normalized().ok_or_else(|| invalid("revolve frame has no axis"))?;
+    let mut pieces = Vec::with_capacity(chains.len());
+    for chain in numbered(chains) {
+        // On one side of the axis; the point farthest from it fixes the turning sense.
+        let pts: Vec<Vec2> = chain.iter().flat_map(|(s, _)| s.polyline(1e-3)).collect();
+        if pts.iter().any(|p| side(*p) < -1e-7) && pts.iter().any(|p| side(*p) > 1e-7) {
+            return Err(invalid("the curves cross the revolve axis"));
         }
-        rec.face(&f, face);
-        Ok(rebuilt_body(surface_body(vec![f]), &[&body.solid], &rec))
-    })
+        let far = pts.iter().copied().max_by(|a, c| side(*a).abs().total_cmp(&side(*c).abs())).filter(|p| !on_axis(*p));
+        let Some(far) = far else { return Err(invalid("the curves lie on the revolve axis")) };
+        let a = if axis.cross(plane.to_world(far) - origin).dot(n) < 0.0 { axis * -1.0 } else { axis };
+        let (Some((first, _)), Some((last, _))) = (chain.first(), chain.last()) else { return Err(invalid("an empty curve chain")) };
+        if first.start().dist(last.end()) <= 1e-6 && pts.iter().any(|p| on_axis(*p)) {
+            return Err(invalid("not supported yet: a closed curve touching the revolve axis"));
+        }
+        // The chain starts `start` round: its sketch frame turned there.
+        let turn = |v: Vec3| crate::build::rotate_about(v, Vec3::ZERO, a, start);
+        let turned = Plane { origin: crate::build::rotate_about(plane.origin, origin, a, start), x: turn(plane.x), y: turn(plane.y) };
+        let (k, angle) = if sweep < 0.0 { (a * -1.0, -sweep) } else { (a, sweep) };
+        let r = imp::revolved(&turned, &chain, origin, k, angle.min(TAU))?;
+        let h = swept_from(&r, &turned, &chain);
+        pieces.push((r, h));
+    }
+    sheet_of(pieces, false)
+}
+
+/// A surface swept from chains of sketch segments on `plane` along a path that starts near them,
+/// turning with it (SMLib's curve sweep: along lines an extrusion, round arcs about one axis a
+/// revolution, exactly). A path whose direction jumps at a joint (a corner) is not supported yet.
+/// The walls form one surface body with no caps; its history has no operands: every face is new.
+pub fn sweep_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg]) -> Result<Body> {
+    sweep_sheet_with(plane, chains, path, &crate::SweepControl::default())
+}
+
+/// [`sweep_sheet`] with sweep options: orientation, twist, end scale and guide rails place the
+/// chains at stations along the path by [`crate::sweep_path`]'s laws (each section the chain's
+/// exact image) for SMLib to skin the walls through.
+pub fn sweep_sheet_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+    ctl.check()?;
+    if !crate::build::frame_ok(plane) {
+        return Err(invalid("sweep frame is not finite and orthonormal"));
+    }
+    check_chains(chains, "sweep")?;
+    if path.is_empty() || path.len() > 1000 {
+        return Err(invalid("the path needs 1…1000 segments"));
+    }
+    let ends: Vec<(Vec3, Vec3)> =
+        path.iter().map(crate::PathSeg::tangents).collect::<Option<_>>().ok_or_else(|| invalid("a path segment has no direction"))?;
+    if ends.windows(2).any(|w| w[0].1.dot(w[1].0) < (1e-3f64).cos()) {
+        return Err(imp::refuse("surface sweep along a path with corners"));
+    }
+    let pieces = numbered(chains)
+        .into_iter()
+        .map(|chain| {
+            let r = if ctl.is_default() { imp::swept(plane, &chain, path)? } else { imp::swept_stations(plane, &chain, path, ctl)? };
+            let h = swept_from(&r, plane, &chain);
+            Ok((r, h))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    sheet_of(pieces, false)
+}
+
+/// A surface swept from chains of sketch segments on `plane` along a 3D polyline path: along the
+/// lines between its points, as [`sweep_sheet`] sweeps them.
+pub fn sweep_sheet_points(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3]) -> Result<Body> {
+    sweep_sheet_points_with(plane, chains, path, &crate::SweepControl::default())
+}
+
+/// [`sweep_sheet_points`] with sweep options (see [`sweep_sheet_with`]).
+pub fn sweep_sheet_points_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3], ctl: &crate::SweepControl) -> Result<Body> {
+    let pts = crate::sweep_path::clean(path)?;
+    let segs: Vec<crate::PathSeg> = pts.windows(2).map(|w| crate::PathSeg::Line { a: w[0], b: w[1] }).collect();
+    sweep_sheet_with(plane, chains, &segs, ctl)
+}
+
+/// A surface lofted through two or more sections, each a chain of sketch segments on its plane,
+/// all open or all closed: ruled between two sections, smooth through three or more. Closed
+/// sections are matched as the solid loft matches them; open ones are split to the same number of
+/// segments (longest first) and each turned to run the way the one before it does. Walls only, no
+/// caps; the history has no operands: every face is new.
+pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
+    loft_sheet_with_rails(sections, &[], crate::RailFit::Scale)
+}
+
+/// [`loft_sheet`] following one or two guide rails (polylines from the first section to the last,
+/// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
+/// sections between. Without rails, the plain sheet loft.
+///
+/// The k-th segments of every section make a column: SMLib lofts each column on its own (one wall
+/// from the column's segments), and the columns are stitched along the edges they share.
+pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    if sections.len() < 2 || sections.len() > 50 {
+        return Err(invalid("a loft needs 2…50 sections"));
+    }
+    let closed: Vec<bool> = sections
+        .iter()
+        .map(|(_, c)| match (c.first(), c.last()) {
+            (Some(f), Some(l)) if c.len() <= 4096 => Ok(l.end().dist(f.start()) <= 1e-6),
+            _ => Err(invalid("a loft section has no curves, or too many")),
+        })
+        .collect::<Result<_>>()?;
+    let all_closed = closed.iter().all(|c| *c);
+    if !all_closed && closed.iter().any(|c| *c) {
+        return Err(invalid("the loft sections must be all open or all closed"));
+    }
+    for (plane, chain) in sections {
+        if !crate::build::frame_ok(plane) {
+            return Err(invalid("a loft section's frame is not finite and orthonormal"));
+        }
+        check_chains(std::slice::from_ref(chain), "loft")?;
+    }
+    let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
+    let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
+    let count = matched.first().map_or(0, |s| s.curves.len());
+    let pieces = (0..count)
+        .map(|k| {
+            let column: Vec<&solidcraft_geom::bspline::CurveN<4>> = lofted.iter().filter_map(|s| s.get(k)).collect();
+            let r = imp::lofted(&column)?;
+            let numbers: BTreeSet<usize> = matched.iter().filter_map(|s| s.numbers.get(k)).flatten().copied().collect();
+            let h = vec![record::profile(numbers.iter()); r.faces.len()];
+            Ok((r, h))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    sheet_of(pieces, true)
+}
+
+/// Closed sections matched as the solid loft matches them ([`crate::build::loft_numbered_loops`]),
+/// in loft order.
+fn closed_sections(sections: &[(Plane, Vec<Seg2>)]) -> Result<Vec<crate::loft_rails::Section>> {
+    let loops: Vec<(Plane, solidcraft_geom::Loop2)> = sections.iter().map(|(p, c)| (*p, solidcraft_geom::Loop2 { segs: c.clone() })).collect();
+    let reversed = crate::build::loft_reversed(&loops)?;
+    let numbered = loops.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(loops.iter().map(|(_, l)| l))).collect::<Vec<_>>();
+    crate::build::loft_numbered_loops(&numbered, reversed)?
+        .iter()
+        .map(|(plane, l)| crate::loft_rails::Section::of(plane, &l.lp.segs, (0..l.lp.segs.len()).map(|i| l.numbers(i).to_vec()).collect()))
+        .collect()
+}
+
+/// Open sections split to the same number of segments (the longest in half until the counts
+/// match), each turned to run the way the one before it does.
+fn open_sections(sections: &[(Plane, Vec<Seg2>)]) -> Result<Vec<crate::loft_rails::Section>> {
+    let n = sections.iter().map(|(_, c)| c.len()).max().unwrap_or(0);
+    let mut out = Vec::with_capacity(sections.len());
+    let mut prev: Option<(Vec3, Vec3)> = None;
+    let mut offset = 0;
+    for (plane, chain) in sections {
+        // Each piece with the segment it is (part of).
+        let mut segs: Vec<(Seg2, usize)> = chain.iter().enumerate().map(|(i, s)| (*s, offset + i)).collect();
+        offset += chain.len();
+        while segs.len() < n {
+            let Some(i) = segs.iter().enumerate().max_by(|a, c| a.1.0.length().total_cmp(&c.1.0.length())).map(|(i, _)| i) else { break };
+            let Some(&(s, k)) = segs.get(i) else { break };
+            let (a, c) = s.split_half();
+            segs.splice(i..=i, [(a, k), (c, k)]);
+        }
+        let ends = |c: &[(Seg2, usize)]| c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.0.start()), plane.to_world(l.0.end())));
+        if let (Some((ps, pe)), Some((s, e))) = (prev, ends(&segs))
+            && s.dist(ps) + e.dist(pe) > s.dist(pe) + e.dist(ps)
+        {
+            segs = segs.iter().rev().map(|(s, k)| (s.reversed(), *k)).collect();
+        }
+        prev = ends(&segs);
+        let pieces: Vec<Seg2> = segs.iter().map(|(s, _)| *s).collect();
+        out.push(crate::loft_rails::Section::of(plane, &pieces, segs.iter().map(|(_, k)| vec![*k]).collect())?);
+    }
+    Ok(out)
+}
+
+/// SMLib's side of this module.
+#[cfg(feature = "smlib")]
+mod imp {
+    use solidcraft_smlib::sweeps::{Affine, Curve, Ends, SweepFrame};
+    use solidcraft_smlib::{Brep as SmBrep, CheckLevel};
+
+    use super::*;
+
+    fn sm(what: &'static str) -> impl Fn(solidcraft_smlib::Error) -> KernelError {
+        move |e| failed(format!("SMLib {what}: {e}"))
+    }
+
+    pub(super) fn refuse(what: &str) -> KernelError {
+        crate::smlib_sweeps::refuse(what)
+    }
+
+    /// A result SMLib's own check accepts, as its record.
+    fn checked(r: &SmBrep, what: &'static str) -> Result<Brep> {
+        let check = r.check(CheckLevel::All).map_err(sm(what))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib {what}: SMLib's check refuses the result: {check}")));
+        }
+        r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
+    }
+
+    pub(super) fn record_body(r: &Brep) -> Result<(Body, bool)> {
+        let (brep, order) = crate::native::smlib_record_ordered(r)?;
+        let (body, kept) = crate::native::body_from_smlib_ordered(&brep)?;
+        Ok((body, order.is_some() && kept.is_some()))
+    }
+
+    /// The record `r` sewn by SMLib at `tol` (`smlib_stitch`), with its history over `[r]` (faces
+    /// and edges by their index in `r`); none where the orders cannot be matched.
+    pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
+        let (brep, order) = crate::native::smlib_record_ordered(r)?;
+        let tagged = brep.tagged(0).map_err(sm("stitch"))?;
+        let (sewn, _closed) = tagged.stitch(tol).map_err(sm("stitch"))?;
+        checked(&sewn, "stitch")?;
+        let (body, kept) = crate::native::body_from_smlib_ordered(&sewn)?;
+        let h = match (order, kept) {
+            (Some(o), Some(k)) => sewn.history().ok().and_then(|raw| raw.history(&[o], &k).ok()),
+            _ => None,
+        };
+        Ok((body, h))
+    }
+
+    pub(super) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
+        crate::offset_backend::thicken(body, thickness, symmetric)
+    }
+
+    /// The face `f` of `r` alone, offset by `d` along its normal (`smlib_offset_sheet`).
+    pub(super) fn offset_face(r: &Brep, f: usize, d: f64) -> Result<Brep> {
+        let one = Parts::of(r, &[(f, false)])?.canonical()?;
+        let sheet = SmBrep::from_record(&one.brep, true).map_err(sm("offset"))?;
+        checked(&sheet.offset_sheet(d).map_err(sm("offset"))?, "offset")
+    }
+
+    /// A sketch segment on `plane` as SMLib's curve: an arc as SMLib's own circle, anything else
+    /// as its exact record curve.
+    fn curve(plane: &Plane, s: &Seg2) -> Result<Curve> {
+        if let Seg2::Arc { center, radius, start, sweep } = *s {
+            let n = plane.normal().normalized().ok_or_else(|| invalid("profile plane"))?;
+            // Clockwise in the plane is counter-clockwise about the other normal.
+            let (axis, a0) = if sweep >= 0.0 { (n, start) } else { (n * -1.0, -start) };
+            let turn = sweep.abs().min(std::f64::consts::TAU);
+            return Ok(Curve::Arc { center: a3(plane.to_world(center)), axis: a3(axis), reference: a3(plane.x), radius, start: a0, end: a0 + turn });
+        }
+        record_curve(&crate::freeform::segment(plane, s)?.0)
+    }
+
+    /// A record line or (rational) B-spline as SMLib's curve.
+    fn record_curve(c: &b::Curve) -> Result<Curve> {
+        let degree = |knots: &[f64], n: usize| knots.len().checked_sub(n + 1).ok_or_else(|| invalid("spline degree"));
+        Ok(match c {
+            b::Curve::Line { start, end } => Curve::Line { start: *start, end: *end },
+            b::Curve::Spline { knots, points } => Curve::Nurbs {
+                degree: degree(knots, points.len())?,
+                points: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
+                knots: knots.clone(),
+            },
+            b::Curve::RationalSpline { knots, homogeneous } => Curve::Nurbs {
+                degree: degree(knots, homogeneous.len())?,
+                points: homogeneous.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect(),
+                knots: knots.clone(),
+            },
+            _ => return Err(invalid("a profile curve SMLib's sweeps do not take")),
+        })
+    }
+
+    fn curves(plane: &Plane, chain: &[Numbered]) -> Result<Vec<Curve>> {
+        chain.iter().map(|(s, _)| curve(plane, s)).collect()
+    }
+
+    pub(super) fn extruded(base: &Plane, chain: &[Numbered], n: Vec3, distance: f64) -> Result<Brep> {
+        checked(&SmBrep::extrude(&curves(base, chain)?, a3(n), distance, 0.0, false).map_err(sm("surface extrude"))?, "surface extrude")
+    }
+
+    pub(super) fn revolved(plane: &Plane, chain: &[Numbered], origin: Vec3, axis: Vec3, angle: f64) -> Result<Brep> {
+        checked(&SmBrep::revolve(&curves(plane, chain)?, a3(origin), a3(axis), angle, false).map_err(sm("surface revolve"))?, "surface revolve")
+    }
+
+    /// A path segment as SMLib's curve.
+    fn path_curve(s: &crate::PathSeg) -> Result<Curve> {
+        Ok(match *s {
+            crate::PathSeg::Line { a, b } => Curve::Line { start: a3(a), end: a3(b) },
+            crate::PathSeg::Arc { a, center, axis, angle } => {
+                let k = axis.normalized().ok_or_else(|| invalid("a path arc has no axis"))?;
+                let (k, turn) = if angle < 0.0 { (k * -1.0, -angle) } else { (k, angle) };
+                let r = a - center;
+                let reference = r.normalized().ok_or_else(|| invalid("a path arc has no radius"))?;
+                Curve::Arc { center: a3(center), axis: a3(k), reference: a3(reference), radius: r.len(), start: 0.0, end: turn }
+            }
+            crate::PathSeg::Curve { plane, seg } => curve(&plane, &seg)?,
+            crate::PathSeg::Cubic { p } => Curve::Nurbs {
+                degree: 3,
+                points: p.iter().map(|q| [q.x, q.y, q.z, 1.0]).collect(),
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            },
+        })
+    }
+
+    pub(super) fn swept(plane: &Plane, chain: &[Numbered], path: &[crate::PathSeg]) -> Result<Brep> {
+        let route = path.iter().map(path_curve).collect::<Result<Vec<_>>>()?;
+        checked(&SmBrep::sweep(&curves(plane, chain)?, &route, SweepFrame::Follow, false).map_err(sm("surface sweep"))?, "surface sweep")
+    }
+
+    /// Fewest and most stations of a sweep that twists, scales or follows rails.
+    const MIN_STATIONS: usize = 16;
+    const MAX_STATIONS: usize = 2048;
+
+    /// The chain carried through stations along `path` placed by [`crate::sweep_path`]'s laws for
+    /// `ctl` (a station per degree the path and the twist turn), SMLib skinning its walls through
+    /// the sections with open ends (`smlib_sweep_stations`).
+    pub(super) fn swept_stations(plane: &Plane, chain: &[Numbered], path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Brep> {
+        let turn: f64 = path.iter().map(turn_of).sum::<f64>() + ctl.twist.abs();
+        let rail_points = ctl.rails.iter().map(Vec::len).max().unwrap_or(0);
+        let n = ((turn / 1f64.to_radians()).ceil() as usize).max(rail_points.saturating_sub(1)).clamp(MIN_STATIONS, MAX_STATIONS);
+        let (pts, tangents) = samples(path, n)?;
+        let st = crate::sweep_path::controlled_stations(plane, &pts, &tangents, &[], ctl)?;
+        let s0 = st.first().map(|s| s.at).ok_or_else(|| invalid("sweep path"))?;
+        let maps: Vec<Affine> = st
+            .iter()
+            .map(|s| {
+                let [a, b, c] = s.m;
+                Affine { m: [a3(a), a3(b), a3(c)], t: a3(s.at - s.apply(s0)) }
+            })
+            .collect();
+        checked(&SmBrep::sweep_stations(&curves(plane, chain)?, &maps, Ends::Open).map_err(sm("surface sweep"))?, "surface sweep")
+    }
+
+    /// How far a path segment turns (radians).
+    fn turn_of(s: &crate::PathSeg) -> f64 {
+        match *s {
+            crate::PathSeg::Line { .. } => 0.0,
+            crate::PathSeg::Arc { angle, .. } => angle.abs(),
+            _ => {
+                let pts: Vec<Vec3> = std::iter::once(s.start()).chain(s.points_after_start(1e-3)).collect();
+                pts.windows(3)
+                    .filter_map(|w| Some(((w[1] - w[0]).normalized()?, (w[2] - w[1]).normalized()?)))
+                    .map(|(u, v)| u.cross(v).len().atan2(u.dot(v)))
+                    .sum()
+            }
+        }
+    }
+
+    /// `n + 1` points spread along `path` (evenly by length from segment to segment, evenly in each
+    /// segment's parameter within it), with the path's unit tangent at each.
+    fn samples(path: &[crate::PathSeg], n: usize) -> Result<(Vec<Vec3>, Vec<Vec3>)> {
+        let bad = || invalid("a path segment has no direction");
+        let lengths: Vec<f64> = path.iter().map(length).collect();
+        let total: f64 = lengths.iter().sum();
+        if !(total > 1e-12) {
+            return Err(invalid("the sweep path has no length"));
+        }
+        let (mut pts, mut tangents) = (Vec::with_capacity(n + 1), Vec::with_capacity(n + 1));
+        for i in 0..=n {
+            let mut s = total * i as f64 / n as f64;
+            let mut k = 0;
+            while k + 1 < path.len() && s > lengths.get(k).copied().unwrap_or(0.0) {
+                s -= lengths.get(k).copied().unwrap_or(0.0);
+                k += 1;
+            }
+            let f = (s / lengths.get(k).copied().unwrap_or(1.0).max(1e-300)).clamp(0.0, 1.0);
+            let (p, t) = path.get(k).and_then(|seg| at(seg, f)).ok_or_else(bad)?;
+            pts.push(p);
+            tangents.push(t);
+        }
+        Ok((pts, tangents))
+    }
+
+    fn length(s: &crate::PathSeg) -> f64 {
+        match *s {
+            crate::PathSeg::Line { a, b } => a.dist(b),
+            crate::PathSeg::Arc { a, center, angle, .. } => a.dist(center) * angle.abs(),
+            _ => {
+                let pts: Vec<Vec3> = std::iter::once(s.start()).chain(s.points_after_start(1e-4)).collect();
+                pts.windows(2).map(|w| w[0].dist(w[1])).sum()
+            }
+        }
+    }
+
+    /// The point `f` (0…1) of the way along a segment's parameter and its unit tangent there.
+    fn at(s: &crate::PathSeg, f: f64) -> Option<(Vec3, Vec3)> {
+        match *s {
+            crate::PathSeg::Line { a, b } => Some((a.lerp(b, f), (b - a).normalized()?)),
+            crate::PathSeg::Arc { a, center, axis, angle } => {
+                let k = axis.normalized()?;
+                let p = crate::build::rotate_about(a, center, k, angle * f);
+                Some((p, (k.cross(p - center) * angle.signum()).normalized()?))
+            }
+            crate::PathSeg::Curve { plane, seg } => Some((plane.to_world(seg.point_at(f)), plane.dir_to_world(seg.derivative(f)).normalized()?)),
+            crate::PathSeg::Cubic { p: [p0, p1, p2, p3] } => {
+                let g = 1.0 - f;
+                let p = p0 * (g * g * g) + p1 * (3.0 * g * g * f) + p2 * (3.0 * g * f * f) + p3 * (f * f * f);
+                let d = (p1 - p0) * (3.0 * g * g) + (p2 - p1) * (6.0 * g * f) + (p3 - p2) * (3.0 * f * f);
+                Some((p, d.normalized()?))
+            }
+        }
+    }
+
+    /// One column of a loft: its curve in each section (and station) in loft order, skinned by
+    /// SMLib with no caps (`smlib_loft`), ruled between two, cubic through four or more.
+    pub(super) fn lofted(column: &[&solidcraft_geom::bspline::CurveN<4>]) -> Result<Brep> {
+        let sections: Vec<Vec<Curve>> = column
+            .iter()
+            .map(|c| {
+                let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
+                vec![Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }]
+            })
+            .collect();
+        let degree = u32::try_from(column.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
+        checked(&SmBrep::loft(&sections, degree, false).map_err(sm("surface loft"))?, "surface loft")
+    }
+}
+
+#[cfg(not(feature = "smlib"))]
+mod imp {
+    use super::*;
+
+    fn not_built() -> KernelError {
+        refuse("surfaces: this build has no SMLib (feature `smlib`)")
+    }
+    pub(super) fn refuse(what: &str) -> KernelError {
+        crate::smlib_sweeps::refuse(what)
+    }
+    pub(super) fn record_body(_: &Brep) -> Result<(Body, bool)> {
+        Err(not_built())
+    }
+    pub(super) fn stitched(_: &Brep, _: f64) -> Result<(Body, Option<History>)> {
+        Err(not_built())
+    }
+    pub(super) fn thicken(_: &Body, _: f64, _: bool) -> Result<Body> {
+        Err(not_built())
+    }
+    pub(super) fn offset_face(_: &Brep, _: usize, _: f64) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn extruded(_: &Plane, _: &[Numbered], _: Vec3, _: f64) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn revolved(_: &Plane, _: &[Numbered], _: Vec3, _: Vec3, _: f64) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn swept(_: &Plane, _: &[Numbered], _: &[crate::PathSeg]) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn swept_stations(_: &Plane, _: &[Numbered], _: &[crate::PathSeg], _: &crate::SweepControl) -> Result<Brep> {
+        Err(not_built())
+    }
+    pub(super) fn lofted(_: &[&solidcraft_geom::bspline::CurveN<4>]) -> Result<Brep> {
+        Err(not_built())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{box_solid, cylinder, measure, trim};
-    use solidcraft_geom::{Loop2, Vec2};
+    use solidcraft_geom::Loop2;
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)
@@ -1320,8 +1570,7 @@ mod tests {
         let bent = vec![line[0], Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 5.0) }];
         let two = sweep_sheet_points(&Plane::XY, &[bent], &arc).unwrap();
         assert_eq!(two.face_count(), 2);
-        let edges: std::collections::HashSet<_> = two.solid.edge_iter().map(|e| e.id()).collect();
-        assert_eq!(edges.len(), 7, "the walls share their seam");
+        assert_eq!(two.edge_count(), 7, "the walls share their seam");
     }
 
     #[test]
@@ -1494,7 +1743,7 @@ mod tests {
         let want = 300.0 + 15.0 + 1.0 / 6.0;
         let v = measure(&t).unwrap().volume;
         assert!(rel(v, want) < 1e-9, "{v} vs {want}");
-        assert!(Body::new(t.solid.as_ref().clone()).is_ok());
+        assert!(t.validity().is_empty(), "{:?}", t.validity());
         assert!(thicken(&corner, -1.0, false).is_err());
         assert!(thicken(&corner, 1.0, true).is_err(), "half of it goes into the inside corner");
     }
