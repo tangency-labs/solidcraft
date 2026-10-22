@@ -491,9 +491,12 @@ impl Surface {
                     domain: domain.copied(),
                     uv_iso_curve: want_uv_iso_curve,
                 };
-                let r = s
-                    .base()
-                    .create_iso_parametric_curve(k, param, iso_parameter, opts)?;
+                let r = s.base_with_nurb(k)?.create_iso_parametric_curve(
+                    k,
+                    param,
+                    iso_parameter,
+                    opts,
+                )?;
                 return Ok(IsoParametricCurve {
                     curve: Curve::from(r.curve),
                     max_gap_3d: r.max_gap_3d,

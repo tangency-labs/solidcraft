@@ -1030,7 +1030,7 @@ impl Surface {
             }
             // (not overridden: the SmBSplineSurface evaluation)
             SurfaceKind::SurfOfExtrusion(s) => {
-                s.base()
+                s.base_with_nurb(k)?
                     .evaluate(uv, highest_u_deriv, highest_v_deriv, flags)
             }
             // (not overridden: the SmBSplineSurface evaluation)
@@ -1089,10 +1089,12 @@ impl Surface {
                 s.base()
                     .evaluate_ignoring_status(uv, highest_u_deriv, highest_v_deriv, flags)
             }
-            SurfaceKind::SurfOfExtrusion(s) => {
-                s.base()
-                    .evaluate_ignoring_status(uv, highest_u_deriv, highest_v_deriv, flags)
-            }
+            SurfaceKind::SurfOfExtrusion(s) => s.base_with_nurb(k)?.evaluate_ignoring_status(
+                uv,
+                highest_u_deriv,
+                highest_v_deriv,
+                flags,
+            ),
             SurfaceKind::Sphere(s) => s.base().base().evaluate_ignoring_status(
                 uv,
                 highest_u_deriv,
@@ -1154,7 +1156,7 @@ impl Surface {
             SurfaceKind::Plane(s) => Ok(s.evaluate_point(uv)),
             SurfaceKind::Cone(s) => s.evaluate_point(k, uv),
             SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_point(uv),
-            SurfaceKind::SurfOfExtrusion(s) => s.base().evaluate_point(uv),
+            SurfaceKind::SurfOfExtrusion(s) => s.base_with_nurb(k)?.evaluate_point(uv),
             SurfaceKind::Sphere(s) => s.base().base().evaluate_point(uv),
             SurfaceKind::Torus(s) => s.base().base().evaluate_point(uv),
             SurfaceKind::OffsetSurface(s) => s.evaluate_point(k, uv),
@@ -1174,7 +1176,7 @@ impl Surface {
             SurfaceKind::Plane(s) => s.natural_uv_domain(),
             SurfaceKind::Cone(s) => s.rev().base().natural_uv_domain(),
             SurfaceKind::SurfOfRevolution(s) => s.base().natural_uv_domain(),
-            SurfaceKind::SurfOfExtrusion(s) => s.base().natural_uv_domain(),
+            SurfaceKind::SurfOfExtrusion(s) => s.natural_uv_domain_for_query(),
             SurfaceKind::Sphere(s) => s.base().base().natural_uv_domain(),
             SurfaceKind::Torus(s) => s.base().base().natural_uv_domain(),
             SurfaceKind::OffsetSurface(s) => s.natural_uv_domain(),
@@ -3473,7 +3475,10 @@ fn eval_second_derivatives_with_output(
                 return s.base().evaluate_with_partial_output(uv, flags);
             }
             SurfaceKind::SurfOfExtrusion(s) if !step => {
-                return s.base().evaluate_with_partial_output(uv, flags);
+                return match s.base_with_nurb(k) {
+                    Ok(base) => base.evaluate_with_partial_output(uv, flags),
+                    Err(error) => (Err(error), Vec::new()),
+                };
             }
             SurfaceKind::CurveBounded(s) => surface = s.basis(),
             SurfaceKind::Step(s) => {
