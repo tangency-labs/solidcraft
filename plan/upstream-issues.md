@@ -2909,6 +2909,15 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Severity:** wrong result.
 - **Rust port:** Ported as is.
 
+#### WR-211. `SmEllipse::AdjustSTEPInterval` collapses an arc moved a turn past its interval to one NURBS parameter
+- **Location:** `source/SMLib/src/SmEllipse.cpp:1905` `SmEllipse::AdjustSTEPInterval` (documented range `[-360 <= Min <= Max <= 360]` at `:1907`): both ends go through `SmPolarConversion::ConvertToNURBSParameter` (`:1921-1922`), which clamps an angle outside the current arc to its ends (`:512-517`). Reached from `SmSurfOfRevolution::AdjustSTEPUVDomain` (`SmSurfOfRevolution.cpp:331`, whose own comment gives `0_to_360`).
+- **What happens:** For a circle over `[0, 360]` (or `[0, 180]`) given `[360, 540]`, both ends clamp to the arc's end, so `sNewNurbsIvl` (`:1923`) has zero length and `EditParameterization` (`:1933`) collapses the curve to one parameter, without an error. The next reparameterisation divides by that length: `N_BasisReparam` (`NL_BasisBasic.cpp:2215`) gets `fac = (ur - ul) / 0`, keeps the end knots and makes every interior knot `ul + inf * 0 = NaN` (`:2221`), the knots `360 360 360 NaN NaN 540 540 540` of #428.
+- **Trigger:** a STEP surface of revolution whose sweep domain starts at 360 degrees (SolidCraft schema 4 allows a periodic domain up to one turn past 2π; tangency-labs/solidcore#428).
+- **How found:** following #428 and #427 (the NaN knots then overflow `N_IgesClampSrf`, `UB-250`); traced at `c9c5979`.
+- **Confirmed:** no (the port reproduces each step; no C++ run here).
+- **Severity:** wrong result (a zero-length curve, then NaN knots).
+- **Fix:** tangency-labs/smlib@74bed94 takes an angle outside the arc whole turns back into it for a full-turn arc, and otherwise extends the arc's NURBS interval in proportion.
+- **Rust port:** Faithful to the code: `Ellipse::adjust_step_interval` collapses the same way and the next reparameterisation gives the same NaN knots (test `step_interval_past_a_turn_collapses_as_upstream`). The fork's fix is not ported: the port follows the reference build, as for `UB-250`.
 ### Surfaces and volumes
 
 #### WR-38. `SmBSplineSurface` data constructor zeroes the v knots when `s > r`

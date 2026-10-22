@@ -1925,6 +1925,30 @@ mod tests {
         .unwrap()
     }
 
+    /// #428 (`WR-211`), as upstream: the polar converter clamps an angle outside the
+    /// current arc to its ends, so an arc moved a turn on (here to `[360, 540]`, past the
+    /// documented `Max <= 360`) gets both ends at one NURBS parameter. The next
+    /// reparameterisation then divides by that zero length: interior knots NaN.
+    #[test]
+    fn step_interval_past_a_turn_collapses_as_upstream() {
+        let k = kernel();
+        let past = Extent1d::from_min_max(360.0, 540.0);
+        for d1 in [360.0, 180.0] {
+            let mut c = circle(&k, 0.0, d1, 2.0);
+            c.adjust_step_interval(&k, &past, None).unwrap();
+            assert_eq!(c.anal_domain, past);
+            let nat = c.base.natural_interval();
+            assert_eq!(nat.min(), nat.max(), "[0, {d1}]");
+        }
+        let mut c = circle(&k, 0.0, 360.0, 2.0);
+        c.adjust_step_interval(&k, &past, None).unwrap();
+        c.base.edit_parameterization(&past).unwrap();
+        let (knots, mults) = c.base.knots(None).unwrap();
+        assert_eq!(mults, [3, 1, 1, 3]);
+        assert_eq!([knots[0], knots[3]], [360.0, 540.0]);
+        assert!(knots[1].is_nan() && knots[2].is_nan());
+    }
+
     #[test]
     fn circle_class_and_types() {
         let k = kernel();
