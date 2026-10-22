@@ -608,8 +608,8 @@ mod tests {
         let ends = [at(c, interval[0]), at(c, interval[1])];
         Run { curve: c, interval, forward, ends: if forward { ends } else { [ends[1], ends[0]] } }
     }
-    /// The quarter circle of radius 10 about the origin from +x to +y, as truck's circle arcs
-    /// were: a rational quadratic spline.
+    /// The quarter circle of radius 10 about the origin from +x to +y, as a rational quadratic
+    /// spline.
     fn quarter() -> Curve {
         let w = std::f64::consts::FRAC_1_SQRT_2;
         Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[10., 0., 0., 1.], [10. * w, 10. * w, 0., w], [0., 10., 0., 1.]] }
