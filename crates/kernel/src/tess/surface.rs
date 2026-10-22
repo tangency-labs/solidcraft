@@ -1,10 +1,11 @@
 //! Surface records ([`brep::Surface`]) in the evaluator's form ([`EvalSurface`]), which the
-//! planner and the CPU and GPU evaluators share. Planes, splines and revolutions keep their
-//! own parameters ([`SurfaceEval`] holds them in that form already). A cylinder, cone, sphere
-//! or torus is the revolution it is, exactly: its generator (a line, or a circle as an exact
-//! rational arc) turned about its axis, the angle as the revolution's parameter. The planner
-//! finds a boundary's parameters by projecting its nodes, so the generator's own parameter
-//! need not be the record's height or latitude.
+//! planner and the CPU and GPU evaluators share, and the map from the record's (u, v) to the
+//! evaluator's, so a face's boundary takes its parameters from its edges' exact pcurves.
+//! Planes, splines and revolutions keep their own parameters ([`SurfaceEval`] holds them in
+//! that form already). A cylinder, cone, sphere or torus is the revolution it is, exactly: its
+//! generator (a line, or a circle as an exact rational arc) turned about its axis by the
+//! record's angle u; the generator's parameter is −v on a line and, on an arc, the rational
+//! parameter of the record's angle v (closed form, [`Arc::param`]).
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
@@ -20,10 +21,59 @@ fn v3(p: [f64; 3]) -> Vec3 {
 /// No transform: the revolution as it is.
 const IDENTITY: [[f64; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
 
-/// `surface` in the evaluator's form. `domain` is the face's parameter box in the record's
-/// parameters, `[[u0, u1], [v0, v1]]`: a cylinder's or cone's generator spans the face's
-/// heights (an unbounded line has no parameter box to project into).
-pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<EvalSurface> {
+/// How a face's record parameters become its evaluator's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Params {
+    /// The same parameters (planes, splines, revolutions).
+    Same,
+    /// A cylinder or cone: (angle, height) to (−height, angle).
+    Height,
+    /// A sphere or torus: (angle, meridian angle) to (the reversed arc's parameter, angle).
+    Meridian(Arc),
+}
+
+impl Params {
+    /// The evaluator's parameters of the record's `uv`.
+    pub(crate) fn to_eval(&self, uv: [f64; 2]) -> [f64; 2] {
+        let [u, v] = uv;
+        match self {
+            Params::Same => uv,
+            Params::Height => [-v, u],
+            Params::Meridian(a) => [1.0 - a.param(v), u],
+        }
+    }
+}
+
+/// The spans of a circular arc made by [`arc`]: from angle `start`, `count` spans of `step`
+/// each, over the parameter [0, 1]; `periodic` for a whole turn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Arc {
+    start: f64,
+    step: f64,
+    count: usize,
+    periodic: bool,
+}
+
+impl Arc {
+    /// The arc's parameter at `angle`. On a rational quadratic span of half angle α with middle
+    /// weight cos α, tan(θ / 2) runs linearly from −tan(α / 2) to tan(α / 2) with the span's
+    /// own parameter (θ from the span's middle). A whole turn continues by whole parameters.
+    pub(crate) fn param(&self, angle: f64) -> f64 {
+        let total = self.step * self.count as f64;
+        let turns = if self.periodic { ((angle - self.start) / total).floor() } else { 0.0 };
+        let a = angle - turns * total;
+        let i = (((a - self.start) / self.step).floor().max(0.0) as usize).min(self.count.saturating_sub(1));
+        let half = 0.5 * self.step;
+        let local = a - (self.start + (i as f64 + 0.5) * self.step);
+        let s = 0.5 * ((0.5 * local).tan() / (0.5 * half).tan() + 1.0);
+        (i as f64 + s) / self.count as f64 + turns
+    }
+}
+
+/// `surface` in the evaluator's form, and how the record's parameters map onto it. `domain` is
+/// the face's parameter box in the record's parameters, `[[u0, u1], [v0, v1]]`: a cylinder's
+/// or cone's generator spans the face's heights.
+pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Result<(EvalSurface, Params)> {
     use std::f64::consts::{FRAC_PI_2, TAU};
     let invalid = |what: &str| KernelError::Invalid(format!("tessellation: {what}"));
     let axes = |f: &Frame| {
@@ -45,27 +95,32 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
         // Parameter −v: the generator at t is the surface at height −t.
         Ok(EvalCurve { degree: 1, knots: vec![-h1, -h1, -h0, -h0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
     };
+    // A meridian from the record's least angle to its greatest, reversed (so the normal is the
+    // record's natural one, outward).
+    let meridian = |centre: Vec3, x: Vec3, z: Vec3, r: f64, angle: [f64; 2], o: Vec3| -> Result<(EvalSurface, Params)> {
+        let (curve, spans) = arc(centre, x, z, r, angle);
+        Ok((revolved(curve.reversed(), o, z)?, Params::Meridian(spans)))
+    };
     match surface {
         brep::Surface::Cylinder { frame, radius } => {
             let (o, x, z) = axes(frame);
-            revolved(generator(&|h| o + x * *radius + z * h)?, o, z)
+            Ok((revolved(generator(&|h| o + x * *radius + z * h)?, o, z)?, Params::Height))
         }
         brep::Surface::Cone { frame, radius_at_origin, half_angle } => {
             let (o, x, z) = axes(frame);
             let slope = half_angle.tan();
-            revolved(generator(&|h| o + x * (radius_at_origin + h * slope) + z * h)?, o, z)
+            Ok((revolved(generator(&|h| o + x * (radius_at_origin + h * slope) + z * h)?, o, z)?, Params::Height))
         }
         brep::Surface::Sphere { frame, radius } => {
             let (o, x, z) = axes(frame);
-            // The meridian from the north pole to the south pole.
-            revolved(arc(o, x, z, *radius, [-FRAC_PI_2, FRAC_PI_2]).reversed(), o, z)
+            meridian(o, x, z, *radius, [-FRAC_PI_2, FRAC_PI_2], o)
         }
         brep::Surface::Torus { frame, major_radius, minor_radius } => {
             let (o, x, z) = axes(frame);
-            revolved(arc(o + x * *major_radius, x, z, *minor_radius, [0.0, TAU]).reversed(), o, z)
+            meridian(o + x * *major_radius, x, z, *minor_radius, [0.0, TAU], o)
         }
         _ => match SurfaceEval::new(surface) {
-            Ok(SurfaceEval::Eval(e, _)) => Ok(e),
+            Ok(SurfaceEval::Eval(e, _)) => Ok((e, Params::Same)),
             Ok(_) => Err(invalid("an analytic surface out of place")),
             Err(e) => Err(KernelError::Failed(format!("not supported yet: tessellation: {e}"))),
         },
@@ -73,8 +128,8 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
 }
 
 /// The circle `centre + r (cos t x + sin t y)` for t in `angle`, as an exact rational quadratic
-/// spline over [0, 1], one span per quarter turn or less.
-fn arc(centre: Vec3, x: Vec3, y: Vec3, r: f64, angle: [f64; 2]) -> EvalCurve {
+/// spline over [0, 1], one span per quarter turn or less, and its spans.
+fn arc(centre: Vec3, x: Vec3, y: Vec3, r: f64, angle: [f64; 2]) -> (EvalCurve, Arc) {
     let span = angle[1] - angle[0];
     let count = (span / std::f64::consts::FRAC_PI_2).ceil().clamp(1.0, 4.0) as usize;
     let step = span / count as f64;
@@ -93,7 +148,8 @@ fn arc(centre: Vec3, x: Vec3, y: Vec3, r: f64, angle: [f64; 2]) -> EvalCurve {
         ctrl.push(at(start + step, 1.0, 1.0));
         knots.extend(std::iter::repeat_n((i + 1) as f64 / count as f64, if i + 1 == count { 3 } else { 2 }));
     }
-    EvalCurve { degree: 2, knots, ctrl }
+    let periodic = (span - std::f64::consts::TAU).abs() < 1e-12;
+    (EvalCurve { degree: 2, knots, ctrl }, Arc { start: angle[0], step, count, periodic })
 }
 
 /// A curve on [0, 1] run the other way: t becomes 1 − t.
@@ -112,36 +168,33 @@ impl Reversed for EvalCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::Solid;
 
-    /// Every face of `solid` evaluates as truck evaluates it, over its own parameter box.
-    fn assert_matches_truck(solid: &Solid) -> [usize; 4] {
-        let mut kinds = [0; 4];
-        for face in solid.face_iter() {
-            let surface = face.surface();
-            let kind = match surface {
-                mt::Surface::Plane(_) => 0,
-                mt::Surface::BSplineSurface(_) => 1,
-                mt::Surface::NurbsSurface(_) => 2,
-                mt::Surface::RevolutedCurve(_) => 3,
+    /// Every face of `b` evaluates, through [`eval_surface`] and its [`Params`], as the record's
+    /// own evaluator ([`SurfaceEval`]) evaluates it, over the face's parameter box: the same
+    /// point and the same natural normal. Counts of planes, analytic surfaces and others.
+    fn assert_matches_the_record(b: &brep::Brep) -> [usize; 3] {
+        let mut kinds = [0; 3];
+        for face in &b.faces {
+            let kind = match face.surface {
+                brep::Surface::Plane { .. } | brep::Surface::PlaneThrough { .. } => 0,
+                brep::Surface::Cylinder { .. } | brep::Surface::Cone { .. } | brep::Surface::Sphere { .. } | brep::Surface::Torus { .. } => 1,
+                _ => 2,
             };
-            let Some(eval) = eval_surface(&surface) else { panic!("not evaluable: {surface:?}") };
-            // Sample the face's parameter box from its boundary vertices.
-            let pts: Vec<(f64, f64)> = face.vertex_iter().filter_map(|v| surface.search_parameter(v.point(), None, 100)).collect();
-            if pts.is_empty() {
-                continue;
-            }
-            let (u0, u1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
-            let (v0, v1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+            let (eval, map) = match eval_surface(&face.surface, face.domain) {
+                Ok(e) => e,
+                Err(e) => panic!("not evaluable: {e} ({:?})", face.surface),
+            };
+            let Ok(reference) = SurfaceEval::new(&face.surface) else { panic!("the record's evaluator: {:?}", face.surface) };
+            let [[u0, u1], [v0, v1]] = face.domain;
             for i in 0..=6 {
                 for j in 0..=6 {
-                    let (u, v) = (u0 + (u1 - u0) * i as f64 / 6.0, v0 + (v1 - v0) * j as f64 / 6.0);
-                    let (p, n) = eval.eval(u, v);
-                    let want = from_p3(surface.subs(u, v));
-                    assert!(p.dist(want) < 1e-9 * (1.0 + want.len()), "point at ({u}, {v}): {p:?} vs {want:?}");
-                    let wn = from_v3(surface.normal(u, v));
-                    if wn.len() > 0.5 {
-                        assert!(n.dist(wn) < 1e-6, "normal at ({u}, {v}): {n:?} vs {wn:?} ({surface:?})");
+                    let uv = [u0 + (u1 - u0) * i as f64 / 6.0, v0 + (v1 - v0) * j as f64 / 6.0];
+                    let q = map.to_eval(uv);
+                    let (p, n) = eval.eval(q[0], q[1]);
+                    let Some((want, su, sv)) = reference.derivs(uv[0], uv[1]) else { panic!("reference at {uv:?}") };
+                    assert!(p.dist(want) < 1e-9 * (1.0 + want.len()), "point at {uv:?}: {p:?} vs {want:?}");
+                    if let Some(wn) = su.cross(sv).normalized().filter(|_| su.cross(sv).len() > 1e-9 * (su.len() * sv.len()).max(1e-12)) {
+                        assert!(n.dist(wn) < 1e-6, "normal at {uv:?}: {n:?} vs {wn:?} ({:?})", face.surface);
                     }
                     kinds[kind] += 1;
                 }
@@ -150,32 +203,36 @@ mod tests {
         kinds
     }
 
-    fn solid(b: crate::Body) -> Solid {
-        (*b.solid).clone()
+    fn record(b: crate::Result<crate::Body>) -> brep::Brep {
+        match b.and_then(|b| crate::brep_record(&b)) {
+            Ok(r) => r,
+            Err(e) => panic!("{e}"),
+        }
     }
 
     #[test]
-    fn primitives_evaluate_like_truck() {
-        let Ok(bx) = crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)) else { panic!("box") };
-        let Ok(cyl) = crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0) else { panic!("cylinder") };
-        let Ok(sph) = crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0) else { panic!("sphere") };
-        let Ok(tor) = crate::torus(Vec3::ZERO, 6.0, 1.5) else { panic!("torus") };
-        let mut kinds = [0; 4];
-        for b in [bx, cyl, sph, tor] {
-            for (k, n) in kinds.iter_mut().zip(assert_matches_truck(&solid(b))) {
+    fn primitives_evaluate_like_the_record() {
+        let bodies = [
+            crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)),
+            crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0),
+            crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0),
+            crate::torus(Vec3::ZERO, 6.0, 1.5),
+        ];
+        let mut kinds = [0; 3];
+        for b in bodies {
+            for (k, n) in kinds.iter_mut().zip(assert_matches_the_record(&record(b))) {
                 *k += n;
             }
         }
-        // Planes, rational patches (sphere) and revolved profiles (cylinder, torus) all covered.
-        assert!(kinds[0] > 0 && kinds[3] > 0 && kinds[1] + kinds[2] > 0, "{kinds:?}");
+        // Planes and the analytic surfaces (cylinder, sphere, torus) all covered.
+        assert!(kinds[0] > 0 && kinds[1] > 0, "{kinds:?}");
     }
 
     #[test]
-    fn transformed_and_mirrored_bodies_evaluate_like_truck() {
+    fn transformed_and_mirrored_bodies_evaluate_like_the_record() {
         let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0) else { panic!("cylinder") };
         // Column-major: x → 3 − x, z → z + 1.
         let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]];
-        let Ok(m) = crate::transform_matrix(&cyl, mirror) else { panic!("transform") };
-        assert!(assert_matches_truck(&solid(m)).iter().sum::<usize>() > 0);
+        assert!(assert_matches_the_record(&record(crate::transform_matrix(&cyl, mirror))).iter().sum::<usize>() > 0);
     }
 }

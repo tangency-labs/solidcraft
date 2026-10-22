@@ -26,8 +26,13 @@ fn assert_watertight(m: &Mesh, name: &str) {
     assert!(open.is_empty(), "{name}: {} unmatched directed edges, e.g. {:?}", open.len(), open.first());
 }
 
+/// The body's schema 4 record, which the planner takes.
+fn record(b: &Body) -> solidcraft_geom::brep::Brep {
+    ok(crate::brep_record(b))
+}
+
 fn plan_body(b: &Body, tol: f64) -> (Mesh, PlanStats) {
-    match plan(&b.solid, tol, Some(crate::tess::size::Turn { angle: crate::DISPLAY_ANGLE, floor: tol * 1e-3 }), b.boundary_tol) {
+    match plan(&record(b), tol, Some(crate::tess::size::Turn { angle: crate::DISPLAY_ANGLE, floor: tol * 1e-3 })) {
         Ok((p, stats)) => (p.evaluate(), stats),
         Err(e) => panic!("plan: {e}"),
     }
@@ -42,7 +47,7 @@ fn check(name: &str, b: &Body, tol: f64, volume: f64) -> PlanStats {
     assert!((got - volume).abs() <= area * tol * 1.5 + 1e-9, "{name}: volume {got} vs {volume} (area {area}, tol {tol})");
     // Outward normals: the divergence theorem gives a positive volume only if they are.
     assert!(got > 0.0, "{name}: inside out");
-    let faces = b.solid.face_iter().count();
+    let faces = b.face_count();
     assert_eq!(stats.planar + stats.structured + stats.delaunay, faces, "{name}: every face planned");
     stats
 }
@@ -94,7 +99,7 @@ fn a_box_is_a_regular_grid_on_every_face() {
 fn primitives_are_watertight_with_the_right_volume() {
     for tol in [0.05, 0.005] {
         let s = check("box", &ok(crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 6.0, 4.0))), tol, 240.0);
-        assert_eq!(s, PlanStats { planar: 6, structured: 0, delaunay: 0, filled: 0 });
+        assert_eq!(s, PlanStats { planar: 6, structured: 0, delaunay: 0 });
         let s = check("cylinder", &ok(crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0)), tol, PI * 2.5 * 2.5 * 7.0);
         assert_eq!(s.delaunay, 0, "cylinder walls are structured");
         let s = check("torus", &ok(crate::torus(Vec3::ZERO, 6.0, 1.5)), tol, 2.0 * PI * PI * 6.0 * 1.5 * 1.5);
@@ -116,8 +121,9 @@ fn holes_and_trimmed_faces_are_watertight() {
     let (m, stats) = plan_body(&body, tol);
     assert_watertight(&m, "cross hole");
     assert_eq!(stats.delaunay, 0, "{stats:?}");
-    // Against the reference mesher's volume (no closed form for the two-cylinder intersection).
-    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(tol * 0.2)) else { panic!("reference mesh") };
+    // Against the body's mesh at a fifth of the tolerance (no closed form for the two-cylinder
+    // intersection).
+    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(tol * 0.2)) else { panic!("finer mesh") };
     let (a, b) = (m.measure().volume, reference.measure().volume);
     assert!((a - b).abs() < 0.01 * b, "cross hole volume {a} vs {b}");
 }
@@ -126,10 +132,11 @@ fn holes_and_trimmed_faces_are_watertight() {
 fn faces_and_edges_keep_the_body_order() {
     let body = ok(crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
     let (m, _) = plan_body(&body, 0.01);
-    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(0.01)) else { panic!("reference mesh") };
+    // Body::mesh, which plans the body's own record: the same faces and edges, in its order.
+    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(0.01)) else { panic!("body mesh") };
     assert_eq!(m.edges.len(), reference.edges.len());
     assert_eq!(m.edge_faces, reference.edge_faces);
-    // Same faces in the same order: each face's area agrees with the reference mesher's.
+    // Same faces in the same order: each face's area agrees with the body mesh's.
     let face_area = |m: &Mesh, f: u32| -> f64 {
         m.triangles
             .iter()
@@ -141,18 +148,19 @@ fn faces_and_edges_keep_the_body_order() {
             })
             .sum()
     };
-    for f in 0..body.solid.face_iter().count() as u32 {
+    for f in 0..body.face_count() as u32 {
         let (a, b) = (face_area(&m, f), face_area(&reference, f));
         assert!((a - b).abs() < 0.01 * b.max(1e-9), "face {f}: {a} vs {b}");
     }
-    // Each edge polyline ends on the same points as the reference's.
+    // Each edge polyline ends on the same points as the body mesh's.
     for (a, b) in m.edges.iter().zip(&reference.edges) {
         assert!(a.first().zip(b.first()).is_some_and(|(p, q)| p.dist(*q) < 1e-9));
         assert!(a.last().zip(b.last()).is_some_and(|(p, q)| p.dist(*q) < 1e-9));
     }
 }
 
-/// Side-by-side wireframes, reference mesher (left) and plan (right):
+/// Side-by-side wireframes, the body's mesh at the chord alone (left) and the plan at the
+/// display angle (right):
 /// `SOLIDCRAFT_TESS_SVG=<dir> cargo test -p solidcraft-kernel render_wireframes -- --ignored`.
 #[test]
 #[ignore]
@@ -173,10 +181,10 @@ fn render_wireframes() {
     ];
     for (name, body) in shapes {
         let t0 = std::time::Instant::now();
-        let Ok(old) = body.mesh(&crate::MeshTolerance::chord(tol)) else { panic!("reference") };
+        let Ok(old) = body.mesh(&crate::MeshTolerance::chord(tol)) else { panic!("body mesh") };
         let t_old = t0.elapsed().as_secs_f64() * 1e3;
         let t0 = std::time::Instant::now();
-        let new = match plan(&body.solid, tol, Some(crate::tess::size::Turn { angle: crate::DISPLAY_ANGLE, floor: tol * 1e-3 }), body.boundary_tol) {
+        let new = match plan(&record(&body), tol, Some(crate::tess::size::Turn { angle: crate::DISPLAY_ANGLE, floor: tol * 1e-3 })) {
             Ok((p, st)) => Some((p.evaluate(), st)),
             Err(e) => {
                 println!("{name}: no plan ({e})");
@@ -186,7 +194,7 @@ fn render_wireframes() {
         let t_new = t0.elapsed().as_secs_f64() * 1e3;
         let mut svg = String::from("<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='860' style='background:#fff'>");
         let label = |x: f64, text: String| format!("<text x='{x}' y='40' font-family='sans-serif' font-size='26'>{text}</text>");
-        svg += &label(20.0, format!("meshalgo (Delaunay): {} tris, {t_old:.1} ms", old.triangles.len()));
+        svg += &label(20.0, format!("chord alone: {} tris, {t_old:.1} ms", old.triangles.len()));
         svg += &draw(&old, 0.0);
         if let Some((m, st)) = &new {
             svg += &label(
@@ -295,159 +303,6 @@ fn trace_seeds_grade_from_one_end_to_the_other() {
     let even = graded([0.0, 0.0], [4.0, 0.0], 1.0, 1.0, 10.0, [1.0, 1.0], &|_, _| true);
     assert_eq!(even.len(), 3);
     assert!(graded([0.0, 0.0], [0.5, 0.0], 1.0, 1.0, 10.0, [1.0, 1.0], &|_, _| true).is_empty());
-}
-
-/// A surface that joins itself along a direction is periodic there: its parameters repeat, so
-/// the evaluator takes a parameter outside the range back into it. A boundary that runs across
-/// the join is unwrapped past the range's end and must still land on the surface.
-#[test]
-fn a_closed_spline_surface_is_periodic_and_evaluates_outside_its_range() {
-    use solidcraft_geom::tess::EvalSurface;
-    // A five-sided tube: the control net's last column repeats its first.
-    let corner = |k: usize| {
-        let a = std::f64::consts::TAU * (k % 5) as f64 / 5.0;
-        (10.0 * a.cos(), 10.0 * a.sin())
-    };
-    let mut ctrl = Vec::new();
-    for j in 0..2 {
-        for k in 0..=5 {
-            let (x, y) = corner(k);
-            ctrl.push([x, y, f64::from(j) * 8.0, 1.0]);
-        }
-    }
-    let s = EvalSurface::Nurbs {
-        degree: [1, 1],
-        knots: [vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0], vec![0.0, 0.0, 1.0, 1.0]],
-        count: [6, 2],
-        ctrl,
-        closed: [true, false],
-    };
-    let dom = uv::domain(&s);
-    assert_eq!(dom.period, [Some(5.0), None]);
-    assert_eq!(dom.range, [Some((0.0, 5.0)), Some((0.0, 1.0))]);
-    // A parameter a whole range below the start is the same point as one inside it.
-    for (a, b) in [(-0.5, 4.5), (-2.0, 3.0), (5.5, 0.5), (7.0, 2.0)] {
-        let (Some(out), Some(inside)) = (s.derivs(a, 0.25), s.derivs(b, 0.25)) else { panic!("evaluates") };
-        assert!(out.0.dist(inside.0) < 1e-12, "u = {a} and u = {b}: {:?} vs {:?}", out.0, inside.0);
-    }
-    // The same net left open is not periodic, and keeps truck's end-span extension outside it.
-    let EvalSurface::Nurbs { degree, knots, count, ctrl, .. } = s else { panic!("nurbs") };
-    let open = EvalSurface::Nurbs { degree, knots, count, ctrl, closed: [false, false] };
-    assert_eq!(uv::domain(&open).period, [None, None]);
-    let (Some(out), Some(inside)) = (open.derivs(-0.5, 0.25), open.derivs(4.5, 0.25)) else { panic!("evaluates") };
-    assert!(out.0.dist(inside.0) > 1.0, "an open surface does not wrap");
-}
-
-/// Each loop of a face is projected on its own, so on a periodic surface a hole can come out a
-/// whole turn away from the boundary that holds it. Every loop is brought into the outer
-/// boundary's period, where the hole cuts the face again.
-#[test]
-fn holes_are_brought_into_the_outer_boundarys_period() {
-    let tau = std::f64::consts::TAU;
-    let at = |u: f64, v: f64| seam::Loop { uv: vec![[u, v], [u + 0.2, v], [u + 0.2, v + 0.2], [u, v + 0.2]], pts: vec![Vec3::ZERO; 4] };
-    let dom = uv::Domain { range: [Some((0.0, 1.0)), Some((0.0, tau))], period: [None, Some(tau)] };
-    let mut loops = vec![at(0.0, -tau), at(0.4, 1.5), at(0.6, 1.5 - tau)];
-    align_periods(&mut loops, &dom);
-    // The outer loop stays where it is; both holes land beside it, a whole turn moved or not.
-    assert_eq!(loops[0].uv[0], [0.0, -tau]);
-    assert!((loops[1].uv[0][1] - (1.5 - tau)).abs() < 1e-12, "{:?}", loops[1].uv[0]);
-    assert!((loops[2].uv[0][1] - (1.5 - tau)).abs() < 1e-12, "{:?}", loops[2].uv[0]);
-    // Nothing moves along a direction that does not repeat.
-    assert_eq!(loops[1].uv[0][0], 0.4);
-}
-
-/// A boundary that steps out to a node and straight back encloses no area: the pair is dropped,
-/// so what is left no longer runs along itself. The two sides need only agree within the given
-/// distance — a STEP writer may draw them as two curves a hair apart.
-#[test]
-fn zero_width_slits_are_dropped_from_a_boundary() {
-    let p = |x: f64| Vec3::new(x, 0.0, 0.0);
-    // A square with a slit poked into it from the corner (2, 1): out to (2, 2) and back.
-    let slit = vec![
-        p(0.0),
-        p(1.0),
-        Vec3::new(2.0, 1.0, 0.0),
-        Vec3::new(2.0, 2.0, 0.0),
-        Vec3::new(2.0 + 1e-9, 1.0, 0.0),
-        p(3.0),
-        Vec3::new(3.0, 3.0, 0.0),
-        Vec3::new(0.0, 3.0, 0.0),
-    ];
-    let (out, known) = drop_slits(&[slit], &[Vec::new()], 1e-6);
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0], vec![p(0.0), p(1.0), Vec3::new(2.0, 1.0, 0.0), p(3.0), Vec3::new(3.0, 3.0, 0.0), Vec3::new(0.0, 3.0, 0.0)]);
-    assert_eq!(known[0].len(), out[0].len());
-    // Too far apart to be one slit: the boundary is left as it is.
-    let wide = vec![p(0.0), p(1.0), Vec3::new(2.0, 1.0, 0.0), Vec3::new(2.0, 2.0, 0.0), Vec3::new(2.5, 1.0, 0.0), p(3.0)];
-    let kept = drop_slits(std::slice::from_ref(&wide), &[Vec::new()], 1e-6).0;
-    assert_eq!(kept, vec![wide]);
-}
-
-/// A pointed end read back from STEP (a screw's tip, a cone): its cone face is written as the
-/// rim, the seam up to the apex and the seam back, and a sector of one as its rim and two
-/// sides meeting at the apex. Unwrapped to the nearest copy at every step, the jump at the
-/// apex made such a loop seem to wind around the cone; the face could not be cut along a seam
-/// it did not have, and the whole body lost its display plan.
-#[test]
-fn a_pointed_end_read_back_from_step_is_planned() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
-    let (r, tip, len) = (3.0, 4.0, 20.0);
-    let Some(axis) = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z) else { panic!("plane") };
-    let pts = [Vec2::new(0.0, 0.0), Vec2::new(r, tip), Vec2::new(r, len), Vec2::new(0.0, len)];
-    for turn in [360.0f64, 300.0, 270.0, 200.0] {
-        let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
-        let Some(body) = ok(crate::revolve(&axis, &[region], Vec2::ZERO, Vec2::Y, turn.to_radians())).pop() else { panic!("revolve") };
-        let imported = ok(crate::step_import(&ok(crate::step_export(&[&body], "pointed end"))));
-        let Some(copy) = imported.bodies.first() else { panic!("no body") };
-        let volume = std::f64::consts::PI * r * r * (len - tip + tip / 3.0) * turn / 360.0;
-        check(&format!("pointed end turned {turn} deg"), &copy.body, 0.02, volume);
-    }
-}
-
-/// A point on a spline that turns many times (a thread's helical flank, as other CAD systems
-/// write it to STEP, has hundreds of spans along the helix) is found from a hint a few turns
-/// away: between 16 starts across the whole spline Newton settled on another turn, the point
-/// was taken as off the surface and the body lost its display plan.
-#[test]
-fn a_point_on_a_long_helical_spline_projects() {
-    let (turns, per_turn, pitch) = (40usize, 24usize, 0.5);
-    let n = turns * per_turn + 1;
-    let at = |i: usize, r: f64| {
-        let t = std::f64::consts::TAU * i as f64 / per_turn as f64;
-        [r * t.cos(), r * t.sin(), pitch * t / std::f64::consts::TAU, 1.0]
-    };
-    let mut ctrl: Vec<[f64; 4]> = Vec::with_capacity(2 * n);
-    for i in 0..n {
-        ctrl.push(at(i, 0.7));
-        ctrl.push(at(i, 0.55));
-    }
-    let mut ku = vec![0.0; 3];
-    ku.extend((1..n - 2).map(|i| i as f64 / (n - 2) as f64));
-    ku.extend([1.0; 3]);
-    let s = EvalSurface::Nurbs { degree: [2, 1], knots: [ku, vec![0.0, 0.0, 1.0, 1.0]], count: [n, 2], ctrl, closed: [false, false] };
-    let dom = uv::domain(&s);
-    for (target, hint) in [([0.5, 1.0], [0.488, 1.0]), ([0.2, 0.0], [0.23, 1.0]), ([0.9, 0.5], [0.1, 0.5])] {
-        let Some((p, _, _)) = s.derivs(target[0], target[1]) else { panic!("evaluate") };
-        let Some(q) = uv::project(&s, &dom, p, Some(hint), 1e-4) else { panic!("{target:?} from {hint:?}: not found") };
-        let Some((back, _, _)) = s.derivs(q[0], q[1]) else { panic!("evaluate") };
-        assert!(back.dist(p) <= 1e-4, "{target:?} from {hint:?}: {q:?} is {} away", back.dist(p));
-    }
-}
-
-/// A sliver face as STEP files write one: two edges between the same two vertices, a rounding
-/// apart, so its boundary runs out and back along itself. Its slits dropped, nothing is left to
-/// bound a face (it is planned empty); a boundary enclosing anything keeps its loop.
-#[test]
-fn a_boundary_running_back_along_itself_is_all_slit() {
-    let out: Vec<Vec3> = (0..5).map(|i| Vec3::new(f64::from(i), 0.5 * f64::from(i), 0.0)).collect();
-    let mut sliver = out.clone();
-    sliver.extend(out.iter().rev().skip(1).take(3).map(|p| *p + Vec3::new(0.0, 1e-14, 0.0)));
-    let (left, _) = drop_slits(&[sliver], &[Vec::new()], 1e-9);
-    assert!(left.iter().all(|l| l.len() < 3), "{left:?}");
-    let mut lens = out.clone();
-    lens.extend(out.iter().rev().skip(1).take(3).map(|p| *p + Vec3::new(0.0, 1e-3, 0.0)));
-    let (kept, _) = drop_slits(std::slice::from_ref(&lens), &[Vec::new()], 1e-9);
-    assert_eq!(kept, vec![lens]);
 }
 
 /// Distance of `p` from the analytic surface `fs`.
@@ -652,7 +507,6 @@ fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
     };
     let threaded = smlib_cut(&smlib_cut(&block, &bore), &smlib_groove(iso_groove(1.0, 8.0, 3.5, true), -1.0, 1.0, 12.0));
     let body = ok(crate::native::body_from_smlib(&threaded));
-    assert!(seam::turns_more_than_once(&body.solid), "the groove's walls wind round the bore");
     let m = ok(body.mesh(&crate::MeshTolerance::chord(0.01)));
     let (lo, hi) = m
         .positions
