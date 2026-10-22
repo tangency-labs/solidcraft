@@ -91,7 +91,7 @@ pub fn untrim(body: &Body, face: usize, holes: UntrimHoles, outer: bool, in_plac
         (Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[ob], &or).ok().map(|mut h| {
             // The untrimmed face is the face it was, bounded differently.
             for p in &mut h.faces {
-                if p.origins.iter().any(|o| *o == FaceOrigin::Face { operand: 0, face }) {
+                if p.origins.contains(&FaceOrigin::Face { operand: 0, face }) {
                     p.change = Change::Modified;
                 }
             }

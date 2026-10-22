@@ -167,7 +167,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
                 let (_, su, sv) = e.derivs(uv[0], uv[1])?;
                 Some(su.cross(sv))
             };
-            let along = normal(&*surfaces[0])?.cross(normal(&*surfaces[1])?);
+            let along = normal(&surfaces[0])?.cross(normal(&surfaces[1])?);
             let along = along.normalized()?;
             if along.dot(curve_tangent(leader, t)?) < 0.0 { along * -1.0 } else { along }
         }
