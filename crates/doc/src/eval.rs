@@ -8,6 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
+use solidcraft_geom::brep::part::Contact;
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
@@ -776,6 +777,11 @@ impl ModelState {
         self.fitted.get(&feature)?.iter().fold(None, |acc, r| Some(acc.map_or((*r, *r), |(lo, hi): (f64, f64)| (lo.min(*r), hi.max(*r)))))
     }
 
+    /// How the solids join `feature` kept as separate bodies met, when it kept any apart.
+    pub fn kept_separate(&self, feature: u64) -> Option<KeptSeparate> {
+        self.kept_separate.get(&feature).copied()
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -824,6 +830,40 @@ pub struct ModelState {
     /// The radius spline of each edge a fillet tapered (a point on the edge with it, by feature
     /// id, see `FilletFit::Taper`).
     tapered: BTreeMap<u64, Vec<(Vec3, kernel::Taper)>>,
+    /// How the solids a join kept as separate bodies met (by feature id), for its notice.
+    kept_separate: BTreeMap<u64, KeptSeparate>,
+}
+
+/// How the solids a join kept as separate bodies (`Touching::Separate`) met: the most any two
+/// of them shared, least first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeptSeparate {
+    /// Nothing: they don't touch.
+    Apart,
+    /// A point.
+    AtPoint,
+    /// A curve: an edge of both.
+    AlongEdge,
+}
+
+impl KeptSeparate {
+    /// Its id in a feature's result: `apart`, `at_point` or `along_edge`.
+    pub fn id(self) -> &'static str {
+        match self {
+            KeptSeparate::Apart => "apart",
+            KeptSeparate::AtPoint => "at_point",
+            KeptSeparate::AlongEdge => "along_edge",
+        }
+    }
+
+    /// What a feature's result says about it.
+    pub fn notice(self) -> &'static str {
+        match self {
+            KeptSeparate::Apart => "These bodies don't touch, so they were kept as separate bodies.",
+            KeptSeparate::AtPoint => "These bodies only touch at a point, so they were kept as separate bodies.",
+            KeptSeparate::AlongEdge => "These bodies only touch along an edge, so they were kept as separate bodies.",
+        }
+    }
 }
 
 impl ModelState {
@@ -2935,66 +2975,16 @@ fn apply_traced_with(
     }
     match op {
         Operation::Join => {
-            // Each tool joins every target it meets into one body, kept under the first one's
-            // name; a tool that meets none joins the first target as a separate lump. A sheet
-            // metal body keeps its own identity: only the first body met may be one.
-            let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
-            // Each union keeps the lineage of what it joins, so the joined body's faces keep
-            // their names (the tool's new faces are named by their roles).
-            let union = |a: &Traced, b: &Traced| -> Result<Traced> {
-                let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("join produced nothing".into()))?;
-                Ok(Traced::step(u, &[a, b]))
-            };
-            // One target takes every tool, whichever it meets: the result is the union of all of
-            // them in one kernel call, checked once.
-            if let [keep] = live.as_slice()
-                && tools.len() > 1
-            {
-                let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(()) };
-                let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-                let acc = union_all(&operands)?;
-                if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
-                    *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+            let joined = join(state, tools, &target_idx)?;
+            if f.touching == crate::Touching::Separate {
+                let mut kept = None;
+                for name in joined {
+                    kept = kept.max(separate_touching(state, &name)?);
                 }
-                return Ok(());
-            }
-            for tool in &tools {
-                let mut met: Vec<String> = Vec::new();
-                for name in &live {
-                    let Some(mb) = state.body(name) else { continue };
-                    let sheet = state.sheets.iter().any(|s| &s.body == name);
-                    if mb.body.is_mesh() || (!met.is_empty() && sheet) {
-                        continue;
-                    }
-                    // Each body is met where it is shown: the tool goes into its frame (#3383).
-                    if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
-                        met.push(name.clone());
-                    }
+                if let Some(k) = kept {
+                    let most = state.kept_separate.entry(f.id).or_insert(k);
+                    *most = (*most).max(k);
                 }
-                let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(()) };
-                let Some(base) = state.body(&keep).map(ModelBody::traced) else { continue };
-                let into_keep = tool_frame(&keep);
-                let mut acc = union(&base, &tool_in(tool, into_keep)?)?;
-                for name in met.iter().skip(1) {
-                    if let Some(b) = state.body(name) {
-                        // A body placed differently from the one kept joins it where it is shown.
-                        let from = match tool_frame(name) {
-                            Some(m) => crate::mat_inverse(&m),
-                            None => Some(crate::IDENTITY),
-                        };
-                        let m = from.map(|from| crate::mat_mul(&into_keep.unwrap_or(crate::IDENTITY), &from)).filter(|m| !crate::is_identity(m));
-                        acc = union(&acc, &tool_in(&b.traced(), m)?)?;
-                    }
-                }
-                let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
-                if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
-                    *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
-                }
-                state.bodies.retain(|b| !absorbed.contains(&b.name));
-                for t in state.threads.iter_mut().filter(|t| absorbed.contains(&t.body)) {
-                    t.body = keep.clone();
-                }
-                live.retain(|n| !absorbed.contains(n));
             }
         }
         Operation::Cut | Operation::Intersect => {
@@ -3071,24 +3061,159 @@ fn apply_traced_with(
                     split.push(mb);
                     continue;
                 }
-                // Each piece's faces are named after the whole's, worked out once for the whole
-                // (so pieces of one face in different bodies are told apart).
-                let lineages = crate::lineage::Lineage::lumps(&mb.body, mb.lineage().as_deref(), &pieces);
-                for (k, (p, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
-                    let name = if k == 0 {
-                        mb.name.clone()
-                    } else {
-                        (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
-                    };
-                    taken.insert(name.clone());
-                    split.push(ModelBody::new(name, p, mb.feature).with_lineage(lineage));
-                }
+                split.extend(named_pieces(&mb, pieces, &mut taken));
             }
             state.bodies = split;
         }
         Operation::NewBody => {}
     }
     Ok(())
+}
+
+/// Join `tools` into the bodies at `target_idx`: each tool joins every target it meets into one
+/// body, kept under the first one's name; a tool that meets none joins the first target as a
+/// separate piece. A sheet metal body keeps its own identity: only the first body met may be
+/// one. The names of the bodies the tools went into.
+fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Vec<String>> {
+    let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
+    // Each union keeps the lineage of what it joins, so the joined body's faces keep
+    // their names (the tool's new faces are named by their roles).
+    let union = |a: &Traced, b: &Traced| -> Result<Traced> {
+        let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("join produced nothing".into()))?;
+        Ok(Traced::step(u, &[a, b]))
+    };
+    // One target takes every tool, whichever it meets: the result is the union of all of
+    // them in one kernel call, checked once.
+    if let [keep] = live.as_slice()
+        && tools.len() > 1
+    {
+        let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(Vec::new()) };
+        // The tools go into the kept body's frame, where it is shown (#3383).
+        let into_keep = tool_frame(keep);
+        let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
+        let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
+        let acc = union_all(&operands)?;
+        if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
+            *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+        }
+        return Ok(vec![keep.clone()]);
+    }
+    let mut joined = Vec::new();
+    for tool in &tools {
+        let mut met: Vec<String> = Vec::new();
+        for name in &live {
+            let Some(mb) = state.body(name) else { continue };
+            let sheet = state.sheets.iter().any(|s| &s.body == name);
+            if mb.body.is_mesh() || (!met.is_empty() && sheet) {
+                continue;
+            }
+            // Each body is met where it is shown: the tool goes into its frame (#3383).
+            if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
+                met.push(name.clone());
+            }
+        }
+        let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(joined) };
+        let Some(base) = state.body(&keep).map(ModelBody::traced) else { continue };
+        let into_keep = tool_frame(&keep);
+        let mut acc = union(&base, &tool_in(tool, into_keep)?)?;
+        for name in met.iter().skip(1) {
+            if let Some(b) = state.body(name) {
+                // A body placed differently from the one kept joins it where it is shown.
+                let from = match tool_frame(name) {
+                    Some(m) => crate::mat_inverse(&m),
+                    None => Some(crate::IDENTITY),
+                };
+                let m = from.map(|from| crate::mat_mul(&into_keep.unwrap_or(crate::IDENTITY), &from)).filter(|m| !crate::is_identity(m));
+                acc = union(&acc, &tool_in(&b.traced(), m)?)?;
+            }
+        }
+        let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
+        if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
+            *mb = ModelBody::traced_new(mb.name.clone(), acc, mb.feature);
+        }
+        state.bodies.retain(|b| !absorbed.contains(&b.name));
+        for t in state.threads.iter_mut().filter(|t| absorbed.contains(&t.body)) {
+            t.body = keep.clone();
+        }
+        live.retain(|n| !absorbed.contains(n));
+        if !joined.contains(&keep) {
+            joined.push(keep);
+        }
+    }
+    Ok(joined)
+}
+
+/// With `Touching::Separate`: the pieces of the joined body `name` that share no area with each
+/// other become bodies of their own, named as a cut's pieces are; pieces that share a face stay
+/// one body. How the pieces kept apart met, when it has any (a sheet metal or mesh body keeps
+/// its pieces).
+fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSeparate>> {
+    let Some(i) = state.bodies.iter().position(|b| b.name == name) else { return Ok(None) };
+    let Some(mb) = state.bodies.get(i).filter(|b| !b.body.is_mesh() && !state.sheets.iter().any(|s| s.body == name)) else { return Ok(None) };
+    let n = mb.body.record().material_regions().len();
+    if n < 2 {
+        return Ok(None);
+    }
+    // Pieces sharing a face are one solid: each group is listed under its least piece.
+    let contacts = mb.body.region_contacts()?;
+    let mut root: Vec<usize> = (0..n).collect();
+    let find = |root: &[usize], mut k: usize| {
+        while let Some(&r) = root.get(k).filter(|&&r| r != k) {
+            k = r;
+        }
+        k
+    };
+    for c in contacts.iter().filter(|c| c.contact == Contact::Face) {
+        let [a, b] = c.regions.map(|k| find(&root, k));
+        if let Some(slot) = root.get_mut(a.max(b)) {
+            *slot = a.min(b);
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_of: BTreeMap<usize, usize> = BTreeMap::new();
+    for k in 0..n {
+        let g = *group_of.entry(find(&root, k)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        if let Some(list) = groups.get_mut(g) {
+            list.push(k);
+        }
+    }
+    if groups.len() < 2 {
+        return Ok(None);
+    }
+    // The most any two of the separate pieces share (never a face).
+    let kept = contacts
+        .iter()
+        .filter(|c| find(&root, c.regions[0]) != find(&root, c.regions[1]))
+        .map(|c| if c.contact == Contact::Vertex { KeptSeparate::AtPoint } else { KeptSeparate::AlongEdge })
+        .max()
+        .unwrap_or(KeptSeparate::Apart);
+    let pieces = mb.body.parts(&groups)?;
+    let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+    let named = named_pieces(mb, pieces, &mut taken);
+    state.bodies.splice(i..=i, named);
+    Ok(Some(kept))
+}
+
+/// The bodies the pieces of `mb` become: the first keeps its name, the others are numbered after
+/// it ("Bar (1)") on past the names already `taken`. Each piece's faces are named after the
+/// whole's, worked out once for the whole (so pieces of one face in different bodies are told
+/// apart).
+fn named_pieces(mb: &ModelBody, pieces: Vec<Body>, taken: &mut std::collections::BTreeSet<String>) -> Vec<ModelBody> {
+    let lineages = crate::lineage::Lineage::lumps(&mb.body, mb.lineage().as_deref(), &pieces);
+    let mut out = Vec::with_capacity(pieces.len());
+    for (k, (p, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
+        let name = if k == 0 {
+            mb.name.clone()
+        } else {
+            (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
+        };
+        taken.insert(name.clone());
+        out.push(ModelBody::new(name, p, mb.feature).with_lineage(lineage));
+    }
+    out
 }
 
 /// Distance that reaches through every target body from the sketch plane (either side).
