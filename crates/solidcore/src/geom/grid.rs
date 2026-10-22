@@ -41,8 +41,9 @@
 //!   polygon elements hold the [`NodeId`] of their `SmBrepCache` tree node.
 //! - `SmGrid(bbox, lSize)` rejects a zero voxel count (upstream builds a grid its
 //!   destructor then reads out of bounds) and a voxel count whose total overflows;
-//!   a voxel array that cannot be allocated is `SM_ERR`, as upstream's failed
-//!   `smos_Calloc`.
+//!   a voxel array that cannot be allocated, or would take more than
+//!   [`crate::limits::MAX_ALLOC_BYTES`], is `SM_ERR`, as upstream's failed
+//!   `smos_Calloc` (upstream's own grids are at most `40 x 40 x 20`).
 //! - `AddElement`'s `SM_GE_HIERARCHY` type (a null-pointer crash upstream) cannot be
 //!   expressed: [`ElementSource`] has no such variant.
 //! - Surface elements need the surface subdivision caches, pseudo boxes and polar
@@ -83,6 +84,7 @@ use crate::geom::extent3d::{Extent3d, LineHit};
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tree::NodeId;
+use crate::limits::try_filled;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
 /// `SmGridElement_TYPE` (`CONT_BASE_TYPE + 155`).
@@ -451,7 +453,7 @@ impl<O: Copy> Grid<O> {
     /// (`SmGrid(crGridBBox, lSize)`).
     ///
     /// Fails when a count is zero, the voxel total overflows or the voxels cannot be
-    /// allocated.
+    /// allocated (including more than [`crate::limits::MAX_ALLOC_BYTES`] of voxels).
     pub fn new(bbox: &Extent3d, size: [usize; 3]) -> Result<Self> {
         const OP: &str = "geom::grid::Grid::new";
         let [nx, ny, nz] = size;
@@ -476,12 +478,9 @@ impl<O: Copy> Grid<O> {
 
         let voxel_tolerance = EFF_ZERO_SQRT * (1.0 + voxel_size.max_dimension()) / 100.0;
 
-        // Upstream's `smos_Calloc` of the voxel array fails softly (`SM_ERR`).
-        let mut voxels = Vec::new();
-        voxels
-            .try_reserve_exact(total)
-            .map_err(|_| SolidError::sm_err(OP))?;
-        voxels.resize(total, Voxel::default());
+        // Upstream's `smos_Calloc` of the voxel array fails softly (`SM_ERR`); above
+        // `MAX_ALLOC_BYTES` the port fails the same way without trying.
+        let voxels = try_filled(total, Voxel::default()).ok_or_else(|| SolidError::sm_err(OP))?;
 
         Ok(Self {
             bbox: *bbox,

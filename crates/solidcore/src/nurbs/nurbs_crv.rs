@@ -55,7 +55,8 @@
 //! - Arrays sized by a caller count (the rows of [`basis_derivs`],
 //!   [`crv_rational_basis_derivs`] and [`basis_i_derivs`] for `der`, the storage of
 //!   [`allocate_nurb_curve`]) are allocated fallibly: `InvalidInput` when they do not
-//!   fit in memory (upstream: the caller's arrays, or `smos_Calloc` returning `NULL`).
+//!   fit in memory or take more than [`crate::limits::MAX_ALLOC_BYTES`] (upstream: the
+//!   caller's arrays, or `smos_Calloc` returning `NULL`).
 //! - `sm_CrvDerivs` accepts `der == GW_MAX_DERIV`, then writes past its row arrays;
 //!   [`crv_derivs`] rejects `der >= MAX_DERIV` with [`NlibCode::MaxDerivative`]
 //!   (upstream's own `der > GW_MAX_DERIV` check returns the plain flag).
@@ -87,6 +88,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::{in_tol, scaled_zero, scaled_zero2};
+use crate::limits;
 use crate::math::{max2, Vec3, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::basis_basic::SpanMaxima;
 use crate::nurbs::crv_basic::Curve;
@@ -273,16 +275,12 @@ pub fn get_knots(knt: &KnotVector<'_>, ivl: Option<&Extent1d>) -> (Vec<f64>, Vec
 
 /// `len` copies of `value`, allocated fallibly: `InvalidInput` instead of an
 /// allocation abort when a caller-given count (derivative order, array size) makes
-/// the array too large for memory.
+/// the array too large for memory or larger than [`limits::MAX_ALLOC_BYTES`].
 fn filled<T: Clone>(len: usize, value: T, op: &'static str) -> Result<Vec<T>> {
-    let mut v = Vec::new();
-    v.try_reserve_exact(len)
-        .map_err(|_| SolidError::InvalidInput {
-            operation: op,
-            reason: "array too large for memory",
-        })?;
-    v.resize(len, value);
-    Ok(v)
+    limits::try_filled(len, value).ok_or(SolidError::InvalidInput {
+        operation: op,
+        reason: "array too large for memory",
+    })
 }
 
 /// A zero-filled curve with highest control point index `n`, degree `p` and highest

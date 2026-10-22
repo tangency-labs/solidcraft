@@ -56,7 +56,8 @@
 //!   [`Surface::compress`], [`Surface::swap_uv`] and [`Surface::average_len`] have no
 //!   memory error path. [`size_arrays`] sizes new storage from caller indices and so
 //!   reserves it fallibly: [`NlibCode::Memory`] (upstream `NL_MEM_ERR`) instead of an
-//!   allocation abort.
+//!   allocation abort, also for a net or knot array above
+//!   [`crate::limits::MAX_ALLOC_BYTES`].
 //! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
@@ -72,6 +73,7 @@
 //!   fails; [`Surface::is_flat_cheap`] returns only the error then.
 
 use crate::error::{NlibCode, Result, SolidError};
+use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::geom::{
     dist_pt_pt, dist_signed_pt_plane, plane_pt_normal_to_implicit, Rectangle,
@@ -979,15 +981,12 @@ pub fn make_rat_compatible(surfaces: &mut [Surface]) {
 }
 
 /// `len_minus_1 + 1` copies of `v`, or [`NlibCode::Memory`] (upstream `NL_MEM_ERR`
-/// from a failed allocation) when the storage cannot be reserved or the length
-/// overflows.
+/// from a failed allocation) when the storage cannot be reserved, would take more
+/// than [`limits::MAX_ALLOC_BYTES`] or the length overflows.
 fn try_filled<T: Clone>(len_minus_1: usize, v: T) -> Result<Vec<T>> {
     let mem = || SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory);
     let len = len_minus_1.checked_add(1).ok_or_else(mem)?;
-    let mut a = Vec::new();
-    a.try_reserve_exact(len).map_err(|_| mem())?;
-    a.resize(len, v);
-    Ok(a)
+    limits::try_filled(len, v).ok_or_else(mem)
 }
 
 /// Operation name of [`size_arrays`].
@@ -1004,10 +1003,19 @@ const OP_SIZE_ARRAYS: &str = "nurbs::srf_basic::size_arrays";
 /// # Errors
 ///
 /// [`NlibCode::Memory`] (upstream's failed `N_Malloc`, `NL_MEM_ERR`) when the new
-/// storage cannot be allocated; the slot is then unchanged.
+/// storage cannot be allocated or an array of it would take more than
+/// [`limits::MAX_ALLOC_BYTES`]; the slot is then unchanged.
 pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> Result<&mut Surface> {
     let SurfaceIndices { n, m, p, q, r, s } = idx;
     let fresh = || -> Result<Surface> {
+        // The whole net counts against the bound, not just one row of it.
+        let points = n
+            .checked_add(1)
+            .zip(m.checked_add(1))
+            .and_then(|(rows, cols)| rows.checked_mul(cols));
+        if !points.is_some_and(limits::fits::<CPoint>) {
+            return Err(SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory));
+        }
         let row = try_filled(m, CPoint::default())?;
         let mut net = try_filled(n, Vec::new())?;
         for r in &mut net {

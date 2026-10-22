@@ -1,6 +1,7 @@
 {
   "unit": "nurbs.nurbs_crv",
   "cases": [
-    {"name": "fuzz00845_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nurbs.nurbs_crv/fuzz00845.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"crv": {"smc": {"$upstream_file": "crvTrim2.smc"}}, "der": 9223372036854775807, "op": "rat_derivs", "u": 1e+300}}
+    {"name": "fuzz00845_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nurbs.nurbs_crv/fuzz00845.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"crv": {"smc": {"$upstream_file": "crvTrim2.smc"}}, "der": 9223372036854775807, "op": "rat_derivs", "u": 1e+300}},
+    {"name": "fuzz01003_alloc_basis_derivs", "origin": "fuzz-out/n2000/nurbs.nurbs_crv/fuzz01003.json (enomem: rust: nurbs_crv::basis_derivs sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: invalid argument: curve: need 1 <= p <= n and m = n + p + 1", "rust": "ok", "inputs": {"crv": {"cpts": [[-14.6, -11.9, 1.7976931348623157e+308, 2.9]], "p": 4, "u": [5.01]}, "der": 2147483648, "op": "basis_derivs", "u": 3.52}}
   ]
 }

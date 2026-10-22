@@ -47,8 +47,9 @@
 //!   reach unported code report "deferred" instead of a different result).
 //! - `SolveByBisection` recursion is a loop (same arithmetic and order).
 //! - [`IterQueue1d::try_new`] (caller-chosen sizes) returns `InvalidInput` when the
-//!   slots cannot be allocated (upstream's `SetSize` fails softly and `Add` then
-//!   writes out of bounds).
+//!   slots cannot be allocated or would take more than
+//!   [`crate::limits::MAX_ALLOC_BYTES`] (upstream's `SetSize` fails softly and `Add`
+//!   then writes out of bounds; upstream's only queue has 8 slots).
 //! - `SE(...)`/`SER` error-log side effects and `SM_DEBUG_CODE` tracing are not
 //!   ported.
 
@@ -56,6 +57,7 @@ use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 pub use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::tol::{in_tol, scaled_zero};
+use crate::limits::try_filled;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, UNDEF_DOUBLE};
 
 /// Upstream status `SM_ERR`.
@@ -223,17 +225,16 @@ impl IterQueue1d {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] when `size` slots cannot be allocated (upstream's
-    /// `SetSize` then fails softly and `Add` writes past the empty array).
+    /// [`SolidError::InvalidInput`] when `size` slots cannot be allocated or would take
+    /// more than [`crate::limits::MAX_ALLOC_BYTES`] (upstream's `SetSize` then fails
+    /// softly and `Add` writes past the empty array).
     pub fn try_new(size: u64) -> Result<Self> {
         let too_large = || SolidError::InvalidInput {
             operation: "geom::local_solve1d::IterQueue1d::try_new",
             reason: "queue size too large to allocate",
         };
         let len = usize::try_from(size).map_err(|_| too_large())?;
-        let mut array = Vec::new();
-        array.try_reserve_exact(len).map_err(|_| too_large())?;
-        array.resize(len, IterationValue::default());
+        let array = try_filled(len, IterationValue::default()).ok_or_else(too_large)?;
         Ok(Self {
             array,
             size,

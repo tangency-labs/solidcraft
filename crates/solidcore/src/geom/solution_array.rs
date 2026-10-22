@@ -85,8 +85,9 @@
 //!   [`SolutionArray::with_capacity`] only reserves. The `try_` variants
 //!   ([`SolutionArray::try_set_size`], [`SolutionArray::try_insert_at`],
 //!   [`SolutionArray::try_with_capacity`]) take caller-chosen sizes and return
-//!   [`SolidError::InvalidInput`] when the slots cannot be allocated (upstream
-//!   writes through the `NULL` of a failed `smos_Calloc`). New slots made by growth
+//!   [`SolidError::InvalidInput`] when the slots cannot be allocated or would take
+//!   more than [`crate::limits::MAX_ALLOC_BYTES`] (upstream writes through the
+//!   `NULL` of a failed `smos_Calloc`). New slots made by growth
 //!   are [`Solution::zeroed`] (type [`SolutionType::NodesOnly`], as calloc'd
 //!   memory reads upstream).
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
@@ -97,6 +98,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object;
 use crate::geom::tree::NodeId;
+use crate::limits::try_reserve_total;
 use crate::math::{max3, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
 /// `SM_SA_MAX_TREES`: most objects (and tree nodes) a solution refers to.
@@ -1363,12 +1365,13 @@ impl<O: SolutionObject> SolutionArray<O> {
     }
 
     /// Makes room for a total of `size` solutions, `InvalidInput` when that cannot
-    /// be allocated.
+    /// be allocated or would take more than [`crate::limits::MAX_ALLOC_BYTES`].
     fn reserve_to(&mut self, size: usize, operation: &'static str) -> Result<()> {
-        let extra = size.saturating_sub(self.data.len());
-        self.data
-            .try_reserve_exact(extra)
-            .map_err(|_| too_large(operation))
+        if try_reserve_total(&mut self.data, size) {
+            Ok(())
+        } else {
+            Err(too_large(operation))
+        }
     }
 
     /// Removes every solution (`ReSet`).

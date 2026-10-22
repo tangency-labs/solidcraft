@@ -12,7 +12,8 @@
 //!
 //! Deviations: `alloc` reserves fallibly and returns [`NlibCode::Memory`] (upstream's
 //! `NL_MEM_ERR` for a failed `N_Malloc`) instead of aborting on a size taken from
-//! caller input; `add` / `mul` return `InvalidInput` where upstream's signed `NL_INDEX`
+//! caller input, also above [`crate::limits::MAX_ALLOC_BYTES`] (so a degree of `2^31`
+//! fails on every machine); `add` / `mul` return `InvalidInput` where upstream's signed `NL_INDEX`
 //! sum or product would overflow (undefined behaviour).
 //!
 //! | Rust                         | Upstream                                       |
@@ -30,6 +31,7 @@
 //! | `add`, `mul`                 | `NL_INDEX` `a + b`, `a * b`                    |
 
 use crate::error::{NlibCode, Result, SolidError};
+use crate::limits;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, MatrixType, RealMatrix};
@@ -113,17 +115,14 @@ pub(crate) fn put2<T>(a: &mut [Vec<T>], i: i64, j: i64, v: T, op: &'static str) 
 /// `n == -1`).
 ///
 /// [`NlibCode::Memory`] (upstream `NL_MEM_ERR` from a failed `N_Malloc`) when the
-/// storage cannot be reserved, instead of an allocation abort.
+/// storage cannot be reserved or would take more than [`limits::MAX_ALLOC_BYTES`],
+/// instead of an allocation abort.
 pub(crate) fn alloc<T: Clone>(n: i64, v: T, op: &'static str) -> Result<Vec<T>> {
     let len = n
         .checked_add(1)
         .and_then(|l| usize::try_from(l).ok())
         .ok_or_else(|| out_of_range(op))?;
-    let mut a = Vec::new();
-    a.try_reserve_exact(len)
-        .map_err(|_| SolidError::nlib(op, NlibCode::Memory))?;
-    a.resize(len, v);
-    Ok(a)
+    limits::try_filled(len, v).ok_or_else(|| SolidError::nlib(op, NlibCode::Memory))
 }
 
 /// `a + b` on upstream `NL_INDEX` values, `InvalidInput` where the sum overflows
@@ -139,9 +138,19 @@ pub(crate) fn mul(a: i64, b: i64, op: &'static str) -> Result<i64> {
         .ok_or_else(|| invalid(op, "index arithmetic overflow"))
 }
 
-/// An `(n+1) x (m+1)` grid of `v`.
+/// An `(n+1) x (m+1)` grid of `v`; [`NlibCode::Memory`] also when the whole grid
+/// would take more than [`limits::MAX_ALLOC_BYTES`] (upstream allocates it as one
+/// block).
 pub(crate) fn alloc2<T: Clone>(n: i64, m: i64, v: T, op: &'static str) -> Result<Vec<Vec<T>>> {
-    alloc(n, alloc(m, v, op)?, op)
+    let row = alloc(m, v, op)?;
+    let rows = n
+        .checked_add(1)
+        .and_then(|l| usize::try_from(l).ok())
+        .ok_or_else(|| out_of_range(op))?;
+    if !rows.checked_mul(row.len()).is_some_and(limits::fits::<T>) {
+        return Err(SolidError::nlib(op, NlibCode::Memory));
+    }
+    alloc(n, row, op)
 }
 
 /// Upstream's row-major block of reals (`N_AllocReal2dArray` plus its zeroing loops),
