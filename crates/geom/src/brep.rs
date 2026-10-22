@@ -15,6 +15,7 @@ pub mod eval;
 pub mod geometry;
 pub mod history;
 pub mod pcurve;
+pub mod placement;
 mod topology;
 pub use curve2::Curve2;
 

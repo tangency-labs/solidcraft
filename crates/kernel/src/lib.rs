@@ -18,7 +18,6 @@ mod blend_corner;
 mod blend_fit;
 mod blend_smlib;
 mod blend_variable;
-mod blend_vertex;
 #[cfg(test)]
 mod blend_wrong_way_tests;
 mod body;
@@ -38,7 +37,6 @@ mod coaxial_overlap;
 mod continuity;
 mod coplanar;
 mod corner_g2;
-mod curveblend;
 mod delete_face;
 mod distance;
 mod emboss;
@@ -87,7 +85,6 @@ mod loft_rails;
 mod loft_rails_tests;
 #[cfg(test)]
 mod loft_region_tests;
-mod loopblend;
 mod matchsurf;
 mod measure;
 mod measure_backend;

@@ -14,6 +14,13 @@ use crate::measure::MassMeasure;
 /// centroid): SMLib must agree with it this closely for its numbers to be used.
 const AGREE: f64 = 1e-3;
 
+/// The relative accuracy SMLib integrates at: the finest of SmApiBrepComputeMassProperties'
+/// documented range ("clamped to [1e-4, 1e-1]", SmApiQueries.h), ten times inside the 1e-3 the
+/// measure is held to ([`AGREE`], and the regression rig's volume and area tolerance). Its cost is
+/// "governed by dRelativeAccuracy": the finest the integrator allows, 1e-8, took tens of seconds
+/// on a modelled thread's faces.
+const ACCURACY: f64 = 1e-4;
+
 /// Exact volume, area and centroid.
 pub(crate) struct Exact {
     pub volume: f64,
@@ -31,7 +38,7 @@ pub(crate) struct Choice {
 #[cfg(feature = "smlib")]
 fn exact(b: &Body) -> Result<Exact, String> {
     let sb = crate::native::smlib_body(b).map_err(|e| e.to_string())?;
-    let m = sb.mass_properties(solidcraft_smlib::MEASURE_ACCURACY).map_err(|e| format!("SMLib mass properties: {e}"))?;
+    let m = sb.mass_properties(ACCURACY).map_err(|e| format!("SMLib mass properties: {e}"))?;
     let [x, y, z] = m.centroid;
     Ok(Exact { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z) })
 }
