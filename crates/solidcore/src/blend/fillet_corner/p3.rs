@@ -44,12 +44,11 @@
 //!   `MakeAnalyticCornerSurface`, the `SmFilletConvexNxNCorner` /
 //!   `SmFilletNx1ClosedCorner` overrides (`blend.fillet_corner_p2`),
 //!   `TestAndConvertBigRadFillet` and `NoteFilletError` (`blend.fillet_executive_p1`),
-//!   `SmFilletEdge::MakeFilletEdge` (`blend.fillet_geom_p5`), `GetRailVertex`
-//!   (`blend.fillet_geom_p6`), `ReCalcFilletGeom` (`blend.fillet_geom_p3`),
-//!   `SplitFilletGeomAtSideEdge` (ported in `blend.fillet_solver_p1` on its own fillet
-//!   geometry handles; its first call `GetRailIndexOfVertexuse` is
-//!   `blend.fillet_geom_p6`, so the stub carries that tag) return
-//!   [`SolidError::Unported`] at the call site.
+//!   `SmFilletEdge::MakeFilletEdge` (`blend.fillet_geom_p5`), `ReCalcFilletGeom`
+//!   (`blend.fillet_geom_p3`), `SplitFilletGeomAtSideEdge` (ported in
+//!   `blend.fillet_solver_p1`, but on the solver's own fillet geometry handles, which
+//!   carry no geometry data for its part 6 calls, so the stub carries that unit's tag)
+//!   return [`SolidError::Unported`] at the call site.
 //! - **Intersection-point user pointers.** `SmTsectPnt::m_apUserPointer[0..2]` (the two
 //!   surfaces of a fillet vertex use's intersection point, read by
 //!   `AdjustTangentCorner`) are not members of the Rust [`TsectPnt`]: the caller passes

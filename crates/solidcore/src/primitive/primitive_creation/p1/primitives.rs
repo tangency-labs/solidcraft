@@ -41,6 +41,7 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::surface::cone::p1::Cone;
 use crate::surface::plane::p1::Plane;
 use crate::surface::sphere::Sphere;
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::torus::{Torus, TorusOptions};
 use crate::topology::edge::NotifyEnv;
@@ -253,18 +254,30 @@ pub(super) fn detailed_face(
     .ok_or_else(|| SolidError::null_pointer("primitive::primitive_creation::p1::detailed_face"))
 }
 
+/// `pSurface->DropCurve(ctx, pSurface->GetNaturalUVDomain(), *pCurve,
+/// pCurve->GetNaturalInterval(), dTolerance, dMaxDist, dDeviation, rUVCurves)` with the
+/// declaration's defaults: `output` is reset first (upstream `rUVCurves.ReSet()`) and
+/// holds the UV curves only when the drop succeeds.
 fn drop_uv_curves(
-    _k: &Kernel,
-    _surface: &Surface,
-    _curve: &Curve,
-    _tolerance: f64,
-    _output: &mut Vec<Curve>,
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    tolerance: f64,
+    output: &mut Vec<Curve>,
 ) -> Result<()> {
-    // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-    Err(SolidError::unported(
-        "SmSurface::DropCurve",
-        "intersect.surface_drop_lib_p3",
-    ))
+    output.clear();
+    let dropped = surface.drop_curve::<NoObject>(
+        k,
+        &surface.natural_uv_domain(),
+        curve,
+        &curve.natural_interval(),
+        tolerance,
+        true,
+        None,
+        true,
+    )?;
+    output.extend(dropped.uv_curves);
+    Ok(())
 }
 /// `SmBrep::StitchFaces(tol, ...)` with the header defaults (`pOptFaces = NULL`,
 /// `bAllowSpineEdges = FALSE`); the counts and gaps are unused.

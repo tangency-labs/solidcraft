@@ -2412,13 +2412,13 @@ mod tests {
                 Operation::Solid,
                 sheet([0.0; 3], 1.0, 0),
                 false,
-                "SmSurface::DropCurve",
+                "SmBrep::ShrinkGeometry",
             ),
             (
                 Operation::Extended,
                 sheet([0.0; 3], 1.0, 0),
                 true,
-                "SmSurface::DropCurve",
+                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
             ),
         ] {
             for distance in [0.0, 1.9999999999999995e-6, 2e-6, 2.0000000000000003e-6] {
@@ -2496,8 +2496,8 @@ mod tests {
 
     #[test]
     fn face_geometry_paths_reach_distinct_actual_callees() {
-        // MakeWireEdgeVertex now runs, and concrete-Surface CrvOnSurf construction
-        // lets the rounded paths reach the real DropCurve blocker too.
+        // MakeWireEdgeVertex now runs; its UV-curve construction runs DropCurve, and the
+        // extended sheets stop later, at the edge-use offset adapter.
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2511,8 +2511,8 @@ mod tests {
             ),
             (
                 "static_offset_real_plane_sheet_extended",
-                "intersect.surface_drop_lib_p3",
-                "SmSurface::DropCurve",
+                "offset.offset_executive_p1",
+                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
             ),
             (
                 "member_sheet_round_skip_true_still_real_geometry",
@@ -2521,8 +2521,8 @@ mod tests {
             ),
             (
                 "member_sheet_extended_dispatch_ignores_skip",
-                "intersect.surface_drop_lib_p3",
-                "SmSurface::DropCurve",
+                "offset.offset_executive_p1",
+                "SmOffsetExecutive::BuildOffsetOfEdgeuses (geometry-creation adapter)",
             ),
             (
                 "extended_sheet_direct_independent_flags",

@@ -122,6 +122,17 @@ pub struct BlendNeighbour<'a> {
     pub b_spline: &'a BSplineSurface,
 }
 
+/// Options of [`BSplineSurface::trim_with_domain_with`]. `Default` is upstream's
+/// `TrimWithDomain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TrimOptions {
+    /// Not upstream (tangency-labs/solidcore#472): a trim boundary at most
+    /// `SM_EFF_ZERO_PARAM` inside a knot is snapped onto the knot instead of being
+    /// moved `10 * SM_EFF_ZERO_SQRT * (1 + |t|)` away from it, which leaves a sliver
+    /// span. Off by default (upstream).
+    pub snap_roundoff_to_knots: bool,
+}
+
 /// The flags of [`BSplineSurface::evaluate`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EvaluateFlags {

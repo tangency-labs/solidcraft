@@ -73,8 +73,7 @@
 //!   `CreateCanonical` for degree 2 with the four Bezier points and end multiplicities
 //!   4, as upstream; the quadratic it makes drops the start-tangent point
 //!   (`plan/upstream-issues.md` WR-190).
-//! - **Unported callees.** `SmSurface::DropCurve` (`intersect.surface_drop_lib_p3`) in
-//!   the 3D branch of `CalcBlendingRail`; `SmFilletExecutive::NoteFilletError`
+//! - **Unported callees.** `SmFilletExecutive::NoteFilletError`
 //!   (`blend.fillet_executive_p1`). Each stub replaces only its call; the code behind
 //!   it is ported.
 //! - **Iteration.** No recursion; `JoinTwoFilletVertsByCurves` removes a side edge use
@@ -467,8 +466,7 @@ impl FilletBrep {
     /// primary edge use / mate / vertices / curves; `SM_ERR` (status
     /// `SM_FE_END_PNT_DROP_FAILURE`) when an end point does not drop onto the
     /// surface, or for an empty drop; those of the evaluations, the curve
-    /// construction and `LiftCurve`; [`SolidError::Unported`] for the 3D branch's
-    /// `DropCurve` (`intersect.surface_drop_lib_p3`).
+    /// construction, `LiftCurve` and the 3D branch's `DropCurve`.
     #[allow(clippy::too_many_lines)]
     pub fn calc_blending_rail(&mut self, k: &Kernel, e: EdgeId, target: &Brep) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_BLENDING);
@@ -674,12 +672,7 @@ impl FilletBrep {
             (lifted.curve, curve)
         } else {
             // Project 3D curve onto the plane
-            // UNPORTED(intersect.surface_drop_lib_p3): SmSurface::DropCurve
-            let uv_curves: Vec<Curve> = unported_on(
-                (k, &uv_domain, &curve, &ivl, tol),
-                "SmSurface::DropCurve",
-                "intersect.surface_drop_lib_p3",
-            )?;
+            let uv_curves = super::p2::surface_drop_curve(k, surf, &uv_domain, &curve, &ivl, tol)?;
             let uv_curve = uv_curves
                 .into_iter()
                 .next()

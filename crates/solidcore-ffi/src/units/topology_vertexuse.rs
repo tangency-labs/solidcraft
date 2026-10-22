@@ -40,9 +40,12 @@
 //! [`eval`] accepts only what upstream handles without undefined behaviour: existing
 //! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal, indices
 //! inside the B-rep's export (it builds the B-rep once more to count), finite inputs.
+//! Blocks with a value above [`super::topology_edgeuse_p2::MAX_BLOCK_MAGNITUDE`] are
+//! refused first (HANG-29: building the face never returns upstream).
 
 use std::path::Path;
 
+use super::topology_edgeuse_p2::check_block_magnitudes;
 use crate::validate::{bad, check_knots, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
@@ -438,6 +441,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let mut rd = Reader::new(input);
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    check_block_magnitudes(block)?;
     let export = raw(Op::Export, path, block)?;
     if op == Op::Export {
         rd.done()?;

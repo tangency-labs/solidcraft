@@ -75,9 +75,18 @@
 //! - Boundary views use required handle mappings and the same [`ClassGeometry`]
 //!   implementation as part 5. Lazy UV and gap calculations run on a private B-rep
 //!   snapshot; numerical results are preserved while cache-only updates are discarded.
-//!   The UV trim curves `IntersectTSBound`'s `ComputeUVPoint` calls make there (upstream
+//! - **Vertex/face gaps.** With `bHasBigGaps`, `IntersectVertices` reads each vertex's
+//!   `GetVertexuseOfFace(pFace)->GetVertexFaceGap()` length. [`curve_on_classify`]
+//!   computes them from the B-rep (on one private snapshot per call, which keeps the
+//!   gap caches across both passes) for the face's vertices before the vertex
+//!   intersections, and answers [`ClassGeometry::vertex_face_gap`] for them around the
+//!   caller's [`ClassGeometry`]; a gap error therefore surfaces before the earlier
+//!   vertices are intersected (upstream: a null dereference or the same unported
+//!   callee). A vertex without a face use is unresolved (upstream dereferences null).
+//! - The UV trim curves `IntersectTSBound`'s `ComputeUVPoint` calls make there (upstream
 //!   on the face's own B-rep) stay visible for the rest of the classification through
-//!   the private `WithMadeTrimCurves` geometry.
+//!   the private `WithMadeTrimCurves` geometry. The gap caches and these trim curves
+//!   share one snapshot per call, as upstream mutates the one B-rep.
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -1099,8 +1108,9 @@ pub fn curve_on_classify<O: ClassObject>(
     reset_classification(k, cc)?;
     cc.set_face(Some(objects.face(f)));
     let mut modified = false;
-    // the B-rep as the trim boundary intersection leaves it (UV trim curves made by its
-    // ComputeUVPoint calls, see WithMadeTrimCurves)
+    // the B-rep as upstream's calls leave it: UV trim curves made by the trim boundary
+    // intersection's ComputeUVPoint calls (see WithMadeTrimCurves) and the vertex/face
+    // gap caches GetVertexFaceGap fills
     let mut snapshot: Option<Brep> = None;
     let mut made_trims: Vec<(O, Curve)> = Vec::new();
 
@@ -1147,7 +1157,7 @@ pub fn curve_on_classify<O: ClassObject>(
             // bHasBigGaps: each vertex's GetVertexuseOfFace(pFace)->GetVertexFaceGap()
             // (pFace is this face, set on the classification above)
             let gaps = if has_big_gaps {
-                let snapshot = gap_snapshot.get_or_insert_with(|| b.clone());
+                let snapshot = snapshot.get_or_insert_with(|| b.clone());
                 vertices
                     .iter()
                     .map(|&v| {

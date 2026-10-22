@@ -175,9 +175,11 @@
 //!   `SmFace::CalculateUVDomainFromUVTrimCurves` of `topology.face_p1`) and the
 //!   unported callees of `SmFace::Point3DClassify` (wired to `query::face::p1`) in
 //!   `sm_ClassifyFacePoint`;
-//!   `SmFilletSolver::RailRailIntersect` (`blend.fillet_solver_p2`) in
-//!   `sm_CreateCubicRailRailInterpolant` (the cubic built from their result is ported
-//!   behind them). Every stub replaces only its call.
+//!   `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`) inside the wired
+//!   `SmFilletSolver::RailRailIntersect` of `sm_CreateCubicRailRailInterpolant` (the
+//!   cubic built from its result is ported behind it; the solvers are `SmFilletSolver*`
+//!   upstream, here `&mut` [`FilletSolver`]s because its virtual callees may change
+//!   them). Every stub replaces only its call.
 //! - **Bounds.** `sm_ExamineNFixFilletGeoms` copies at most the smaller control net
 //!   row; indices are checked. No input-driven recursion.
 

@@ -64,10 +64,16 @@
 //!   edges, type and `TestRailRailInterpolationCurve` are `UNPORTED(blend.fillet_corner_p1)`
 //!   stubs (the four vertex calculators stop at the filleted vertex, right after the
 //!   corner's null check; `CalcRailRailInterpolation` only with a corner).
-//! - **Unported callees.** `SmFilletSolver::RailRailIntersect` and `PointOnPlaneSolve`
-//!   (`blend.fillet_solver_p2`); `SmFilletGeom::GetRailIndexOfSideEU`,
-//!   `RailEdgeuseIntersect` and `SmFilletEdge::ShouldSwapFaces`
-//!   (`blend.fillet_geom_p6`); `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
+//! - **Solver virtuals.** The `solvers` table holds base [`FilletSolver`]s, so
+//!   `RailRailIntersect` and the virtual `PointOnPlaneSolve` run with the base
+//!   `SmFilletSolver` virtuals (`impl FilletSolverOps for FilletSolver`), as for the
+//!   base `SmFilletSolver` the difftest shims build; the virtuals' changes to the
+//!   solver (offsets, surface extensions) stay in the table. When both solvers of
+//!   `RailRailIntersect` / `sm_CreateCubicRailRailInterpolant` are the same table entry
+//!   (one object upstream, which Rust cannot lend twice) the second runs on a copy and
+//!   its changes are dropped (`plan/findings.md`, "`blend.fillet_solver_p2`: back-edges
+//!   into the solver from `blend.fillet_geom`").
+//! - **Unported callees.** `SmTemporaryRadiusChange` (`blend.fillet_executive_p2`)
 //!   for a solver (its set-up is a no-op for a `NULL` solver). Each stub replaces only
 //!   its call; the code behind it is ported.
 //! - **Record writes.** `SetPoint` on a fillet vertex and `SetCurve` on a fillet edge
@@ -100,6 +106,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p2::SurfaceIntersection;
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::edgeuse::p3::{
@@ -368,7 +375,7 @@ const fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
 /// rdMaxDist, rdDeviation, rUVCurves)` with the defaults (`bKeepAllDropCurves =
 /// TRUE`, no fail record, `bCreatingUVTrimCurve = TRUE`): the UV curves
 /// ([`Surface::drop_curve`]; the `SmPlane` override or the general drop).
-fn surface_drop_curve(
+pub(super) fn surface_drop_curve(
     k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
