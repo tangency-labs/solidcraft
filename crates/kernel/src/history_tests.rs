@@ -66,7 +66,7 @@ fn substitute_a_body_made_from_a_sketch() {
 #[test]
 fn bodies_without_reported_history_have_none() {
     let a = box_solid(Vec3::ZERO, Vec3::new(4.0, 3.0, 1.0)).unwrap();
-    let bare = Body::new(a.deep_copy()).unwrap();
+    let bare = Body::from_record(a.record().clone()).unwrap();
     assert!(bare.history().is_none());
 }
 

@@ -210,8 +210,13 @@ fn too_large_or_unsupported_is_refused() {
     let tilted = crate::build::cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::new(1.0, 0.0, 2.0), 5.0, 40.0).unwrap();
     let cut = box_solid(Vec3::new(-50.0, -50.0, 10.0), Vec3::new(50.0, 50.0, 50.0)).unwrap();
     let t = boolean(&tilted, &cut, BoolOp::Cut).unwrap().unwrap();
-    let solid = t.deep_copy();
-    let rim = crate::body::Body::unique_edges(&solid).iter().filter_map(crate::blend::edge_mid).find(|m| (m.z - 10.0).abs() < 1e-6).unwrap();
+    let rim = t
+        .record()
+        .edges
+        .iter()
+        .filter_map(|e| solidcraft_geom::brep::eval::CurveEval::new(&e.curve).ok()?.point(0.5 * (e.interval[0] + e.interval[1])))
+        .find(|m| (m.z - 10.0).abs() < 1e-6)
+        .unwrap();
     match chamfer_sides(&t, &[rim], 1.0, ChamferSide::Distance(2.0), false) {
         Err(KernelError::Failed(m)) => assert!(m.starts_with("not supported yet"), "{m}"),
         Err(e) => panic!("{e}"),

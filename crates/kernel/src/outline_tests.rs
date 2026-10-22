@@ -40,7 +40,10 @@ fn a_lip_swept_on_a_round_rim_joins_it() {
 #[test]
 fn a_swept_lips_foot_is_a_plane() {
     let l = lip(0.0);
-    let foot = crate::coplanar::faces_in(&l, -Vec3::Z, -10.0, 1e-6);
+    // The faces lying in the plane z = 10 facing down: planar, normal -z, through z = 10.
+    let foot: Vec<usize> = (0..l.face_count())
+        .filter(|&i| l.planar_face(i).is_some_and(|p| p.normal().dot(-Vec3::Z) > 1.0 - 1e-9 && (p.origin.z - 10.0).abs() < 1e-6))
+        .collect();
     let m = l.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
     let area: f64 = m
         .triangles

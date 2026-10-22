@@ -25,20 +25,19 @@ fn channel() -> Body {
     box_solid(Vec3::new(-20.0, 30.0, 10.0), Vec3::new(220.0, 70.0, 20.0)).unwrap()
 }
 
-/// What the boolean of `a` and `b` adds to a's volume, the result's lumps, and how it was made.
-fn change(a: &Body, b: &Body, op: BoolOp) -> (f64, usize, BooleanDiagnostics) {
-    let (r, how) = capture_boolean_diagnostics(|| boolean(a, b, op));
-    let r = r.unwrap().unwrap();
-    (measure(&r).unwrap().volume - measure(a).unwrap().volume, r.lumps().unwrap().len(), how)
+/// What the boolean of `a` and `b` adds to a's volume, and the result's lumps.
+fn change(a: &Body, b: &Body, op: BoolOp) -> (f64, usize) {
+    let r = boolean(a, b, op).unwrap().unwrap();
+    (measure(&r).unwrap().volume - measure(a).unwrap().volume, r.lumps().unwrap().len())
 }
 
 /// A channel cut along a block, up to the face a rib stands on. The channel's top lies in
 /// that face's plane and the rib bridges it.
 #[test]
 fn a_cut_up_to_a_face_leaves_what_stands_on_the_face() {
-    let (added, lumps, how) = change(&ribbed(), &channel(), BoolOp::Cut);
+    let (added, lumps) = change(&ribbed(), &channel(), BoolOp::Cut);
     // It takes 200 x 40 x 10 of the block and nothing of the rib.
-    assert!((added + 80_000.0).abs() < 1e-6 && lumps == 1, "{added}, {lumps} lumps, {how:?}");
+    assert!((added + 80_000.0).abs() < 1e-6 && lumps == 1, "{added}, {lumps} lumps");
 }
 
 /// The same with a round hole through the block beside the channel (r 4 at 30, 15: y 11 to
@@ -48,9 +47,9 @@ fn a_cut_up_to_a_face_leaves_what_stands_on_the_face() {
 fn a_round_hole_beside_the_cut_changes_nothing() {
     let hole = cylinder(Vec3::new(30.0, 15.0, -1.0), Vec3::Z, 4.0, 22.0).unwrap();
     let drilled = boolean(&ribbed(), &hole, BoolOp::Cut).unwrap().unwrap();
-    let (added, lumps, how) = change(&drilled, &channel(), BoolOp::Cut);
+    let (added, lumps) = change(&drilled, &channel(), BoolOp::Cut);
     // 200 x 40 x 10 again (the hole is measured on its mesh, before and after).
-    assert!((added + 80_000.0).abs() < 1e-3 && lumps == 1, "{added}, {lumps} lumps, {how:?}");
+    assert!((added + 80_000.0).abs() < 1e-3 && lumps == 1, "{added}, {lumps} lumps");
 }
 
 /// A pocket whose top lies in the plane of the block's top face, and a pad whose foot does.
@@ -59,12 +58,12 @@ fn faces_in_a_common_plane_cut_and_join() {
     let block = block(200.0, 100.0, 20.0);
     // A pocket 50 x 60 x 5 from the top face: 15 000 less.
     let pocket = box_solid(Vec3::new(75.0, 20.0, 15.0), Vec3::new(125.0, 80.0, 20.0)).unwrap();
-    let (added, _, how) = change(&block, &pocket, BoolOp::Cut);
-    assert!((added + 15_000.0).abs() < 1e-6, "{added}, {how:?}");
+    let (added, _) = change(&block, &pocket, BoolOp::Cut);
+    assert!((added + 15_000.0).abs() < 1e-6, "{added}");
     // A pad 50 x 60 x 10 on the top face: 30 000 more.
     let pad = box_solid(Vec3::new(75.0, 20.0, 20.0), Vec3::new(125.0, 80.0, 30.0)).unwrap();
-    let (added, lumps, how) = change(&block, &pad, BoolOp::Union);
-    assert!((added - 30_000.0).abs() < 1e-6 && lumps == 1, "{added}, {how:?}");
+    let (added, lumps) = change(&block, &pad, BoolOp::Union);
+    assert!((added - 30_000.0).abs() < 1e-6 && lumps == 1, "{added}");
 }
 
 /// A disc joined into a round hole it fills (issue: "boolean Union: no result" for a 1 mm
@@ -78,10 +77,9 @@ fn a_disc_joined_into_the_hole_it_fills() {
     for (z0, z1) in [(0.0, 1.0), (5.0, 8.0), (19.0, 20.0)] {
         let disc = cylinder(Vec3::new(150.0, 50.0, z0), Vec3::Z, 20.0, z1 - z0).unwrap();
         let want = measure(&disc).unwrap().volume;
-        let (r, how) = capture_boolean_diagnostics(|| boolean(&drilled, &disc, BoolOp::Union));
-        let r = r.unwrap().unwrap();
+        let r = boolean(&drilled, &disc, BoolOp::Union).unwrap().unwrap();
         let added = measure(&r).unwrap().volume - measure(&drilled).unwrap().volume;
-        assert!((added - want).abs() < want * 1e-3, "{z0}..{z1}: {added} vs {want}, {how:?}");
+        assert!((added - want).abs() < want * 1e-3, "{z0}..{z1}: {added} vs {want}");
         assert!(r.lumps().unwrap().len() == 1 && r.validity().is_empty(), "{z0}..{z1}: {:?}", r.validity());
     }
 }

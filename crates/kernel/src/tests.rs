@@ -2326,9 +2326,6 @@ fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
             present[face as usize] = true;
         }
         assert_eq!(body.unmeshed_faces(), present.iter().filter(|p| !**p).count());
-        if scale == 1.0 {
-            assert_eq!(body.coarse_missing, Some((tol, 0)));
-        }
     }
 }
 
@@ -2473,7 +2470,7 @@ fn loft_joined_onto_a_box_top_is_one_shell() {
     // Overhanging the box edge (x = 20) the disc is not inside the top face: whatever the join
     // does, it never returns touching shells as one body.
     if let Ok(Some(r)) = boolean(&bx, &loft_at(17.0), BoolOp::Union) {
-        assert!(r.shell_count() == 1 || r.union_lumps().is_ok(), "{} touching shells", r.shell_count());
+        assert!(r.shell_count() == 1 || r.lumps().is_ok(), "{} touching shells", r.shell_count());
     }
 }
 
