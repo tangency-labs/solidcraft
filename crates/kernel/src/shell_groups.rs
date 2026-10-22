@@ -106,4 +106,3 @@ pub(super) fn meshes_meet(a: &Mesh, b: &Mesh, gap: f64) -> Result<bool> {
     // No boundary contact: they meet only if one lies wholly inside the other.
     Ok(b.positions.first().is_some_and(|p| a.contains(*p)) || a.positions.first().is_some_and(|p| b.contains(*p)))
 }
-

@@ -142,7 +142,6 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
     })
 }
 
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FaceSource {
     ExtrudeSide {
@@ -248,7 +247,6 @@ pub struct FaceInfo {
     /// Unit normal if the face is planar.
     pub plane_normal: Option<Vec3>,
 }
-
 
 /// The most one facet of the display mesh turns (radians): a curved face or edge is divided
 /// until no facet spans more of it than this, however small its radius is beside the body.
@@ -1216,9 +1214,10 @@ impl Body {
             .into_iter()
             .map(|r| {
                 let part = self.record.part(&[r]).map_err(|e| KernelError::Failed(format!("lump: {e}")))?;
-                let sources = self.face_sources.as_ref().map(|all| {
-                    std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>())
-                });
+                let sources = self
+                    .face_sources
+                    .as_ref()
+                    .map(|all| std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>()));
                 let history = crate::history::of_part(&part, &counts);
                 let piece = Body::from_record(part.brep)?.with_face_sources(sources).inherit_regularization_protection(self);
                 Ok(piece.with_checked_history(Some(history), &counts))

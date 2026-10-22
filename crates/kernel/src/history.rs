@@ -18,8 +18,8 @@
 pub use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
 
 use crate::body::{Body, FaceSource};
-use solidcraft_geom::brep::{Brep, part::Part};
 use crate::{KernelError, Result};
+use solidcraft_geom::brep::{Brep, part::Part};
 
 impl From<solidcraft_geom::brep::history::Failed> for KernelError {
     fn from(e: solidcraft_geom::brep::history::Failed) -> KernelError {
