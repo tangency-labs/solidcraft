@@ -35,7 +35,8 @@ fn missing(c: &Capturer, width: f64) -> Vec<usize> {
     (0..N)
         .filter(|&i| {
             let z = -4.0 + i as f64 * 0.23;
-            let line = SceneLine { points: vec![Vec3::new(-8.0, 0.0, z), Vec3::new(8.0, 0.0, z)], color: Rgb(255, 0, 0), width, on_top: true };
+            let line =
+                SceneLine { points: vec![Vec3::new(-8.0, 0.0, z), Vec3::new(8.0, 0.0, z)], color: Rgb(255, 0, 0), alpha: 1.0, width, on_top: true };
             let scene = Scene { lines: vec![line], radius: 30.0, ..Default::default() };
             let img = c.rgba(&scene, &cam, 200, 200).unwrap();
             !img.as_chunks::<4>().0.iter().any(|p| p[0] > 60 && p[0] > p[1].saturating_add(40) && p[0] > p[2].saturating_add(40))

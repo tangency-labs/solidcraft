@@ -153,7 +153,7 @@ fn front(mesh: Mesh, lines: Vec<SceneLine>, radius: f64, fov: f64) -> (Scene, Ca
 }
 
 fn red_line(a: Vec3, b: Vec3, on_top: bool) -> SceneLine {
-    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), width: 1.2, on_top }
+    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 1.2, on_top }
 }
 
 fn red_pixels(c: &Capturer, scene: &Scene, cam: &Camera) -> usize {
