@@ -3,14 +3,17 @@
 //! lines from the edge in a direction set by the face beside it: along its normal, continuing
 //! it, at an angle from a reference direction (a draft), or along a fixed vector.
 //!
-//! A strip is exact where the rulings move the edge by an affine map: a straight edge with a
-//! constant ruling direction gives a plane, an arc whose rulings keep their angle to its axis
-//! gives a plane (a ring), or a ruled NURBS surface between the edge and its image (a cylinder
-//! or a cone, exactly). Any other strip is a ruled B-spline (degree 1 across) fitted within
-//! [`FIT_TOLERANCE`]. Strips share their side edges where their rulings agree; at a sharp
-//! corner of the chain they are mitred (each extended along its far edge until the two meet, or
-//! cut back where they overlap) or rounded (a planar or conical sector SMLib revolves from one
-//! ruling to the other; an inside corner is always cut back).
+//! A strip is exact where the rulings move the edge by an affine map: a constant ruling direction
+//! (a plane, or the ruled NURBS between the edge and its translate), or an arc whose rulings keep
+//! their angle to its axis (a plane ring, or the ruled NURBS of a cylinder or a cone, exactly).
+//! Rulings that turn any other way along the edge (a normal turning along a free-form face, a
+//! tangent continuing a face round a free-form curve) end on an offset curve, which has no exact
+//! NURBS form in general (SMLib keeps one only implicitly, `SmOffsetCurve`, or approximates it,
+//! `N_CrvOffsetApprox`), so such a strip is refused, never fitted. Strips share their side edges
+//! where their rulings agree; at a sharp corner of the chain they are mitred (each extended along
+//! its far edge until the two meet, or cut back where they overlap) or rounded (a planar or
+//! conical sector SMLib revolves from one ruling to the other; an inside corner is always cut
+//! back).
 //!
 //! Every strip and corner face is built on its own on the record (each edge a NURBS curve, the
 //! edge's own curve as a NURBS where it stands on the body), and the faces are stitched by SMLib
@@ -28,11 +31,8 @@ use crate::history::FaceOrigin;
 use crate::surfaces::{Parts, nearest_face, picked_chain, sheet_of, spline_curve, spline_surface, uv_line};
 use crate::{KernelError, Result, record};
 
-/// How far a fitted strip may stray from the true ruled surface (mm).
-const FIT_TOLERANCE: f64 = 1e-3;
-/// Samples along an edge when classifying its strip, and the most a fitted strip is refined to.
+/// Samples along an edge when classifying its strip.
 const SAMPLES: usize = 16;
-const MAX_FIT_SAMPLES: usize = 513;
 /// Rulings closer than this (as unit vectors) agree: their strips share a side edge.
 const SAME_RULING: f64 = 1e-7;
 
@@ -403,16 +403,16 @@ struct End {
 enum Kind {
     /// The plane through a point spanned by the edge's direction and the ruling (normal t × r).
     Plane { o: Vec3, t: Vec3, r: Vec3 },
-    /// The ruled NURBS surface from the base curve (v = 0) to the top (v = 1) on their shared
-    /// knots and weights.
+    /// The ruled NURBS surface from the base curve (v = 0) to its image, the top (v = 1), on
+    /// their shared knots and weights.
     Ruled,
 }
 
 /// The strip on one edge.
 struct Strip {
-    /// The edge as a NURBS curve run along the chain (or its fit, for a fitted strip).
+    /// The edge as a NURBS curve run along the chain.
     base: CurveN<4>,
-    /// The far edge's curve (from the start's ruling end to the end's), on the base's knots.
+    /// The far edge's curve (from the start's ruling end to the end's): the base's image.
     top: CurveN<4>,
     kind: Kind,
     /// A plane through a straight edge: its far edge is the line between its corners.
@@ -447,13 +447,14 @@ impl Strip {
             plane_normal.is_some_and(|nn| samples.iter().map(|s| s.0).chain(tops.iter().copied()).all(|q| (q - first.0).dot(nn).abs() <= eps));
         let exact = affine(&samples, d, eps);
         let line = planar && base.degree == 1 && base.ctrl.len() == 2 && exact.is_some();
-        let (base, top) = match exact {
-            Some(m) => {
-                let top = mapped(&base, |p| m.apply(p));
-                (base, top)
-            }
-            None => fitted(&at, d)?,
+        let Some(m) = exact else {
+            return Err(KernelError::Invalid(
+                "not supported yet: a ruled strip whose rulings turn along the edge other than about an arc's axis \
+                 (their ends trace an offset curve, which has no exact NURBS form): give a fixed direction"
+                    .into(),
+            ));
         };
+        let top = mapped(&base, |p| m.apply(p));
         let kind = if planar { Kind::Plane { o: first.0, t: first.1, r: first.3 } } else { Kind::Ruled };
         let tangent = |f: f64| point_tangent(&top, f).and_then(|(_, t)| t.normalized()).unwrap_or(first.1);
         let end = |(p, _, n, r): (Vec3, Vec3, Vec3, Vec3), tan: Vec3| End { at: p, ruling: r, top: p + r * d, tangent: tan, normal: n };
@@ -679,39 +680,6 @@ fn affine(samples: &[(Vec3, Vec3, Vec3, Vec3)], d: f64, eps: f64) -> Option<Affi
         along.get_or_insert(y);
     }
     Some(Affine::Radial { c: centre, a: axis, scale: 1.0 + radial? / radius, shift: axis * along? })
-}
-
-/// A ruled B-spline fitted to the strip (degree 1 across): cubics through matching samples of the
-/// edge and of its rulings' ends (at the same parameters, so they share their knots), refined
-/// until both are within [`FIT_TOLERANCE`]; the edge's fit and the far edge's.
-fn fitted(at: &dyn Fn(f64) -> Result<(Vec3, Vec3, Vec3, Vec3)>, d: f64) -> Result<(CurveN<4>, CurveN<4>)> {
-    let fail = |e: solidcraft_geom::bspline::SplineError| KernelError::Failed(format!("ruled surface: fitting a strip: {e}"));
-    let lift = |c: CurveN<3>| CurveN { degree: c.degree, knots: c.knots, ctrl: c.ctrl.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
-    let mut m = SAMPLES + 1;
-    loop {
-        let params: Vec<f64> = (0..m).map(|k| k as f64 / (m - 1) as f64).collect();
-        let pts: Vec<(Vec3, Vec3, Vec3, Vec3)> = params.iter().map(|f| at(*f)).collect::<Result<_>>()?;
-        let near: Vec<[f64; 3]> = pts.iter().map(|s| [s.0.x, s.0.y, s.0.z]).collect();
-        let far: Vec<[f64; 3]> = pts.iter().map(|s| s.0 + s.3 * d).map(|q| [q.x, q.y, q.z]).collect();
-        let (base, top) = (lift(CurveN::interpolate(&params, &near, 3).map_err(fail)?), lift(CurveN::interpolate(&params, &far, 3).map_err(fail)?));
-        // Checked between the samples, where a fit strays most.
-        let mut worst = 0.0f64;
-        for k in 0..m - 1 {
-            let f = (k as f64 + 0.5) / (m - 1) as f64;
-            let (p, _, _, r) = at(f)?;
-            let (Some(q0), Some(q1)) = (point(&base, f), point(&top, f)) else {
-                return Err(KernelError::Failed("ruled surface: fitting a strip".into()));
-            };
-            worst = worst.max(q0.dist(p)).max(q1.dist(p + r * d));
-        }
-        if worst <= FIT_TOLERANCE {
-            return Ok((base, top));
-        }
-        if m >= MAX_FIT_SAMPLES {
-            return Err(KernelError::Invalid(format!("the strip can't be fitted within {FIT_TOLERANCE} mm (off by up to {worst:.4} mm)")));
-        }
-        m = (2 * m - 1).min(MAX_FIT_SAMPLES);
-    }
 }
 
 /// Which strip of a joint: the one ending there or the one starting there.
@@ -1003,9 +971,11 @@ mod tests {
         let cases = [
             (ruled(RuledMode::Normal, 2.0, top), 80.0, 4, 4),
             (ruled(RuledMode::Tangent, 2.0, top), 14.0 * 14.0 - 100.0, 4, 4),
-            (round(RuledMode::Tangent), 80.0 + PI * 4.0, 12, 12),
+            // Each round corner is one face, SMLib's revolve of a quarter turn (truck's cone
+            // builder split it in two): four strips and four sectors, each sharing its two sides.
+            (round(RuledMode::Tangent), 80.0 + PI * 4.0, 8, 8),
             (ruled(angle, 2.0, top), 80.0 + 4.0 * 2.0 * h, 4, 4),
-            (round(angle), 80.0 + PI * h * 2.0, 12, 12),
+            (round(angle), 80.0 + PI * h * 2.0, 8, 8),
         ];
         for (r, want, faces, joins) in cases {
             let s = ruled_surface(&b, &rim, &r).unwrap();
@@ -1063,10 +1033,10 @@ mod tests {
     }
 
     /// Off a doubly curved face (a saddle patch over a cup's rim) its normal turns along a
-    /// straight edge: the strip is a fitted ruled B-spline, its rulings square to the edge, so
-    /// it reaches exactly 3 from the edge's line (within the fit) and covers it end to end.
+    /// straight edge: the rulings' ends trace an offset curve with no exact NURBS form, so the
+    /// strip is refused, by name.
     #[test]
-    fn a_strip_off_a_curved_face_is_fitted() {
+    fn a_strip_off_a_curved_face_is_refused() {
         let b = box_solid(Vec3::new(-14.0, -14.0, 0.0), Vec3::new(14.0, 14.0, 20.0)).unwrap();
         let tool = cylinder(Vec3::new(0.0, -60.0, 50.0), Vec3::Y, 40.0, 120.0).unwrap();
         let cup = crate::boolean(&b, &tool, crate::BoolOp::Cut).unwrap().unwrap();
@@ -1074,14 +1044,8 @@ mod tests {
         let rim = [Vec3::new(14.0, 0.0, z(14.0)), Vec3::new(0.0, 14.0, z(0.0)), Vec3::new(-14.0, 0.0, z(-14.0)), Vec3::new(0.0, -14.0, z(0.0))];
         let cover = crate::patch_edges(&cup, &rim).unwrap();
         let edge = [Vec3::new(14.0, 0.0, z(14.0))];
-        let s = ruled_surface(&cover, &edge, &ruled(RuledMode::Normal, 3.0, Vec3::new(0.0, 0.0, 12.0))).unwrap();
-        assert!(s.face_count() == 1 && face_surface(&s, 0).is_none(), "{:?}", face_surface(&s, 0));
-        let mesh = s.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
-        let from_line = |p: &Vec3| Vec3::new(p.x - 14.0, 0.0, p.z - z(14.0)).len();
-        let far = mesh.positions.iter().map(from_line).fold(0.0, f64::max);
-        assert!((far - 3.0).abs() < 2e-3, "{far}");
-        let bb = measure(&s).unwrap().bbox;
-        assert!((bb.min.y + 14.0).abs() < 1e-3 && (bb.max.y - 14.0).abs() < 1e-3, "{bb:?}");
+        let e = ruled_surface(&cover, &edge, &ruled(RuledMode::Normal, 3.0, Vec3::new(0.0, 0.0, 12.0))).unwrap_err().to_string();
+        assert!(e.contains("offset curve"), "{e}");
     }
 
     /// Each strip is made in place of the edge it stands on; a corner face in place of the two
