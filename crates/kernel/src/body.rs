@@ -142,7 +142,6 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
     })
 }
 
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FaceSource {
     ExtrudeSide {
@@ -248,7 +247,6 @@ pub struct FaceInfo {
     /// Unit normal if the face is planar.
     pub plane_normal: Option<Vec3>,
 }
-
 
 /// The most one facet of the display mesh turns (radians): a curved face or edge is divided
 /// until no facet spans more of it than this, however small its radius is beside the body.
@@ -1216,9 +1214,10 @@ impl Body {
             .into_iter()
             .map(|r| {
                 let part = self.record.part(&[r]).map_err(|e| KernelError::Failed(format!("lump: {e}")))?;
-                let sources = self.face_sources.as_ref().map(|all| {
-                    std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>())
-                });
+                let sources = self
+                    .face_sources
+                    .as_ref()
+                    .map(|all| std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>()));
                 let history = crate::history::of_part(&part, &counts);
                 let piece = Body::from_record(part.brep)?.with_face_sources(sources).inherit_regularization_protection(self);
                 Ok(piece.with_checked_history(Some(history), &counts))
@@ -1260,27 +1259,6 @@ impl Body {
             contacts.push(shell_groups::meshes_meet(mesh, &other.mesh(&MeshTolerance::chord(tol))?, 2.0 * tol)?);
         }
         Ok(contacts)
-    }
-
-    /// For each shell: whether it bounds material (else a void or an open/wire shell), and the
-    /// shell directly around it (the outer shell of the region it lies in; `None` in the open).
-    pub(crate) fn shell_nesting(&self) -> (Vec<bool>, Vec<Option<usize>>) {
-        let n = self.record.shells.len();
-        let (mut material, mut parent) = (vec![false; n], vec![None; n]);
-        for (r, region) in self.record.regions.iter().enumerate() {
-            let around = if r == 0 { None } else { region.shells.first().map(|&s| s as usize) };
-            for (k, &s) in region.shells.iter().enumerate() {
-                let s = s as usize;
-                if r > 0 && k == 0 {
-                    if let Some(m) = material.get_mut(s) {
-                        *m = !region.void;
-                    }
-                } else if let Some(p) = parent.get_mut(s) {
-                    *p = around;
-                }
-            }
-        }
-        (material, parent)
     }
 }
 

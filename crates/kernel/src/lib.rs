@@ -119,7 +119,6 @@ mod smlib_sweeps_tests;
 mod smooth_edges;
 #[cfg(test)]
 mod sphere_lens_tests;
-mod spline_conv;
 mod splitface;
 mod step;
 mod step_in;

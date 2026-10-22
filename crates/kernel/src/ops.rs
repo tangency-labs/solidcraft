@@ -101,10 +101,8 @@ fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
     let records: Vec<&solidcraft_geom::brep::Brep> = bodies.iter().map(Body::record).collect();
     let part = part::compound(&records).map_err(|e| KernelError::Failed(format!("pieces: {e}")))?;
     // Each face's source, numbered as `compound` numbers the inputs: one after another.
-    let sources: Vec<Option<crate::FaceSource>> = bodies
-        .iter()
-        .flat_map(|b| (0..b.face_count()).map(move |f| b.face_sources().and_then(|s| s.get(f)).cloned().flatten()))
-        .collect();
+    let sources: Vec<Option<crate::FaceSource>> =
+        bodies.iter().flat_map(|b| (0..b.face_count()).map(move |f| b.face_sources().and_then(|s| s.get(f)).cloned().flatten())).collect();
     let mapped = bodies
         .iter()
         .any(|b| b.face_sources().is_some())

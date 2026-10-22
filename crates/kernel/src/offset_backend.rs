@@ -12,7 +12,6 @@
 //! ([`FaceOrigin::Offset`]), and its edges as where its faces meet. A face SMLib makes new along
 //! a sheet's open edge (a thickened sheet's wall) is recorded as made in place of that edge.
 
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_geom::Vec3;

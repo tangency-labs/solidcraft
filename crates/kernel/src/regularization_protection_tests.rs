@@ -36,7 +36,6 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
         assert!(!mesh.contains(Vec3::new(0., 0., 12.)));
         let count = result.face_count();
         assert_eq!(result.clone().regularize_certified_planar_faces().unwrap().face_count(), count);
-        assert_eq!(result.clone().regularize_generated_planar_faces().unwrap().face_count(), count);
         let placed = crate::transform(&result, Vec3::new(30., -40., 7.), Vec3::ZERO, Vec3::Z, 0.3).unwrap();
         assert!(placed.regularization_protected);
         for lump in placed.lumps().unwrap() {

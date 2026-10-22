@@ -141,12 +141,6 @@ impl Body {
         self.map_planar_sources(&[input], None, None, &[], false)
     }
 
-    /// Generate distinct outer/inner roles from the exact original supports of
-    /// an inside shell. Generated rims and curved walls are intentionally absent.
-    pub(crate) fn with_shell_planar_sources(self, input: &Body, thickness: f64, open: &[Vec3]) -> Result<Self> {
-        self.map_planar_sources(&[input], Some(thickness), None, open, false)
-    }
-
     /// Retain exact shell roles, and construction roles for Cut, only on unchanged
     /// supports without a competing coplanar tool. No imported or fitted role is inferred.
     pub(crate) fn with_preserved_boolean_planar_sources(self, input: &Body, tool: &Body, constructed: bool) -> Result<Self> {

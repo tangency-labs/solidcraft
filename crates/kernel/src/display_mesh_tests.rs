@@ -257,7 +257,10 @@ fn an_arc_the_chord_tolerance_already_divides_finely_is_left_alone() {
     // And a body with nothing curved at any tolerance.
     let b = crate::box_solid(Vec3::ZERO, Vec3::new(3000.0, 1000.0, 2.0)).unwrap();
     let tol = display_tol(&b);
-    assert_eq!(b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap().positions, b.mesh(&crate::MeshTolerance::chord(tol)).unwrap().positions);
+    assert_eq!(
+        b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap().positions,
+        b.mesh(&crate::MeshTolerance::chord(tol)).unwrap().positions
+    );
 }
 
 #[test]

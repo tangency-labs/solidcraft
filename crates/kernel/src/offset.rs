@@ -69,34 +69,6 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
 }
 
 impl Surf {
-    /// Outward unit normal of the surface at `p` (on or near it).
-    pub(crate) fn normal(&self, p: Vec3) -> Option<Vec3> {
-        match *self {
-            Surf::Plane { n, .. } => Some(n),
-            Surf::Cylinder { o, a, convex, .. } => {
-                let v = p - o;
-                let radial = (v - a * v.dot(a)).normalized()?;
-                Some(if convex { radial } else { -radial })
-            }
-            Surf::Sphere { c, convex, .. } => {
-                let radial = (p - c).normalized()?;
-                Some(if convex { radial } else { -radial })
-            }
-            Surf::Cone { v, a, half, convex } => {
-                let w = p - v;
-                let q = (w - a * w.dot(a)).normalized()?;
-                let n = q * half.cos() - a * half.sin();
-                Some(if convex { n } else { -n })
-            }
-            Surf::Torus { o, a, big, h, convex, .. } => {
-                let w = p - o;
-                let u = (w - a * w.dot(a)).normalized()?;
-                let n = (p - (o + a * h + u * big)).normalized()?;
-                Some(if convex { n } else { -n })
-            }
-        }
-    }
-
     /// Whether `other` is this surface, with the same outward side, within `tol`.
     pub(crate) fn same(&self, other: &Surf, tol: f64) -> bool {
         match (*self, *other) {

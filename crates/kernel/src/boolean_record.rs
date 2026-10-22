@@ -1,7 +1,7 @@
 //! Composing the exact history of a multi-step operation (a boolean through several steps, a
 //! local modifier on a healed body): each step's history over its own operands is placed among
 //! the operation's operands ([`placed`], [`kept`]) and substituted into the next
-//! ([`through`], [`of_pair`], [`crate::record::after`]). The operands of a boolean are `[a, b]`:
+//! ([`through`], [`crate::record::after`]). The operands of a boolean are `[a, b]`:
 //! the target, then the tool. A step that cannot report its history leaves the result without
 //! one.
 
@@ -35,15 +35,6 @@ pub(crate) fn through(result: &Body, k: usize, inner: Option<&History>) -> Optio
 /// the history that says so.
 pub(crate) fn operand(body: &Body, operand: usize, counts: &[(usize, usize)]) -> Body {
     body.clone().with_checked_history(kept(body, operand, counts.len()), counts)
-}
-
-/// A body with its history over the operation's operands (`None`: not known).
-pub(crate) type Traced = (Body, Option<History>);
-
-/// The history over the operation's operands of `result`, made from `x` and `y` (in that order)
-/// whose histories over them are given.
-pub(crate) fn of_pair(result: &Body, x: &Option<History>, y: &Option<History>) -> Option<History> {
-    composed(result.history()?.clone().over(&[x.as_ref()?, y.as_ref()?]))
 }
 
 /// `body` healed as the local modifiers take it (faces on one surface as one face, as after a

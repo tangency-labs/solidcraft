@@ -3,7 +3,7 @@
 //! face's parameter box.
 
 use solidcraft_geom::tess::EvalSurface;
-pub(crate) use solidcraft_geom::tess::uv::{Domain, degenerate, domain, project, unwrap};
+pub(crate) use solidcraft_geom::tess::uv::{Domain, degenerate, domain, unwrap};
 
 use super::size::Rules;
 

@@ -118,13 +118,7 @@ pub fn boolean_shapes(seed: u64) -> (Shape, Shape) {
 /// V(A∪B) + V(A∩B) = V(A) + V(B) and V(A−B) = V(A) − V(A∩B), within 0.2 %.
 pub fn boolean_case(seed: u64) -> BoolCase {
     let (a, b) = boolean_shapes(seed);
-    let mut case = BoolCase {
-        seed,
-        a: a.clone(),
-        b: b.clone(),
-        outcome: "ok".into(),
-        detail: String::new(),
-    };
+    let mut case = BoolCase { seed, a: a.clone(), b: b.clone(), outcome: "ok".into(), detail: String::new() };
     let fail = |c: &mut BoolCase, kind: &str, d: String| {
         c.outcome = kind.into();
         c.detail = d;

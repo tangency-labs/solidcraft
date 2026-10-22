@@ -176,41 +176,6 @@ fn unowned_overlapping_and_touching_cavities_are_errors_not_dropped_geometry() {
 }
 
 #[test]
-fn shell_grouping_preserves_large_disconnected_patterns_and_bounds_hostile_work() {
-    let mesh = cube(1.0).mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
-    let copies: Vec<_> = (0..512)
-        .map(|i| {
-            let mut m = mesh.clone();
-            for p in &mut m.positions {
-                p.x += f64::from(i) * 4.0;
-            }
-            m
-        })
-        .collect();
-    assert_eq!(shell_groups::groups(&copies, &vec![8.0; 512], 1e-8).unwrap().len(), 512);
-    let excessive = vec![Mesh::default(); shell_groups::MAX_SHELLS + 1];
-    assert!(shell_groups::groups(&excessive, &vec![1.0; excessive.len()], 1e-8).unwrap_err().to_string().contains("shell count"));
-    let mut oversized = mesh.clone();
-    oversized.positions.resize(shell_groups::MAX_POINTS + 1, Vec3::ZERO);
-    assert!(shell_groups::groups(&[oversized], &[8.0], 1e-8).unwrap_err().to_string().contains("grouping limit"));
-    // Two stacks of one slanted triangle, in parallel planes 1 µm apart: every pair's boxes
-    // overlap but none touch, so all 7000² pairs need testing.
-    let slanted = |dz: f64| Mesh {
-        positions: vec![Vec3::new(0.0, 0.0, dz), Vec3::new(1.0, 0.0, 1.0 + dz), Vec3::new(0.0, 1.0, 1.0 + dz)],
-        triangles: vec![[0, 1, 2]; 7000],
-        ..Mesh::default()
-    };
-    let (repeated, lifted) = (slanted(0.0), slanted(1e-3));
-    assert!(shell_groups::groups(&[repeated, lifted], &[8.0, 8.0], 1e-8).unwrap_err().to_string().contains("boundary work"));
-    let mut outer = cube(2.0).mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
-    let mut inner = mesh;
-    outer.triangles = outer.triangles.iter().copied().cycle().take(4000).collect();
-    inner.triangles = inner.triangles.iter().copied().cycle().take(4000).collect();
-    inner.positions.resize(4000, Vec3::ZERO);
-    assert!(shell_groups::groups(&[outer, inner], &[64.0, -8.0], 1e-8).unwrap_err().to_string().contains("containment work"));
-}
-
-#[test]
 fn translated_and_scaled_nested_voids_keep_material_membership() {
     let body = nested_island();
     for scale in [0.01, 0.25, 2.0] {
