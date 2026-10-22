@@ -524,13 +524,10 @@ impl ExecutiveAccess<Handle> for Access {
         _: Handle,
         _: &mut FilletExecutive<Handle>,
     ) -> SolidResult<()> {
-        // No concrete object is constructed here. Future fixtures must dispatch
-        // derived types to their owners, as documented on ExecutiveAccess.
-        // UNPORTED(blend.fillet_solver_p4): SmFilletSolver::CalcFilletGeom
-        Err(SolidError::unported(
-            "SmFilletSolver::CalcFilletGeom",
-            "blend.fillet_solver_p4",
-        ))
+        // This fixture builds no solver, so there is nothing to dispatch to: the
+        // base `CalcFilletGeom` is ported (`blend::fillet_solver::p4`) and
+        // `SmSurfaceSurfaceFS`'s override is blend.fillet_standard_solver_p2's.
+        missing()
     }
     fn corner_error_info(
         &self,

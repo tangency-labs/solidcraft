@@ -47,10 +47,6 @@
 //!   keeps its caller's owner, as upstream's shared base does. The `SetBaseSurface` setter, the
 //!   unused copy constructor, `CreateMirrorSurface`, `GetMemoryUsed`, `WriteToDB`,
 //!   `Draw`, `DrawUV`, `Dump` and `AssertValid` are not ported (unused upstream).
-//! - **Offset distance.** `m_dOffsetDistance` is a `Cell`, so
-//!   [`OffsetSurface::set_offset_distance`] takes `&self`: a fillet trace evaluates a
-//!   copy of its solver's offset surface (upstream: the same object) and keeps its
-//!   distance in step with the solver's (`blend::fillet_solver::p4`).
 //! - **Context.** Every surface has a context here, so the clamp-instead-of-extend
 //!   branch for `GetContext() == NULL` is never taken; `SetContext` has nothing to set.
 //!   The constructor and every member that constructs an offset ([`OffsetSurface::copy`],
@@ -217,7 +213,7 @@ impl Clone for OffsetSurface {
 /// The extension an [`OffsetSurface`]'s `&self` evaluators made (a [`core::cell::Cell`]:
 /// upstream's `const` evaluators write `m_pExtendedSurface`).
 #[derive(Default)]
-struct PendingExtension(core::cell::Cell<Option<Box<Surface>>>);
+struct PendingExtension(Cell<Option<Box<Surface>>>);
 
 impl core::fmt::Debug for PendingExtension {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -436,7 +432,7 @@ impl OffsetSurface {
         self.offset_distance.get()
     }
 
-    /// `SetOffsetDistance` (through `&self`: the distance is a [`Cell`]).
+    /// `SetOffsetDistance`.
     pub fn set_offset_distance(&self, offset_distance: f64) {
         self.offset_distance.set(offset_distance);
     }
@@ -618,7 +614,7 @@ impl OffsetSurface {
         } else {
             // when BaseSurface is not owned (shared upstream: the same base surface)
             // (the same object upstream: its owner is unchanged)
-            let shared = self.surface.clone_keeping_owner();
+            let shared = self.surface.clone_for_evaluation_depth(1)?;
             let mut s = Self::new(k, self.offset_distance.get(), shared, false, SS_UNKNOWN)?;
             s.owns_surface = false;
             s
@@ -711,21 +707,14 @@ impl OffsetSurface {
         )?))
     }
 
-    /// A copy for evaluation (`Surface::clone_for_evaluation`): the members as they
-    /// are, the base and extended surfaces copied exactly (no knot fix-up), `depth`
-    /// the wrapper nesting already walked.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` past the evaluation copy's nesting bound.
-    pub(crate) fn clone_for_evaluation(&self, depth: usize) -> Result<Self> {
-        let surface = Box::new(self.surface.clone_for_evaluation_depth(depth)?);
-        let extended_surface = self
-            .extended_surface
-            .as_deref()
-            .map(|e| e.clone_for_evaluation_depth(depth).map(Box::new))
-            .transpose()?;
-        Ok(Self {
+    /// Exact evaluation copy (no knot fix-up) that takes the current extension, pending
+    /// or stored, as main's copy does; the caller validates the complete geometry graph
+    /// first.
+    pub(crate) fn clone_exact_bounded(&self) -> Self {
+        let surface = Box::new(self.surface.clone_exact_bounded());
+        let extended_surface =
+            self.with_current_extension(|e| e.map(|e| Box::new(e.clone_exact_bounded())));
+        Self {
             offset_distance: Cell::new(self.offset_distance.get()),
             allow_extension: self.allow_extension,
             owns_surface: self.owns_surface,
@@ -2156,15 +2145,11 @@ fn find_nonsingular_stepoff(
 /// during the call, which upstream stores in `m_pExtendedSurface` at once.
 pub struct OffsetEval<'a> {
     off: &'a OffsetSurface,
-    made: Cell<Option<Box<Surface>>>,
 }
 
 impl<'a> OffsetEval<'a> {
     const fn new(off: &'a OffsetSurface) -> Self {
-        Self {
-            off,
-            made: Cell::new(None),
-        }
+        Self { off }
     }
 
     /// Runs `f` on a copy of the offset (with its current extension) as a [`Surface`];

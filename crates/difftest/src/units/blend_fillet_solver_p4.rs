@@ -41,9 +41,9 @@ use serde_json::{json, Value};
 
 use solidcore::blend::fillet_custom_solver::{ConstantRadiusAssistedFs, OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{
-    FilletBrep, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId,
+    FilletBrep, FilletGeom, FilletGeomType, FilletSolverId,
 };
-use solidcore::blend::fillet_solver::p1::{FilletGeomRef, FilletSolver, FilletSolverOps};
+use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::geom::extent2d::Extent2d;
@@ -568,6 +568,7 @@ impl FilletSolverOps for ShimSolver {
 
     fn load_jacobian(
         &mut self,
+        k: &Kernel,
         num_equations: &mut usize,
         num_parameters: &mut usize,
         load: &mut solidcore::blend::fillet_custom_solver::JacobianLoad<'_>,
@@ -576,11 +577,56 @@ impl FilletSolverOps for ShimSolver {
     ) -> solidcore::Result<bool> {
         <ConstantRadiusAssistedFs as FilletSolverOps>::load_jacobian(
             &mut self.inner,
+            k,
             num_equations,
             num_parameters,
             load,
             f,
             jacobian,
+        )
+    }
+
+    /// `SmConstantRadiusFS::GetType`.
+    fn type_code(&self) -> solidcore::Result<i64> {
+        Ok(solidcore::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_FS_TYPE)
+    }
+
+    /// `SmConstantRadiusFS::GetSolverType` (`SM_FS_CONST_RADIUS`).
+    fn solver_type(
+        &self,
+    ) -> solidcore::Result<solidcore::blend::fillet_solver::p1::FilletSolverType> {
+        Ok(solidcore::blend::fillet_solver::p1::FilletSolverType::ConstRadius)
+    }
+
+    /// `SmConstantRadiusFS::IsKindOf`.
+    fn is_kind_of(&self, t: i64) -> solidcore::Result<bool> {
+        Ok(solidcore::blend::fillet_standard_solver::p1::constant_radius_is_kind_of(t))
+    }
+
+    /// `SmConstantRadiusFS::LoadInitialValues`.
+    fn load_initial_values(
+        &mut self,
+        k: &Kernel,
+        brep: Option<&Brep>,
+        do_surf2_calcs: bool,
+        rail_index: usize,
+        surface1: &mut OffsetSurface,
+        surface1_index: usize,
+        intervals: &mut solidcore::geom::extent1d::ExtentNd,
+        periodicities: &mut Vec<bool>,
+        guess_t: &mut Vec<f64>,
+    ) -> solidcore::Result<Option<solidcore::blend::fillet_custom_solver::InitialValues>> {
+        <ConstantRadiusAssistedFs as FilletSolverOps>::load_initial_values(
+            &mut self.inner,
+            k,
+            brep,
+            do_surf2_calcs,
+            rail_index,
+            surface1,
+            surface1_index,
+            intervals,
+            periodicities,
+            guess_t,
         )
     }
 
@@ -717,26 +763,27 @@ fn rust_calc_case(c: &CalcCase) -> Result<Output, Fail> {
     inner.solver.edgeuses = [Some(eu0), Some(eu1)];
     inner.solver.g1_knots.clone_from(&knots_in);
     let mut fb = FilletBrep::new();
-    let mut geoms: Vec<FilletGeomId> = Vec::new();
     if c.geom {
         let mut g = setup(
             FilletGeom::new(
                 &k,
-                Some((FilletSolverId(0), &inner)),
+                Some((FilletSolverId(0), &inner.solver)),
                 FilletGeomType::Default,
             ),
             "fillet geometry",
         )?;
         g.need_split = c.split;
-        geoms.push(fb.add_geom(g));
-        inner.solver.fillet_geoms.push(FilletGeomRef { index: 0 });
+        let id = fb.add_geom(g);
+        inner.solver.fillet_geoms.push(id);
     }
     let mut ops = ShimSolver {
         inner,
         fd: false,
         extend: Some(c.extend),
     };
-    let r = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut target, &mut fb, &mut geoms);
+    // the executive's solver table (this solver, id 0), as the shim's executive holds
+    let table = vec![ops.inner.solver.clone()];
+    let r = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut target, &mut fb, &table);
     let st = op_status(r)?;
     let s = ops.solver();
     Ok(Output::new()

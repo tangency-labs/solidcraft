@@ -10,3 +10,8 @@
 # unit = "curve.curve_p1"
 # case = "gen0042"
 # why = "C++ succeeds with 0 points, Rust returns status_3 (plan/findings.md: ...)"
+
+[[mismatch]]
+unit = "blend.fillet_intersector"
+case = "rv_next_clipped_step"
+why = "StepSolve clipped branch differs by a few ULP from C++; suspected p3 evaluating offset-surface copies vs the solver's own objects; pre-existing, newly reachable via #212 (plan/findings.md: blend.fillet_intersector rv_next_clipped_step)"

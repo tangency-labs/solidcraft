@@ -296,8 +296,8 @@ impl<'s> IntersectorVirtuals<'s> for SurfaceIntersector<'s> {
         SurfaceIntersector::compute_next_point(self, k, prev, step_size, next)
     }
 
-    fn flush_curve(&mut self, _k: &Kernel, out: &mut TsectCurves) -> Result<()> {
-        SurfaceIntersector::flush_curve(self, out)
+    fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
+        SurfaceIntersector::flush_curve(self, k, out)
     }
 }
 
@@ -1179,7 +1179,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             start.assign(&tsp);
             let start_id = v.intersector_mut().alloc_point(start);
             // (status ignored)
-            ignored(v.intersector_mut().add_start_point(start_id))?;
+            ignored(v.intersector_mut().add_start_point(k, start_id))?;
             v.intersector_mut().point_mut(pid)?.curve_parameter = 0.0;
             if !(opts.start_direction.is_some() && n > 1) {
                 v.intersector_mut().start_point = Some(start_id);
@@ -1299,10 +1299,10 @@ fn join_from_singular_point<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // the end point of the current curve
     let mut end_tsp = TsectPnt::new();
     let uv_curve0 = res.uv_curves[0].as_ref().ok_or_else(no_curve)?;
-    let pnt = uv_curve0.evaluate_point(ivl1.max())?;
+    let pnt = uv_curve0.evaluate_point(k, ivl1.max())?;
     *end_tsp.uv_pos_mut(SrfIndex::First) = Point2::new(pnt.x, pnt.y);
     let uv_curve1 = res.uv_curves[1].as_ref().ok_or_else(no_curve)?;
-    let pnt = uv_curve1.evaluate_point(ivl1.max())?;
+    let pnt = uv_curve1.evaluate_point(k, ivl1.max())?;
     *end_tsp.uv_pos_mut(SrfIndex::Second) = Point2::new(pnt.x, pnt.y);
     let end_id = v.intersector_mut().alloc_point(end_tsp);
 
@@ -1316,18 +1316,18 @@ fn join_from_singular_point<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     if let Some(mut c2) = second.curve_3d {
         let c1 = res.curve_3d.as_mut().ok_or_else(no_curve)?;
-        let crv1_pnt = c1.evaluate_point(ivl1.max())?;
+        let crv1_pnt = c1.evaluate_point(k, ivl1.max())?;
         let ivl2 = c2.natural_interval();
-        let crv2_pnt = c2.evaluate_point(ivl2.min())?;
+        let crv2_pnt = c2.evaluate_point(k, ivl2.min())?;
 
         // curve end points close enough: join the curves
         if crv1_pnt.closer_than(v.intersector().this_approx_tol_3d, crv2_pnt) {
-            join_curves(c1, &mut c2)?;
+            join_curves(k, c1, &mut c2)?;
             let [u0, u1] = second.uv_curves;
             let mut u0 = u0.ok_or_else(no_curve)?;
             let mut u1 = u1.ok_or_else(no_curve)?;
-            join_curves(res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
-            join_curves(res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
+            join_curves(k, res.uv_curves[0].as_mut().ok_or_else(no_curve)?, &mut u0)?;
+            join_curves(k, res.uv_curves[1].as_mut().ok_or_else(no_curve)?, &mut u1)?;
         }
     }
     Ok(())

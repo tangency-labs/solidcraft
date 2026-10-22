@@ -549,11 +549,12 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
 
-    /// Virtual `CalcFilletGeom` dispatch. The base belongs to
-    /// `blend.fillet_solver_p4`; the `SurfaceSurfaceFS` override belongs to
-    /// `blend.fillet_standard_solver_p2`. Adapters must dispatch by concrete
-    /// solver type and return that owner's `Unported` while it is missing.
-    // UNPORTED(blend.fillet_solver_p4): SmFilletSolver::CalcFilletGeom
+    /// Virtual `CalcFilletGeom` dispatch. The base is
+    /// `blend::fillet_solver::p4::FilletSolver::calc_fillet_geom` (it takes the solver
+    /// as its `FilletSolverOps`, the target and pseudo B-reps and the solver table);
+    /// the `SurfaceSurfaceFS` override belongs to `blend.fillet_standard_solver_p2`.
+    /// Adapters must dispatch by concrete solver type and return that owner's
+    /// `Unported` while it is missing.
     // UNPORTED(blend.fillet_standard_solver_p2): SmSurfaceSurfaceFS::CalcFilletGeom -- justified: plan/findings.md blend.fillet_standard_solver_p2 (executive adapter stubs)
     fn calc_fillet_geom(
         &mut self,

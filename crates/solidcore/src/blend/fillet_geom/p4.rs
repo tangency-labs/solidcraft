@@ -17,7 +17,7 @@
 //! | [`FilletBrep::make_face_brep`]                    | `SmFilletGeom::MakeFaceBrep`                 |
 //! | [`FilletBrep::rail_index_of_vertex`]              | `SmFilletGeom::GetRailIndexOfVertex`         |
 //! | [`FilletBrep::insert_intersection_topology`]      | `SmFilletGeom::InsertIntersectionTopology`   |
-//! | [`FilletBrep::calc_blending_geom`], [`FilletBrep::calc_blending_geom_of_solver`] | `SmFilletGeom::CalcBlendingGeom` |
+//! | [`FilletBrep::calc_blending_geom`]                | `SmFilletGeom::CalcBlendingGeom`             |
 //!
 //! Deviations:
 //! - **Object model.** As in `blend.fillet_geom_p1`, a fillet vertex, edge or geometry
@@ -2073,9 +2073,8 @@ impl FilletBrep {
     ///
     /// `SM_ERR` for a rail that is not a blending rail; `SM_ERR_NULL_POINTER` for a
     /// missing solver, rail, curve, UV curve, face, surface or cross-section edge;
-    /// those of the length, arc-length, interpolation, lift and surface creations;
-    /// [`SolidError::Unported`] for `SmFilletEdge::CalcBlendingRail`
-    /// (`blend.fillet_geom_p6`).
+    /// those of the length, arc-length, interpolation, lift and surface creations and
+    /// of `SmFilletEdge::CalcBlendingRail`.
     pub fn calc_blending_geom(
         &mut self,
         k: &Kernel,
@@ -2110,8 +2109,6 @@ impl FilletBrep {
         if self.geom(g)?.fillet_solver().is_none() {
             return Err(nul());
         }
-        let rail1 = self.geom(g)?.rail(0).ok_or_else(nul)?;
-        let rail2 = self.geom(g)?.rail(1).ok_or_else(nul)?;
         let approx_tol_3d = fil_solver.approx_tol_3d;
         let tangency_tol_radians = fil_solver.tangency_tolerance;
 

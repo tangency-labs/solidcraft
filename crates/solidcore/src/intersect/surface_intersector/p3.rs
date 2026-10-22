@@ -1184,6 +1184,7 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
 
         // if through point is on hermite curve from pPrev1 point to rNextTSP point
         if is_point_on_tsect_curve(
+            k,
             v.intersector().point(through)?,
             v.intersector().point(p1)?,
             v.intersector().point(next)?,
@@ -1239,6 +1240,7 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
 
         // if StartTsp is on xsect curve segment
         if is_point_on_tsect_curve(
+            k,
             v.intersector().point(start)?,
             v.intersector().point(p1)?,
             v.intersector().point(next)?,
@@ -1306,6 +1308,7 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
                 .copied();
             if prev2 != Some(sp)
                 && is_point_on_tsect_curve(
+                    k,
                     v.intersector().point(sp)?,
                     v.intersector().point(p1)?,
                     v.intersector().point(next)?,
@@ -1324,6 +1327,7 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
     if let Some(ep) = v.intersector().end_point {
         let p1 = need_prev()?;
         if is_point_on_tsect_curve(
+            k,
             v.intersector().point(ep)?,
             v.intersector().point(p1)?,
             v.intersector().point(next)?,
