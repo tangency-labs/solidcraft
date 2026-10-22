@@ -5,23 +5,28 @@
 //!
 //! A strip is exact where the rulings move the edge by an affine map: a straight edge with a
 //! constant ruling direction gives a plane, an arc whose rulings keep their angle to its axis
-//! gives a plane (a ring), a cylinder or a cone. Any other strip is a ruled B-spline (degree 1
-//! across) fitted within [`FIT_TOLERANCE`]. Strips share their side edges where their rulings
-//! agree; at a sharp corner of the chain they are mitred (each extended along its far edge
-//! until the two meet, or cut back where they overlap) or rounded (a planar or conical sector
-//! turning one ruling into the other; an inside corner is always cut back). The strips stand
-//! on the body's own edges, so they come out stitched together.
+//! gives a plane (a ring), or a ruled NURBS surface between the edge and its image (a cylinder
+//! or a cone, exactly). Any other strip is a ruled B-spline (degree 1 across) fitted within
+//! [`FIT_TOLERANCE`]. Strips share their side edges where their rulings agree; at a sharp
+//! corner of the chain they are mitred (each extended along its far edge until the two meet, or
+//! cut back where they overlap) or rounded (a planar or conical sector SMLib revolves from one
+//! ruling to the other; an inside corner is always cut back).
+//!
+//! Every strip and corner face is built on its own on the record (each edge a NURBS curve, the
+//! edge's own curve as a NURBS where it stands on the body), and the faces are stitched by SMLib
+//! along the side edges they share.
 
 use std::collections::HashMap;
 
-use mt::{BoundedCurve, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
+use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::brep::{self as b, Brep};
+use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
 
-use crate::body::{Body, from_p3, p3, v3};
-use crate::record::{Rebuild, rebuilt_body};
-use crate::surfaces::{map_control_points, nearest_face, picked_chain, surface_body};
-use crate::{KernelError, Result, guard};
+use crate::body::Body;
+use crate::history::FaceOrigin;
+use crate::surfaces::{Parts, nearest_face, picked_chain, sheet_of, spline_curve, spline_surface, uv_line};
+use crate::{KernelError, Result, record};
 
 /// How far a fitted strip may stray from the true ruled surface (mm).
 const FIT_TOLERANCE: f64 = 1e-3;
@@ -95,146 +100,257 @@ pub fn ruled_surface(body: &Body, at: &[Vec3], r: &Ruled) -> Result<Body> {
     };
     let picked_face = r.face.map(|p| nearest_face(body, p)).transpose()?;
     let eps = 1e-9 * (1.0 + body.size() + d);
-    guard("ruled surface", || {
-        let (chain, closed) = picked_chain(body, at)?;
-        let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
-        // The faces beside each chain edge (face index, the face's own use of the edge).
-        let mut beside: HashMap<mt::EdgeID, Vec<(usize, mt::Edge)>> = chain.iter().map(|e| (e.id(), Vec::new())).collect();
-        for (i, f) in faces.iter().enumerate() {
-            for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-                if let Some(list) = beside.get_mut(&e.id()) {
-                    list.push((i, e.clone()));
-                }
-            }
-        }
-        let mut count: HashMap<usize, usize> = HashMap::new();
-        for list in beside.values() {
-            for (i, _) in list {
-                *count.entry(*i).or_default() += 1;
-            }
-        }
-        let empty = Vec::new();
-        let around = |e: &mt::Edge| beside.get(&e.id()).unwrap_or(&empty);
-        // The face each edge takes its directions from: the picked face where it borders the
-        // edge, carried on along the chain to the faces meeting it smoothly (a cylinder's
-        // halves); with no picked face beside the chain, the face beside the most edges.
-        let n = chain.len();
-        let mut chosen: Vec<Option<usize>> = chain.iter().map(|e| around(e).iter().position(|(i, _)| Some(*i) == picked_face)).collect();
-        if chosen.iter().all(Option::is_none) {
-            chosen = chain
+    let rec = body.record();
+    let (chain, closed) = picked_chain(body, at)?;
+    let n = chain.len();
+    // The faces beside each chain edge: each use's face and whether that face's loop runs the
+    // edge the way the chain does.
+    let around: Vec<Vec<(usize, bool)>> = chain
+        .iter()
+        .map(|&(e, forward)| {
+            let edge = rec.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
+            Ok(edge
+                .uses
                 .iter()
-                .map(|e| {
-                    let list = around(e);
-                    (0..list.len()).max_by(|a, b| {
-                        let key = |k: &usize| list.get(*k).map(|(i, _)| (count.get(i).copied().unwrap_or(0), std::cmp::Reverse(*i)));
-                        key(a).cmp(&key(b))
-                    })
+                .filter_map(|u| {
+                    let face = rec.faces.get(u.face as usize)?;
+                    let b::Loop::Edges { edges } = face.loops.get(u.r#loop as usize)? else { return None };
+                    Some((u.face as usize, edges.get(u.position as usize)?.forward == forward))
                 })
-                .collect();
+                .collect())
+        })
+        .collect::<Result<_>>()?;
+    let mut count: HashMap<usize, usize> = HashMap::new();
+    for list in &around {
+        for (i, _) in list {
+            *count.entry(*i).or_default() += 1;
         }
-        // Carried on from a chosen neighbour across the vertex they share.
-        let normal = |face: usize, p: mt::Point3| faces.get(face).and_then(|f| normal_at(f, from_p3(p)));
-        for _ in 0..n {
-            let mut changed = false;
-            for j in 0..n {
-                if chosen.get(j).copied().flatten().is_some() {
-                    continue;
-                }
-                let Some(e) = chain.get(j) else { continue };
-                let neighbours = [
-                    (j.checked_sub(1).or(closed.then(|| n - 1)), e.front().point()),
-                    ((j + 1 < n).then_some(j + 1).or(closed.then_some(0)), e.back().point()),
-                ];
-                let pick = neighbours.iter().find_map(|(k, p)| {
-                    let k = (*k)?;
-                    let (face, _) = around(chain.get(k)?).get(chosen.get(k).copied().flatten()?)?;
-                    let want = normal(*face, *p)?;
-                    let list = around(e);
-                    (0..list.len()).max_by(|a, b| {
-                        let dot = |k: &usize| list.get(*k).and_then(|(i, _)| normal(*i, *p)).map_or(f64::NEG_INFINITY, |nn| nn.dot(want));
-                        dot(a).total_cmp(&dot(b))
-                    })
-                });
-                if let (Some(k), Some(slot)) = (pick, chosen.get_mut(j)) {
-                    *slot = Some(k);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        let field = Field { mode, flip: r.flip, distance: d };
-        let mut strips = Vec::with_capacity(n);
-        for (e, k) in chain.iter().zip(&chosen) {
-            let (i, own) = k.and_then(|k| around(e).get(k)).ok_or_else(|| KernelError::Invalid("a picked edge has no face beside it".into()))?;
-            let face = faces.get(*i).ok_or_else(|| KernelError::Failed("ruled surface: a face".into()))?;
-            // The face lies left of its own boundary (seen along its normal); the strip's
-            // tangent direction points away from it.
-            let face_left = own.orientation() == e.orientation();
-            strips.push(Strip::new(e.clone(), face, face_left, &field, eps)?);
-        }
-        // Joints at the chain's vertices: joint j is where strip j starts (and strip j - 1
-        // ends); an open chain has one more, at its far end.
-        let joints = (0..n + usize::from(!closed))
-            .map(|j| {
-                let incoming = if j > 0 {
-                    strips.get(j - 1)
-                } else if closed {
-                    strips.last()
-                } else {
-                    None
-                };
-                let outgoing = strips.get(j).filter(|_| closed || j < n);
-                Joint::new(incoming, outgoing, &mode, r.corners, eps)
+    }
+    let surfaces: Vec<Option<SurfaceEval>> = rec.faces.iter().map(|f| SurfaceEval::new(&f.surface).ok()).collect();
+    let normal = |face: usize, p: Vec3| normal_at(surfaces.get(face)?.as_ref()?, body.face_forward(face), p);
+    // The face each edge takes its directions from: the picked face where it borders the edge,
+    // carried on along the chain to the faces meeting it smoothly (a cylinder's halves); with no
+    // picked face beside the chain, the face beside the most edges.
+    let mut chosen: Vec<Option<usize>> = around.iter().map(|list| list.iter().position(|(i, _)| Some(*i) == picked_face)).collect();
+    if chosen.iter().all(Option::is_none) {
+        chosen = around
+            .iter()
+            .map(|list| {
+                (0..list.len()).max_by(|a, b| {
+                    let key = |k: &usize| list.get(*k).map(|(i, _)| (count.get(i).copied().unwrap_or(0), std::cmp::Reverse(*i)));
+                    key(a).cmp(&key(b))
+                })
             })
-            .collect::<Result<Vec<_>>>()?;
-        let mut rec = Rebuild::default();
-        let mut out = Vec::new();
-        for (j, s) in strips.iter().enumerate() {
-            let start = joints.get(j).ok_or_else(|| KernelError::Failed("ruled surface: a joint".into()))?;
-            let end = joints.get(if closed { (j + 1) % n } else { j + 1 }).ok_or_else(|| KernelError::Failed("ruled surface: a joint".into()))?;
-            let (up_start, top_start) = start.side(Side::Out, s);
-            let (up_end, top_end) = end.side(Side::In, s);
-            let top = if s.line {
-                mt::Edge::new_unchecked(&top_start, &top_end, mt::Curve::Line(mt::Line(top_start.point(), top_end.point())))
-            } else {
-                mt::Edge::new_unchecked(&top_start, &top_end, s.top.clone())
-            };
-            if s.line && (from_p3(top_end.point()) - from_p3(top_start.point())).dot(s.start.tangent) <= eps {
-                return Err(KernelError::Invalid("the corners cut a strip away entirely: try a shorter distance".into()));
+            .collect();
+    }
+    let bases: Vec<CurveN<4>> = chain.iter().map(|&(e, forward)| base_curve(rec, e, forward)).collect::<Result<_>>()?;
+    let ends = |k: usize| -> Option<(Vec3, Vec3)> { Some((point(bases.get(k)?, 0.0)?, point(bases.get(k)?, 1.0)?)) };
+    // Carried on from a chosen neighbour across the vertex they share.
+    for _ in 0..n {
+        let mut changed = false;
+        for j in 0..n {
+            if chosen.get(j).copied().flatten().is_some() {
+                continue;
             }
-            let mut wire = vec![s.base.clone()];
-            wire.extend(up_end.iter().cloned());
-            wire.push(top.inverse());
-            wire.extend(up_start.iter().rev().map(mt::Edge::inverse));
-            let face = mt::Face::new_unchecked(vec![wire.into()], s.surface.clone());
-            rec.blend(&face, [s.base.id()]);
-            out.push(face);
-            out.extend(end.corner_faces().into_iter().cloned());
+            let Some((start, end)) = ends(j) else { continue };
+            let neighbours = [(j.checked_sub(1).or(closed.then(|| n - 1)), start), ((j + 1 < n).then_some(j + 1).or(closed.then_some(0)), end)];
+            let pick = neighbours.iter().find_map(|(k, p)| {
+                let k = (*k)?;
+                let (face, _) = around.get(k)?.get(chosen.get(k).copied().flatten()?)?;
+                let want = normal(*face, *p)?;
+                let list = around.get(j)?;
+                (0..list.len()).max_by(|a, b| {
+                    let dot = |k: &usize| list.get(*k).and_then(|(i, _)| normal(*i, *p)).map_or(f64::NEG_INFINITY, |nn| nn.dot(want));
+                    dot(a).total_cmp(&dot(b))
+                })
+            });
+            if let (Some(k), Some(slot)) = (pick, chosen.get_mut(j)) {
+                *slot = Some(k);
+                changed = true;
+            }
         }
-        // Corner faces are made in place of the two edges meeting at the corner.
-        for (j, jt) in joints.iter().enumerate() {
-            let near: Vec<mt::EdgeID> = [
-                if j > 0 {
-                    strips.get(j - 1)
-                } else if closed {
-                    strips.last()
-                } else {
-                    None
-                },
-                strips.get(j),
-            ]
+        if !changed {
+            break;
+        }
+    }
+    let field = Field { mode, flip: r.flip, distance: d };
+    let mut strips = Vec::with_capacity(n);
+    for (j, k) in chosen.iter().enumerate() {
+        let (face, along) =
+            k.and_then(|k| around.get(j)?.get(k).copied()).ok_or_else(|| KernelError::Invalid("a picked edge has no face beside it".into()))?;
+        let surface = surfaces.get(face).and_then(Option::as_ref).ok_or_else(|| KernelError::Failed("ruled surface: a face's surface".into()))?;
+        // The face lies left of its own boundary seen along its (oriented) normal; the strip's
+        // tangent direction points away from it.
+        let forward = body.face_forward(face);
+        let base = bases.get(j).ok_or_else(|| KernelError::Failed("ruled surface: an edge".into()))?;
+        strips.push(Strip::new(base.clone(), surface, forward, along == forward, &field, eps)?);
+    }
+    // Joints at the chain's vertices: joint j is where strip j starts (and strip j - 1 ends); an
+    // open chain has one more, at its far end.
+    let joints = (0..n + usize::from(!closed))
+        .map(|j| {
+            let incoming = if j > 0 {
+                strips.get(j - 1)
+            } else if closed {
+                strips.last()
+            } else {
+                None
+            };
+            let outgoing = strips.get(j).filter(|_| closed || j < n);
+            Joint::new(incoming, outgoing, &mode, r.corners, eps)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let tolerance = (eps * 1e3).max(rec.tolerance);
+    let mut pieces = Vec::new();
+    for (j, s) in strips.iter().enumerate() {
+        let start = joints.get(j).ok_or_else(|| KernelError::Failed("ruled surface: a joint".into()))?;
+        let end = joints.get(if closed { (j + 1) % n } else { j + 1 }).ok_or_else(|| KernelError::Failed("ruled surface: a joint".into()))?;
+        let (up_start, top_start) = start.side(Side::Out, s);
+        let (up_end, top_end) = end.side(Side::In, s);
+        if s.line && (top_end - top_start).dot(s.start.tangent) <= eps {
+            return Err(KernelError::Invalid("the corners cut a strip away entirely: try a shorter distance".into()));
+        }
+        let edge = chain.get(j).map_or(0, |(e, _)| *e);
+        pieces
+            .push((s.face(&up_start, &up_end, top_start, top_end, tolerance)?, vec![record::generated(vec![FaceOrigin::Edge { operand: 0, edge }])]));
+    }
+    // Corner faces are made in place of the two edges meeting at the corner.
+    for (j, jt) in joints.iter().enumerate() {
+        let before = if j > 0 {
+            Some(j - 1)
+        } else if closed {
+            n.checked_sub(1)
+        } else {
+            None
+        };
+        let near: Vec<FaceOrigin> = [before, (j < n).then_some(j)]
             .into_iter()
             .flatten()
-            .map(|s| s.base.id())
+            .filter_map(|k| chain.get(k))
+            .map(|(e, _)| FaceOrigin::Edge { operand: 0, edge: *e })
             .collect();
-            for f in jt.corner_faces() {
-                rec.blend(f, near.iter().copied());
-            }
+        for f in jt.corner_faces(tolerance)? {
+            let h = vec![record::generated(near.clone()); f.faces.len()];
+            pieces.push((f, h));
         }
-        Ok(rebuilt_body(surface_body(out), &[&body.solid], &rec))
-    })
+    }
+    sheet_of(pieces, true, &[body])
+}
+
+/// The unit normal of a face (its surface, used along its natural normal when `forward`) at its
+/// surface's point nearest `p`.
+fn normal_at(surface: &SurfaceEval, forward: bool, p: Vec3) -> Option<Vec3> {
+    let [u, v] = surface.project(p, None, f64::INFINITY)?;
+    let (_, su, sv) = surface.derivs(u, v)?;
+    let n = su.cross(sv).normalized()?;
+    Some(if forward { n } else { n * -1.0 })
+}
+
+/// The edge `e` of `r` as a NURBS curve with homogeneous control points, run the way the chain
+/// runs along it (`forward`), its parameter the curve's own (an arc's rational quadratic form,
+/// one span per quarter turn or less).
+fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
+    let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
+    let [t0, t1] = edge.interval;
+    let c = match &edge.curve {
+        b::Curve::Line { start, end } => {
+            let at = |t: f64| [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t, 1.0];
+            CurveN { degree: 1, knots: vec![t0, t0, t1, t1], ctrl: vec![at(t0), at(t1)] }
+        }
+        b::Curve::Circle { frame, radius } => conic(frame, [*radius, *radius], [t0, t1]),
+        b::Curve::Ellipse { frame, radii } => conic(frame, *radii, [t0, t1]),
+        b::Curve::Polyline { points } => {
+            let n = points.len();
+            let mut knots = vec![0.0];
+            knots.extend((0..n).map(|i| i as f64));
+            knots.push(n.saturating_sub(1) as f64);
+            CurveN { degree: 1, knots, ctrl: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() }
+        }
+        b::Curve::Spline { knots, points } => {
+            CurveN { degree: degree(knots, points.len())?, knots: knots.clone(), ctrl: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() }
+        }
+        b::Curve::RationalSpline { knots, homogeneous } => {
+            CurveN { degree: degree(knots, homogeneous.len())?, knots: knots.clone(), ctrl: homogeneous.clone() }
+        }
+        b::Curve::SurfaceIntersection { .. } => {
+            return Err(KernelError::Invalid("not supported yet: a ruled surface on a traced intersection edge".into()));
+        }
+    };
+    Ok(if forward { c } else { reversed(&c) })
+}
+
+fn degree(knots: &[f64], n: usize) -> Result<usize> {
+    knots.len().checked_sub(n + 1).filter(|d| *d >= 1).ok_or_else(|| KernelError::Invalid("a spline's knots".into()))
+}
+
+/// The arc of a circle or ellipse (its frame and radii) from angle `t0` to `t1` as a rational
+/// quadratic on [t0, t1]: the same points, not the same parameterisation.
+fn conic(frame: &b::Frame, radii: [f64; 2], [t0, t1]: [f64; 2]) -> CurveN<4> {
+    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let (o, x, y) = (v(frame.origin), v(frame.x_axis), v(frame.y_axis));
+    let m = ((t1 - t0) / std::f64::consts::FRAC_PI_2 - 1e-9).ceil().max(1.0) as usize;
+    let step = (t1 - t0) / m as f64;
+    let w = (step / 2.0).cos();
+    let at = |a: f64, s: f64| o + x * (radii[0] * a.cos() * s) + y * (radii[1] * a.sin() * s);
+    let h = |p: Vec3, w: f64| [p.x * w, p.y * w, p.z * w, w];
+    let (mut ctrl, mut knots) = (vec![h(at(t0, 1.0), 1.0)], vec![t0; 3]);
+    for j in 0..m {
+        let a0 = t0 + step * j as f64;
+        ctrl.push(h(at(a0 + step / 2.0, 1.0 / w), w));
+        ctrl.push(h(at(a0 + step, 1.0), 1.0));
+        let u = t0 + step * (j + 1) as f64;
+        if j + 1 < m {
+            knots.extend([u, u]);
+        } else {
+            knots.extend([t1; 3]);
+        }
+    }
+    CurveN { degree: 2, knots, ctrl }
+}
+
+/// `c` run the other way: the same points, its parameter t taken to (first + last knot) − t.
+fn reversed(c: &CurveN<4>) -> CurveN<4> {
+    let (a, z) = (c.knots.first().copied().unwrap_or(0.0), c.knots.last().copied().unwrap_or(1.0));
+    CurveN { degree: c.degree, knots: c.knots.iter().rev().map(|k| a + z - k).collect(), ctrl: c.ctrl.iter().rev().copied().collect() }
+}
+
+/// A curve's parameter range.
+fn range(c: &CurveN<4>) -> [f64; 2] {
+    [c.knots.get(c.degree).copied().unwrap_or(0.0), c.knots.get(c.ctrl.len()).copied().unwrap_or(1.0)]
+}
+
+/// The point `f` (0…1) of the way along a curve's parameter range.
+fn point(c: &CurveN<4>, f: f64) -> Option<Vec3> {
+    point_tangent(c, f).map(|(p, _)| p)
+}
+
+/// The point `f` of the way along a curve's range and its derivative there (by the parameter).
+fn point_tangent(c: &CurveN<4>, f: f64) -> Option<(Vec3, Vec3)> {
+    let [t0, t1] = range(c);
+    let ([x, y, z, w], [dx, dy, dz, dw]) = c.eval(t0 + (t1 - t0) * f)?;
+    if !(w.abs() > 1e-300) {
+        return None;
+    }
+    let p = Vec3::new(x / w, y / w, z / w);
+    Some((p, (Vec3::new(dx, dy, dz) - p * dw) * (1.0 / w)))
+}
+
+/// `c` with its control points (Cartesian) moved by `f`, its weights kept: the exact image of the
+/// curve under an affine `f`.
+fn mapped(c: &CurveN<4>, f: impl Fn(Vec3) -> Vec3) -> CurveN<4> {
+    let ctrl = c
+        .ctrl
+        .iter()
+        .map(|h| {
+            let q = f(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+            [q.x * h[3], q.y * h[3], q.z * h[3], h[3]]
+        })
+        .collect();
+    CurveN { degree: c.degree, knots: c.knots.clone(), ctrl }
+}
+
+fn hpoints(c: &CurveN<4>) -> Vec<HPoint> {
+    c.ctrl.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect()
 }
 
 /// How the rulings are set at a point of an edge.
@@ -257,13 +373,13 @@ impl Field {
                 // Square to the reference and the edge, turned away from the face.
                 let mut w = t.cross(r);
                 if w.dot(out + n) < 0.0 {
-                    w = -w;
+                    w = w * -1.0;
                 }
                 r * angle.cos() + w * angle.sin()
             }
             RuledMode::Direction(v) => v,
         };
-        let dir = if self.flip { -dir } else { dir };
+        let dir = if self.flip { dir * -1.0 } else { dir };
         if dir.cross(t).len() < 1e-6 {
             return Err(KernelError::Invalid("the strip would run along an edge: pick another direction".into()));
         }
@@ -283,13 +399,22 @@ struct End {
     normal: Vec3,
 }
 
+/// What a strip's surface is.
+enum Kind {
+    /// The plane through a point spanned by the edge's direction and the ruling (normal t × r).
+    Plane { o: Vec3, t: Vec3, r: Vec3 },
+    /// The ruled NURBS surface from the base curve (v = 0) to the top (v = 1) on their shared
+    /// knots and weights.
+    Ruled,
+}
+
 /// The strip on one edge.
 struct Strip {
-    /// The body's edge, turned to run along the chain.
-    base: mt::Edge,
-    surface: mt::Surface,
-    /// The far edge's curve (from the start's ruling end to the end's).
-    top: mt::Curve,
+    /// The edge as a NURBS curve run along the chain (or its fit, for a fitted strip).
+    base: CurveN<4>,
+    /// The far edge's curve (from the start's ruling end to the end's), on the base's knots.
+    top: CurveN<4>,
+    kind: Kind,
     /// A plane through a straight edge: its far edge is the line between its corners.
     line: bool,
     /// The strip lies in a plane.
@@ -299,24 +424,19 @@ struct Strip {
 }
 
 impl Strip {
-    fn new(base: mt::Edge, face: &mt::Face, face_left: bool, field: &Field, eps: f64) -> Result<Strip> {
-        let c = base.oriented_curve();
-        let (t0, t1) = c.range_tuple();
+    fn new(base: CurveN<4>, face: &SurfaceEval, forward: bool, face_left: bool, field: &Field, eps: f64) -> Result<Strip> {
         let d = field.distance;
-        // The point, unit tangent, face normal and ruling at a parameter of the edge.
-        let at = |t: f64| -> Result<(Vec3, Vec3, Vec3, Vec3)> {
-            let p = from_p3(c.subs(t));
-            let tan = from_p3(mt::Point3::new(0.0, 0.0, 0.0) + c.der(t))
-                .normalized()
-                .ok_or_else(|| KernelError::Invalid("a picked edge has a point with no direction".into()))?;
-            let n = normal_at(face, p)
+        // The point, unit tangent, face normal and ruling a fraction of the way along the edge.
+        let at = |f: f64| -> Result<(Vec3, Vec3, Vec3, Vec3)> {
+            let (p, der) = point_tangent(&base, f).ok_or_else(|| KernelError::Invalid("a picked edge can't be evaluated".into()))?;
+            let tan = der.normalized().ok_or_else(|| KernelError::Invalid("a picked edge has a point with no direction".into()))?;
+            let n = normal_at(face, forward, p)
                 .ok_or_else(|| KernelError::Invalid("the face beside an edge has a point with no normal there: not supported yet".into()))?;
             let out = if face_left { tan.cross(n) } else { n.cross(tan) };
             let out = out.normalized().ok_or_else(|| KernelError::Invalid("the face beside an edge runs along it".into()))?;
             Ok((p, tan, n, field.ruling(tan, n, out)?))
         };
-        let param = |k: usize, m: usize| t0 + (t1 - t0) * k as f64 / (m - 1) as f64;
-        let samples: Vec<(Vec3, Vec3, Vec3, Vec3)> = (0..SAMPLES).map(|k| at(param(k, SAMPLES))).collect::<Result<_>>()?;
+        let samples: Vec<(Vec3, Vec3, Vec3, Vec3)> = (0..SAMPLES).map(|k| at(k as f64 / (SAMPLES - 1) as f64)).collect::<Result<_>>()?;
         let (Some(first), Some(last)) = (samples.first().copied(), samples.last().copied()) else {
             return Err(KernelError::Failed("ruled surface: samples".into()));
         };
@@ -325,44 +445,185 @@ impl Strip {
         let plane_normal = first.1.cross(first.3).normalized();
         let planar =
             plane_normal.is_some_and(|nn| samples.iter().map(|s| s.0).chain(tops.iter().copied()).all(|q| (q - first.0).dot(nn).abs() <= eps));
-        let exact = affine(&samples, d, eps).and_then(|m| map_control_points(&c, |p| m.apply(p)));
-        let line = planar && matches!(c, mt::Curve::Line(_)) && exact.is_some();
-        let (surface, top) = match (planar, exact) {
-            (true, Some(top)) => (plane(first.0, first.1, first.3), top),
-            (false, Some(top)) => {
-                let s = mt::BSplineSurface::homotopy(c.clone().lift_up(), top.clone().lift_up());
-                (mt::Surface::NurbsSurface(mt::NurbsSurface::new(s)), top)
+        let exact = affine(&samples, d, eps);
+        let line = planar && base.degree == 1 && base.ctrl.len() == 2 && exact.is_some();
+        let (base, top) = match exact {
+            Some(m) => {
+                let top = mapped(&base, |p| m.apply(p));
+                (base, top)
             }
-            (planar, None) => {
-                let (s, top) = fitted(&at, &param, d)?;
-                (if planar { plane(first.0, first.1, first.3) } else { s }, top)
+            None => fitted(&at, d)?,
+        };
+        let kind = if planar { Kind::Plane { o: first.0, t: first.1, r: first.3 } } else { Kind::Ruled };
+        let tangent = |f: f64| point_tangent(&top, f).and_then(|(_, t)| t.normalized()).unwrap_or(first.1);
+        let end = |(p, _, n, r): (Vec3, Vec3, Vec3, Vec3), tan: Vec3| End { at: p, ruling: r, top: p + r * d, tangent: tan, normal: n };
+        Ok(Strip { start: end(first, tangent(0.0)), end: end(last, tangent(1.0)), base, top, kind, line, planar })
+    }
+
+    /// The strip's face on its own: the base edge, up the end side (`up_end`, points from the
+    /// edge's end to `top_end`), back along the far edge, down the start side (`up_start`, from
+    /// the edge's start to `top_start`).
+    fn face(&self, up_start: &[Vec3], up_end: &[Vec3], top_start: Vec3, top_end: Vec3, tolerance: f64) -> Result<Brep> {
+        let fail = || KernelError::Failed("ruled surface: a strip".into());
+        let mut parts = Parts { tolerance, ..Parts::default() };
+        let vertex = |p: Vec3, parts: &mut Parts| -> Result<u32> {
+            let i = u32::try_from(parts.vertices.len()).map_err(|_| fail())?;
+            parts.vertices.push(b::Vertex { point: [p.x, p.y, p.z], tolerance });
+            Ok(i)
+        };
+        let [u0, u1] = range(&self.base);
+        // The loop's corners and the curves between them, counter-clockwise about the strip's
+        // natural normal (t × r).
+        let (bs, be) = (point(&self.base, 0.0).ok_or_else(fail)?, point(&self.base, 1.0).ok_or_else(fail)?);
+        let corners: Vec<u32> = [bs, be].into_iter().map(|p| vertex(p, &mut parts)).collect::<Result<_>>()?;
+        let (base, base_iv) = spline_curve(&hpoints(&self.base), self.base.knots.clone())?;
+        let mut uses: Vec<(b::Curve, [f64; 2], [u32; 2], bool, Option<Curve2Pair>)> = Vec::new();
+        let ruled = matches!(self.kind, Kind::Ruled);
+        uses.push((base, base_iv, [corners[0], corners[1]], true, ruled.then_some(([u0, 0.0], [u1, 0.0]))));
+        let mut chain_up = |pts: &[Vec3], from: u32, u: f64, parts: &mut Parts, uses: &mut Vec<_>| -> Result<u32> {
+            let mut at = from;
+            for w in pts.windows(2) {
+                let next = vertex(w[1], parts)?;
+                let pc = ruled.then_some(([u, 0.0], [u, 1.0]));
+                uses.push((b::Curve::Line { start: [w[0].x, w[0].y, w[0].z], end: [w[1].x, w[1].y, w[1].z] }, [0.0, 1.0], [at, next], true, pc));
+                at = next;
+            }
+            Ok(at)
+        };
+        let end_top = chain_up(up_end, corners[1], u1, &mut parts, &mut uses)?;
+        // Down the start side, made from the bottom up and walked backwards.
+        let mut start_side = Vec::new();
+        let start_top = chain_up(up_start, corners[0], u0, &mut parts, &mut start_side)?;
+        let (top, top_iv) = if self.line {
+            (b::Curve::Line { start: [top_start.x, top_start.y, top_start.z], end: [top_end.x, top_end.y, top_end.z] }, [0.0, 1.0])
+        } else {
+            spline_curve(&hpoints(&self.top), self.top.knots.clone())?
+        };
+        uses.push((top, top_iv, [start_top, end_top], false, ruled.then_some(([u0, 1.0], [u1, 1.0]))));
+        for (curve, iv, ends, _, pc) in start_side.into_iter().rev() {
+            uses.push((curve, iv, ends, false, pc));
+        }
+        let surface = match self.kind {
+            Kind::Plane { o, t, r } => b::Surface::PlaneThrough {
+                origin: [o.x, o.y, o.z],
+                u_point: [o.x + t.x, o.y + t.y, o.z + t.z],
+                v_point: [o.x + r.x, o.y + r.y, o.z + r.z],
+            },
+            Kind::Ruled => {
+                let mut ctrl = hpoints(&self.base);
+                ctrl.extend(hpoints(&self.top));
+                // u along the edge (fastest), v across: the base row, then the top row.
+                spline_surface(
+                    &NurbsSurface::from_homogeneous([self.base.degree, 1], [self.base.knots.clone(), vec![0.0, 0.0, 1.0, 1.0]], ctrl)
+                        .map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?,
+                )
             }
         };
-        let (s0, s1) = top.range_tuple();
-        let tangent = |s: f64| from_p3(mt::Point3::new(0.0, 0.0, 0.0) + top.der(s)).normalized().unwrap_or(first.1);
-        let end = |(p, _, n, r): (Vec3, Vec3, Vec3, Vec3), tan: Vec3| End { at: p, ruling: r, top: p + r * d, tangent: tan, normal: n };
-        Ok(Strip { start: end(first, tangent(s0)), end: end(last, tangent(s1)), base, surface, top, line, planar })
+        face_of(parts, surface, uses)
     }
 }
 
-/// The unit normal of `face` (as it faces) at its point nearest `p`.
-fn normal_at(face: &mt::Face, p: Vec3) -> Option<Vec3> {
-    let surface = face.oriented_surface();
-    let (u, v) = surface.search_nearest_parameter(p3(p), None, 100)?;
-    from_p3(mt::Point3::new(0.0, 0.0, 0.0) + surface.normal(u, v)).normalized()
+/// A pcurve given as a straight line between two (u, v) points over its edge's interval.
+type Curve2Pair = ([f64; 2], [f64; 2]);
+
+/// One face of the record `parts` (whose vertices are in place) on `surface`, bounded by one loop
+/// of `uses`: each edge's curve, interval, vertices, whether the loop runs along it, and its
+/// straight pcurve where known (else the shared pcurve routine's, exact for lines and splines on
+/// a plane).
+fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2], [u32; 2], bool, Option<Curve2Pair>)>) -> Result<Brep> {
+    let tolerance = parts.tolerance;
+    let mut given = Vec::with_capacity(uses.len());
+    for (curve, interval, vertices, forward, pc) in uses {
+        parts.edges.push(b::Edge { curve, interval, vertices, tolerance, uses: Vec::new() });
+        given.push((forward, pc.map(|(a, z)| uv_line(a, z, interval))));
+    }
+    let loop_uses = parts
+        .edges
+        .iter()
+        .zip(&given)
+        .enumerate()
+        .map(|(i, (e, (forward, pc)))| {
+            let edge = u32::try_from(i).map_err(|_| KernelError::Failed("ruled surface: an edge".into()))?;
+            Ok(b::pcurve::EdgeUse { edge, curve: &e.curve, interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let pcurves = b::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
+    let edges = given
+        .iter()
+        .zip(pcurves.into_iter().flatten())
+        .enumerate()
+        .map(|(i, ((forward, _), pcurve))| {
+            Ok(b::OrientedEdge {
+                edge: u32::try_from(i).map_err(|_| KernelError::Failed("ruled surface: an edge".into()))?,
+                forward: *forward,
+                pcurve,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let loops = vec![b::Loop::Edges { edges }];
+    let domain = match &surface {
+        b::Surface::Spline { u_knots, v_knots, points } => [natural(u_knots, points.len()), natural(v_knots, points.first().map_or(0, Vec::len))],
+        b::Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            [natural(u_knots, homogeneous.len()), natural(v_knots, homogeneous.first().map_or(0, Vec::len))]
+        }
+        _ => uv_bounds(&loops).ok_or_else(|| KernelError::Invalid("a ruled face encloses no area".into()))?,
+    };
+    parts.faces.push((b::Face { surface, domain, loops }, true));
+    Ok(parts.canonical()?.brep)
 }
 
-/// The plane through `o` spanned by the edge direction `t` and the ruling `r`, its normal t × r
-/// (the strip's own orientation).
-fn plane(o: Vec3, t: Vec3, r: Vec3) -> mt::Surface {
-    mt::Surface::Plane(mt::Plane::new(p3(o), p3(o + t), p3(o + r)))
+/// A spline direction's knot domain.
+fn natural(knots: &[f64], count: usize) -> [f64; 2] {
+    let p = knots.len().saturating_sub(count + 1);
+    [knots.get(p).copied().unwrap_or(0.0), knots.get(count).copied().unwrap_or(1.0)]
+}
+
+/// The box of a face's pcurves' control points.
+fn uv_bounds(loops: &[b::Loop]) -> Option<[[f64; 2]; 2]> {
+    let mut bx = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for l in loops {
+        let b::Loop::Edges { edges } = l else { continue };
+        for u in edges {
+            let pts: Vec<[f64; 2]> = match &u.pcurve {
+                b::Curve2::Spline { points, .. } => points.clone(),
+                b::Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+            };
+            for p in pts {
+                for (d, x) in bx.iter_mut().zip(p) {
+                    d[0] = d[0].min(x);
+                    d[1] = d[1].max(x);
+                }
+            }
+        }
+    }
+    bx.iter().all(|d| d[0].is_finite() && d[1] > d[0]).then_some(bx)
+}
+
+/// A flat polygon face through `pts` (three or more, in order), on the plane through its first
+/// three points (its normal (b − a) × (c − a)).
+fn polygon(pts: &[Vec3], tolerance: f64) -> Result<Brep> {
+    let (Some(a), Some(bb), Some(c)) = (pts.first(), pts.get(1), pts.get(2)) else {
+        return Err(KernelError::Failed("ruled surface: a corner".into()));
+    };
+    let mut parts = Parts { tolerance, ..Parts::default() };
+    parts.vertices = pts.iter().map(|p| b::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
+    let n = pts.len();
+    let uses = (0..n)
+        .map(|i| {
+            let (p, q) = (pts[i], pts[(i + 1) % n]);
+            let ends = [u32::try_from(i).unwrap_or(0), u32::try_from((i + 1) % n).unwrap_or(0)];
+            (b::Curve::Line { start: [p.x, p.y, p.z], end: [q.x, q.y, q.z] }, [0.0, 1.0], ends, true, None)
+        })
+        .collect();
+    let surface = b::Surface::PlaneThrough { origin: [a.x, a.y, a.z], u_point: [bb.x, bb.y, bb.z], v_point: [c.x, c.y, c.z] };
+    face_of(parts, surface, uses)
 }
 
 /// An affine map taking each point of an edge to the end of its ruling.
 enum Affine {
     Translate(Vec3),
-    /// Points scaled by `scale` about the axis through `c` along `a` (in its square plane),
-    /// then moved by `shift`.
+    /// Points scaled by `scale` about the axis through `c` along `a` (in its square plane), then
+    /// moved by `shift`.
     Radial {
         c: Vec3,
         a: Vec3,
@@ -400,7 +661,7 @@ fn affine(samples: &[(Vec3, Vec3, Vec3, Vec3)], d: f64, eps: f64) -> Option<Affi
     if !(ww > 1e-24) {
         return None;
     }
-    let centre = a + (v.cross(w) * u.dot(u) + w.cross(u) * v.dot(v)) / (2.0 * ww);
+    let centre = a + (v.cross(w) * u.dot(u) + w.cross(u) * v.dot(v)) * (1.0 / (2.0 * ww));
     let axis = w.normalized()?;
     let radius = (a - centre).len();
     let (mut radial, mut along) = (None, None);
@@ -420,27 +681,31 @@ fn affine(samples: &[(Vec3, Vec3, Vec3, Vec3)], d: f64, eps: f64) -> Option<Affi
     Some(Affine::Radial { c: centre, a: axis, scale: 1.0 + radial? / radius, shift: axis * along? })
 }
 
-/// A ruled B-spline fitted to the strip (degree 1 across: cubics through matching samples of
-/// the edge and of its rulings' ends), refined until both are within [`FIT_TOLERANCE`]; and its
-/// far edge.
-fn fitted(at: &dyn Fn(f64) -> Result<(Vec3, Vec3, Vec3, Vec3)>, param: &dyn Fn(usize, usize) -> f64, d: f64) -> Result<(mt::Surface, mt::Curve)> {
+/// A ruled B-spline fitted to the strip (degree 1 across): cubics through matching samples of the
+/// edge and of its rulings' ends (at the same parameters, so they share their knots), refined
+/// until both are within [`FIT_TOLERANCE`]; the edge's fit and the far edge's.
+fn fitted(at: &dyn Fn(f64) -> Result<(Vec3, Vec3, Vec3, Vec3)>, d: f64) -> Result<(CurveN<4>, CurveN<4>)> {
+    let fail = |e: solidcraft_geom::bspline::SplineError| KernelError::Failed(format!("ruled surface: fitting a strip: {e}"));
+    let lift = |c: CurveN<3>| CurveN { degree: c.degree, knots: c.knots, ctrl: c.ctrl.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() };
     let mut m = SAMPLES + 1;
     loop {
-        let pts: Vec<(Vec3, Vec3, Vec3, Vec3)> = (0..m).map(|k| at(param(k, m))).collect::<Result<_>>()?;
-        let near: Vec<Vec3> = pts.iter().map(|s| s.0).collect();
-        let far: Vec<Vec3> = pts.iter().map(|s| s.0 + s.3 * d).collect();
-        let fail = || KernelError::Failed("ruled surface: fitting a strip".into());
-        let (base, top) = (crate::build::interpolate_cubic(&near).ok_or_else(fail)?, crate::build::interpolate_cubic(&far).ok_or_else(fail)?);
+        let params: Vec<f64> = (0..m).map(|k| k as f64 / (m - 1) as f64).collect();
+        let pts: Vec<(Vec3, Vec3, Vec3, Vec3)> = params.iter().map(|f| at(*f)).collect::<Result<_>>()?;
+        let near: Vec<[f64; 3]> = pts.iter().map(|s| [s.0.x, s.0.y, s.0.z]).collect();
+        let far: Vec<[f64; 3]> = pts.iter().map(|s| s.0 + s.3 * d).map(|q| [q.x, q.y, q.z]).collect();
+        let (base, top) = (lift(CurveN::interpolate(&params, &near, 3).map_err(fail)?), lift(CurveN::interpolate(&params, &far, 3).map_err(fail)?));
         // Checked between the samples, where a fit strays most.
         let mut worst = 0.0f64;
         for k in 0..m - 1 {
-            let s = (k as f64 + 0.5) / (m - 1) as f64;
-            let (p, _, _, r) = at(param(2 * k + 1, 2 * m - 1))?;
-            worst = worst.max(from_p3(base.subs(s)).dist(p)).max(from_p3(top.subs(s)).dist(p + r * d));
+            let f = (k as f64 + 0.5) / (m - 1) as f64;
+            let (p, _, _, r) = at(f)?;
+            let (Some(q0), Some(q1)) = (point(&base, f), point(&top, f)) else {
+                return Err(KernelError::Failed("ruled surface: fitting a strip".into()));
+            };
+            worst = worst.max(q0.dist(p)).max(q1.dist(p + r * d));
         }
         if worst <= FIT_TOLERANCE {
-            let surface = mt::Surface::BSplineSurface(mt::BSplineSurface::homotopy(base, top.clone()));
-            return Ok((surface, mt::Curve::BSplineCurve(top)));
+            return Ok((base, top));
         }
         if m >= MAX_FIT_SAMPLES {
             return Err(KernelError::Invalid(format!("the strip can't be fitted within {FIT_TOLERANCE} mm (off by up to {worst:.4} mm)")));
@@ -458,37 +723,32 @@ enum Side {
 
 /// How the strips meet at a vertex of the chain (or end at a free end of it).
 enum Joint {
-    /// One side edge from the vertex up the ruling: the strips' rulings agree, or a free end.
-    Shared(mt::Edge),
-    /// Mitred: the edge from the vertex to where the strips' far edges meet (`m`); a curved
-    /// strip keeps its own side edge and gets a triangle (`incoming`, `outgoing`) up to it.
-    Mitre { edge: mt::Edge, m: mt::Vertex, incoming: Option<(mt::Edge, mt::Face)>, outgoing: Option<(mt::Edge, mt::Face)> },
-    /// Rounded: each strip's own side edge, and the sector turning one into the other (in
-    /// pieces of less than a half turn).
-    Round { incoming: mt::Edge, outgoing: mt::Edge, sector: Vec<mt::Face> },
+    /// One side edge from the vertex up the ruling to `top`: the strips' rulings agree, or a free
+    /// end.
+    Shared { at: Vec3, top: Vec3 },
+    /// Mitred: the edge from the vertex to where the strips' far edges meet (`m`); a curved strip
+    /// keeps its own side edge and gets a triangle up to `m` (its own side's top given).
+    Mitre { at: Vec3, m: Vec3, incoming: Option<Vec3>, outgoing: Option<Vec3> },
+    /// Rounded: each strip's own side edge (to `incoming`, `outgoing`), and the sector SMLib
+    /// revolves from one into the other about `axis` through the vertex by `turn`.
+    Round { at: Vec3, incoming: Vec3, outgoing: Vec3, axis: Vec3, turn: f64 },
 }
 
 impl Joint {
     fn new(a: Option<&Strip>, b: Option<&Strip>, mode: &RuledMode, corners: RuledCorners, eps: f64) -> Result<Joint> {
-        let side = |s: &Strip, e: &End, from_start: bool| {
-            let v = if from_start { s.base.front().clone() } else { s.base.back().clone() };
-            let top = mt::Vertex::new(p3(e.top));
-            mt::Edge::new_unchecked(&v, &top, mt::Curve::Line(mt::Line(v.point(), top.point())))
-        };
         let (a, b) = match (a, b) {
             (Some(a), Some(b)) => (a, b),
-            (Some(a), None) => return Ok(Joint::Shared(side(a, &a.end, false))),
-            (None, Some(b)) => return Ok(Joint::Shared(side(b, &b.start, true))),
+            (Some(a), None) => return Ok(Joint::Shared { at: a.end.at, top: a.end.top }),
+            (None, Some(b)) => return Ok(Joint::Shared { at: b.start.at, top: b.start.top }),
             (None, None) => return Err(KernelError::Failed("ruled surface: an empty joint".into())),
         };
         let (ea, eb) = (&a.end, &b.start);
-        let vertex = a.base.back().clone();
+        let vertex = ea.at;
         if (ea.ruling - eb.ruling).len() <= SAME_RULING {
-            let top = mt::Vertex::new(p3((ea.top + eb.top) * 0.5));
-            return Ok(Joint::Shared(mt::Edge::new_unchecked(&vertex, &top, mt::Curve::Line(mt::Line(vertex.point(), top.point())))));
+            return Ok(Joint::Shared { at: vertex, top: (ea.top + eb.top) * 0.5 });
         }
-        // Where the far edges, carried on straight, meet: λ along the incoming one past its
-        // end, μ along the outgoing one past its start.
+        // Where the far edges, carried on straight, meet: λ along the incoming one past its end,
+        // μ along the outgoing one past its start.
         let meet = || -> Option<(Vec3, f64, f64)> {
             let (p, q, u, v) = (ea.top, eb.top, ea.tangent, eb.tangent);
             let w = p - q;
@@ -504,8 +764,7 @@ impl Joint {
         // An inside corner (the strips overlap) is cut back where the far edges meet; that needs
         // straight far edges.
         let inside = eb.ruling.dot(ea.tangent) - ea.ruling.dot(eb.tangent) < -1e-9;
-        let corner_at = vertex.point();
-        let refuse = |what: &str| KernelError::Invalid(format!("{what} at the corner at {:?}", from_p3(corner_at)));
+        let refuse = |what: &str| KernelError::Invalid(format!("{what} at the corner at {vertex:?}"));
         if corners == RuledCorners::Mitre || inside {
             let (m, lam, mu) = meet().ok_or_else(|| refuse("the strips' far edges don't meet: try round corners,"))?;
             let convex = lam > 0.0 && mu < 0.0;
@@ -516,31 +775,13 @@ impl Joint {
             if concave && !(a.line && b.line) {
                 return Err(refuse("not supported yet: cutting back a curved strip"));
             }
-            let mv = mt::Vertex::new(p3(m));
-            let edge = mt::Edge::new_unchecked(&vertex, &mv, mt::Curve::Line(mt::Line(vertex.point(), mv.point())));
-            // A strip that isn't a plane keeps its side edge and gets a triangle up to the
-            // mitre, in its tangent plane there.
-            let triangle = |s: &Strip, e: &End, from_start: bool| -> Option<(mt::Edge, mt::Face)> {
-                if s.planar {
-                    return None;
-                }
-                let own = side(s, e, from_start);
-                let top = own.back().clone();
-                let rim = mt::Edge::new_unchecked(&mv, &top, mt::Curve::Line(mt::Line(mv.point(), top.point())));
-                let (wire, surface): (Vec<mt::Edge>, _) = if from_start {
-                    (vec![own.clone(), rim.inverse(), edge.inverse()], plane_through(e.at, e.top, m))
-                } else {
-                    (vec![edge.clone(), rim, own.inverse()], plane_through(e.at, m, e.top))
-                };
-                Some((own, mt::Face::new_unchecked(vec![wire.into()], surface)))
-            };
-            let incoming = triangle(a, ea, false);
-            let outgoing = triangle(b, eb, true);
-            return Ok(Joint::Mitre { edge, m: mv, incoming, outgoing });
+            // A strip that isn't a plane keeps its side edge and gets a triangle up to the mitre.
+            let own = |s: &Strip, e: &End| (!s.planar).then_some(e.top);
+            return Ok(Joint::Mitre { at: vertex, m, incoming: own(a, ea), outgoing: own(b, eb) });
         }
-        // Rounded: the incoming ruling turned into the outgoing one about an axis both keep
-        // the same angle to (the reference direction, or the faces' normal: a cone), else
-        // about the axis square to both (a flat sector).
+        // Rounded: the incoming ruling turned into the outgoing one about an axis both keep the
+        // same angle to (the reference direction, or the faces' normal: a cone), else about the
+        // axis square to both (a flat sector).
         let mut axes: Vec<Vec3> = Vec::new();
         if let RuledMode::Angle { reference: Some(r), .. } = mode {
             axes.push(*r);
@@ -558,70 +799,62 @@ impl Joint {
             .ok_or_else(|| refuse("the strips turn back on each other"))?;
         let (pa, pb) = (flat(ea.ruling, axis), flat(eb.ruling, axis));
         let turn = pa.cross(pb).dot(axis).atan2(pa.dot(pb));
-        let (axis, turn) = if turn < 0.0 { (-axis, -turn) } else { (axis, turn) };
+        let (axis, turn) = if turn < 0.0 { (axis * -1.0, -turn) } else { (axis, turn) };
         if !(turn > 1e-9 && turn < std::f64::consts::PI - 1e-6) {
             return Err(refuse("the strips turn back on each other"));
         }
-        let incoming = side(a, ea, false);
-        // Swept about the vertex (on the axis, so the sector closes there in a point).
-        let mut sector: Vec<mt::Face> = mt::builder::cone(&vec![incoming.clone()].into(), v3(axis), mt::Rad(turn)).into_iter().collect();
-        let edges: Vec<mt::Edge> =
-            sector.iter().flat_map(|f| f.boundaries().into_iter().flat_map(|w| w.edge_iter().cloned().collect::<Vec<_>>())).collect();
-        // The sector runs down the incoming side (the strip runs up it).
-        if edges.iter().any(|e| e.id() == incoming.id() && e.front().id() == vertex.id()) {
-            for f in &mut sector {
-                f.invert();
-            }
-        }
-        // Its other side: the edge from the vertex that only one piece of it has.
-        let uses = |id: mt::EdgeID| edges.iter().filter(|e| e.id() == id).count();
-        let outgoing = edges
-            .iter()
-            .find(|e| e.id() != incoming.id() && uses(e.id()) == 1 && (e.front().id() == vertex.id() || e.back().id() == vertex.id()))
-            .map(|e| if e.front().id() == vertex.id() { e.clone() } else { e.inverse() })
-            .ok_or_else(|| KernelError::Failed("ruled surface: a round corner's side".into()))?;
-        Ok(Joint::Round { incoming, outgoing, sector })
+        Ok(Joint::Round { at: vertex, incoming: ea.top, outgoing: eb.top, axis, turn })
     }
 
-    /// The edges a strip runs up from the joint's vertex (in order), and the vertex its far edge
-    /// starts or ends at.
-    fn side(&self, which: Side, s: &Strip) -> (Vec<mt::Edge>, mt::Vertex) {
-        match self {
-            Joint::Shared(e) => (vec![e.clone()], e.back().clone()),
-            Joint::Round { incoming, outgoing, .. } => {
-                let e = if which == Side::In { incoming } else { outgoing };
-                (vec![e.clone()], e.back().clone())
+    /// The points a strip's side runs through from the joint's vertex up (its edges are the lines
+    /// between them), and the point its far edge starts or ends at.
+    fn side(&self, which: Side, s: &Strip) -> (Vec<Vec3>, Vec3) {
+        match *self {
+            Joint::Shared { at, top } => (vec![at, top], top),
+            Joint::Round { at, incoming, outgoing, .. } => {
+                let top = if which == Side::In { incoming } else { outgoing };
+                (vec![at, top], top)
             }
-            Joint::Mitre { edge, m, incoming, outgoing } => {
-                let own = if which == Side::In { incoming } else { outgoing };
-                if let Some((e, _)) = own {
-                    return (vec![e.clone()], e.back().clone());
+            Joint::Mitre { at, m, incoming, outgoing } => {
+                if let Some(top) = if which == Side::In { incoming } else { outgoing } {
+                    return (vec![at, top], top);
                 }
                 if s.line {
-                    return (vec![edge.clone()], m.clone());
+                    return (vec![at, m], m);
                 }
                 // A plane under a curved far edge: on along the mitre's far edge to it.
-                let e = if which == Side::In { &s.end } else { &s.start };
-                let top = mt::Vertex::new(p3(e.top));
-                let rim = mt::Edge::new_unchecked(m, &top, mt::Curve::Line(mt::Line(m.point(), top.point())));
-                (vec![edge.clone(), rim], top)
+                let top = if which == Side::In { s.end.top } else { s.start.top };
+                (vec![at, m, top], top)
             }
         }
     }
 
     /// The joint's own faces: a round corner's sector, a mitre's triangles.
-    fn corner_faces(&self) -> Vec<&mt::Face> {
-        match self {
-            Joint::Shared(_) => Vec::new(),
-            Joint::Round { sector, .. } => sector.iter().collect(),
-            Joint::Mitre { incoming, outgoing, .. } => incoming.iter().chain(outgoing).map(|(_, f)| f).collect(),
+    fn corner_faces(&self, tolerance: f64) -> Result<Vec<Brep>> {
+        match *self {
+            Joint::Shared { .. } => Ok(Vec::new()),
+            Joint::Mitre { at, m, incoming, outgoing } => {
+                let mut out = Vec::new();
+                if let Some(top) = incoming {
+                    out.push(polygon(&[at, m, top], tolerance)?);
+                }
+                if let Some(top) = outgoing {
+                    out.push(polygon(&[at, top, m], tolerance)?);
+                }
+                Ok(out)
+            }
+            Joint::Round { at, incoming, axis, turn, .. } => {
+                // The incoming side as a line in the plane it spans with the axis, turned about the
+                // axis through the vertex (a cone with its apex there, or a flat sector).
+                let side = incoming - at;
+                let x = side.normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
+                let y = (axis - x * axis.dot(x)).normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
+                let plane = solidcraft_geom::Plane { origin: at, x, y };
+                let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+                Ok(vec![crate::surfaces::revolved_record(&plane, &[line], at, axis, turn)?])
+            }
         }
     }
-}
-
-/// The plane through three points, its normal (b − a) × (c − a).
-fn plane_through(a: Vec3, b: Vec3, c: Vec3) -> mt::Surface {
-    mt::Surface::Plane(mt::Plane::new(p3(a), p3(b), p3(c)))
 }
 
 #[cfg(test)]
@@ -645,12 +878,28 @@ mod tests {
         measure(b).unwrap().area
     }
     /// How many faces use each edge of a body.
-    fn uses(b: &Body) -> HashMap<mt::EdgeID, usize> {
-        let mut m = HashMap::new();
-        for e in b.solid.face_iter().flat_map(|f| f.boundaries().into_iter().flat_map(|w| w.edge_iter().map(|e| e.id()).collect::<Vec<_>>())) {
-            *m.entry(e).or_default() += 1;
-        }
-        m
+    fn uses(b: &Body) -> HashMap<usize, usize> {
+        b.record().edges.iter().enumerate().map(|(i, e)| (i, e.uses.len())).collect()
+    }
+    /// The edges of `s` that lie along a straight edge of `b` (their middles on it).
+    fn on_edges_of(s: &Body, b: &Body) -> usize {
+        let on = |p: Vec3| {
+            b.record().edges.iter().any(|e| match e.curve {
+                solidcraft_geom::brep::Curve::Line { start, end } => {
+                    let (a, z) = (Vec3::new(start[0], start[1], start[2]), Vec3::new(end[0], end[1], end[2]));
+                    p.dist_to_segment(a, z) < 1e-6
+                }
+                _ => false,
+            })
+        };
+        s.record()
+            .edges
+            .iter()
+            .filter(|e| {
+                let c = solidcraft_geom::brep::eval::CurveEval::new(&e.curve).unwrap();
+                on(c.point(0.5 * (e.interval[0] + e.interval[1])).unwrap())
+            })
+            .count()
     }
     fn shared(b: &Body) -> usize {
         uses(b).values().filter(|n| **n == 2).count()
@@ -763,8 +1012,7 @@ mod tests {
             assert!(rel(area(&s), want) < 2e-3, "{r:?}: {} vs {want}", area(&s)); // (measured on meshes)
             assert_eq!((s.face_count(), shared(&s)), (faces, joins), "{r:?}");
             // The strips stand on the box's own edges.
-            let own: std::collections::HashSet<mt::EdgeID> = b.solid.edge_iter().map(|e| e.id()).collect();
-            assert_eq!(uses(&s).keys().filter(|e| own.contains(e)).count(), 4);
+            assert_eq!(on_edges_of(&s, &b), 4);
             let sewn = crate::stitch(&[&s], 0.0).unwrap();
             assert_eq!((sewn.face_count(), shared(&sewn), uses(&sewn).len()), (faces, joins, uses(&s).len()), "{r:?}");
         }
