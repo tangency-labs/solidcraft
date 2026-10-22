@@ -18,9 +18,9 @@ use crate::sweep_path::RailFit;
 use crate::{KernelError, Result};
 
 /// Most wires a railed loft is skinned through, sections and stations together.
-const MAX_WIRES: usize = 33;
+pub(crate) const MAX_WIRES: usize = 33;
 /// Most stations between two sections.
-const MAX_PER_SPAN: usize = 15;
+pub(crate) const MAX_PER_SPAN: usize = 15;
 
 type Curve = mt::BSplineCurve<mt::Point3>;
 
@@ -42,14 +42,14 @@ struct Rail {
 }
 
 /// An affine move: `x` goes to `to + m·(x − from)` (`m` by columns).
-struct Affine {
+pub(crate) struct Affine {
     from: Vec3,
     to: Vec3,
     m: [Vec3; 3],
 }
 
 impl Affine {
-    fn apply(&self, x: Vec3) -> Vec3 {
+    pub(crate) fn apply(&self, x: Vec3) -> Vec3 {
         let d = x - self.from;
         self.to + self.m[0] * d.x + self.m[1] * d.y + self.m[2] * d.z
     }
@@ -259,7 +259,7 @@ fn nearest_on(section: &[Curve], p: Vec3) -> Option<(f64, Vec3, f64)> {
 
 /// A wire parameter `f` of the way from `g0` to `g1`; round a closed wire of `n` edges the
 /// shorter way.
-fn interpolate_g(g0: f64, g1: f64, f: f64, n: usize, closed: bool) -> f64 {
+pub(crate) fn interpolate_g(g0: f64, g1: f64, f: f64, n: usize, closed: bool) -> f64 {
     let n = n as f64;
     if !closed {
         return (g0 + f * (g1 - g0)).clamp(0.0, n);
@@ -294,7 +294,7 @@ fn centroid(ctrl: &[Vec<Vec3>]) -> Vec3 {
 /// rail's point), the station's middle `middle`, the loft's direction there `dir` (unit); `size`
 /// the loft's size. One rail: turned about `dir` and sized about the middle, shifted along `dir`;
 /// two: carried with the first, turned and sized with the line between them, leaning along `dir`.
-fn station_map(pairs: &[(Vec3, Vec3)], middle: Vec3, dir: Vec3, fit: RailFit, size: f64) -> Result<Affine> {
+pub(crate) fn station_map(pairs: &[(Vec3, Vec3)], middle: Vec3, dir: Vec3, fit: RailFit, size: f64) -> Result<Affine> {
     let (from, to, a, r, two) = match pairs {
         [(p, q)] => (middle, middle, *p - middle, *q - middle, false),
         [(p1, q1), (p2, q2)] => (*p1, *q1, *p2 - *p1, *q2 - *q1, true),

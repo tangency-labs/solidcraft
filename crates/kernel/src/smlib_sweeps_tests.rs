@@ -117,3 +117,50 @@ fn a_sweep_keeps_a_profile_off_its_path_where_it_lies() {
     let b = smlib_sweeps::sweep(&plane, &pieces_of(&disc), &path, false).unwrap();
     close(volume(&b), PI * 4.0 * (PI / 2.0 * 25.0), 1e-3, "bent tube");
 }
+
+fn numbered(r: &Region2) -> crate::numbered::NumberedRegion {
+    number_regions(std::slice::from_ref(r)).pop().unwrap().oriented()
+}
+
+#[test]
+fn a_sweep_twists_scales_and_follows_rails_through_stations() {
+    let square = region(Loop2::polygon(&[Vec2::new(-5.0, -5.0), Vec2::new(5.0, -5.0), Vec2::new(5.0, 5.0), Vec2::new(-5.0, 5.0)]));
+    let up = [crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 40.0) }];
+    // Turning about the section's centre keeps its area: V = 100 * 40, the caps and the four
+    // walls named.
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    let b = smlib_sweeps::sweep_controlled(&Plane::XY, &numbered(&square), &up, &ctl).unwrap();
+    close(volume(&b), 4000.0, 1e-3, "twisted square");
+    let o = origins(&b);
+    assert!(o.contains(&cap(false)) && o.contains(&cap(true)) && (0..4).all(|k| o.contains(&profile(k))), "{o:?}");
+    // Scaled from 5 to 10 over 30, or between rails that widen as much: a cone frustum.
+    let disc = region(Loop2::circle(Vec2::ZERO, 5.0));
+    let frustum = |h: f64| h / 3.0 * PI * (25.0 + 100.0 + 50.0);
+    let short = [crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 30.0) }];
+    let ctl = crate::SweepControl { scale: 2.0, ..Default::default() };
+    close(volume(&smlib_sweeps::sweep_controlled(&Plane::XY, &numbered(&disc), &short, &ctl).unwrap()), frustum(30.0), 1e-3, "end scale");
+    let rails = [vec![Vec3::new(5.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 30.0)], vec![Vec3::new(-5.0, 0.0, 0.0), Vec3::new(-10.0, 0.0, 30.0)]];
+    for n in 1..=2 {
+        let ctl = crate::SweepControl { rails: rails[..n].to_vec(), ..Default::default() };
+        close(volume(&smlib_sweeps::sweep_controlled(&Plane::XY, &numbered(&disc), &short, &ctl).unwrap()), frustum(30.0), 1e-3, "rails");
+    }
+}
+
+#[test]
+fn a_twisted_sweep_round_a_closed_path_joins_its_ends() {
+    // An 8 x 8 square round a circle of radius 30, a quarter turn of twist (onto itself): Pappus.
+    let xz = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let square = region(Loop2::polygon(&[Vec2::new(26.0, -4.0), Vec2::new(34.0, -4.0), Vec2::new(34.0, 4.0), Vec2::new(26.0, 4.0)]));
+    let a = Vec3::new(30.0, 0.0, 0.0);
+    let round = [
+        crate::PathSeg::Arc { a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+        crate::PathSeg::Arc { a: -a, center: Vec3::ZERO, axis: Vec3::Z, angle: PI },
+    ];
+    let ctl = crate::SweepControl { twist: PI / 2.0, ..Default::default() };
+    let b = smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).unwrap();
+    close(volume(&b), 64.0 * TAU * 30.0, 1e-3, "twisted ring");
+    assert!(origins(&b).iter().all(|o| o.contains("Profile")), "{:?}", origins(&b));
+    // A twist that does not bring the square back onto itself cannot close.
+    let ctl = crate::SweepControl { twist: PI / 3.0, ..Default::default() };
+    assert!(smlib_sweeps::sweep_controlled(&xz, &numbered(&square), &round, &ctl).is_err());
+}
