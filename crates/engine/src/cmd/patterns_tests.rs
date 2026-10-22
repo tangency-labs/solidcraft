@@ -632,7 +632,6 @@ fn pattern_of_touching_cuts_needs_no_fallback() {
     let (mut s, id) = sawtooth_bar(40, true);
     let result = s.model.result(id.unwrap()).unwrap();
     assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-    assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     let m = run(&mut s, "inspect.measure", json!({}));
     let (mut one, _) = sawtooth_bar(40, false);
     let single = run(&mut one, "inspect.measure", json!({}));
@@ -670,7 +669,6 @@ fn pattern_of_cuts_beside_a_round_needs_no_retries() {
         let id = created["feature"].as_u64().unwrap();
         let result = s.model.result(id).unwrap();
         assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-        assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     }
     // The bar, less the rounds' corners and 40 teeth (a 4 x 2 triangle below the top, 16 wide).
     let expected = 16000.0 - 400.0 * (1.0 - PI / 4.0) - 40.0 * 4.0 * 16.0;

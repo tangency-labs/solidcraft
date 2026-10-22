@@ -1031,7 +1031,6 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
         "definition": def, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
-        "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
     }))
 }
 

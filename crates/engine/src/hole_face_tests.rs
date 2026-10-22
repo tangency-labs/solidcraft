@@ -343,7 +343,6 @@ fn drilled_sketch_points_break_through_a_sloping_back_face() {
     let id = s.doc.find_feature("H").unwrap().id;
     let result = s.model.result(id).unwrap();
     assert!(result.error.is_none());
-    assert!(result.boolean_diagnostics.unverified().is_none());
     // The cylindrical bore and cone, less the oblique conical cap outside x = z/4.
     let r = 2.5;
     let k = 59f64.to_radians().tan();

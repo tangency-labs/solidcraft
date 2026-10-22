@@ -112,60 +112,11 @@ changes to body grouping can therefore change the generated design. This preserv
 original geometric reference independently of those choices. These checks supplement the
 snapshots' stricter repeatability comparisons of raw topology and tessellated measurements.
 
-## Successful Boolean retries
+## Booleans
 
-When an accepted Boolean result needs a retry that can make it differ from the
-exact one (a tool nudge, or the unverified shortcut), the feature shows a
-warning in the timeline. Every other retry works on temporary geometry or
-tolerances and leaves the exact result, so it is recorded but not warned about.
-`timeline.inspect` and `doc.inspect` expose every retry in the feature's
-`boolean_diagnostics`, including the strategy and the applied translation,
-rotation, face offset and tessellation tolerance in millimetres/radians.
-Candidates those retries discarded before measuring them are listed in its
-`rejected`, with the reason: a candidate with an edge further outside the
-operands than 5% of their size cannot be their union, cut or intersection,
-and meshing one (a trim loop running metres along a cone's continuation)
-could take minutes or never finish (#3020).
-
-A common shift of both operands is reversed on the result. Coincident-face
-separation and bore offsets describe temporary working geometry; they are not
-claims about the final model's error. A coincident face is separated only
-where the space it moves through holds what the Boolean leaves there anyway
-(nothing of the target for a cut's face, the target's material for a join's);
-a face with no such room stays, and the exact planar fallback is tried first.
-A tool nudge changes the relative operand
-placement and reports both its translation magnitude and rotation angle. When it
-fails, or leaves a sliver face (narrower than 1/200 of the part), it is tried the
-other way too: one way can push a face into a curved face it only touched (a cut
-whose end lies tangent to a round side) and leave a sliver of it, where the other
-way parts them (#897, #827).
-Exact planar and piecewise fallbacks report zero displacement. When a conical
-cutter meets a body with earlier conical faces (pointed bores copied in a pattern),
-two finer, unshifted passes are tried first, at 1e-5 and 1e-6 of their size (never
-below 1e-6 mm). A coarse first cut can leave tiny junctions that later copies cannot
-intersect, so refining only the failing copy is too late. Every candidate must pass
-the volume, membership and spatial checks; a rejected candidate continues to the
-next tolerance, then the ordinary routes. The existing acceptance checks still
-apply to all results.
-
-A join or a cut that needed any retry is then held to what it can do at all
-(`crates/kernel/src/boolean_guard.rs`, #616): the result is closed, a join
-never loses volume and a cut never gains any, and outside the tool's box the
-result's surface is the target's and the target's is the result's (a join or
-a cut can only change the target where the tool is). A cut may come out empty
-only when the tool covers the target. A result that fails is refused with an
-error naming what was wrong and where, rather than returned: a wrong result
-that looks right is worse than an error.
-
-Reports belong to the evaluated feature and survive cached rebuilds and
-undo/redo. Cold reopening regenerates them from the embedded design. Failed or
-discarded retry branches do not contribute successful-retry events. Reports
-are capped at 1024 events per feature and explicitly identify truncation.
-
-Fuzz JSON and the text report count successful retry events by strategy for
-designs and Boolean identity checks separately, including nested operations.
-These are event counts, so a single Boolean or seed can contribute several.
-Truncated reports are counted separately rather than implying complete totals.
+Booleans run in SMLib, with no retries or fallbacks: a Boolean SMLib cannot do exactly is an
+error that names why, never a nudged or approximate result. The retry reports truck's Booleans
+kept (`boolean_diagnostics` in `timeline.inspect` and `doc.inspect`) are gone with them.
 
 ## Results
 
