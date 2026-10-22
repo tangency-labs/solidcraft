@@ -135,7 +135,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     let evals: Vec<(EvalSurface, surface::Params)> = faces
         .iter()
         .enumerate()
-        .map(|(fi, f)| surface::eval_surface(&f.surface, f.domain).map_err(|e| unsupported(format!("face {fi} ({}): {e}", kind(&f.surface)))))
+        .map(|(fi, f)| surface::eval_surface(f.parameters(), f.domain).map_err(|e| unsupported(format!("face {fi} ({}): {e}", kind(&f.surface)))))
         .collect::<Result<_>>()?;
     let (evals, params): (Vec<EvalSurface>, Vec<surface::Params>) = evals.into_iter().unzip();
     let curved = evals.iter().filter(|e| !matches!(e, EvalSurface::Plane { .. })).count();
@@ -160,7 +160,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
         };
         let loops = boundary(b, fi, face, eval, map, &nodes, &rules)?;
         let mut stats = PlanStats::default();
-        let fp = plan_face(fi, kind(&face.surface), eval, &loops, &rules, *size, &mut stats)?;
+        let fp = plan_face(fi, kind(face.parameters()), eval, &loops, &rules, *size, &mut stats)?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };

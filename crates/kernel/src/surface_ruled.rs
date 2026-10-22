@@ -225,7 +225,7 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
             *count.entry(*i).or_default() += 1;
         }
     }
-    let surfaces: Vec<Option<SurfaceEval>> = rec.faces.iter().map(|f| SurfaceEval::new(&f.surface).ok()).collect();
+    let surfaces: Vec<Option<SurfaceEval>> = rec.faces.iter().map(|f| SurfaceEval::new(f.parameters()).ok()).collect();
     let normal = |face: usize, p: Vec3| normal_at(surfaces.get(face)?.as_ref()?, body.face_forward(face), p);
     // The face each edge takes its directions from: the picked face where it borders the edge,
     // carried on along the chain to the faces meeting it smoothly (a cylinder's halves); with no
@@ -1001,7 +1001,7 @@ fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2],
         }
         _ => uv_bounds(&loops).ok_or_else(|| KernelError::Invalid("a ruled face encloses no area".into()))?,
     };
-    parts.faces.push((b::Face { surface, domain, loops }, true));
+    parts.faces.push((b::Face { nurbs: None, surface, domain, loops }, true));
     Ok(parts.canonical()?.brep)
 }
 

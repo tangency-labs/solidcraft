@@ -109,7 +109,7 @@ pub fn section_frames(body: &Body, edges: &[Vec3], leave: Vec3, stations: usize)
         if !chain.iter().all(|(e, _)| bounds(f, *e)) {
             continue;
         }
-        let Ok(surf) = SurfaceEval::new(&face.surface) else { continue };
+        let Ok(surf) = SurfaceEval::new(face.parameters()) else { continue };
         let Some((_, su, sv)) = surf.project(mid, None, f64::INFINITY).and_then(|uv| surf.derivs(uv[0], uv[1])) else { continue };
         let n = su.cross(sv).normalized().unwrap_or(Vec3::ZERO);
         let score = (leave - n * leave.dot(n)).len();

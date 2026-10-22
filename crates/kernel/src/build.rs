@@ -885,7 +885,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
         tolerance,
         regions: vec![rec::Region { shells: vec![0], void: false }],
         shells: vec![rec::Shell::Faces { faces: vec![rec::OrientedFace { face: 0, forward: true }], wires: vec![] }],
-        faces: vec![rec::Face { surface, domain: [[lo[0] - pad, hi[0] + pad], [lo[1] - pad, hi[1] + pad]], loops: face_loops }],
+        faces: vec![rec::Face { nurbs: None, surface, domain: [[lo[0] - pad, hi[0] + pad], [lo[1] - pad, hi[1] + pad]], loops: face_loops }],
         edges,
         vertices,
     };

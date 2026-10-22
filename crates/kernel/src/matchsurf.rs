@@ -263,7 +263,7 @@ struct Patch {
 impl Patch {
     fn of(r: &b::Brep, face: usize) -> Result<Patch> {
         let f = r.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("no face {face}")))?;
-        let surface = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("match: face {face}: {e}")))?;
+        let surface = SurfaceEval::new(f.parameters()).map_err(|e| KernelError::Failed(format!("match: face {face}: {e}")))?;
         let [[u0, u1], [v0, v1]] = f.domain;
         Ok(Patch { surface, ranges: [(u0, u1), (v0, v1)] })
     }

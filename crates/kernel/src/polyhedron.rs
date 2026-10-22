@@ -137,6 +137,7 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
         }
         let w = |x: Vec3| [x.x, x.y, x.z];
         out.push(rec::Face {
+            nurbs: None,
             surface: rec::Surface::Plane { origin: w(o), u_axis: w(u), v_axis: w(v) },
             domain: [[lo[0], hi_uv[0]], [lo[1], hi_uv[1]]],
             loops: vec![Loop::Edges { edges }],

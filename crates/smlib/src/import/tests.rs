@@ -49,6 +49,7 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]]) -> Record {
             });
         }
         faces.push(Face {
+            nurbs: None,
             surface: Surface::Plane { origin: o, u_axis: x, v_axis: y },
             domain: [[lo[0], hi[0]], [lo[1], hi[1]]],
             loops: vec![Loop::Edges { edges }],
@@ -132,7 +133,7 @@ fn a_plane_on_other_axes_goes_as_smlibs_plane() {
     // non-unit and check it still goes as SMLib's plane, the volume unchanged.
     let c = [[0., 0., 0.], [6., 0., 0.], [0., 6., 0.], [0., 0., 6.]];
     let mut r = polyhedron(&c, &[&[0, 2, 1], &[0, 1, 3], &[1, 2, 3], &[2, 0, 3]]);
-    if let Some(Face { surface: Surface::Plane { u_axis, v_axis, .. }, domain, loops }) = r.faces.get_mut(0) {
+    if let Some(Face { nurbs: None, surface: Surface::Plane { u_axis, v_axis, .. }, domain, loops }) = r.faces.get_mut(0) {
         *u_axis = scale(*u_axis, 2.0);
         *v_axis = scale(*v_axis, 2.0);
         *domain = domain.map(|d| d.map(|x| x / 2.0));

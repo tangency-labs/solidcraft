@@ -217,7 +217,7 @@ mod tests {
                 let face = &body.faces[u.face as usize];
                 let brep::Loop::Edges { edges: loop_edges } = &face.loops[u.r#loop as usize] else { panic!("an edge loop") };
                 let oe = &loop_edges[u.position as usize];
-                let Ok((s, map)) = crate::tess::surface::eval_surface(&face.surface, face.domain) else { panic!("evaluates") };
+                let Ok((s, map)) = crate::tess::surface::eval_surface(face.parameters(), face.domain) else { panic!("evaluates") };
                 for (t, p) in n.params.iter().zip(&n.points) {
                     let Some(q) = oe.pcurve.eval(*t) else { panic!("pcurve at {t}") };
                     let q = map.to_eval(q);

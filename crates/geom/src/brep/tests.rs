@@ -101,7 +101,7 @@ fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) ->
             let [o, p, q] = [0, 1, 2].map(|k| points[cycle[k]]);
             let axis = |a: [f64; 3]| [a[0] - o[0], a[1] - o[1], a[2] - o[2]];
             let surface = Surface::Plane { origin: o, u_axis: axis(p), v_axis: axis(q) };
-            b.faces.push(Face { surface, domain: [[-10., 10.], [-10., 10.]], loops: vec![Loop::Edges { edges: loop_ }] });
+            b.faces.push(Face { nurbs: None, surface, domain: [[-10., 10.], [-10., 10.]], loops: vec![Loop::Edges { edges: loop_ }] });
         }
         b.shells.push(Shell::Faces { faces: uses, wires: vec![] });
     }
@@ -145,6 +145,7 @@ fn tube() -> Brep {
         regions: vec![infinite(vec![0])],
         shells: vec![Shell::Faces { faces: vec![OrientedFace { face: 0, forward: true }], wires: vec![] }],
         faces: vec![Face {
+            nurbs: None,
             surface: Surface::Cylinder { frame: f.clone(), radius: 2. },
             domain: [[0., TAU], [0., 5.]],
             loops: vec![Loop::Edges {
@@ -176,6 +177,7 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
         regions: vec![infinite(vec![0])],
         shells: vec![Shell::Faces { faces: vec![OrientedFace { face: 0, forward: true }], wires: vec![] }],
         faces: vec![Face {
+            nurbs: None,
             surface,
             domain,
             loops: vec![Loop::Edges { edges: uses.iter().map(|&(edge, forward)| OrientedEdge { edge, forward, pcurve: segment(0., 1.) }).collect() }],

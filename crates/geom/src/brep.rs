@@ -84,7 +84,16 @@ pub struct OrientedFace {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Face {
+    /// What the face is: its surface as the producer names it (a cylinder, a NURBS…).
     pub surface: Surface,
+    /// The NURBS form the face is parameterised on, when it differs from `surface`'s own
+    /// parameters: a cylinder, cone, sphere or torus as SMLib holds it (every SMLib analytic
+    /// surface is a B-spline surface, its trims in that NURBS's parameters). When given, `domain`
+    /// and every pcurve are in this surface's (u, v), and `surface` only says what it is; it is a
+    /// `Spline` or `RationalSpline` and `surface` is a cylinder, cone, sphere or torus
+    /// (docs/native-brep.md, "Surfaces").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nurbs: Option<Surface>,
     /// The modelled rectangle in surface parameters, `[[u0, u1], [v0, v1]]`, inside the
     /// surface's natural domain and around every loop.
     pub domain: [[f64; 2]; 2],
@@ -469,6 +478,14 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
     }
 }
 
+impl Face {
+    /// The surface the face's (u, v) are on: its NURBS form when it has one, else its surface.
+    /// Everything that evaluates the face's domain or pcurves goes through this.
+    pub fn parameters(&self) -> &Surface {
+        self.nurbs.as_ref().unwrap_or(&self.surface)
+    }
+}
+
 impl Brep {
     /// Validate portable structure without calling a kernel or evaluating geometry: resource
     /// budgets, geometry records, parameter ranges, references, loops, regions, every edge's
@@ -495,7 +512,15 @@ impl Brep {
         }
         for f in &self.faces {
             surface(&f.surface, 0, &mut budget)?;
-            let [u, v] = surface_natural(&f.surface);
+            if let Some(n) = &f.nurbs {
+                surface(n, 0, &mut budget)?;
+                require(matches!(n, Surface::Spline { .. } | Surface::RationalSpline { .. }), "NURBS form is not a NURBS")?;
+                require(
+                    matches!(f.surface, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }),
+                    "NURBS form on a surface that is not a cylinder, cone, sphere or torus",
+                )?;
+            }
+            let [u, v] = surface_natural(f.parameters());
             interval(&f.domain[0], u)?;
             interval(&f.domain[1], v)?;
             budget.add(f.loops.len())?;

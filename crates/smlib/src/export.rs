@@ -305,22 +305,59 @@ fn frame(origin: [f64; 3], axis: [f64; 3], x: [f64; 3]) -> b::Frame {
 
 // ---- Geometry ---------------------------------------------------------------------------
 
-/// The schema record of each face's surface, in face order.
-fn surfaces(flat: View, n_faces: usize) -> Res<Vec<b::Surface>> {
+/// The schema record of each face's surface, in face order, and its NURBS form when the arrays give
+/// one (`FACE_NURBS_FORM`: an analytic face with the NURBS SMLib holds it as).
+fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surface>)>> {
     let kinds = flat.i(FACE_SURFACE_TYPE);
     if kinds.len() != n_faces {
         return Err(invalid("face surface kinds"));
     }
+    // The NURBS blocks, in face order: each NURBS face's surface and each face's NURBS form.
+    struct At {
+        j: usize,
+        cv: usize,
+        uk: usize,
+        vk: usize,
+        w: usize,
+    }
+    let next_nurbs = |at_: &mut At| -> Res<b::Surface> {
+        let j = at_.j;
+        let nu = count(at(flat.i(FACE_NURBS_U_VERTEX_COUNT), j, "NURBS face")?, "NURBS face")?;
+        let nv = count(at(flat.i(FACE_NURBS_V_VERTEX_COUNT), j, "NURBS face")?, "NURBS face")?;
+        let ou = count(at(flat.i(FACE_NURBS_U_ORDER), j, "NURBS face")?, "NURBS face")?;
+        let ov = count(at(flat.i(FACE_NURBS_V_ORDER), j, "NURBS face")?, "NURBS face")?;
+        let n = nu.checked_mul(nv).filter(|n| *n <= b::MAX_ITEMS).ok_or_else(|| invalid("NURBS face size"))?;
+        let slice = |v: &[f64], from: usize, len: usize| v.get(from..from + len).map(<[f64]>::to_vec).ok_or_else(|| invalid("NURBS face arrays"));
+        let pts = slice(flat.f(FACE_NURBS_CVS), 3 * at_.cv, 3 * n)?;
+        let u_knots = slice(flat.f(FACE_NURBS_U_KNOTS), at_.uk, nu + ou)?;
+        let v_knots = slice(flat.f(FACE_NURBS_V_KNOTS), at_.vk, nv + ov)?;
+        let weights = if flat.f(FACE_NURBS_WEIGHTS).is_empty() { vec![1.0; n] } else { slice(flat.f(FACE_NURBS_WEIGHTS), at_.w, n)? };
+        *at_ = At { j: j + 1, cv: at_.cv + n, uk: at_.uk + nu + ou, vk: at_.vk + nv + ov, w: at_.w + n };
+        let point = |p: usize| -> [f64; 3] { [pts[3 * p], pts[3 * p + 1], pts[3 * p + 2]] };
+        Ok(if weights.iter().all(|x| *x == 1.0) {
+            b::Surface::Spline { u_knots, v_knots, points: (0..nu).map(|r| (0..nv).map(|c| point(r * nv + c)).collect()).collect() }
+        } else {
+            let h = |p: usize| {
+                let (q, wt) = (point(p), weights[p]);
+                [q[0] * wt, q[1] * wt, q[2] * wt, wt]
+            };
+            b::Surface::RationalSpline { u_knots, v_knots, homogeneous: (0..nu).map(|r| (0..nv).map(|c| h(r * nv + c)).collect()).collect() }
+        })
+    };
+    let mut nurbs_at = At { j: 0, cv: 0, uk: 0, vk: 0, w: 0 };
+    let forms = flat.i(FACE_NURBS_FORM);
+    if !forms.is_empty() && forms.len() != n_faces {
+        return Err(invalid("face NURBS forms"));
+    }
     let mut k = [0usize; 6];
-    let (mut cv, mut uk, mut vk, mut w) = (0usize, 0usize, 0usize, 0usize);
     let mut out = Vec::with_capacity(n_faces);
-    for &kind in kinds {
+    for (f, &kind) in kinds.iter().enumerate() {
         let slot = usize::try_from(kind).ok().filter(|s| *s < 6).ok_or_else(|| unsupported(format!("SMLib surface kind {kind}")))?;
         let i = at(&k, slot, "kind")?;
         if let Some(c) = k.get_mut(slot) {
             *c += 1;
         }
-        out.push(match kind {
+        let surface = match kind {
             SURFACE_PLANE => {
                 let f = frame(
                     v3(flat.f(FACE_PLANE_ORIGIN), i, "plane")?,
@@ -368,35 +405,12 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<b::Surface>> {
                 major_radius: at(flat.f(FACE_TORUS_MAJOR_RADIUS), i, "torus")?,
                 minor_radius: at(flat.f(FACE_TORUS_MINOR_RADIUS), i, "torus")?,
             },
-            SURFACE_NURBS => {
-                let nu = count(at(flat.i(FACE_NURBS_U_VERTEX_COUNT), i, "NURBS face")?, "NURBS face")?;
-                let nv = count(at(flat.i(FACE_NURBS_V_VERTEX_COUNT), i, "NURBS face")?, "NURBS face")?;
-                let ou = count(at(flat.i(FACE_NURBS_U_ORDER), i, "NURBS face")?, "NURBS face")?;
-                let ov = count(at(flat.i(FACE_NURBS_V_ORDER), i, "NURBS face")?, "NURBS face")?;
-                let n = nu.checked_mul(nv).filter(|n| *n <= b::MAX_ITEMS).ok_or_else(|| invalid("NURBS face size"))?;
-                let slice =
-                    |a: &[f64], from: usize, len: usize| a.get(from..from + len).map(<[f64]>::to_vec).ok_or_else(|| invalid("NURBS face arrays"));
-                let pts = slice(flat.f(FACE_NURBS_CVS), 3 * cv, 3 * n)?;
-                let u_knots = slice(flat.f(FACE_NURBS_U_KNOTS), uk, nu + ou)?;
-                let v_knots = slice(flat.f(FACE_NURBS_V_KNOTS), vk, nv + ov)?;
-                let weights = if flat.f(FACE_NURBS_WEIGHTS).is_empty() { vec![1.0; n] } else { slice(flat.f(FACE_NURBS_WEIGHTS), w, n)? };
-                cv += n;
-                uk += nu + ou;
-                vk += nv + ov;
-                w += n;
-                let point = |p: usize| -> [f64; 3] { [pts[3 * p], pts[3 * p + 1], pts[3 * p + 2]] };
-                if weights.iter().all(|x| *x == 1.0) {
-                    b::Surface::Spline { u_knots, v_knots, points: (0..nu).map(|a| (0..nv).map(|c| point(a * nv + c)).collect()).collect() }
-                } else {
-                    let h = |p: usize| {
-                        let (q, wt) = (point(p), weights[p]);
-                        [q[0] * wt, q[1] * wt, q[2] * wt, wt]
-                    };
-                    b::Surface::RationalSpline { u_knots, v_knots, homogeneous: (0..nu).map(|a| (0..nv).map(|c| h(a * nv + c)).collect()).collect() }
-                }
-            }
+            SURFACE_NURBS => next_nurbs(&mut nurbs_at)?,
             other => return Err(unsupported(format!("SMLib surface kind {other}"))),
-        });
+        };
+        // A NURBS face's own block came first; a form follows the analytic face's canonical entry.
+        let form = if kind != SURFACE_NURBS && forms.get(f) == Some(&1) { Some(next_nurbs(&mut nurbs_at)?) } else { None };
+        out.push((surface, form));
     }
     Ok(out)
 }
@@ -675,6 +689,8 @@ fn onto(r: [f64; 2], natural: b::Natural) -> [f64; 2] {
 /// One face before renumbering: loops relative to the record's normal, as (edge, forward).
 #[derive(Clone)]
 struct Face {
+    /// The NURBS form the face's (u, v) are on (`FACE_NURBS_FORM`), when it differs from `surface`.
+    nurbs: Option<b::Surface>,
     surface: b::Surface,
     domain: [[f64; 2]; 2],
     /// SMLib's natural normal is the record's.
@@ -809,11 +825,13 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         return Err(invalid("face ranges"));
     }
     let mut faces = Vec::with_capacity(n_faces);
-    for (f, (surface, loops)) in surfaces.into_iter().zip(&face_loops).enumerate() {
+    for (f, ((surface, nurbs), loops)) in surfaces.into_iter().zip(&face_loops).enumerate() {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
-        let natural = surface.natural();
+        // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
+        let params = nurbs.as_ref().unwrap_or(&surface);
+        let natural = params.natural();
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
-        let spline = matches!(surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. });
+        let spline = matches!(params, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. });
         let mut out = Vec::with_capacity(loops.len());
         let mut records = Vec::with_capacity(loops.len());
         let mut given = Vec::with_capacity(loops.len());
@@ -843,7 +861,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
             out.push(Loop::Edges(l));
             given.push(g);
         }
-        faces.push(Face { surface, domain, agrees: true, loops: out, records, given });
+        faces.push(Face { nurbs, surface, domain, agrees: true, loops: out, records, given });
     }
     for face in &mut faces {
         if outer_area(face, &edges, largest)? < 0.0 {
@@ -1154,7 +1172,8 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
                 Loop::Vertex(v) => Ok(Loop::Vertex(*v)),
             })
             .collect::<Res<_>>()?;
-        let mut curves = pcurves(&face.surface, face.domain, &renumbered, &face.given, &edge_records, tolerance)?.into_iter();
+        let mut curves =
+            pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &renumbered, &face.given, &edge_records, tolerance)?.into_iter();
         let mut loops = Vec::with_capacity(renumbered.len());
         for (li, l) in renumbered.iter().enumerate() {
             loops.push(match l {
@@ -1170,7 +1189,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
                 }
             });
         }
-        face_records.push(b::Face { surface: face.surface.clone(), domain: face.domain, loops });
+        face_records.push(b::Face { nurbs: face.nurbs.clone(), surface: face.surface.clone(), domain: face.domain, loops });
     }
     let positions = flat.f(VERTEX_POSITION);
     let vertices = vertex_order
@@ -1461,7 +1480,7 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     let records: Vec<b::Edge> =
         edges.iter().map(|e| b::Edge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() }).collect();
     let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
-    let curves = pcurves(&face.surface, face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
+    let curves = pcurves(face.nurbs.as_ref().unwrap_or(&face.surface), face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;

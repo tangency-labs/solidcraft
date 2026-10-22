@@ -31,7 +31,7 @@ fn triangle_with_intersection_edge(support_gap: f64) -> b::Brep {
             pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![uv[k], uv[(k + 1) % 3]] },
         })
         .collect();
-    let face = b::Face { surface: plane(0.5), domain: [[0.0, 1.0], [0.0, 1.0]], loops: vec![b::Loop::Edges { edges: uses }] };
+    let face = b::Face { nurbs: None, surface: plane(0.5), domain: [[0.0, 1.0], [0.0, 1.0]], loops: vec![b::Loop::Edges { edges: uses }] };
     let loose = b::Brep {
         version: b::VERSION,
         tolerance: 1e-6,

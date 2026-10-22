@@ -266,8 +266,8 @@ impl Beside {
             return Err(KernelError::Invalid("an edge of the loop lies between two faces: g1 and g2 need the one face beside it".into()));
         };
         let face = record.faces.get(u.face as usize).ok_or_else(|| KernelError::Failed("patch: face reference".into()))?;
-        let surface =
-            SurfaceEval::new(&face.surface).map_err(|err| KernelError::Invalid(format!("the face beside edge {e} cannot be evaluated: {err}")))?;
+        let surface = SurfaceEval::new(face.parameters())
+            .map_err(|err| KernelError::Invalid(format!("the face beside edge {e} cannot be evaluated: {err}")))?;
         let outward = record
             .shells
             .iter()
@@ -947,7 +947,7 @@ mod tests {
     fn height_over(body: &Body, x: f64, y: f64, start: &mut Option<(f64, f64)>) -> Option<f64> {
         let r = record(body);
         let face = &r.faces[0];
-        let s = SurfaceEval::new(&face.surface).ok()?;
+        let s = SurfaceEval::new(face.parameters()).ok()?;
         let [[u0, u1], [v0, v1]] = face.domain;
         let (mut u, mut v) = start.unwrap_or(((u0 + u1) / 2.0, (v0 + v1) / 2.0));
         for _ in 0..30 {

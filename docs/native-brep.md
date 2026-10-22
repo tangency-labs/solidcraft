@@ -143,6 +143,15 @@ its producer holds it (truck's `RevolutedCurve` under a `Processor`): nothing is
 baked into the profile, and `forward: false` swaps u and v, which reverses the
 natural normal.
 
+A face on a `cylinder`, `cone`, `sphere` or `torus` may also carry `nurbs`, a
+`spline` or `rational_spline`: the NURBS form it is parameterised on, as SMLib
+holds it (every SMLib analytic surface is a B-spline surface, and its trims are
+in that NURBS's parameters, not the angle). The face's domain and pcurves are
+then in the NURBS's (u, v), its natural normal is the NURBS's, and `surface`
+only says what the face is (axis, radius). Pcurves on such a face are SMLib's
+own trims, with nothing fitted. A STEP writer writes the analytic surface and
+the face's edges without pcurves.
+
 ### Parameter ranges
 
 An edge interval and each side of a face domain are finite with min < max. In a

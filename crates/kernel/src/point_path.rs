@@ -177,7 +177,7 @@ pub fn project_onto_face(
 pub fn face_section_along(body: &Body, face: usize, at: Vec3, along: Vec3) -> Result<Vec<(brep::Curve, [f64; 2])>> {
     use solidcraft_geom::brep::eval::SurfaceEval;
     let f = body.record().faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
-    let eval = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("face section: {e}")))?;
+    let eval = SurfaceEval::new(f.parameters()).map_err(|e| KernelError::Failed(format!("face section: {e}")))?;
     let [[u0, u1], [v0, v1]] = f.domain;
     let size = body.size().max(1e-9);
     let uv = eval
@@ -206,7 +206,7 @@ pub fn iso_curves(body: &Body, face: usize, at: Vec3, along_u: bool) -> Result<V
     use solidcraft_geom::brep::eval::SurfaceEval;
     let record = body.record();
     let f = record.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
-    let eval = SurfaceEval::new(&f.surface).map_err(|e| KernelError::Failed(format!("iso curve: {e}")))?;
+    let eval = SurfaceEval::new(f.parameters()).map_err(|e| KernelError::Failed(format!("iso curve: {e}")))?;
     let [[u0, u1], [v0, v1]] = f.domain;
     let size = body.size().max(1e-9);
     let mid = [0.5 * (u0 + u1), 0.5 * (v0 + v1)];
@@ -275,11 +275,11 @@ pub fn iso_curves(body: &Body, face: usize, at: Vec3, along_u: bool) -> Result<V
         if inside(at_t(0.5 * (a + b))) {
             run = Some(run.map_or((a, b), |(s, _)| (s, b)));
         } else if let Some(r) = run.take() {
-            out.push(iso_record(&f.surface, along_u, fixed, r)?);
+            out.push(iso_record(f.parameters(), along_u, fixed, r)?);
         }
     }
     if let Some(r) = run {
-        out.push(iso_record(&f.surface, along_u, fixed, r)?);
+        out.push(iso_record(f.parameters(), along_u, fixed, r)?);
     }
     if out.is_empty() {
         return Err(KernelError::Invalid("the iso curve runs outside the face".into()));
