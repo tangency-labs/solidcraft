@@ -1338,7 +1338,7 @@ fn a_fillet_or_chamfer_on_one_edge_ending_at_a_cylinder() {
 fn a_round_on_a_knuckle_cap_circle() {
     for (cmd, size, removed) in [("solid.fillet", "radius", (2.4, 2.8)), ("solid.chamfer", "distance", (5.6, 6.3))] {
         let mut s = load(&root().join("tests/oracle/63-hinge-knuckle/recipe.json")).unwrap();
-        let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate(0.001).unwrap().measure().volume).sum::<f64>();
+        let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume).sum::<f64>();
         let before = volume(&s);
         s.execute(cmd, &json!({"edges": [[40.0, 29.837_722, 6.449_490]], size: 0.728})).unwrap_or_else(|e| panic!("{cmd}: {e}"));
         check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{cmd}: {kind}: {e}"));
@@ -1358,7 +1358,7 @@ fn a_round_on_a_knuckle_cap_circle() {
 #[test]
 fn a_hair_thin_hole_on_a_ledge_beside_a_loft_cut() {
     let mut s = load(&root().join("examples/regressions/loft_cut_beside_round_hole.json")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.005, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.005)).unwrap().measure().volume).sum::<f64>();
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 0.133, "position": [357.22, -150.993_333, 730.0]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1375,7 +1375,7 @@ fn a_hair_thin_hole_on_a_ledge_beside_a_loft_cut() {
 #[test]
 fn a_small_hole_through_the_wall_of_a_plastic_rest() {
     let mut s = load(&root().join("apps/solidcraft-cli/tests/corpus/modern-plastic.solidcraft")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.002, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.002)).unwrap().measure().volume).sum::<f64>();
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 0.8, "position": [63.069_841_5, 28.333_333, 4.0]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1390,7 +1390,7 @@ fn a_small_hole_through_the_wall_of_a_plastic_rest() {
 #[test]
 fn a_hole_square_to_a_45_degree_flange() {
     let mut s = load(&root().join("tests/oracle/70-sm-flange-45/recipe.json")).unwrap();
-    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.tessellate_with(0.002, true).unwrap().measure().volume).sum::<f64>();
+    let volume = |s: &Session| s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.002)).unwrap().measure().volume).sum::<f64>();
     let before = volume(&s);
     s.execute("solid.hole", &json!({"diameter": 3.448, "position": [66.666_667, -4.511_845, 4.511_845]})).unwrap();
     check(&s, 0, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
@@ -1728,7 +1728,7 @@ fn the_ribbed_lid_builds_the_same_body_every_time() {
         st.bodies
             .iter()
             .map(|b| {
-                let mesh = b.body.tessellate(0.1).unwrap();
+                let mesh = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)).unwrap();
                 let bits = mesh.positions.iter().fold(0u64, |acc, p| {
                     acc.rotate_left(7).wrapping_add(p.x.to_bits() ^ p.y.to_bits().rotate_left(21) ^ p.z.to_bits().rotate_left(42))
                 });

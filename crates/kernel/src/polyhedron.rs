@@ -296,7 +296,7 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) 
 fn draft_walls(b: &Body, at: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {
     let healed = crate::boolean_record::healed(b)?;
     let size = healed.size();
-    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
     for p in at {
         let near = mesh
@@ -470,7 +470,7 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
         if b.paint().is_some_and(|paint| !paint.faces.is_empty()) { crate::boolean_record::copied(b)? } else { crate::boolean_record::healed(b)? };
     let healed = healed.with_paint(b.paint().cloned()).with_split_lines(b.split_lines().cloned()).inherit_regularization_protection(b);
     let size = healed.size();
-    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     // Faces to open: the face of the triangle nearest each point.
     let mut opened: Vec<usize> = Vec::new();
     for p in open {
@@ -672,7 +672,7 @@ fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickn
         // Healing can leave faces the boolean dislikes (revolved patches): the body as it was,
         // its faces to open found again.
         Err(e) => {
-            let raw = b.tessellate((size * 1e-3).max(1e-3)).map_err(|_| e.clone())?;
+            let raw = b.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3))).map_err(|_| e.clone())?;
             let mut opened_raw: Vec<usize> = Vec::new();
             for p in open {
                 let near = raw
@@ -712,7 +712,7 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
     let tol = size * 1e-6 + 1e-9;
     let faces: Vec<mt::Face> = healed.solid.face_iter().cloned().collect();
     // Each open face's plane (outward normal, offset) and its triangles.
-    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut open: Vec<(&mt::Face, Vec3, f64, Vec<[Vec3; 3]>)> = Vec::new();
     for fi in opened {
         let Some(f) = faces.get(*fi) else { return Ok(None) };
@@ -850,7 +850,7 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
 /// move, so they pick the same surface either way.
 fn faces_at(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     let size = body.size();
-    let mesh = body.tessellate((size * 1e-3).max(1e-3))?;
+    let mesh = body.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
     for p in at {
         let near = mesh

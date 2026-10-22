@@ -315,7 +315,7 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
     for deboss in [false, true] {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"})).unwrap();
-        let initial = h.app.session.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let initial = h.app.session.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let sketch =
             h.app.run("sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Badge"})).unwrap()["sketch"]
                 .as_u64()
@@ -336,7 +336,7 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
         assert!(commands[0].1.get("face").is_none());
         let preview = h.app.session.preview_world(&commands).unwrap();
         let expected = if deboss { -19.0 } else { 21.0 };
-        let preview_delta = preview.after.body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - initial;
+        let preview_delta = preview.after.body("Sleeve").unwrap().body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - initial;
         assert!(
             (preview_delta - expected).abs() < 0.05,
             "deboss={deboss}, preview delta={preview_delta}, expected={expected}, commands={commands:?}"
@@ -350,7 +350,7 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
         assert_eq!(*actual, deboss);
         assert_eq!(face.body, "Sleeve");
         assert!(
-            (h.app.session.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - initial - expected)
+            (h.app.session.model.state().body("Sleeve").unwrap().body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume - initial - expected)
                 .abs()
                 < 0.05
         );
@@ -2453,7 +2453,7 @@ fn point_along_path_has_its_position_and_missing_picks_are_named() {
 fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
     let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {

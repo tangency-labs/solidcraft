@@ -300,7 +300,7 @@ fn smlib_hole_rim_fillet_decodes_with_its_volume() {
     );
     record.check_geometry().unwrap();
     let body = crate::native::body_from_smlib(&rim).unwrap();
-    let mesh = body.tessellate(0.02).unwrap();
+    let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
     for f in 0..body.face_count() {
         assert!(mesh.tri_face.iter().any(|&t| t as usize == f), "face {f} meshes");
     }
@@ -343,7 +343,7 @@ fn smlib_spheres_cut_beside_or_across_their_seam_decode_with_their_volume() {
             .collect();
         let loaded: Vec<bool> = body.solid.boundaries().iter().flat_map(|sh| sh.face_iter().map(|f| f.orientation()).collect::<Vec<_>>()).collect();
         assert_eq!(loaded, forward, "{name}: the body was turned inside out");
-        let mesh = body.tessellate(0.02).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
         for f in 0..body.face_count() {
             assert!(mesh.tri_face.iter().any(|&t| t as usize == f), "{name}: face {f} meshes");
         }
@@ -392,7 +392,7 @@ fn smlib_torus_decodes_without_meshing_and_plans_with_a_sphere_beside_it() {
         crate::body::ORIENTED.with(|n| n.set(0));
         let body = crate::native::body_from_smlib(&s).unwrap();
         assert_eq!(crate::body::ORIENTED.with(|n| n.get()), 0, "{name}: the decode meshed the body to orient it");
-        let plan = body.display_plan(0.05).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.05)).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(plan.faces.len(), body.face_count(), "{name}");
         let ours = crate::measure(&body).unwrap().volume;
         assert!((ours - exact).abs() < 1e-3 * exact, "{name}: decoded volume {ours}, exact {exact}");

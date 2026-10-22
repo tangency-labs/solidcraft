@@ -379,8 +379,8 @@ mod tests {
             assert!((moved.face_plane(floor).unwrap().origin.z - (300. + thickness)).abs() < 1e-9);
             assert!(matches!(moved.face_sources().unwrap().get(right), Some(Some(FaceSource::ShellPlanar { producer: Some(9), inner: false, .. }))));
             assert!(moved.face_plane(right).unwrap().normal().dot(Vec3::Y) > 0.999999);
-            let raw = cup.tessellate(0.01).unwrap();
-            let display = cup.display_mesh(0.01).unwrap();
+            let raw = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+            let display = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             let cylindrical: Vec<_> = cup
                 .solid
                 .face_iter()
@@ -429,7 +429,7 @@ mod tests {
             assert!((rv - dv).abs() <= raw.measure().area * 0.01, "display volume {dv} vs {rv}");
             let expected = (width * 60. - (4. - std::f64::consts::PI) * 36.) * 30.
                 - ((width - 2. * thickness) * (60. - 2. * thickness) - (4. - std::f64::consts::PI) * (6. - thickness).powi(2)) * (30. - thickness);
-            assert!((cup.tessellate(1e-4).unwrap().measure().volume - expected).abs() < 0.2);
+            assert!((cup.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - expected).abs() < 0.2);
             let imported = crate::step_import(&crate::step_export(&[&cup], "regularized rounded shell").unwrap()).unwrap();
             assert!(imported.warnings.is_empty());
             let copy = &imported.bodies[0].body;
@@ -447,7 +447,7 @@ mod tests {
                 assert!(z.iter().any(|z| z.abs() < 1e-8));
                 assert!(z.iter().any(|z| (*z - 30.).abs() < 1e-8));
             }
-            let copy_mesh = copy.tessellate(1e-4).unwrap();
+            let copy_mesh = copy.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
             assert!((copy_mesh.measure().volume - expected).abs() < 0.2);
             assert!(copy_mesh.contains(Vec3::new(width / 2. - thickness / 2., 0., 15.)));
             assert!(!copy_mesh.contains(Vec3::new(0., 0., 15.)));
@@ -459,7 +459,7 @@ mod tests {
         let pending = shell(&source, &[Vec3::new(20., 15., 20.)], 2.).unwrap();
         let cup = pending.clone().with_shell_certificate(2).unwrap();
         assert_eq!(cup.solid.face_iter().count(), 11);
-        let mesh = cup.tessellate(0.01).unwrap();
+        let mesh = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!((mesh.measure().volume - (40. * 30. * 20. - 36. * 26. * 18.)).abs() < 1e-6);
         assert!(mesh.contains(Vec3::new(20., 1., 1.)));
         assert!(mesh.contains(Vec3::new(20., 1., 10.)));
@@ -468,7 +468,7 @@ mod tests {
         assert!(imported.warnings.is_empty());
         let copy = &imported.bodies[0].body;
         assert_eq!(copy.solid.face_iter().count(), 11);
-        assert!((copy.tessellate(0.01).unwrap().measure().volume - mesh.measure().volume).abs() < 1e-6);
+        assert!((copy.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume - mesh.measure().volume).abs() < 1e-6);
     }
     #[test]
     fn union_keeps_unchanged_supports_of_both_operands_and_drops_shared_ones() {
@@ -551,8 +551,8 @@ mod tests {
         let (x, y) = (24.73317426966596, 21.733174269665962);
         let cutter = box_solid(Vec3::new(-x, -y, 1.), Vec3::new(x, y, 10.)).unwrap();
         let pocket = crate::boolean(&original, &cutter, crate::BoolOp::Cut).unwrap().unwrap();
-        let raw = pocket.tessellate(0.01).unwrap();
-        let display = pocket.display_mesh(0.01).unwrap();
+        let raw = pocket.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+        let display = pocket.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let sources = pocket.face_sources().unwrap();
         assert_eq!(pocket.solid.face_iter().count(), 11, "four outer walls, four inner walls, rim, floor, bottom");
         let sides: Vec<_> =
@@ -575,7 +575,7 @@ mod tests {
         assert!(imported.warnings.is_empty());
         let copy = &imported.bodies[0].body;
         assert_eq!(copy.solid.face_iter().count(), 11);
-        let copy_mesh = copy.tessellate(0.01).unwrap();
+        let copy_mesh = copy.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!((copy_mesh.measure().volume - raw.measure().volume).abs() < 1e-6);
         assert!(copy_mesh.contains(Vec3::new(0., 0., 0.5)));
         assert!(!copy_mesh.contains(Vec3::new(0., 0., 5.)));

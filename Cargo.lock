@@ -4370,7 +4370,6 @@ dependencies = [
  "solidcraft-step",
  "spade",
  "thiserror 2.0.21",
- "truck-meshalgo",
  "truck-modeling",
  "truck-shapeops",
  "truck-stepio",

@@ -402,7 +402,7 @@ mod tests {
     use super::*;
 
     fn mesh_of(body: &Body) -> Body {
-        let mesh = body.tessellate(0.005).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         crate::mesh_body(&mesh.positions, &mesh.triangles).unwrap()
     }
 
@@ -425,7 +425,7 @@ mod tests {
         assert!(!converted.is_mesh());
         assert!(converted.validity().is_empty());
         let expected = (1000. - std::f64::consts::PI * 16.) * 15.;
-        let fine_volume = |body: &Body| body.tessellate_with(1e-5, true).unwrap().measure().volume;
+        let fine_volume = |body: &Body| body.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
         assert!((fine_volume(&converted) - expected).abs() < 0.02);
         assert!((crate::measure(&converted).unwrap().volume - crate::measure(&source).unwrap().volume).abs() < 1e-7);
         assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&1));

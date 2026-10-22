@@ -26,7 +26,7 @@ struct Piece {
 /// The planar face of `body` at `at`: its index and outward normal.
 fn face_at(body: &Body, at: Vec3) -> Result<(usize, Vec3)> {
     let size = body.size();
-    let mesh = body.tessellate((size * 1e-3).max(1e-3))?;
+    let mesh = body.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let near = mesh
         .triangles
         .iter()

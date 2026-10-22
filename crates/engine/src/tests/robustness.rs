@@ -460,7 +460,7 @@ fn knife_edge_part() -> Session {
 
 /// The volume of the session's bodies through the display plan.
 fn planned_volume(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.display_plan(2e-4).unwrap().evaluate().measure().volume).sum()
+    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
 }
 
 /// #851: the knife edge where the wall runs out has opposite normals on its two faces. It rounds
@@ -538,7 +538,7 @@ fn blend_corners_where_edges_meet_on_a_curved_wall() {
         }
         for b in &s.model.state().bodies {
             assert!(b.body.validity().is_empty(), "{name}: {:?}", b.body.validity());
-            assert!(b.body.display_plan(2e-4).is_ok(), "{name}: the display plan refuses the body");
+            assert!(b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).is_ok(), "{name}: the display plan refuses the body");
         }
         let removed = base - planned_volume(&s);
         assert!(removed > 0.0 && removed < 250.0, "{name}: removed {removed}");
@@ -570,7 +570,7 @@ fn seed_33_display_plan_and_measure_agree() {
     assert_eq!(r.outcome.kind, "ok", "seed 33: {:?}\n{}", r.outcome, r.script());
     let s = script(r.script());
     for b in &s.model.state().bodies {
-        let planned = b.body.display_plan(2e-4).unwrap().evaluate().measure().volume;
+        let planned = b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume;
         let measured = solidcraft_kernel::measure(&b.body).unwrap().volume;
         assert!((planned - measured).abs() < 2e-5 * measured, "{}: planned {planned}, measured {measured}", b.name);
     }

@@ -2520,7 +2520,7 @@ fn chamfer_tool_curved(cur: &Body, pick: Vec3, distance: f64) -> Result<Cutter> 
         // Contacts must lie on the trimmed faces, not merely their infinite supports. A
         // fine mesh and an inward probe larger than its chord error also reject a bevel that
         // has already used up the top face. Reuse that mesh for all cutter clearance probes.
-        let mesh = cur.tessellate_with(tolerance * 10.0, true)?;
+        let mesh = cur.mesh(&crate::MeshTolerance::chord(tolerance * 10.0))?;
         let inset = (tolerance * 100.0).min(distance * 0.01);
         for (face, point) in [(*f1, a), (*f2, b)] {
             let (_, normal, _) = crate::curveblend::project(face, point, None).ok_or_else(|| unsupported("chamfer contact"))?;
@@ -2681,7 +2681,7 @@ mod tests {
         assert_eq!(sections, 2);
         // Independent analytic area: integrating x(t) y'(t) for the quintic
         // gives 113/756 times setback² for a right-angle corner.
-        let volume = out.tessellate(0.0001).unwrap().measure().volume;
+        let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
         let expected = 8000.0 - (113.0 / 756.0) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
     }
@@ -2699,7 +2699,7 @@ mod tests {
         let body = crate::build::extrude(&Plane::XY, &[Region2 { outer: lp, holes: vec![] }], 0.0, 20.0).unwrap().remove(0);
         let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 10.0)], 2.0).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
-        let volume = out.tessellate(0.0001).unwrap().measure().volume;
+        let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
         let expected = 6000.0 + (113.0 / 756.0) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
@@ -2799,7 +2799,7 @@ mod tests {
                 // the quintic's x(t)y'(t) and x(t)y(t)y'(t). Axial length is 40−(left+right)y.
                 let removed = 40.0 * 113.0 / 756.0 * 25.0 - (left + right) * 13711.0 / 486486.0 * 125.0;
                 let expected = 16000.0 - 4000.0 * (left + right) - removed;
-                let volume = out.tessellate(0.0001).unwrap().measure().volume;
+                let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
                 assert!((volume - expected).abs() < 0.05, "{volume} vs {expected}");
             }
         }
@@ -2840,7 +2840,7 @@ mod tests {
                 }
             }
         }
-        let volume = out.tessellate(0.0001).unwrap().measure().volume;
+        let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
         let expected = 6000.0 + 113.0 / 756.0 * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
     }
@@ -2894,7 +2894,7 @@ mod tests {
     #[test]
     fn a_blend_runs_into_a_cylinder_at_its_end() {
         let body = box_and_boss();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         // The edge (40, 0..8, 0) ends in the cylinder wall at y = 8.
         let len = 20.0 - (144.0f64 - 0.0).sqrt();
@@ -2915,7 +2915,7 @@ mod tests {
         let plate = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 10.0)).unwrap();
         let hole = crate::build::cylinder(Vec3::new(20.0, 0.0, -1.0), Vec3::Z, 5.0, 12.0).unwrap();
         let body = crate::ops::boolean(&plate, &hole, crate::BoolOp::Cut).unwrap().unwrap();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         for (shape, area) in [(Shape::Round, (1.0 - std::f64::consts::PI / 4.0)), (Shape::Flat, 0.5)] {
             let out = blend(&body, &[Vec3::new(5.0, 0.0, 10.0)], 1.0, shape, "blend").unwrap();
@@ -2930,7 +2930,7 @@ mod tests {
         let plate = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 10.0)).unwrap();
         let pocket = crate::build::box_solid(Vec3::new(10.0, 10.0, -1.0), Vec3::new(30.0, 30.0, 12.0)).unwrap();
         let body = crate::ops::boolean(&plate, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         let one = chamfer(&body, &[Vec3::new(10.0, 10.0, 5.0)], 2.0).unwrap();
         assert!(one.validity().is_empty(), "{:?}", one.validity());
@@ -2959,7 +2959,7 @@ mod tests {
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.lumps().unwrap().len(), 1);
         assert_eq!(out.face_count(), c.face_count() + 1);
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         // About the triangle (sides 1 and 1 at 120°) along the mitre; its ends slant.
         let removed = vol(&c) - vol(&out);
         let along = 0.5 * 120f64.to_radians().sin() * k * 3f64.sqrt();
@@ -2973,7 +2973,7 @@ mod tests {
         let b = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 20.0)).unwrap();
         let c = crate::build::cylinder(Vec3::new(20.0, -1.0, 16.0), Vec3::Y, 8.0, 22.0).unwrap();
         let body = crate::ops::boolean(&b, &c, crate::BoolOp::Cut).unwrap().unwrap();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         for shape in [Shape::Round, Shape::Flat] {
             let out = blend(&body, &[Vec3::new(20.0, 0.0, 8.0)], 0.5, shape, "blend").unwrap();
@@ -3007,7 +3007,7 @@ mod tests {
         // wall is in pieces (inside the box it is gone): the blend's end lies on the cylinder
         // where the box was, now laid bare.
         let body = box_and_boss();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         for (shape, area) in [(Shape::Round, (1.0 - std::f64::consts::PI / 4.0) * 0.64), (Shape::Flat, 0.32)] {
             let out = blend(&body, &[Vec3::new(40.0, 4.0, 20.0)], 0.8, shape, "blend").unwrap();
@@ -3024,7 +3024,7 @@ mod tests {
         // The boss's bottom edge outside the box (a half circle) ends at the box's side, square to
         // it: the side face takes the end section, its bottom edge running on to the blend.
         let body = box_and_boss();
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         for (shape, area, c) in [
             (
@@ -3071,7 +3071,7 @@ mod tests {
             })
         });
         assert!(seam_twice);
-        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let vol = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let v0 = vol(&body);
         // The edge runs from x = −45 to where the wall meets the cylinder, x = 55 − √(25² − 5²).
         let len = 45.0 + 55.0 - (600f64).sqrt();

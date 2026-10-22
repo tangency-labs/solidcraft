@@ -108,7 +108,7 @@ mod imp {
         if picks.iter().any(|p| !p.is_finite()) {
             return Err(KernelError::Invalid("edge picks must be finite points".into()));
         }
-        let mesh = body.tessellate((body.size() * 2e-3).max(1e-3))?;
+        let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-3)))?;
         let seams = crate::topo::seam_flags(body, &mesh);
         let (smooth, _) = crate::smooth_edges::flags(body, &mesh);
         let reach = pick_tolerance(body);

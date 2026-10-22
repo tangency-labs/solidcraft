@@ -198,7 +198,7 @@ pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Fea
 fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
     let tol = (b.size() * 2e-3).max(1e-3);
     let faces = b.faces(tol).ok()?;
-    let mesh = b.tessellate(tol).ok()?;
+    let mesh = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?;
     let mut near = vec![f64::INFINITY; faces.len()];
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if let (Some([u, v, w]), Some(d)) = (mesh.tri(t), near.get_mut(*f as usize)) {
@@ -807,11 +807,11 @@ pub(super) fn sheet_eval(
             // thin plate that thousandth passes the thickness: the far side's triangles counted as
             // this face's (no outline was left), and a hole of a smaller radius than that fell out.
             let mut tol = (mb.body.size() * 1e-3).max(1e-3);
-            let mut mesh = mb.body.tessellate(tol)?;
+            let mut mesh = mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))?;
             let (mut lo, mut hi) = extent(&mesh);
             if hi - lo > 0.0 && tol > (hi - lo) * 0.1 {
                 tol = ((hi - lo) * 0.1).max(1e-6);
-                mesh = mb.body.tessellate(tol)?;
+                mesh = mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))?;
                 (lo, hi) = extent(&mesh);
             }
             let t = hi - lo;
@@ -1536,7 +1536,7 @@ fn sheet_prism_cut(
 /// more): bodies whose boxes are apart do not meet. None when it can't be worked out.
 fn body_box(body: &Body) -> Option<Aabb3> {
     let tol = (body.size() * 1e-3).max(1e-4);
-    padded_box(&body.tessellate(tol).ok()?, tol)
+    padded_box(&body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?, tol)
 }
 
 /// [`body_box`] of a model body, from the mesh it keeps.
@@ -1814,7 +1814,7 @@ fn plate_recesses(body: &Body, mesh: &Mesh, plane: &Plane, at: Vec3, n: Vec3, (l
         )));
     }
     // The floors' outlines, from a mesh fine enough to mark them by.
-    let fine = body.tessellate((t * 1e-2).min(tol).max(1e-4))?;
+    let fine = body.mesh(&solidcraft_kernel::MeshTolerance::chord((t * 1e-2).min(tol).max(1e-4)))?;
     floors.sort_by(|a, b| depth_of(a.1).total_cmp(&depth_of(b.1)));
     // Floors at one depth are one pocket where they meet.
     let mut groups: Vec<(f64, Vec<Region2>)> = Vec::new();
@@ -2032,7 +2032,7 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             }
             let plane = Plane::from_normal(face.0, n).ok_or_else(|| DocError::Invalid("rim plane".into()))?;
             let tol = (mb.body.size() * 1e-3).max(1e-3);
-            let mesh = mb.body.tessellate(tol)?;
+            let mesh = mb.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))?;
             let mut loops = face_loops(&mesh, &plane, face.0, n, 0.0, tol);
             loops.sort_by(|a, b| b.signed_area().abs().total_cmp(&a.signed_area().abs()));
             let ccw = |l: &Ring<Vec2>| if l.signed_area() < 0.0 { l.iter().rev().copied().collect::<Ring<_>>() } else { l.clone() };

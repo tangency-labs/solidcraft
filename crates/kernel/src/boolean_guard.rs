@@ -142,7 +142,7 @@ pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>)
         // Nothing left: only a cut whose tool covers the whole target (to within the meshes'
         // chords: a tool touching a round side of the target).
         let chord = a.size().max(b.size()) * 1e-3;
-        let (Ok(ma), Ok(mb)) = (a.tessellate(chord), b.tessellate(chord)) else { return Ok(()) };
+        let (Ok(ma), Ok(mb)) = (a.mesh(&crate::MeshTolerance::chord(chord)), b.mesh(&crate::MeshTolerance::chord(chord))) else { return Ok(()) };
         let (ba, bb) = (ma.bounds(), mb.bounds());
         let tol = 2.0 * chord;
         let within = ba.min.x >= bb.min.x - tol
@@ -158,7 +158,7 @@ pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>)
     }
     let size = a.size().max(b.size());
     let t = (size * 2e-4).max(1e-5);
-    let (Ok(ma), Ok(mb), Ok(mr)) = (a.tessellate_with(t, true), b.tessellate_with(t, true), r.tessellate_with(t, true)) else {
+    let (Ok(ma), Ok(mb), Ok(mr)) = (a.mesh(&crate::MeshTolerance::chord(t)), b.mesh(&crate::MeshTolerance::chord(t)), r.mesh(&crate::MeshTolerance::chord(t))) else {
         return Err(bad(op, "the result could not be checked".into()));
     };
     // A mesh as coarse as `t` on a round smaller than it has no inside to speak of (a through
@@ -171,7 +171,7 @@ pub(crate) fn check_retry(a: &Body, b: &Body, op: BoolOp, result: Option<&Body>)
         if fine == t && scale == 1.0 {
             return Ok(mesh.measure().volume);
         }
-        body.tessellate_with(fine * scale, true).map(|m| m.measure().volume).map_err(|_| bad(op, "the result could not be checked".into()))
+        body.mesh(&crate::MeshTolerance::chord(fine * scale)).map(|m| m.measure().volume).map_err(|_| bad(op, "the result could not be checked".into()))
     };
     let judge = |scale: f64| -> Result<(bool, f64, f64, f64)> {
         let (va, vb, vr) = (volume(a, &ma, scale)?, volume(b, &mb, scale)?, volume(r, &mr, scale)?);

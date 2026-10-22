@@ -117,7 +117,7 @@ fn holes_and_trimmed_faces_are_watertight() {
     assert_watertight(&m, "cross hole");
     assert_eq!(stats.delaunay, 0, "{stats:?}");
     // Against the reference mesher's volume (no closed form for the two-cylinder intersection).
-    let Ok(reference) = body.tessellate(tol * 0.2) else { panic!("reference mesh") };
+    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(tol * 0.2)) else { panic!("reference mesh") };
     let (a, b) = (m.measure().volume, reference.measure().volume);
     assert!((a - b).abs() < 0.01 * b, "cross hole volume {a} vs {b}");
 }
@@ -126,7 +126,7 @@ fn holes_and_trimmed_faces_are_watertight() {
 fn faces_and_edges_keep_the_body_order() {
     let body = ok(crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
     let (m, _) = plan_body(&body, 0.01);
-    let Ok(reference) = body.tessellate(0.01) else { panic!("reference mesh") };
+    let Ok(reference) = body.mesh(&crate::MeshTolerance::chord(0.01)) else { panic!("reference mesh") };
     assert_eq!(m.edges.len(), reference.edges.len());
     assert_eq!(m.edge_faces, reference.edge_faces);
     // Same faces in the same order: each face's area agrees with the reference mesher's.
@@ -173,7 +173,7 @@ fn render_wireframes() {
     ];
     for (name, body) in shapes {
         let t0 = std::time::Instant::now();
-        let Ok(old) = body.tessellate(tol) else { panic!("reference") };
+        let Ok(old) = body.mesh(&crate::MeshTolerance::chord(tol)) else { panic!("reference") };
         let t_old = t0.elapsed().as_secs_f64() * 1e3;
         let t0 = std::time::Instant::now();
         let new = match plan(&body.solid, tol, Some(crate::tess::size::Turn { angle: crate::DISPLAY_ANGLE, floor: tol * 1e-3 }), body.boundary_tol) {
@@ -491,8 +491,8 @@ fn max_chord(b: &Body, m: &Mesh) -> f64 {
 /// The display plan of `b` at `tol` (and the display angle), evaluated: closed, with no
 /// zero-area or needle triangle.
 fn closed_display_mesh(name: &str, b: &Body, tol: f64) -> Mesh {
-    let plan = ok(b.display_plan_angular(tol, crate::DISPLAY_ANGLE));
-    let m = ok(b.display_mesh_of(&plan));
+    let plan = ok(b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) }));
+    let m = ok(b.mesh_of(&plan));
     assert_watertight(&m, &format!("{name} at {tol}"));
     for t in &m.triangles {
         let [a, b, c] = t.map(|i| m.positions[i as usize]);
@@ -653,7 +653,7 @@ fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
     let threaded = smlib_cut(&smlib_cut(&block, &bore), &smlib_groove(iso_groove(1.0, 8.0, 3.5, true), -1.0, 1.0, 12.0));
     let body = ok(crate::native::body_from_smlib(&threaded));
     assert!(seam::turns_more_than_once(&body.solid), "the groove's walls wind round the bore");
-    let m = ok(body.tessellate(0.01));
+    let m = ok(body.mesh(&crate::MeshTolerance::chord(0.01)));
     let (lo, hi) = m
         .positions
         .iter()
@@ -667,7 +667,7 @@ fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
         let m = closed_display_mesh("thread in a bore", &body, tol);
         let chord = max_chord(&body, &m);
         assert!(chord <= tol * 1.05, "thread in a bore at {tol}: chord {chord}");
-        assert_faces_lie_flat("thread in a bore", &ok(body.display_plan_angular(tol, crate::DISPLAY_ANGLE)));
+        assert_faces_lie_flat("thread in a bore", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })));
     }
 }
 
@@ -682,7 +682,7 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
     let Ok(shaft) = solidcraft_smlib::Brep::make_cylinder([0.0; 3], 5.0, 30.0) else { panic!("shaft") };
     let threaded = smlib_cut(&shaft, &smlib_groove(iso_groove(1.5, 10.0, 5.0, false), -1.5, 1.5, 11.0));
     let body = ok(crate::native::body_from_smlib(&threaded));
-    let m = ok(body.tessellate(0.01));
+    let m = ok(body.mesh(&crate::MeshTolerance::chord(0.01)));
     let (lo, hi) = m
         .positions
         .iter()
@@ -693,7 +693,7 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
         let chord = max_chord(&body, &m);
         assert!(chord <= tol * 1.05, "thread run out at {tol}: chord {chord}");
         assert!(m.triangles.len() < 60_000, "thread run out at {tol}: {} triangles", m.triangles.len());
-        assert_faces_lie_flat("thread run out", &ok(body.display_plan_angular(tol, crate::DISPLAY_ANGLE)));
+        assert_faces_lie_flat("thread run out", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })));
     }
 }
 

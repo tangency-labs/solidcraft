@@ -393,7 +393,7 @@ fn classify_faces(b: &Body, mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
         .collect()
 }
 
-/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.tessellate(..)`.
+/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(&crate::MeshTolerance::chord(..))`.
 /// The point halfway along a polyline (by length).
 fn halfway(pl: &[Vec3]) -> Option<Vec3> {
     let total: f64 = pl.windows(2).map(|w| w[0].dist(w[1])).sum();
@@ -646,7 +646,7 @@ pub struct CylinderFace {
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.tessellate(tol).ok()?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     // Each face's distance from the point (its nearest triangle).
     let mut near: HashMap<u32, f64> = HashMap::new();
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
@@ -706,7 +706,7 @@ impl CylinderFace {
 pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.tessellate(tol).ok()?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     let surfs = classify_faces(b, &mesh, b.face_count(), (size * 1e-4).max(1e-6));
     let mut best: Option<(f64, CylinderFace)> = None;
     for (face, s) in surfs.iter().enumerate() {

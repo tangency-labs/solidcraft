@@ -287,7 +287,7 @@ fn planar_polys(b: &Body, operand: usize) -> std::result::Result<Vec<Poly>, NotP
     let tol = (b.size() * 1e-3).max(1e-3);
     let unmeshed = |e: KernelError| NotPlanar::Other(format!("faces could not be meshed ({e})"));
     let faces = b.faces(tol).map_err(unmeshed)?;
-    let mesh = b.tessellate(tol).map_err(unmeshed)?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).map_err(unmeshed)?;
     let planes = face_planes(b, &faces)?;
     if mesh.triangles.len() > MAX_POLYS {
         return Err(NotPlanar::Other(format!("mesh is too detailed ({} triangles)", mesh.triangles.len())));
@@ -312,7 +312,7 @@ fn planar_polys(b: &Body, operand: usize) -> std::result::Result<Vec<Poly>, NotP
 /// pieces of its faces as operand `operand`.
 fn faceted_polys(b: &Body, tol: f64, operand: usize) -> Option<Vec<Poly>> {
     let faces = b.faces(tol).ok()?;
-    let mesh = b.tessellate(tol).ok()?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     let planes: Vec<Option<PlaneEq>> = faces.iter().map(|f| f.plane_normal.map(|n| PlaneEq { n, w: n.dot(f.centroid) })).collect();
     let mut out = Vec::new();
     for (t, fi) in mesh.triangles.iter().zip(&mesh.tri_face) {
@@ -465,7 +465,7 @@ pub(crate) fn sliced_planar_boolean(a: &Body, b: &Body, op: BoolOp) -> Option<Re
     let size = a.size().max(b.size());
     let tol = (a.size() * 1e-3).max(1e-3);
     let infos = a.faces(tol).ok()?;
-    let mesh = a.tessellate(tol).ok()?;
+    let mesh = a.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     // Each face's plane normal where it is planar (see [`curved_kind`]): a small round meshed
     // flat is no plane, and taken for one the middle piece would rebuild it as a chamfer.
     let surface_tol = kind_tol(a);

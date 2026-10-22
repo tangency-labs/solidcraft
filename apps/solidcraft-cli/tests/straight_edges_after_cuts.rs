@@ -52,7 +52,7 @@ fn straight_edges_are_one_edge_after_many_cuts() {
         let bodies: Vec<_> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
         assert_eq!(bodies.len(), 1, "{what}: one body");
         let body = &bodies[0].body;
-        let mesh = body.tessellate(0.01).unwrap();
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         // Every edge is drawn as one polyline; a straight one as one segment.
         let mut at: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
         for (i, e) in mesh.edges.iter().enumerate() {

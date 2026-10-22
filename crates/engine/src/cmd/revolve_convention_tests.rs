@@ -35,7 +35,7 @@ fn check_centered(s: &Session, opposed: bool) {
         assert!(!body.contains(Vec3::new(0.0, 5.0, 3.0)));
         assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, 1.5)));
         assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, -1.5)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.z + 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.z - 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         let inner_x = if sign > 0.0 { bounds.min.x } else { -bounds.max.x };
@@ -80,7 +80,7 @@ fn two_sided_revolves_use_the_canonical_negative_and_positive_limits() {
         turn(&mut s, sign, json!({"direction":"positive","angle":"60 deg","angle2":"30 deg"}));
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x - 1.0).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.x - 4.0).abs() < 1e-4);
         assert!((bounds.min.z + 2.0).abs() < 1e-6);
@@ -109,7 +109,7 @@ fn legacy_missing_convention_keeps_geometry_through_edit_redefine_undo_and_reope
         let body = &state.bodies[0].body;
         assert!(body.contains(Vec3::new(0.0, 5.0, 3.0)));
         assert!(!body.contains(Vec3::new(3.0, 5.0, 0.0)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x + 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.max.x - 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.min.z - SQRT_2).abs() < 1e-6);
@@ -175,7 +175,7 @@ fn symmetric_revolve_preserves_a_translated_rotated_sketch_frame() {
     run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":{"origin":[10,20,30],"dir":[-1,0,0]},"angle":"90 deg","direction":"symmetric"}));
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let bounds = body.tessellate(1e-4).unwrap().bounds();
+    let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
     assert!(bounds.min.dist(Vec3::new(10.0, 20.0 - 2.0 * SQRT_2, 30.0 + SQRT_2)) < 1e-6, "{bounds:?}");
     assert!(bounds.max.dist(Vec3::new(20.0, 20.0 + 2.0 * SQRT_2, 34.0)) < 1e-4, "{bounds:?}");
     assert!(body.contains(Vec3::new(15.0, 20.0, 33.0)));

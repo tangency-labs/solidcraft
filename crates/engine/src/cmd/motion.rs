@@ -195,7 +195,7 @@ pub fn collisions(s: &Session) -> Vec<(String, String, f64)> {
 /// Edges are tested for crossing the other's surface too: plates crossing face to face have
 /// no sample point inside (#3323).
 fn overlap(a: &Body, b: &Body) -> Option<f64> {
-    let (ma, mb) = (a.tessellate((a.size() * 1e-3).max(1e-3)).ok()?, b.tessellate((b.size() * 1e-3).max(1e-3)).ok()?);
+    let (ma, mb) = (a.mesh(&solidcraft_kernel::MeshTolerance::chord((a.size() * 1e-3).max(1e-3))).ok()?, b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).ok()?);
     mesh_overlap(&ma, &mb, 1e-4 * a.size().max(b.size()).max(1.0))
 }
 
@@ -1001,7 +1001,7 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.tessellate((b.size() * 1e-2).max(1e-2)) {
+            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
                 bounds = bounds.union(&m.bounds());
             }
         }

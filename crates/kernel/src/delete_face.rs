@@ -342,12 +342,12 @@ mod tests {
     use crate::{BoolOp, boolean, box_solid, chamfer, cylinder, fillet};
 
     fn volume(b: &crate::Body) -> f64 {
-        b.tessellate(1e-3).unwrap().measure().volume
+        b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
     }
 
     /// The faces of `b` with every triangle corner passing `keep`.
     fn faces_where(b: &crate::Body, keep: impl Fn(Vec3) -> bool) -> Vec<usize> {
-        let m = b.tessellate(1e-3).unwrap();
+        let m = b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
         let n = m.tri_face.iter().max().map(|x| *x as usize + 1).unwrap_or(0);
         (0..n)
             .filter(|f| {

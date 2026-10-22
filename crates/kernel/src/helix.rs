@@ -167,7 +167,7 @@ fn smooth_helix(plane: &Plane, profile: &NumberedLoop, o: Vec3, k: Vec3, pitch: 
         let section_tol = (lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
         for ws in [walls.clone(), walls.iter().map(|(f, prov)| (f.inverse(), prov.clone())).collect()] {
             if let Ok(b) = cap_and_close(ws, std::slice::from_ref(&w0), std::slice::from_ref(&w1), false)
-                && b.tessellate(section_tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
+                && b.mesh(&crate::MeshTolerance::chord(section_tol)).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
             {
                 return Ok(b);
             }

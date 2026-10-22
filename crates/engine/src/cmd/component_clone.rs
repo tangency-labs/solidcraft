@@ -677,8 +677,8 @@ pub(super) fn paste(
         let mut material_matches = true;
         let tol_a = (a.size() * 1e-3).max(1e-3).max(a.size() * 1e-6);
         let tol_b = (b.size() * 1e-3).max(1e-3).max(b.size() * 1e-6);
-        let mesh_a = a.display_mesh(tol_a)?;
-        let mesh_b = b.display_mesh(tol_b)?;
+        let mesh_a = a.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_a))?;
+        let mesh_b = b.mesh(&solidcraft_kernel::MeshTolerance::chord(tol_b))?;
         // Precharge all 27 candidates, six possible replacements, their triangle
         // distances and the three containment rays before any proof traversal.
         proof_work = proof_work.saturating_add(mesh_a.triangles.len().saturating_add(mesh_b.triangles.len()).saturating_mul(27 * 7 * 4));

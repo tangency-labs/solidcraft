@@ -50,7 +50,6 @@ semver = "1"
 # geometry kernel (Apache-2.0; see plan/adr/0001-geometry-kernel.md). Only crates/kernel uses it.
 truck-modeling = "0.6"
 truck-shapeops = { version = "0.4", default-features = false }
-truck-meshalgo = { version = "0.4", default-features = false, features = ["tessellation", "analyzers"] }
 truck-stepio = { version = "0.3", default-features = false }
 truck-topology = "0.6"
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0); already in the

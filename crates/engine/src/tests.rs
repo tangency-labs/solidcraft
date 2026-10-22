@@ -1456,7 +1456,7 @@ fn twisted_ruled_faces_are_meshed_to_the_chord_tolerance() {
     let st = s.model.state();
     let body = &st.bodies.first().unwrap().body;
     let exact = solidcraft_kernel::measure(body).unwrap().volume;
-    let mesh = body.tessellate(0.05).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap();
     let volume: f64 = mesh
         .triangles
         .iter()

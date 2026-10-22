@@ -1005,7 +1005,7 @@ mod tests {
             let lumps = body.lumps().unwrap();
             assert_eq!(lumps.len(), 2);
             assert!(lumps.iter().all(|b| (crate::measure(b).unwrap().volume - 24.0).abs() < 1e-9));
-            let mesh = body.tessellate(0.01).unwrap();
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             assert!(mesh.contains(Vec3::new(1.0, 1.0, 1.0)));
             assert!(mesh.contains(Vec3::new(11.0, 1.0, 1.0)));
             assert!(!mesh.contains(Vec3::new(5.0, 1.0, 1.0)));
@@ -1034,7 +1034,7 @@ mod tests {
         assert_eq!(cavity.shell_count(), 2);
         assert_eq!(cavity.lumps().unwrap().len(), 1);
         assert!((crate::measure(&cavity).unwrap().volume - 21.0).abs() < 1e-9);
-        assert!(!cavity.tessellate(0.01).unwrap().contains(Vec3::new(1.0, 1.5, 2.0)));
+        assert!(!cavity.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(Vec3::new(1.0, 1.5, 2.0)));
         let touching = box_faces(Vec3::new(2.0, 3.0, 4.0), Vec3::new(2.0, 3.0, 4.0));
         assert!(sew(&outer.iter().chain(&touching).cloned().collect::<Vec<_>>()).unwrap_err().to_string().contains("vertex"));
         let mut hostile = outer.clone();

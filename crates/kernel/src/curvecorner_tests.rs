@@ -291,7 +291,7 @@ fn corner_blends_hold_at_any_scale() {
     // What a blend takes off the part scaled by `k`, over k³, through a display plan of matching
     // accuracy.
     let removed = |k: f64, steps: &[Vec<Vec3>]| {
-        let volume = |b: &Body| b.display_plan(2e-4 * k).unwrap().evaluate().measure().volume;
+        let volume = |b: &Body| b.mesh_plan(&crate::MeshTolerance::chord(2e-4 * k)).unwrap().evaluate().measure().volume;
         let body = scaled_arc_part(k);
         let mut b = body.clone();
         for pts in steps {

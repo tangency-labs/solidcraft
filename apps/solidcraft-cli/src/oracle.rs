@@ -187,7 +187,7 @@ fn step_export_check(s: &solidcraft_engine::Session, volume: f64) -> (bool, Stri
 fn our_mesh(s: &solidcraft_engine::Session) -> Result<Vec<Tri>, String> {
     let mut ours: Vec<Tri> = Vec::new();
     for b in &s.world_state().bodies {
-        let m = b.body.tessellate_with(MESH_TOL, true).map_err(|e| e.to_string())?;
+        let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(MESH_TOL)).map_err(|e| e.to_string())?;
         let p = |i: u32| m.positions.get(i as usize).map(|v: &Vec3| [v.x, v.y, v.z]);
         for t in &m.triangles {
             if let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) {

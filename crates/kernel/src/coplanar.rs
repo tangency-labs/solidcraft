@@ -990,7 +990,7 @@ pub(crate) fn faces_touch(a: &Body, b: &Body) -> bool {
     if faces.is_empty() {
         return false;
     }
-    let (Ok(ma), Ok(mb)) = (a.tessellate_with(size * 1e-3, true), b.tessellate_with(size * 1e-3, true)) else { return false };
+    let (Ok(ma), Ok(mb)) = (a.mesh(&crate::MeshTolerance::chord(size * 1e-3)), b.mesh(&crate::MeshTolerance::chord(size * 1e-3))) else { return false };
     let inside = ma.inside_index();
     let depth = (size * 1e-4).max(1e-6);
     mb.triangles.iter().zip(&mb.tri_face).take(100_000).any(|(t, fi)| {
@@ -1044,7 +1044,7 @@ const MAX_SKIN_FACES: usize = 2000;
 /// the chord error.
 fn in_plane(tool: &Body, m: Vec3, d: f64, skin: f64) -> Vec<([Vec3; 3], f64)> {
     let chord = (tool.size() * 2e-4).max(skin);
-    let Ok(mesh) = tool.tessellate_with(chord, true) else { return Vec::new() };
+    let Ok(mesh) = tool.mesh(&crate::MeshTolerance::chord(chord)) else { return Vec::new() };
     let faces: Vec<&mt::Face> = tool.solid.face_iter().collect();
     let margins: HashMap<usize, f64> = planes(tool)
         .into_iter()
@@ -1063,7 +1063,7 @@ fn backed(a: &Body, b: &Body, m: Vec3, d: f64, depth: f64) -> bool {
     let size = a.size().max(b.size());
     let tol = (size * 1e-7).max(1e-9) * 10.0;
     let faces: Vec<usize> = planes(b).into_iter().filter(|(_, p)| p.n.dot(m) > 1.0 - 1e-9 && (p.d - d).abs() < tol).map(|(i, _)| i).collect();
-    let (Ok(ma), Ok(mb)) = (a.tessellate_with(size * 1e-3, true), b.tessellate_with(size * 1e-3, true)) else { return false };
+    let (Ok(ma), Ok(mb)) = (a.mesh(&crate::MeshTolerance::chord(size * 1e-3)), b.mesh(&crate::MeshTolerance::chord(size * 1e-3))) else { return false };
     let inside = ma.inside_index();
     let mut points = Vec::new();
     for (t, fi) in mb.triangles.iter().zip(&mb.tri_face) {
@@ -1589,7 +1589,7 @@ pub(crate) fn bore_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) -> 
     let size = a.size().max(b.size());
     let tol = (size * 1e-7).max(1e-9) * 10.0;
     let mtol = size * 2e-3;
-    let (ma, mb) = (a.tessellate_with(mtol, true).ok()?, b.tessellate_with(mtol, true).ok()?);
+    let (ma, mb) = (a.mesh(&crate::MeshTolerance::chord(mtol)).ok()?, b.mesh(&crate::MeshTolerance::chord(mtol)).ok()?);
     let (ia, ib) = (ma.inside_index(), mb.inside_index());
     let empty = |p: Vec3| !ia.contains(p) && !ib.contains(p);
     let (ca, cb) = (cylinders(a), cylinders(b));

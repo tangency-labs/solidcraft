@@ -1497,7 +1497,7 @@ mod tests {
             assert!(result.validity().is_empty());
             assert_eq!(result.unmeshed_faces(), 0);
             assert!(vol(&result) < vol(&basin));
-            let mesh = result.tessellate(0.01).unwrap();
+            let mesh = result.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             assert!(mesh.contains(Vec3::new(50.0, 2.0, 27.0)));
             assert!(!mesh.contains(Vec3::new(50.0, 3.9, 29.99)));
             // The small blend removes only a strip at the rim, and never escapes

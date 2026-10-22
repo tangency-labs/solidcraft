@@ -1876,7 +1876,7 @@ mod tests {
     fn patch_continuity_and_points_cap_a_tube() {
         // A coarse mesh is enough to tell the patches apart (measuring a fitted face's area
         // exactly tessellates it finely).
-        let mesh = |s: &Session, name: &str| s.world_state().body(name).unwrap().body.tessellate(0.05).unwrap();
+        let mesh = |s: &Session, name: &str| s.world_state().body(name).unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap();
         let (mut s, rim) = open_tube();
         let reply = run(&mut s, "surface.patch", json!({"edges": rim, "body": "Tube", "continuity": "g1", "body_name": "Cap"}));
         assert_eq!(reply["continuity"], json!({"all": "g1"}), "{reply}");

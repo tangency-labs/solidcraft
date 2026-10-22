@@ -23,7 +23,7 @@ fn a_lip_swept_on_a_round_rim_joins_it() {
     for inset in [0.0, 0.5] {
         let (r0, r1) = (9.0 - inset, 10.0 - inset);
         // Measured as the result is (the round faces' volume from their meshes).
-        let mesh_volume = |b: &Body| b.tessellate(1e-5).unwrap().measure().volume;
+        let mesh_volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
         let want = mesh_volume(&body) + mesh_volume(&lip(inset));
         assert!((want - PI * 1000.0 - PI * (r1 * r1 - r0 * r0) / 4.0).abs() < 0.05);
         for (a, b) in [(&body, &lip(inset)), (&lip(inset), &body)] {
@@ -43,7 +43,7 @@ fn a_lip_swept_on_a_round_rim_joins_it() {
 fn a_swept_lips_foot_is_a_plane() {
     let l = lip(0.0);
     let foot = crate::coplanar::faces_in(&l, -Vec3::Z, -10.0, 1e-6);
-    let m = l.tessellate(1e-5).unwrap();
+    let m = l.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
     let area: f64 = m
         .triangles
         .iter()

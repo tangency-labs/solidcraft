@@ -200,7 +200,7 @@ fn threads() -> Vec<(String, Body, f64, f64, f64)> {
 fn thread_display_mesh_stays_on_its_surfaces() {
     for (name, b, d, p, turns) in threads() {
         let tol = tol(&b);
-        let plan = b.display_plan_angular(tol, DISPLAY_ANGLE).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
+        let plan = b.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
         let mesh = plan.evaluate();
         let q = quality(&plan, &mesh);
         assert!(q.worst_sag <= 1.5 * tol, "{name}: a triangle lies {} mm off its surface (tolerance {tol})", q.worst_sag);
@@ -226,9 +226,9 @@ fn thread_display_mesh_stays_on_its_surfaces() {
         let want = ridge_volume(d, p, turns);
         assert!((m.volume - want).abs() < m.area * tol, "{name}: display mesh volume {}, the thread's {want}", m.volume);
         // The reference mesh (picking, measuring, the viewport without GPU tessellation) is the same.
-        let reference = b.reference_display_mesh_angular(tol, DISPLAY_ANGLE).unwrap();
+        let reference = b.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap();
         assert_eq!(reference.triangles.len(), mesh.triangles.len(), "{name}");
-        let measured = b.tessellate(tol * 0.1).unwrap().measure().volume;
+        let measured = b.mesh(&crate::MeshTolerance::chord(tol * 0.1)).unwrap().measure().volume;
         assert!((measured - want).abs() < want * 1e-3, "{name}: measured volume {measured}, the thread's {want}");
     }
 }
@@ -238,7 +238,7 @@ fn thread_display_mesh_stays_on_its_surfaces() {
 #[test]
 fn thread_display_mesh_has_no_degenerate_or_flipped_triangles() {
     for (name, b, ..) in threads() {
-        let plan = b.display_plan_angular(tol(&b), DISPLAY_ANGLE).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
+        let plan = b.mesh_plan(&crate::MeshTolerance { chord: tol(&b), angle: Some(DISPLAY_ANGLE) }).unwrap_or_else(|e| panic!("{name}: no display plan: {e}"));
         let mesh = plan.evaluate();
         let q = quality(&plan, &mesh);
         assert!(q.tris > 1000, "{name}: {} triangles", q.tris);

@@ -210,7 +210,7 @@ impl ModelBody {
             .get(q.index())?
             .get_or_init(|| match self.mesh_placement.as_deref() {
                 Some(placed) => placed.plan_mesh(q, &self.name),
-                None => self.display_plan_at(q).and_then(|plan| self.body.display_mesh_of(&plan).ok()).map(Arc::new),
+                None => self.display_plan_at(q).and_then(|plan| self.body.mesh_of(&plan).ok()).map(Arc::new),
             })
             .clone()
     }
@@ -301,14 +301,14 @@ impl ModelBody {
         if k == 0 {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
-        let plan = match self.body.display_plan_angular(q.refined_chord(self.body.size(), k), q.refined_angle(k)) {
+        let plan = match self.body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(self.body.size(), k), angle: Some(q.refined_angle(k)) }) {
             Ok(plan) => plan,
             Err(e) => {
                 log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
                 return None;
             }
         };
-        let mesh = self.body.display_mesh_of(&plan).ok()?;
+        let mesh = self.body.mesh_of(&plan).ok()?;
         Some((Arc::new(plan), Arc::new(mesh)))
     }
 
@@ -3832,7 +3832,7 @@ fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[EdgeRef], warning: &mut Option<
     let edges = b.edges((size * 1e-3).max(1e-3))?;
     let tight = (size * 2e-3).max(1e-3);
     let dist = |p: Vec3, e: &kernel::EdgeInfo| e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
-    let now = b.tessellate((size * 1e-2).max(1e-2)).map(|m| m.bounds()).ok();
+    let now = b.mesh(&solidcraft_kernel::MeshTolerance::chord((size * 1e-2).max(1e-2))).map(|m| m.bounds()).ok();
     let (mut out, mut moved, mut lost) = (Vec::new(), 0, 0);
     for (i, p) in pts.iter().enumerate() {
         let on = edges.iter().any(|e| dist(*p, e) <= tight);
@@ -6796,7 +6796,7 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
         for (lump, lineage) in lumps.into_iter().zip(lineages) {
             let tol = (lump.size() * 1e-4).max(1e-6);
             let touches =
-                lump.tessellate((lump.size() * 1e-2).max(1e-2)).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
+                lump.mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2))).map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol)).unwrap_or(false);
             if touches {
                 out.push(Traced { body: lump, lineage });
             }
@@ -6975,7 +6975,7 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
     let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
     for b in &st.bodies {
         let tol = (b.body.size() * 1e-3).max(1e-3);
-        let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.tessellate(tol)) else { continue };
+        let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))) else { continue };
         for f in faces {
             let Some(fnrm) = f.plane_normal else { continue };
             if fnrm.dot(n) < 1.0 - 1e-6 {

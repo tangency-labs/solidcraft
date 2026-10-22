@@ -1691,7 +1691,7 @@ impl SheetBody {
             for longer in [false, true] {
                 let tool = if longer {
                     let axis = bore.axis.normalized().ok_or_else(|| DocError::Invalid("invalid sheet bore".into()))?;
-                    let mesh = inside.tessellate((bore.radius * 0.1).max(1e-4))?;
+                    let mesh = inside.mesh(&solidcraft_kernel::MeshTolerance::chord((bore.radius * 0.1).max(1e-4)))?;
                     let (lo, hi) =
                         mesh.positions.iter().map(|p| (*p - bore.base).dot(axis)).fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(d), hi.max(d)));
                     if !(lo <= hi) {

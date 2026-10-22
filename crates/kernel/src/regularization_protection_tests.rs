@@ -30,7 +30,7 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
         assert!(result.face_count() > ordinary.face_count(), "authored boundaries must survive both Shell regularizers");
         assert!(result.validity().is_empty());
         let expected = 40. * 30. * 24. - 38. * 28. * 23.;
-        let mesh = result.tessellate(1e-5).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         assert!((mesh.measure().volume - expected).abs() < 1e-6);
         assert!(mesh.contains(Vec3::new(19.5, 0., 12.)));
         assert!(!mesh.contains(Vec3::new(0., 0., 12.)));

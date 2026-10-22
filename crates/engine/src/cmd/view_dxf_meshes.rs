@@ -127,7 +127,7 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
     let bytes = AtomicUsize::new(0);
     let results = map_with_local_pools(&items, WORKERS, |item| {
         progress.check().map_err(|e| KernelError::Failed(e.into()))?;
-        let mut mesh = item.body.body.reference_display_mesh_angular(tolerance, solidcraft_kernel::DISPLAY_ANGLE)?;
+        let mut mesh = item.body.body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) })?;
         if mesh.triangles.is_empty() {
             return Err(KernelError::Invalid(format!("{} has no exportable surface", item.body.name)));
         }

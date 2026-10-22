@@ -323,7 +323,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
             // Each body's edges with the faces beside them.
             let meshes: Vec<solidcraft_geom::Mesh> =
-                bodies.iter().map(|b| b.body.tessellate(tolerance(b.body.size()))).collect::<std::result::Result<_, _>>()?;
+                bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance(b.body.size())))).collect::<std::result::Result<_, _>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()

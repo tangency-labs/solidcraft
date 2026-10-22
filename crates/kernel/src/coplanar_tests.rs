@@ -122,7 +122,7 @@ fn a_block_flush_with_the_flat_face_of_a_hemisphere_joins_exactly() {
         assert_eq!(joined.lumps().unwrap().len(), 1);
         assert!(joined.validity().is_empty(), "{:?}", joined.validity());
         // The flat faces are one plane again: nothing of the join stays below z = 0.
-        let mesh = joined.tessellate(0.05).unwrap();
+        let mesh = joined.mesh(&crate::MeshTolerance::chord(0.05)).unwrap();
         let lowest = mesh.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min);
         assert!(lowest > -1e-6, "the join reaches down to z = {lowest}");
     }
@@ -141,7 +141,7 @@ fn what_growing_a_face_adds_is_cut_off_again_exactly() {
     assert!((v - measured).abs() < measured * 1e-6, "{v} against {measured}");
     assert_eq!(back.face_count(), dome.face_count());
     assert!(back.validity().is_empty(), "{:?}", back.validity());
-    let lowest = back.tessellate(0.05).unwrap().positions.iter().map(|p| p.z).fold(f64::MAX, f64::min);
+    let lowest = back.mesh(&crate::MeshTolerance::chord(0.05)).unwrap().positions.iter().map(|p| p.z).fold(f64::MAX, f64::min);
     assert!(lowest > -1e-6, "the body reaches down to z = {lowest}");
 }
 

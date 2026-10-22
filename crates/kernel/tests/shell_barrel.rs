@@ -53,7 +53,7 @@ fn shell_of_a_revolved_barrel() {
     let result = shell(&barrel, &[Vec3::new(0.0, 0.0, 2.0 * HALF_HEIGHT)], 2.0).unwrap();
     assert!(result.validity().is_empty(), "{:?}", result.validity());
     assert_eq!(result.shell_count(), 1);
-    let mesh = result.tessellate(0.005).unwrap();
+    let mesh = result.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
     assert!(mesh.contains(Vec3::new(0.0, 0.0, 1.0)), "closed floor");
     assert!(!mesh.contains(Vec3::new(0.0, 0.0, 3.0)), "open cavity");
     assert!(mesh.contains(Vec3::new(13.0, 0.0, HALF_HEIGHT)), "barrel wall");
@@ -81,7 +81,7 @@ fn barrel_shell_opens_either_or_both_caps_and_refuses_a_vanished_cavity() {
         }
         let result = shell(&barrel, &opened, 2.0).unwrap();
         assert!(result.validity().is_empty());
-        let mesh = result.tessellate(0.005).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         assert!(!mesh.contains(Vec3::new(0.0, 0.0, 1.0)));
         assert_eq!(mesh.contains(Vec3::new(0.0, 0.0, 25.8)), !both);
         check_volume(&result, 0.0, 2.0 * HALF_HEIGHT - if both { 0.0 } else { 2.0 });

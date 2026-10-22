@@ -39,7 +39,7 @@ fn assert_seam_sphere(text: &str, radius: f64) {
     let want_area = 4.0 * std::f64::consts::PI * radius.powi(2);
     assert!(rel(m.volume, want_volume) < 1e-3, "volume {} vs {want_volume}", m.volume);
     assert!(rel(m.area, want_area) < 1e-3, "area {} vs {want_area}", m.area);
-    let mesh = body.body.display_mesh(radius * 1e-3).unwrap();
+    let mesh = body.body.mesh(&crate::MeshTolerance::chord(radius * 1e-3)).unwrap();
     assert!(!mesh.positions.is_empty() && !mesh.triangles.is_empty());
 }
 
@@ -214,7 +214,7 @@ fn assert_same_import(serial: &StepImport, parallel: &StepImport) {
         assert_eq!(a.body.paint(), b.body.paint());
         assert_eq!(a.body.face_sources, b.body.face_sources);
         assert_same_measure(&measure(&a.body).unwrap(), &measure(&b.body).unwrap());
-        let (a, b) = (a.body.display_mesh(0.05).unwrap(), b.body.display_mesh(0.05).unwrap());
+        let (a, b) = (a.body.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), b.body.mesh(&crate::MeshTolerance::chord(0.05)).unwrap());
         assert_eq!(a.positions, b.positions);
         assert_eq!(a.normals, b.normals);
         assert_eq!(a.triangles, b.triangles);
@@ -794,8 +794,8 @@ fn later_instances_show_the_first_instances_mesh_placed() {
     // The first instance shows the shared mesh as well (meshing its own would mesh the part twice).
     let (Some(a), Some(b)) = (first.display_of.as_deref(), second.display_of.as_deref()) else { panic!("both instances share a display") };
     assert!(std::sync::Arc::ptr_eq(&a.0, &b.0));
-    let a = first.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
-    let b = second.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
+    let a = first.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
+    let b = second.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
     assert_eq!(a.triangles, b.triangles);
     assert_eq!(a.tri_face, b.tri_face);
     assert_eq!(a.edges.len(), b.edges.len());
@@ -1015,7 +1015,7 @@ fn split_band_edges_are_seams() {
     let curved: f64 = ib.body.faces(1e-3).unwrap().iter().filter(|f| f.plane_normal.is_none()).map(|f| f.area).sum();
     let want = std::f64::consts::PI.powi(2) * 30.0;
     assert!(rel(curved, want) < 2e-3, "{curved} vs {want}");
-    let m = ib.body.display_mesh(ib.body.size() * 1e-3).unwrap();
+    let m = ib.body.mesh(&crate::MeshTolerance::chord(ib.body.size() * 1e-3)).unwrap();
     // Seams: the file's own seam (inside the tube face) and the split edge.
     assert!(m.seams.iter().filter(|s| **s).count() >= 2, "{:?}", m.seams);
 }
@@ -1682,9 +1682,9 @@ fn explicit_outer_bound_keeps_shallow_cylinder_patch_trimmed() {
         assert_eq!(b.file_faces, 1);
         assert!(!b.closed);
         for mesh in [
-            b.body.tessellate(0.01).unwrap(),
-            b.body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-            b.body.display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
+            b.body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
+            b.body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+            b.body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
         ] {
             assert!(!mesh.triangles.is_empty());
             assert!(mesh.bounds().diagonal() < 10.0, "sense={sense}: {:?}", mesh.bounds());
@@ -1697,7 +1697,7 @@ fn explicit_outer_bound_keeps_shallow_cylinder_patch_trimmed() {
 #[test]
 fn implicit_bound_can_still_describe_the_complement_of_a_patch() {
     let imp = step_import(&shallow_cylinder_patch(false, false)).unwrap();
-    let mesh = imp.bodies[0].body.tessellate(0.1).unwrap();
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
     assert!(mesh.bounds().diagonal() > 5000.0, "without an explicit outer bound the loop is a hole");
 }
 
@@ -1730,7 +1730,7 @@ fn explicit_outer_bound_crossing_a_closed_nurbs_seam_stays_trimmed() {
         let text = text.replacen(old, &surface, 1).replace(TAIL, &format!("{points}{TAIL}"));
         let imp = step_import(&text).unwrap();
         let body = &imp.bodies[0].body;
-        let mesh = body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
         assert!(!mesh.triangles.is_empty(), "{:?}", imp.warnings);
         assert!(mesh.bounds().diagonal() < 10.0, "sense={sense}: {:?}", mesh.bounds());
         assert!((mesh.measure().area - 42.0).abs() < 0.01, "sense={sense}: area {}", mesh.measure().area);
@@ -1759,12 +1759,12 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert_eq!(imported.bodies.len(), 1);
             let body = &imported.bodies[0].body;
             assert_eq!(imported.bodies[0].file_faces, 1);
-            let plan = body.display_plan(0.01).unwrap();
+            let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
                 plan.evaluate(),
-                body.display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-                body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-                body.tessellate(0.01).unwrap(),
+                body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+                body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+                body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
             ] {
                 assert!(!mesh.triangles.is_empty());
                 assert!(mesh.bounds().diagonal() < 10.0, "radius={radius}, sense={sense}, outer={outer}: {:?}", mesh.bounds());

@@ -238,7 +238,7 @@ fn check_case(dir: &str) -> Value {
         shells += m.shells as u64;
         if want["watertight"].as_bool() == Some(true) {
             let tol = want["tolerance"]["mesh_mm"].as_f64().unwrap_or(MESH_TOL);
-            let (open, over) = match b.body.tessellate(tol) {
+            let (open, over) = match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
                 Ok(mesh) => open_edges(&mesh.positions, &mesh.triangles, want["tolerance"]["weld_mm"].as_f64().unwrap_or(1e-4)),
                 Err(e) => {
                     c.push("watertight", json!(format!("{}: {e}", b.name)), json!("no open edges"), false);

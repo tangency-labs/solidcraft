@@ -38,7 +38,7 @@ fn points(b: &Body) -> Vec<Vec<Vec3>> {
 /// Mesh vertices of each face, and its triangles' centres (off a curved face by up to the
 /// mesh's tolerance).
 fn mesh_points(b: &Body) -> (Vec<Vec<Vec3>>, Vec<Vec<Vec3>>) {
-    let m = b.tessellate(b.size() * 1e-3).unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(b.size() * 1e-3)).unwrap();
     let (mut corners, mut centres) = (vec![Vec::new(); b.face_count()], vec![Vec::new(); b.face_count()]);
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         let c = t.map(|i| m.positions[i as usize]);

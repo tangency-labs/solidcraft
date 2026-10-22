@@ -79,6 +79,6 @@ fn a_barrel_joined_between_the_sides_of_a_leaf_needs_no_retry() {
     }
     // A quarter of the barrel lies in the leaf.
     let expected = 5500. + 0.75 * PI * 25. * 14.;
-    let actual = plate.tessellate(1e-4).unwrap().measure().volume;
+    let actual = plate.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!(rel(actual, expected) < 1e-5, "{actual} vs {expected}");
 }

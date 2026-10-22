@@ -126,7 +126,7 @@ fn next_split(a: &Body, b: &Body, tol: f64) -> Option<(bool, usize, Plane)> {
         for y in &in_b {
             let Some(crossing) = crossing(x, y, tol) else { continue };
             if meshes.is_none() {
-                meshes = Some((a.tessellate(chord).ok()?, b.tessellate(chord).ok()?));
+                meshes = Some((a.mesh(&crate::MeshTolerance::chord(chord)).ok()?, b.mesh(&crate::MeshTolerance::chord(chord)).ok()?));
             }
             let (ma, mb) = meshes.as_ref()?;
             for p in crossing.points {

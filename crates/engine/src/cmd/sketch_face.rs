@@ -122,7 +122,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 continue;
             }
             let faces = body.body.faces(tolerance)?;
-            let mesh = body.body.tessellate(tolerance)?;
+            let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
             // The triangles are grouped by face once, and a face's test reads only its own: the
             // work is the mesh plus one plane test per face, not the mesh once per face (a
             // modelled thread leaves thousands of faces, #6720).

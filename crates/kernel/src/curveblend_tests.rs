@@ -42,7 +42,7 @@ fn issue_1303_chamfer_open_rim_after_end_chamfer() {
     // The straight strips end at min(31-u, 30+v), 0 <= v <= u. Their integral
     // over 0 <= u <= 1 is 30 + 1/6; this includes both split end sections.
     let expected = 30.0 + 1.0 / 6.0 + std::f64::consts::PI * (11.75 / 2.0 + 1.0 / 6.0);
-    let volume = |b: &Body| b.tessellate_with(0.0001, true).unwrap().measure().volume;
+    let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
     let removed = volume(&body) - volume(&result);
     assert!((removed - expected).abs() < 0.02, "removed {removed}, expected {expected}");
     for p in [Vec3::new(30.5, 12.25, 12.5), Vec3::new(30.5, -12.25, 12.5)] {
@@ -176,7 +176,7 @@ fn rolling_ball_matches_analytic_tee_and_contacts() {
 
         // The reverse direction uses points on the actual trimmed face mesh, so an
         // untrimmed neighbouring surface cannot conceal an overshooting blend patch.
-        let mesh = blend.tessellate_with(0.002, true).unwrap();
+        let mesh = blend.mesh(&crate::MeshTolerance::chord(0.002)).unwrap();
         let mut reverse_distance: f64 = 0.0;
         let mut probes = 0;
         for point in mesh.positions.iter().step_by(19) {
@@ -315,7 +315,7 @@ fn rolling_ball_along_a_straight_edge_between_cylinders_trims_curved_end_seams()
     assert_eq!((after.faces, after.edges, after.vertices), (before.faces + 1, before.edges + 3, before.vertices + 2), "{before:?} -> {after:?}");
     // The round fills the gap over the full height. The caps gain it twice; the walls lose
     // their arcs to the contacts and gain the round.
-    let (m0, m1) = (body.tessellate_with(0.0005, true).unwrap().measure(), blend.tessellate_with(0.0005, true).unwrap().measure());
+    let (m0, m1) = (body.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap().measure(), blend.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap().measure());
     let volume = h * g.area;
     assert!((m1.volume - m0.volume - volume).abs() < volume * 3e-3, "added volume {} vs {volume}", m1.volume - m0.volume);
     let [a1, a2, af] = g.angles;
@@ -517,7 +517,7 @@ fn rolling_ball_along_an_arc_ends_in_side_walls_at_an_angle() {
             let surfaces: Vec<_> =
                 blend.solid.face_iter().map(|f| f.oriented_surface()).filter(|s| matches!(s, mt::Surface::NurbsSurface(_))).collect();
             assert!(!surfaces.is_empty(), "{what}: no blend face");
-            let mesh = blend.tessellate_with(0.0005, true).unwrap();
+            let mesh = blend.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap();
             let (lo, hi) = mesh.positions.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
             assert!(lo > -1e-3 && hi < 40.0 + 1e-3, "{what}: the blend runs past the side walls: x {lo}..{hi}");
             if round {
@@ -645,7 +645,7 @@ fn rolling_ball_along_a_straight_edge_ends_in_a_curved_face() {
             .sum::<f64>()
             * h
             / 3.0;
-        let (m0, m1) = (body.tessellate_with(0.0005, true).unwrap(), blend.tessellate_with(0.0005, true).unwrap());
+        let (m0, m1) = (body.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap(), blend.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap());
         let got = m0.measure().volume - m1.measure().volume;
         assert!((got - removed).abs() < removed * 3e-3, "round {round}: removed {got} vs {removed}");
         let volume_about = |o: Vec3| {
@@ -676,7 +676,7 @@ fn chamfer_a_chain_of_a_line_and_an_arc_into_a_slanted_end() {
         Seg2::Line { a: Vec2::new(0.0, 40.0), b: Vec2::new(0.0, 0.0) },
     ];
     let body = crate::extrude(&Plane::XY, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap();
-    let volume = |b: &Body| b.tessellate_with(0.0005, true).unwrap().measure().volume;
+    let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap().measure().volume;
     let made = crate::chamfer(&body, &[Vec3::new(10.0, 0.0, 20.0)], 2.0).unwrap();
     let n = 2000;
     let h = 2.0 / n as f64;

@@ -488,17 +488,17 @@ fn transferred_frozen_face_paint_ignores_consumed_legacy_offset() {
 #[test]
 fn boundary_material_proof_requires_resolvable_stock_and_void() {
     use solidcraft_geom::Vec3;
-    let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().tessellate(1e-3).unwrap();
-    let b = solidcraft_kernel::box_solid(Vec3::new(1e-5, 0., 0.), Vec3::new(10.00001, 10., 10.)).unwrap().tessellate(1e-3).unwrap();
+    let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+    let b = solidcraft_kernel::box_solid(Vec3::new(1e-5, 0., 0.), Vec3::new(10.00001, 10., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     let p = Vec3::new(5e-6, 5., 5.);
     assert_ne!(a.contains(p), b.contains(p));
     assert!((super::mesh_distance(&a, p) - 5e-6).abs() < 1e-12);
     assert!((super::mesh_distance(&b, p) - 5e-6).abs() < 1e-12);
     assert!(super::material_probe_matches(&a, &b, p, 1e-3, 1e-3));
-    let shifted = solidcraft_kernel::box_solid(Vec3::new(1., 0., 0.), Vec3::new(11., 10., 10.)).unwrap().tessellate(1e-3).unwrap();
+    let shifted = solidcraft_kernel::box_solid(Vec3::new(1., 0., 0.), Vec3::new(11., 10., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     assert!(!super::material_probe_matches(&a, &shifted, p, 1e-3, 1e-3));
-    let thin = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 1e-4)).unwrap().tessellate(1e-6).unwrap();
-    let thin_shifted = solidcraft_kernel::box_solid(Vec3::new(0., 0., 1e-4), Vec3::new(10., 10., 2e-4)).unwrap().tessellate(1e-6).unwrap();
+    let thin = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 1e-4)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6)).unwrap();
+    let thin_shifted = solidcraft_kernel::box_solid(Vec3::new(0., 0., 1e-4), Vec3::new(10., 10., 2e-4)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6)).unwrap();
     // Every resolvable replacement is void: thin ambiguous material is refused.
     assert!(!super::material_probe_matches(&thin, &thin_shifted, Vec3::new(5., 5., 5e-5), 1e-3, 1e-3));
     assert!(!super::material_probe_matches(&a, &b, p, f64::INFINITY, 1e-3));
@@ -514,12 +514,12 @@ fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
         s
     };
     let mut s = bore(10.);
-    let source = s.model.state().body("Drilled").unwrap().body.tessellate(1e-3).unwrap();
+    let source = s.model.state().body("Drilled").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     // The exact R4 wall passes through x6; a chord may end either side of that
     // cardinal angle, so its distance is bounded by the requested sag tolerance.
     assert!(super::mesh_distance(&source, Vec3::new(6., 10., 5.)) <= 1e-3);
-    let shifted = bore(11.).model.state().body("Drilled").unwrap().body.tessellate(1e-3).unwrap();
-    let lost = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30., 20., 10.)).unwrap().tessellate(1e-3).unwrap();
+    let shifted = bore(11.).model.state().body("Drilled").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+    let lost = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30., 20., 10.)).unwrap().mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
     assert!(!super::material_probe_matches(&source, &shifted, Vec3::new(6.5, 10., 5.), 1e-3, 1e-3));
     assert!(!super::material_probe_matches(&source, &lost, Vec3::new(10., 10., 5.), 1e-3, 1e-3));
     let created = run(&mut s, "component.from_bodies", json!({"bodies":["Drilled"]}));
@@ -528,7 +528,7 @@ fn frozen_bore_boundary_copy_preserves_stock_void_and_reopen() {
     let check = |session: &Session| {
         let state = session.model.state();
         let body = state.bodies.iter().find(|body| session.doc.model_body_component(body) == copied).unwrap();
-        let mesh = body.body.tessellate(1e-3).unwrap();
+        let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
         for (point, stock) in
             [(Vec3::new(5.5, 10., 5.), true), (Vec3::new(6.5, 10., 5.), false), (Vec3::new(10., 10., 5.), false), (Vec3::new(18., 10., 5.), true)]
         {
@@ -555,7 +555,7 @@ fn frozen_r6_bore_copy_uses_current_geometry_despite_mesh_measure_bias() {
         let state = session.model.state();
         let body = state.bodies.iter().find(|b| session.doc.model_body_component(b) == copied).unwrap();
         assert_eq!(solidcraft_kernel::certified_prism_equivalent(&source, &body.body).unwrap(), Some(true));
-        let mesh = body.body.tessellate(1e-3).unwrap();
+        let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
         for (point, material) in
             [(Vec3::new(3., 10., 5.), true), (Vec3::new(5., 10., 5.), false), (Vec3::new(10., 10., 5.), false), (Vec3::new(18., 10., 5.), true)]
         {

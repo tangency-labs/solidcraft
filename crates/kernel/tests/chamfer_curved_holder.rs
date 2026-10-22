@@ -59,7 +59,7 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     assert_eq!(made.crossed_face_loops().unwrap(), 0);
     let history = made.history().expect("the chamfer retains exact face provenance");
     assert!(history.faces.iter().any(|f| f.origins.iter().any(|o| matches!(o, solidcraft_kernel::history::FaceOrigin::Edge { operand: 0, .. }))));
-    let mesh = |body: &Body| body.tessellate_with(0.0005, true).unwrap();
+    let mesh = |body: &Body| body.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap();
     let before = mesh(&body).measure().volume;
     let after = mesh(&made);
     let removed = before - after.measure().volume;
@@ -114,7 +114,7 @@ fn one_chamfer_pick_follows_the_tangent_chain_at_any_part_size() {
         assert!(made.validity().is_empty(), "{:?}", made.validity());
         // Two straight edges (c^2/2 * 40 each) and both end arcs (Pappus, c^2/2 * 2 pi (R - c/3)).
         let expected = 40.0 + 0.5 * 2.0 * PI * (5.0 - 1.0 / 3.0);
-        let volume = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         let removed = volume(&body) - volume(&made);
         assert!((removed - expected).abs() < 0.3, "plate {plate}: removed {removed}, expected {expected}");
         assert_eq!(made.face_count(), body.face_count() + 4, "plate {plate}: one chamfer face per rim edge");

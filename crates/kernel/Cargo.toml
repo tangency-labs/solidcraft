@@ -23,7 +23,6 @@ thiserror = { workspace = true }
 log = { workspace = true }
 truck-modeling = { workspace = true }
 truck-shapeops = { workspace = true }
-truck-meshalgo = { workspace = true }
 truck-stepio = { workspace = true }
 truck-topology = { workspace = true }
 spade = { workspace = true }
@@ -33,7 +32,4 @@ web-time = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]
-# The vendored crate tests never build in CI, so its equivalence checks run from kernel tests.
-# Resolver 3 keeps this dev-only feature out of shipped builds.
-truck-meshalgo = { workspace = true, features = ["test-hooks"] }
 proptest = { version = "1", default-features = false, features = ["std"] }

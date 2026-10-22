@@ -25,7 +25,7 @@ fn loft_regions_preserve_a_tapered_round_passage_and_step() {
     for secs in [secs.to_vec(), secs.into_iter().rev().collect()] {
         let body = loft_regions(&secs).unwrap();
         check(&body, want, 1e-3);
-        assert!(!body.tessellate(0.001).unwrap().contains(Vec3::new(0.0, 0.0, 10.0)), "passage was filled");
+        assert!(!body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap().contains(Vec3::new(0.0, 0.0, 10.0)), "passage was filled");
         let imported = step_import(&step_export(&[&body], "SolidCraft").unwrap()).unwrap();
         assert_eq!(imported.bodies.len(), 1);
         check(&imported.bodies[0].body, want, 1e-3);
@@ -41,7 +41,7 @@ fn loft_regions_smooth_inner_and_outer_walls_together() {
     for secs in [secs.to_vec(), secs.into_iter().rev().collect()] {
         let b = loft_regions(&secs).unwrap();
         check(&b, 22400.0, 1e-4);
-        assert!(!b.tessellate(0.001).unwrap().contains(Vec3::new(0.0, 0.0, 10.0)), "passage was filled");
+        assert!(!b.mesh(&crate::MeshTolerance::chord(0.001)).unwrap().contains(Vec3::new(0.0, 0.0, 10.0)), "passage was filled");
         assert_eq!(measure(&b).unwrap().merged.faces, 10, "four outer walls, four inner walls, two caps");
     }
 }
@@ -58,7 +58,7 @@ fn loft_regions_match_holes_in_opposite_curve_orders_and_facing_planes() {
     for secs in [secs.to_vec(), secs.into_iter().rev().collect()] {
         let body = loft_regions(&secs).unwrap();
         check(&body, (1600.0 - PI * 34.0) * 20.0, 1e-3);
-        let mesh = body.tessellate(0.001).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         assert!(!mesh.contains(Vec3::new(-8.0, 0.0, 10.0)));
         assert!(!mesh.contains(Vec3::new(8.0, 0.0, 10.0)));
         assert!(mesh.contains(Vec3::new(0.0, 12.0, 10.0)));

@@ -806,7 +806,7 @@ mod tests {
     /// The volume of a fine tessellation: at a blend closed to a point `measure` takes a
     /// coarser mesh of the blend, a few mm³ off on these parts.
     fn fine_volume(b: &Body) -> f64 {
-        b.tessellate_with(5e-4, true).unwrap().measure().volume
+        b.mesh(&crate::MeshTolerance::chord(5e-4)).unwrap().measure().volume
     }
 
     /// A taper on the top front edge of a wedge, whose top face narrows to a point, and of a

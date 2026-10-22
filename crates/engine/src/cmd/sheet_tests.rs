@@ -421,7 +421,7 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
         assert!(mb.body.contains(floor));
         let world = s.world_state();
         let body = &world.body(name).unwrap().body;
-        let bounds = body.tessellate(1e-3).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds();
         assert!(bounds.min.dist(Vec3::ZERO) < 1e-6, "{bounds:?}");
         assert!(bounds.max.dist(Vec3::new(100.0, 60.0, 2.5)) < 1e-6, "{bounds:?}");
         assert!(!body.contains(Vec3::new(25.0, 25.0, 0.5)));
@@ -4881,7 +4881,7 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
 fn flat_face_points(s: &Session) -> Vec<(usize, solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     (0..body.face_count())
         .filter_map(|index| {
             let normal = body.planar_face(index)?.normal();

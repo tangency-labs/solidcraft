@@ -24,7 +24,7 @@ fn disc(cx: f64, cy: f64, r: f64) -> Loop2 {
 }
 
 fn assert_solid(r: &Body, volume: f64, rel: f64, shells: usize, what: &str) {
-    let v = r.tessellate(1e-4).unwrap().measure().volume;
+    let v = r.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((v - volume).abs() <= volume * rel, "{what}: volume {v} vs {volume}");
     assert_eq!(r.shell_count(), shells, "{what}: shells");
     assert!(r.validity().is_empty(), "{what}: {:?}", r.validity());
@@ -174,7 +174,7 @@ fn stepped_cuts_touching_along_a_line_keep_their_pieces() {
             post(x) * dx * if x < 25.0 { 20.0 } else { 10.0 }
         })
         .sum();
-    let v = res.tessellate(1e-4).unwrap().measure().volume;
+    let v = res.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     assert!((v - volume).abs() <= volume * 1e-4, "posts: volume {v} vs {volume}");
     assert!(!d.events.iter().any(|e| e.strategy == BooleanStrategy::ToolNudge), "{d:?}");
     let sewn = crate::prism::prism_boolean(&stepped, &tool, BoolOp::Cut);

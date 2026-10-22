@@ -38,7 +38,7 @@ fn a_barrel_between_the_sides_of_a_leaf_joins_exactly() {
         assert!(joined.validity().is_empty(), "{what}: {:?}", joined.validity());
         let inside = (x1.min(24.) - x0.max(10.)) / 4.;
         let want = 5500. + PI * r * r * (x1 - x0 - inside);
-        let v = joined.tessellate(1e-4).unwrap().measure().volume;
+        let v = joined.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         assert!((v - want).abs() < want * 1e-5, "{what}: volume {v} vs {want}");
         for p in joined.solid.vertex_iter().map(|v| from_p3(v.point())) {
             assert!([0., 10., 24., 40., x0, x1].iter().any(|x| (p.x - x).abs() < 1e-9), "{what}: a vertex at {p:?}");

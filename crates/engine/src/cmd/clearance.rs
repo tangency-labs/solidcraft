@@ -489,7 +489,7 @@ fn clipped(body: &solidcraft_kernel::Body, region: Aabb3) -> Option<solidcraft_k
 /// `body` cut down to where it may meet `piece` (their boxes' common part, grown as
 /// [`shared_region`] grows it), when that leaves part of it out. `None`: use the whole body.
 fn narrowed(body: &solidcraft_kernel::Body, piece: &solidcraft_kernel::Body) -> Option<solidcraft_kernel::Body> {
-    let bounds = |b: &solidcraft_kernel::Body| b.tessellate_with((b.size() * 1e-3).max(1e-4), false).ok().map(|m| m.bounds());
+    let bounds = |b: &solidcraft_kernel::Body| b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-4))).ok().map(|m| m.bounds());
     let (x, y) = (bounds(body)?, bounds(piece)?);
     let (min, max) = (x.min.max(y.min), x.max.min(y.max));
     if x.is_empty() || y.is_empty() || !(min.x <= max.x && min.y <= max.y && min.z <= max.z) {

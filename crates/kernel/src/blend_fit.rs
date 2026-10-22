@@ -271,7 +271,7 @@ fn select(body: &Body, pts: &[Vec3]) -> Result<Selection> {
 fn select_in(body: &Body, pts: &[Vec3]) -> Result<Selection> {
     let size = body.size();
     let chord = (size * 1e-3).max(1e-4);
-    let mesh = body.tessellate(chord)?;
+    let mesh = body.mesh(&crate::MeshTolerance::chord(chord))?;
     let solid = &*body.solid;
     let faces: Vec<&mt::Face> = solid.face_iter().collect();
     let planar: Vec<bool> = faces.iter().map(|f| plane_normal(f).is_some()).collect();
@@ -617,7 +617,7 @@ fn volume_in(sel: &Selection, input: &Body, out: Body, size: Size) -> Result<Bod
     }
     // Well within the bound on the meshes the check made anyway: accepted. Otherwise measured
     // finely, as a coarse mesh of a cone or a blend is off by more than a small blend.
-    if let Ok(m) = out.tessellate(sel.chord).map(|m| m.measure()) {
+    if let Ok(m) = out.mesh(&crate::MeshTolerance::chord(sel.chord)).map(|m| m.measure()) {
         let (va, aa) = sel.coarse;
         // A chord's sag over every face bounds what the meshes miss.
         let slack = (aa + m.area) * sel.chord;
