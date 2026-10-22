@@ -61,7 +61,16 @@ fn an_extrusion_names_its_caps_and_walls_and_keeps_their_sources() {
     // A drafted disc: a frustum, its wall the circle's.
     let disc = region(Loop2::circle(Vec2::ZERO, 5.0));
     let taper = -5f64.to_radians();
-    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&disc), Some(&disc), 0.0, 4.0, 1.0, Some(Draft { taper, foot: 0.0 })).unwrap();
+    let b = smlib_sweeps::extrude(
+        &Plane::XY,
+        &pieces_of(&disc),
+        Some(&disc),
+        0.0,
+        4.0,
+        1.0,
+        Some(Draft { taper, foot: 0.0, corner: crate::DraftCorner::default() }),
+    )
+    .unwrap();
     let r2 = 5.0 + 4.0 * taper.tan();
     close(volume(&b), PI * 4.0 / 3.0 * (25.0 + r2 * r2 + 5.0 * r2), 1e-3, "drafted disc");
     assert!(origins(&b).iter().filter(|o| o.contains("Profile")).count() >= 1);
@@ -223,7 +232,16 @@ fn a_drafted_extrusion_stands_on_a_straight_foot() {
     // the prism 100 and the frustum from 10 to 10 + 2 x 10 tan 5 over 9.
     let sq = region(Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]));
     let taper = 5f64.to_radians();
-    let b = smlib_sweeps::extrude(&Plane::XY, &pieces_of(&sq), Some(&sq), 0.0, 10.0, 1.0, Some(Draft { taper, foot: 1.0 })).unwrap();
+    let b = smlib_sweeps::extrude(
+        &Plane::XY,
+        &pieces_of(&sq),
+        Some(&sq),
+        0.0,
+        10.0,
+        1.0,
+        Some(Draft { taper, foot: 1.0, corner: crate::DraftCorner::default() }),
+    )
+    .unwrap();
     let (a1, s2) = (100.0, 10.0 + 2.0 * 10.0 * taper.tan());
     let a2 = s2 * s2;
     close(volume(&b), 100.0 + 9.0 / 3.0 * (a1 + a2 + (a1 * a2).sqrt()), 1e-9, "footed draft");

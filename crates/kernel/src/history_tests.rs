@@ -290,8 +290,8 @@ fn collinear_profile_lines_taper_into_one_side_face() {
     let whole = polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)]);
     let taper = 5f64.to_radians();
     for (from, to, foot) in [(0.0, 5.0, 0.0), (-1.0, 5.0, 1.0)] {
-        let body = crate::extrude_tapered_between(&Plane::XY, &split, from, to, foot, 1.0, taper).unwrap();
-        let reference = crate::extrude_tapered_between(&Plane::XY, &whole, from, to, foot, 1.0, taper).unwrap();
+        let body = crate::extrude_tapered_between(&Plane::XY, &split, from, to, foot, 1.0, taper, crate::DraftCorner::default()).unwrap();
+        let reference = crate::extrude_tapered_between(&Plane::XY, &whole, from, to, foot, 1.0, taper, crate::DraftCorner::default()).unwrap();
         assert_eq!(body.face_count(), reference.face_count(), "{from}..{to} foot {foot}: as many faces as one piece");
         let (v, w) = (crate::measure(&body).unwrap().volume, crate::measure(&reference).unwrap().volume);
         assert!((v - w).abs() < 1e-9 * w, "{v} vs {w}");

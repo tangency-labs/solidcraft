@@ -1178,7 +1178,7 @@ fn countersink_exports_one_cone() {
     // A 90° countersink, radius 4 at the top face, down from 1 mm above it to radius 1.8, and the
     // 2 mm drill through.
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
-    let cone = crate::extrude_tapered(&Plane::XY.offset(5.0), &disc, 3.2, -1.0, -FRAC_PI_4).unwrap();
+    let cone = crate::extrude_tapered(&Plane::XY.offset(5.0), &disc, 3.2, -1.0, -FRAC_PI_4, crate::DraftCorner::default()).unwrap();
     let drill = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 2.0, 6.0).unwrap();
     let b = boolean(&boolean(&plate, &cone, BoolOp::Cut).unwrap().unwrap(), &drill, BoolOp::Cut).unwrap().unwrap();
     let text = step_export(&[&b], "t").unwrap();

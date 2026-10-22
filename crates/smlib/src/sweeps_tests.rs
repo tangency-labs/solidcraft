@@ -27,11 +27,11 @@ fn circle(center: [f64; 3], radius: f64) -> Curve {
 #[test]
 fn extrusions_straight_and_drafted() {
     let rect = polygon(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 6.0, 0.0], [0.0, 6.0, 0.0]]);
-    let b = Brep::extrude(&rect, [0.0, 0.0, 1.0], 5.0, 0.0, true).unwrap();
+    let b = Brep::extrude(&rect, [0.0, 0.0, 1.0], 5.0, 0.0, DraftCorner::default(), true).unwrap();
     assert_close(solid_volume(&b, "prism"), 300.0, 1e-9, "prism");
     // A disc drafted 5 degrees in over 4 mm: a frustum of radii 5 and 5 - 4 tan 5.
     let r2 = 5.0 - 4.0 * 5f64.to_radians().tan();
-    let b = Brep::extrude(&[circle([0.0; 3], 5.0)], [0.0, 0.0, 1.0], 4.0, 5f64.to_radians(), true).unwrap();
+    let b = Brep::extrude(&[circle([0.0; 3], 5.0)], [0.0, 0.0, 1.0], 4.0, 5f64.to_radians(), DraftCorner::default(), true).unwrap();
     assert_close(solid_volume(&b, "frustum"), PI * 4.0 / 3.0 * (25.0 + r2 * r2 + 5.0 * r2), 1e-6, "drafted disc");
 }
 
@@ -114,9 +114,9 @@ fn sweeps_through_stations() {
 #[test]
 fn hostile_curve_lists_are_refused() {
     let nan = [Curve::Line { start: [0.0, f64::NAN, 0.0], end: [1.0, 0.0, 0.0] }];
-    assert_eq!(Brep::extrude(&nan, [0.0, 0.0, 1.0], 1.0, 0.0, true).err(), Some(Error::Argument));
+    assert_eq!(Brep::extrude(&nan, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
     let bad = [Curve::Nurbs { degree: 3, points: vec![[0.0, 0.0, 0.0, 1.0]; 2], knots: vec![0.0; 6] }];
-    assert_eq!(Brep::extrude(&bad, [0.0, 0.0, 1.0], 1.0, 0.0, true).err(), Some(Error::Argument));
+    assert_eq!(Brep::extrude(&bad, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
     assert_eq!(Brep::loft(&[vec![circle([0.0; 3], 1.0)]], 1, true).err(), Some(Error::Argument));
     let sq = polygon(&[[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]);
     assert_eq!(Brep::revolve(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));

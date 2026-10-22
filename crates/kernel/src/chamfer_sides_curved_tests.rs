@@ -167,7 +167,7 @@ fn boss_foot_fills() {
 fn cone_rim() {
     let taper = 10f64.to_radians();
     let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, 0.0), holes: vec![] };
-    let f = extrude_tapered(&Plane::XY, &region, 20.0, 1.0, -taper).unwrap();
+    let f = extrude_tapered(&Plane::XY, &region, 20.0, 1.0, -taper, crate::DraftCorner::default()).unwrap();
     let base = volume(&f);
     let top = 10.0 - 20.0 * taper.tan();
     let rim = Vec3::new(top, 0.0, 20.0);

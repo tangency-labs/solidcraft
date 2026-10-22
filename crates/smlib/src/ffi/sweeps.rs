@@ -20,6 +20,15 @@ pub const CURVE_MAX_CURVES: usize = 4096;
 pub const CURVE_MAX_DEGREE: usize = 25;
 pub const CURVE_MAX_POINTS: usize = 100_000;
 
+/// How a drafted extrusion closes a sharp corner (`SMLIB_DRAFT_CORNER_*`).
+pub const DRAFT_CORNER_CURVATURE: i32 = 0;
+pub const DRAFT_CORNER_TANGENT: i32 = 1;
+pub const DRAFT_CORNER_ROUND: i32 = 2;
+/// The continued curves do not meet at the corner (`SMLIB_ERR_CORNER_APART`).
+pub const ERR_CORNER_APART: i32 = -1108;
+/// A wall closes before the far end (`SMLIB_ERR_WALL_CLOSES`).
+pub const ERR_WALL_CLOSES: i32 = -1109;
+
 pub const SWEEP_FOLLOW: i32 = 0;
 pub const SWEEP_TRANSLATE: i32 = 1;
 
@@ -64,8 +73,10 @@ unsafe extern "C" {
         direction: *const f64,
         distance: f64,
         draft: f64,
+        corner: i32,
         cap: i32,
         out: *mut *mut RawBrep,
+        out_corner: *mut f64,
     ) -> i32;
     fn smlib_revolve(
         kinds: *const i64,
@@ -188,9 +199,9 @@ pub fn planar_faces(loops: &List) -> Result<Handle, i32> {
 }
 
 #[cfg(feature = "native")]
-pub fn extrude(profile: &List, direction: &[f64; 3], distance: f64, draft: f64, cap: bool) -> Result<Handle, i32> {
+pub fn extrude(profile: &List, direction: &[f64; 3], distance: f64, draft: f64, corner: i32, cap: bool, at: &mut [f64; 3]) -> Result<Handle, i32> {
     let (k, nk, r, nr) = raw(profile)?;
-    new_brep(|out| unsafe { smlib_extrude(k, nk, r, nr, direction.as_ptr(), distance, draft, i32::from(cap), out) })
+    new_brep(|out| unsafe { smlib_extrude(k, nk, r, nr, direction.as_ptr(), distance, draft, corner, i32::from(cap), out, at.as_mut_ptr()) })
 }
 
 #[cfg(feature = "native")]
@@ -330,7 +341,7 @@ pub fn planar_faces(_: &List) -> Result<Handle, i32> {
 }
 
 #[cfg(not(feature = "native"))]
-pub fn extrude(_: &List, _: &[f64; 3], _: f64, _: f64, _: bool) -> Result<Handle, i32> {
+pub fn extrude(_: &List, _: &[f64; 3], _: f64, _: f64, _: i32, _: bool, _: &mut [f64; 3]) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
