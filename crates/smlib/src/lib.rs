@@ -24,6 +24,7 @@ pub mod import;
 mod measure;
 mod ops;
 mod split;
+mod sheets;
 pub mod ssi;
 pub mod sweeps;
 pub mod trim;
