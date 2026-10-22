@@ -155,6 +155,22 @@ pub fn edge_path(body: &Body, edge: usize) -> Result<Vec<PathSeg>> {
     curve_path(&e.curve, e.interval)
 }
 
+/// The sketch segments `segs` on `plane` projected along `direction` (pointing from them toward
+/// the face) onto the face of `body` at `face_at`, as the record curves SMLib's projection makes
+/// (one per piece of the projection that stays on the face), each on its interval.
+pub fn project_onto_face(
+    body: &Body,
+    face_at: Vec3,
+    plane: &Plane,
+    segs: &[solidcraft_geom::Seg2],
+    direction: Vec3,
+) -> Result<Vec<(brep::Curve, [f64; 2])>> {
+    if !(face_at.is_finite() && direction.is_finite() && direction.len() > 1e-12) || segs.is_empty() || segs.len() > 4096 {
+        return Err(KernelError::Invalid("curve projection: a point, a direction and 1…4096 curves".into()));
+    }
+    crate::smlib_sweeps::project_onto_face(body, face_at, plane, segs, direction)
+}
+
 /// Most control points a record curve given to [`curve_path`] may have.
 const MAX_CURVE_POINTS: usize = 100_000;
 
