@@ -154,7 +154,7 @@ Inputs are checked before any work:
 
 | Input | Limit | Otherwise |
 | --- | --- | --- |
-| Records of one body | `brep::MAX_ITEMS` (100 000), checked by `Brep::validate` in `prepare` | `Invalid("portable B-rep")` |
+| Records of one body | `brep::MAX_ITEMS` (1 000 000), checked by `Brep::validate` in `prepare` | `Invalid("portable B-rep")` |
 | Placements in one scene | `hlr::MAX_ITEMS` (100 000) | `Budget("placement")` |
 | `Options::trim_samples` | 1 to `MAX_TRIM_SAMPLES` (4096) | `Invalid("trim samples")` |
 | `Options::threads` | at most `MAX_THREADS` (64) | capped |
@@ -173,10 +173,11 @@ does not depend on the number of threads or on their scheduling:
 | Left-out face box checks | 500 million | `Budget("shadow")` |
 | Coverage point checks | 200 million | `Budget("coverage")` |
 
-`hlr::MAX_ITEMS` is `section::MAX_ITEMS`, the aggregate item limit that `geom::section` and
-`geom::brep` already apply, and the body limit of `file.export_view_dxf`. It bounds what a
-caller supplies (records, placements) and, by default, the number of curves, which is the
-number of lines in the drawing; a caller drawing a large assembly may raise `max_tracks`.
+`hlr::MAX_ITEMS` is `section::MAX_ITEMS`, the aggregate item limit that `geom::section`
+applies, and the body limit of `file.export_view_dxf`. It bounds the placements a caller
+supplies and, by default, the number of curves, which is the number of lines in the drawing;
+a caller drawing a large assembly may raise `max_tracks`. A body's own records have the
+larger limit of `geom::brep`, which stores whole evaluated models.
 The default ray budget is the occlusion work budget of `file.export_view_dxf`. Every piece
 costs at least one ray, so the ray budget also bounds the pieces. The remaining caps bound
 the steps in between.

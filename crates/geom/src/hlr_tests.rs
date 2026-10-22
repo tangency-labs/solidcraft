@@ -2998,8 +2998,7 @@ fn scenes_and_trims_beyond_the_shared_limits_are_refused() {
     for trim_samples in [0, MAX_TRIM_SAMPLES + 1] {
         assert!(matches!(prepare(&cuboid([0.; 3], [1.; 3]), &Options { trim_samples, ..Options::default() }), Err(HlrError::Invalid(_))));
     }
-    assert_eq!(Options::default().max_tracks, crate::section::MAX_ITEMS);
-    assert_eq!(MAX_ITEMS, crate::brep::MAX_ITEMS);
+    assert_eq!((MAX_ITEMS, Options::default().max_tracks), (crate::section::MAX_ITEMS, crate::section::MAX_ITEMS));
 }
 
 /// A disc bounded by one closed cubic spline through `n` control points on a wavy circle of
