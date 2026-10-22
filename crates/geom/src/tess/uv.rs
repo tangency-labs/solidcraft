@@ -25,10 +25,9 @@ pub fn domain(s: &EvalSurface) -> Domain {
     let tau = std::f64::consts::TAU;
     match s {
         EvalSurface::Plane { .. } => Domain { range: [None, None], period: [None, None] },
-        EvalSurface::Nurbs { degree, knots, count, ctrl } => {
+        EvalSurface::Nurbs { degree, knots, count, closed: shut, .. } => {
             let r = |d: usize| Some((*knots[d].get(degree[d])?, *knots[d].get(count[d])?));
             let range = [r(0), r(1)];
-            let shut = closed(*degree, knots, *count, ctrl);
             let period = [0, 1].map(|d| range[d].filter(|_| shut[d]).map(|(a, b)| b - a).filter(|p| *p > 0.0));
             Domain { range, period }
         }
@@ -363,15 +362,16 @@ mod tests {
                 ctrl.push([c[0] * c[3], c[1] * c[3], (c[2] + z) * c[3], c[3]]);
             }
         }
-        EvalSurface::Nurbs { degree: [2, 1], knots: [u_knots, vec![0.0, 0.0, 1.0, 1.0]], count: [6, 2], ctrl }
+        EvalSurface::nurbs([2, 1], [u_knots, vec![0.0, 0.0, 1.0, 1.0]], [6, 2], ctrl)
     }
 
     #[test]
     fn a_spline_closed_on_itself_is_periodic_over_its_knot_interval() {
         let clamped = || vec![0.0, 0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0];
         let s = ring([0.0; 4], clamped());
-        let EvalSurface::Nurbs { degree, knots, count, ctrl } = &s else { panic!("a spline") };
+        let EvalSurface::Nurbs { degree, knots, count, ctrl, closed: kept } = &s else { panic!("a spline") };
         assert_eq!(closed(*degree, knots, *count, ctrl), [true, false]);
+        assert_eq!(*kept, [true, false], "the constructor keeps what the test finds");
         assert_eq!(domain(&s).period, [Some(1.0), None]);
         // A period away is the same point; inside the interval nothing moves.
         for (u, inside) in [(1.25, 0.25), (-0.25, 0.75), (3.6, 0.6)] {

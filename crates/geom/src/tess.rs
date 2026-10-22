@@ -38,10 +38,10 @@ pub struct EvalCurve {
 pub enum EvalSurface {
     /// `origin + u·du + v·dv`.
     Plane { origin: Vec3, du: Vec3, dv: Vec3 },
-    /// A rational tensor B-spline; control point `(i, j)` is `ctrl[j·count[0] + i]`.
-    /// `closed[d]`: the surface joins itself along direction `d` (a B-spline tube's way round).
-    /// Such a direction is periodic: a parameter outside the knot range is moved by whole
-    /// ranges back into it, so a face whose boundary runs across the join still evaluates.
+    /// A rational tensor B-spline; control point `(i, j)` is `ctrl[j·count[0] + i]`. `closed`:
+    /// whether it closes on itself along each direction ([`uv::closed`]), worked out once by
+    /// [`EvalSurface::nurbs`] (every evaluation outside the knot interval asks, and the test
+    /// walks the whole control net).
     Nurbs { degree: [usize; 2], knots: [Vec<f64>; 2], count: [usize; 2], ctrl: Vec<[f64; 4]>, closed: [bool; 2] },
     /// `profile(u)` turned by the angle `v` (right-handed) about the axis through `origin`
     /// along the unit `axis`, then mapped by the affine `transform` (row-major 3×4); with
@@ -136,6 +136,8 @@ impl TessPlan {
                 EvalSurface::Plane { origin, du, dv } => EvalSurface::Plane { origin: point(*origin), du: vector(*du), dv: vector(*dv) },
                 EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => EvalSurface::Nurbs {
                     degree: *degree,
+                    // An affine map keeps a surface closed or open.
+                    closed: *closed,
                     knots: knots.clone(),
                     count: *count,
                     // Homogeneous: the translation scales with the weight.
@@ -232,6 +234,12 @@ impl EvalCurve {
 }
 
 impl EvalSurface {
+    /// The rational tensor B-spline [`EvalSurface::Nurbs`], with whether it closes on itself.
+    pub fn nurbs(degree: [usize; 2], knots: [Vec<f64>; 2], count: [usize; 2], ctrl: Vec<[f64; 4]>) -> EvalSurface {
+        let closed = uv::closed(degree, &knots, count, &ctrl);
+        EvalSurface::Nurbs { degree, knots, count, ctrl, closed }
+    }
+
     /// Point and unit normal (`S_u × S_v`, oriented as the surface) at `(u, v)`. A degenerate
     /// point (a cone's apex, a sphere's pole) takes its normal from a step inside; anything
     /// that still fails gives the origin and +Z rather than a NaN.
@@ -278,16 +286,13 @@ impl EvalSurface {
             }
             return out;
         }
-        let EvalSurface::Nurbs { degree, knots, count, ctrl, .. } = self else { return uv };
+        let EvalSurface::Nurbs { degree, knots, count, closed, .. } = self else { return uv };
         let range = |d: usize| Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?));
-        let outside: Vec<usize> = (0..2).filter(|&d| range(d).is_some_and(|(a, b)| !(a..=b).contains(&uv[d]))).collect();
-        if outside.is_empty() {
-            return uv;
-        }
-        let shut = uv::closed(*degree, knots, *count, ctrl);
         let mut out = uv;
-        for d in outside {
-            if let (true, Some(r)) = (shut[d], range(d)) {
+        for d in 0..2 {
+            if let (true, Some(r)) = (closed[d], range(d))
+                && !(r.0..=r.1).contains(&uv[d])
+            {
                 out[d] = uv::wrap_into(uv[d], r);
             }
         }
@@ -456,13 +461,12 @@ mod tests {
         let m = [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -2.0, 7.0, 1.0]];
         let apply = |p: Vec3| Vec3::new(c * p.x - s * p.y + 5.0, s * p.x + c * p.y - 2.0, p.z + 7.0);
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let nurbs = EvalSurface::Nurbs {
-            degree: [2, 1],
-            knots: [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
-            count: [3, 2],
-            ctrl: vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]],
-            closed: [false, false],
-        };
+        let nurbs = EvalSurface::nurbs(
+            [2, 1],
+            [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+            [3, 2],
+            vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]],
+        );
         let revolved = EvalSurface::Revolved {
             profile: line(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0)),
             origin: Vec3::ZERO,
@@ -583,13 +587,7 @@ mod tests {
     fn bilinear_nurbs_patch_and_derivatives() {
         // Degree (1, 1) over [0, 2] × [0, 1] with corners lifted: a hyperbolic paraboloid.
         let ctrl = vec![[0.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0], [2.0, 1.0, 1.0, 1.0]];
-        let s = EvalSurface::Nurbs {
-            degree: [1, 1],
-            knots: [vec![0.0, 0.0, 2.0, 2.0], vec![0.0, 0.0, 1.0, 1.0]],
-            count: [2, 2],
-            ctrl,
-            closed: [false, false],
-        };
+        let s = EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 2.0, 2.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], ctrl);
         let Some((p, du, dv)) = s.derivs(1.0, 0.5) else { panic!("evaluates") };
         assert!(close(p, Vec3::new(1.0, 0.5, 0.25), 1e-12), "{p:?}");
         assert!(close(du, Vec3::new(1.0, 0.0, 0.25), 1e-12), "{du:?}");
@@ -611,7 +609,7 @@ mod tests {
         }
         let Ok(reference) = crate::bspline::NurbsSurface::new([3, 2], knots.clone(), &pts, &wts) else { panic!("valid surface") };
         let ctrl = reference.homogeneous().iter().map(|h| [h.x, h.y, h.z, h.w]).collect();
-        let s = EvalSurface::Nurbs { degree: [3, 2], knots, count: [nu, nv], ctrl, closed: [false, false] };
+        let s = EvalSurface::nurbs([3, 2], knots, [nu, nv], ctrl);
         for i in 0..=8 {
             for j in 0..=8 {
                 let (u, v) = (i as f64 / 8.0, j as f64 / 4.0);
@@ -635,14 +633,8 @@ mod tests {
     #[test]
     fn hostile_surfaces_do_not_panic() {
         let bad = [
-            EvalSurface::Nurbs { degree: [9, 1], knots: [vec![0.0; 3], vec![0.0; 3]], count: [1, 1], ctrl: vec![], closed: [false, false] },
-            EvalSurface::Nurbs {
-                degree: [1, 1],
-                knots: [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
-                count: [2, 2],
-                ctrl: vec![[0.0; 4]; 4],
-                closed: [false, false],
-            },
+            EvalSurface::nurbs([9, 1], [vec![0.0; 3], vec![0.0; 3]], [1, 1], vec![]),
+            EvalSurface::nurbs([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], [2, 2], vec![[0.0; 4]; 4]),
             EvalSurface::Revolved {
                 profile: EvalCurve { degree: 0, knots: vec![], ctrl: vec![] },
                 origin: Vec3::ZERO,
