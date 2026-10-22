@@ -185,9 +185,15 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
 /// Face `fi`'s boundary, loop by loop: the shared edge nodes (each edge's last node is the next
 /// edge's first) and their parameters on the face's surface, from each edge use's exact pcurve
 /// at the node's curve parameter. A seam edge's two uses on one face have their own pcurves, so
-/// its two sides are told apart. Each loop is unwrapped along its periodic directions (a pcurve
-/// may start a period along from where the previous one ended). A vertex loop (a pole) bounds no
-/// area and has no nodes of its own. A pcurve that does not cover its edge's interval, or puts a
+/// its two sides are told apart. A pcurve runs on continuously; where one edge meets the next, a
+/// pcurve that starts a whole period along from where the previous one ended is moved back by
+/// it, except in a direction the meeting point is a pole of: there the parameter is free, and
+/// the two pcurves' own values are where the face's boundary runs along the pole from and to
+/// (a meridian revolved half a turn meets the other at the pole half a period away; unwrapped,
+/// its loop would wind round the surface). Each loop then starts at a node off every pole whose
+/// predecessor is off them too, so the step from its last node to its first, which
+/// [`seam::drift`] takes as the nearest copy, never crosses a pole. A vertex loop (a pole)
+/// bounds no area and has no nodes of its own. A pcurve that does not cover its edge's interval, or puts a
 /// node farther off the edge than the tolerances allow, is an error naming the face and edge:
 /// the record is wrong there.
 fn boundary(
@@ -205,6 +211,8 @@ fn boundary(
     for l in &face.loops {
         let Loop::Edges { edges } = l else { continue };
         let (mut pts, mut uvs): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
+        // Where the previous edge ended, and the periods its pcurve was moved by.
+        let (mut end, mut shift): (Option<[f64; 2]>, [f64; 2]) = (None, [0.0; 2]);
         for oe in edges {
             let n = nodes.get(oe.edge as usize).ok_or_else(|| fail(oe.edge, "no nodes".into()))?;
             let edge = b.edges.get(oe.edge as usize).ok_or_else(|| fail(oe.edge, "no such edge".into()))?;
@@ -232,19 +240,29 @@ fn boundary(
                 ep.reverse();
                 eq.reverse();
             }
+            if let (Some(e), Some(&start)) = (end, eq.first()) {
+                for d in 0..2 {
+                    let Some(per) = dom.period[d] else { continue };
+                    if !(uv::degenerate(s, e, d) || uv::degenerate(s, start, d)) {
+                        shift[d] = per * ((e[d] - start[d]) / per).round();
+                    }
+                }
+            }
+            for q in &mut eq {
+                q[0] += shift[0];
+                q[1] += shift[1];
+            }
+            end = eq.last().copied();
             ep.pop();
             eq.pop();
             pts.extend(ep);
             uvs.extend(eq);
         }
-        let mut prev: Option<[f64; 2]> = None;
-        for q in &mut uvs {
-            if let Some(pr) = prev {
-                for d in 0..2 {
-                    q[d] = uv::unwrap(q[d], pr[d], dom.period[d]);
-                }
-            }
-            prev = Some(*q);
+        let n = uvs.len();
+        let pole = |q: &[f64; 2]| (0..2).any(|d| uv::degenerate(s, *q, d));
+        if let Some(k) = (0..n).find(|&k| uvs.get(k).is_some_and(|q| !pole(q)) && uvs.get((k + n - 1) % n).is_some_and(|q| !pole(q))) {
+            uvs.rotate_left(k);
+            pts.rotate_left(k);
         }
         if pts.len() >= 2 {
             loops.push(seam::Loop { uv: uvs, pts });
