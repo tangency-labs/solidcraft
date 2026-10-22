@@ -24,6 +24,7 @@ mod bom;
 mod browser;
 pub(crate) mod clearance;
 mod clipboard;
+mod cloud;
 mod compare;
 mod component;
 mod component_clone;
@@ -295,6 +296,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(script::COMMANDS.iter());
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(cloud::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
