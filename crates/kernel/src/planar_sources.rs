@@ -1,21 +1,43 @@
 //! Exact oriented planar support lineage through a trim and an inside shell.
 //! No tessellated face names, centroids, or nearest-plane choices are used.
-use super::{Body, FaceSource, from_p3};
+use super::{Body, FaceSource};
 use crate::{KernelError, Result, guard};
+use solidcraft_geom::brep::{self, Surface};
 use solidcraft_geom::{Plane, Vec3};
 use std::sync::Arc;
-use truck_modeling as mt;
 
-pub(super) fn actual_plane(face: &mt::Face) -> Option<Plane> {
-    let mt::Surface::Plane(p) = face.oriented_surface() else { return None };
-    let u = p.u_axis();
-    let v = p.v_axis();
-    let u = Vec3::new(u.x, u.y, u.z);
-    let v = Vec3::new(v.x, v.y, v.z);
-    if !u.is_finite() || !v.is_finite() || u.cross(v).len() <= u.len() * v.len() * 1e-8 {
-        return None;
+/// The oriented plane each face of `body` lies on (in face order), from its record: the
+/// surface's plane, its normal turned with the face; none for a face on any other surface.
+pub(super) fn actual_planes(body: &Body) -> Result<Vec<Option<Plane>>> {
+    let record = crate::native::brep_record(body)?;
+    let mut forward = vec![true; record.faces.len()];
+    for shell in &record.shells {
+        if let brep::Shell::Faces { faces, .. } = shell {
+            for o in faces {
+                if let Some(f) = forward.get_mut(o.face as usize) {
+                    *f = o.forward;
+                }
+            }
+        }
     }
-    Plane::new(from_p3(p.origin()), u, v)
+    let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    Ok(record
+        .faces
+        .iter()
+        .zip(forward)
+        .map(|(face, forward)| {
+            let (o, u, w) = match face.surface {
+                Surface::Plane { origin, u_axis, v_axis } => (v(origin), v(u_axis), v(v_axis)),
+                Surface::PlaneThrough { origin, u_point, v_point } => (v(origin), v(u_point) - v(origin), v(v_point) - v(origin)),
+                _ => return None,
+            };
+            if !o.is_finite() || !u.is_finite() || !w.is_finite() || u.cross(w).len() <= u.len() * w.len() * 1e-8 {
+                return None;
+            }
+            // A reversed face faces against its surface's normal.
+            if forward { Plane::new(o, u, w) } else { Plane::new(o, w, u) }
+        })
+        .collect())
 }
 
 /// How far apart the normals' x components of two planes `same_support` accepts can be, with
@@ -157,13 +179,13 @@ impl Body {
             return Ok(self);
         }
         if inputs.len() > 2
-            || inputs.iter().any(|input| input.solid.face_iter().count() > 16_384)
-            || self.solid.face_iter().count() > 16_384
-            || blocker.is_some_and(|b| b.solid.face_iter().count() > 16_384)
+            || inputs.iter().any(|input| input.face_count() > 16_384)
+            || self.face_count() > 16_384
+            || blocker.is_some_and(|b| b.face_count() > 16_384)
         {
             return Err(KernelError::Invalid("planar source face budget exceeded".into()));
         }
-        if inputs.iter().any(|input| input.face_sources().is_some_and(|sources| sources.len() != input.solid.face_iter().count())) {
+        if inputs.iter().any(|input| input.face_sources().is_some_and(|sources| sources.len() != input.face_count())) {
             return Err(KernelError::Invalid("planar source alignment mismatch".into()));
         }
         if shell.is_some_and(|t| !t.is_finite() || t <= 0.) {
@@ -175,7 +197,7 @@ impl Body {
         let opening_tolerance = if shell.is_some() { inputs.iter().map(|input| input.size()).fold(0., f64::max) * 1e-4 + 1e-6 } else { 0. };
         let mapped = guard("exact planar support lineage", || {
             let mut competing = Vec::new();
-            for plane in blocker.into_iter().flat_map(|b| b.solid.face_iter()).filter_map(actual_plane) {
+            for plane in blocker.map(actual_planes).transpose()?.into_iter().flatten().flatten() {
                 // A tool face blocks a face on its plane facing either way.
                 let opposing = Plane::new(plane.origin, plane.x, -plane.y).ok_or_else(|| KernelError::Invalid("invalid opposing plane".into()))?;
                 competing.extend([plane, opposing]);
@@ -183,12 +205,14 @@ impl Body {
             competing.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
             let mut candidates = Vec::new();
             let mut unknown_supports = Vec::new();
-            let faces = inputs.iter().flat_map(|input| {
+            let mut faces = Vec::new();
+            for input in inputs {
                 let sources = input.face_sources().unwrap_or_default();
-                input.solid.face_iter().enumerate().map(move |(index, face)| (face, sources.get(index).and_then(Option::as_ref)))
-            });
-            for (face, source) in faces {
-                let Some(actual) = actual_plane(face) else { continue };
+                faces
+                    .extend(actual_planes(input)?.into_iter().enumerate().map(|(index, plane)| (plane, sources.get(index).and_then(Option::as_ref))));
+            }
+            for (actual, source) in faces {
+                let Some(actual) = actual else { continue };
                 let Some(source) = source else {
                     unknown_supports.push(actual);
                     continue;
@@ -224,9 +248,9 @@ impl Body {
             let mut metadata = 2_000_000usize;
             let mut identity_bytes = 16_000_000usize;
             let mut result = Vec::new();
-            for (index, face) in self.solid.face_iter().enumerate() {
+            for (index, actual) in actual_planes(&self)?.into_iter().enumerate() {
                 let mut found = None;
-                if let Some(actual) = actual_plane(face) {
+                if let Some(actual) = actual {
                     let mut blocked = false;
                     let nx = actual.normal().x;
                     for plane in normal_window(&unknown_supports, |p| p, nx) {
@@ -336,6 +360,105 @@ mod tests {
     use super::*;
     use crate::{box_solid, fillet, shell, transform_matrix};
 
+    /// The corner points of face `i` of `b`, from its record.
+    fn face_points(b: &Body, i: usize) -> Vec<Vec3> {
+        let record = crate::native::brep_record(b).unwrap();
+        let mut out = Vec::new();
+        for l in &record.faces[i].loops {
+            match l {
+                brep::Loop::Edges { edges } => {
+                    for e in edges {
+                        for v in record.edges[e.edge as usize].vertices {
+                            let p = record.vertices[v as usize].point;
+                            out.push(Vec3::new(p[0], p[1], p[2]));
+                        }
+                    }
+                }
+                brep::Loop::Vertex { vertex } => {
+                    let p = record.vertices[*vertex as usize].point;
+                    out.push(Vec3::new(p[0], p[1], p[2]));
+                }
+            }
+        }
+        out
+    }
+
+    /// The edges of face `i` of `b` as their end points, from its record.
+    fn face_edges(b: &Body, i: usize) -> Vec<(Vec3, Vec3)> {
+        let record = crate::native::brep_record(b).unwrap();
+        let at = |v: u32| {
+            let p = record.vertices[v as usize].point;
+            Vec3::new(p[0], p[1], p[2])
+        };
+        record.faces[i]
+            .loops
+            .iter()
+            .flat_map(|l| match l {
+                brep::Loop::Edges { edges } => edges.iter().map(|e| record.edges[e.edge as usize].vertices).map(|[a, b]| (at(a), at(b))).collect(),
+                brep::Loop::Vertex { .. } => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// One body holding `a` and `b` side by side (their records' shells together, `b` wholly
+    /// beyond `a` along x), each face's source that of the face of its own operand on the same
+    /// plane (none from `b` when `b_sources` is false).
+    fn side_by_side(a: &Body, b: &Body, b_sources: bool) -> Body {
+        let (ra, rb) = (crate::native::brep_record(a).unwrap(), crate::native::brep_record(b).unwrap());
+        let mut r = ra.clone();
+        let (nf, ne, nv, ns) = (r.faces.len() as u32, r.edges.len() as u32, r.vertices.len() as u32, r.shells.len() as u32);
+        for mut face in rb.faces.clone() {
+            for l in &mut face.loops {
+                match l {
+                    brep::Loop::Edges { edges } => edges.iter_mut().for_each(|e| e.edge += ne),
+                    brep::Loop::Vertex { vertex } => *vertex += nv,
+                }
+            }
+            r.faces.push(face);
+        }
+        for mut e in rb.edges.clone() {
+            e.vertices = e.vertices.map(|v| v + nv);
+            e.uses.iter_mut().for_each(|u| u.face += nf);
+            r.edges.push(e);
+        }
+        r.vertices.extend(rb.vertices.iter().cloned());
+        for mut sh in rb.shells.clone() {
+            if let brep::Shell::Faces { faces, wires } = &mut sh {
+                faces.iter_mut().for_each(|o| o.face += nf);
+                wires.iter_mut().for_each(|w| *w += ne);
+            }
+            r.shells.push(sh);
+        }
+        for mut region in rb.regions.clone().into_iter().filter(|g| !g.void) {
+            region.shells.iter_mut().for_each(|s| *s += ns);
+            r.regions.push(region);
+        }
+        let mut combined = crate::native::body_from_smlib(&solidcraft_smlib::Brep::from_record(&r, true).unwrap()).unwrap();
+        let planes = |x: &Body| actual_planes(x).unwrap();
+        let (pa, pb, pc) = (planes(a), planes(b), planes(&combined));
+        let a_right = a.outline_bounds().max.x;
+        let sources: Vec<Option<FaceSource>> = pc
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let p = (*p)?;
+                let find = |of: &Body, ps: &[Option<Plane>]| {
+                    ps.iter().position(|q| q.is_some_and(|q| same_support(&q, &p))).and_then(|i| of.face_sources()?[i].clone())
+                };
+                let in_a = face_points(&combined, i).iter().all(|q| q.x <= a_right + 1e-9);
+                if in_a {
+                    find(a, &pa)
+                } else if b_sources {
+                    find(b, &pb)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        combined.face_sources = Some(Arc::new(sources));
+        combined
+    }
+
     #[test]
     fn rounded_shell_planar_roles_are_exact_distinct_and_transformable() {
         for (width, thickness) in [(80., 2.), (100., 3.)] {
@@ -381,18 +504,16 @@ mod tests {
             assert!(moved.face_plane(right).unwrap().normal().dot(Vec3::Y) > 0.999999);
             let raw = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             let display = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
-            let cylindrical: Vec<_> = cup
-                .solid
-                .face_iter()
-                .enumerate()
-                .filter_map(|(i, f)| {
+            let cylindrical: Vec<_> = (0..cup.face_count())
+                .filter_map(|i| {
                     let crate::FaceSurface::Cylinder { radius, .. } = crate::face_surface(&cup, i)? else { return None };
-                    let lo = f.vertex_iter().map(|v| v.point().z).fold(f64::INFINITY, f64::min);
-                    let hi = f.vertex_iter().map(|v| v.point().z).fold(f64::NEG_INFINITY, f64::max);
+                    let z: Vec<f64> = face_points(&cup, i).iter().map(|p| p.z).collect();
+                    let lo = z.iter().copied().fold(f64::INFINITY, f64::min);
+                    let hi = z.iter().copied().fold(f64::NEG_INFINITY, f64::max);
                     Some((i, radius, lo, hi))
                 })
                 .collect();
-            eprintln!("roundedShell width{width} thickness{thickness} raw{} cylindrical roles{cylindrical:?}", cup.solid.face_iter().count());
+            eprintln!("roundedShell width{width} thickness{thickness} raw{} cylindrical roles{cylindrical:?}", cup.face_count());
             let mut corner_joins = 0;
             for (edge, adjacent) in raw.edge_faces.iter().enumerate() {
                 let [a, b] = adjacent.as_slice() else { continue };
@@ -415,8 +536,7 @@ mod tests {
                 for high in [false, true] {
                     let matching: Vec<_> = sources.iter().enumerate().filter_map(|(i,s)| matches!(s,Some(FaceSource::ShellPlanar {inner:false,source,..}) if matches!(source.as_ref(),FaceSource::Box {axis:a,high:h,..} if *a==axis && *h==high)).then_some(i)).collect();
                     assert_eq!(matching.len(), 1, "each straight exterior wall is one actual face");
-                    let face = cup.solid.face_iter().nth(matching[0]).unwrap();
-                    let z: Vec<_> = face.vertex_iter().map(|v| v.point().z).collect();
+                    let z: Vec<_> = face_points(&cup, matching[0]).iter().map(|p| p.z).collect();
                     assert!(z.iter().any(|z| z.abs() < 1e-9));
                     assert!(z.iter().any(|z| (*z - 30.).abs() < 1e-9));
                 }
@@ -437,13 +557,15 @@ mod tests {
             // STEP may additionally coalesce cylindrical corner patches. The
             // certified planar wall topology itself must survive unchanged.
             for (axis, coordinate) in [(Vec3::X, width / 2.), (-Vec3::X, width / 2.), (Vec3::Y, 30.), (-Vec3::Y, 30.)] {
-                let walls: Vec<_> = copy
-                    .solid
-                    .face_iter()
-                    .filter(|f| actual_plane(f).is_some_and(|p| p.normal().dot(axis) > 0.999 && (p.origin.dot(axis) - coordinate).abs() < 1e-8))
+                let walls: Vec<usize> = actual_planes(copy)
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.is_some_and(|p| p.normal().dot(axis) > 0.999 && (p.origin.dot(axis) - coordinate).abs() < 1e-8))
+                    .map(|(i, _)| i)
                     .collect();
                 assert_eq!(walls.len(), 1);
-                let z: Vec<_> = walls[0].vertex_iter().map(|v| v.point().z).collect();
+                let z: Vec<_> = face_points(copy, walls[0]).iter().map(|p| p.z).collect();
                 assert!(z.iter().any(|z| z.abs() < 1e-8));
                 assert!(z.iter().any(|z| (*z - 30.).abs() < 1e-8));
             }
@@ -458,7 +580,7 @@ mod tests {
         let source = box_solid(Vec3::ZERO, Vec3::new(40., 30., 20.)).unwrap().with_box_certificate(1).unwrap();
         let pending = shell(&source, &[Vec3::new(20., 15., 20.)], 2.).unwrap();
         let cup = pending.clone().with_shell_certificate(2).unwrap();
-        assert_eq!(cup.solid.face_iter().count(), 11);
+        assert_eq!(cup.face_count(), 11);
         let mesh = cup.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!((mesh.measure().volume - (40. * 30. * 20. - 36. * 26. * 18.)).abs() < 1e-6);
         assert!(mesh.contains(Vec3::new(20., 1., 1.)));
@@ -467,7 +589,7 @@ mod tests {
         let imported = crate::step_import(&crate::step_export(&[&cup], "regularized shell").unwrap()).unwrap();
         assert!(imported.warnings.is_empty());
         let copy = &imported.bodies[0].body;
-        assert_eq!(copy.solid.face_iter().count(), 11);
+        assert_eq!(copy.face_count(), 11);
         assert!((copy.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume - mesh.measure().volume).abs() < 1e-6);
     }
     #[test]
@@ -479,8 +601,8 @@ mod tests {
         let joined = boolean(&a, &b, BoolOp::Union).unwrap().unwrap();
         let sources = joined.face_sources().unwrap();
         let mut seen = Vec::new();
-        for (i, face) in joined.solid.face_iter().enumerate() {
-            let plane = actual_plane(face).unwrap();
+        for (i, plane) in actual_planes(&joined).unwrap().into_iter().enumerate() {
+            let plane = plane.unwrap();
             let source = sources[i].as_ref();
             let height = plane.origin.z;
             if plane.normal().z > 0.999 && (height - 10.).abs() < 1e-9 {
@@ -502,30 +624,25 @@ mod tests {
     fn coincident_competing_source_planes_and_tool_planes_stay_unknown() {
         let a = box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().with_box_certificate(1).unwrap();
         let b = box_solid(Vec3::new(20., 0., 0.), Vec3::new(30., 10., 10.)).unwrap().with_box_certificate(2).unwrap();
-        let mut shells = a.solid.boundaries().to_vec();
-        shells.extend(b.solid.boundaries().iter().cloned());
-        let mut combined = Body::new(mt::Solid::try_new(shells).unwrap()).unwrap();
-        combined.face_sources = Some(Arc::new(a.face_sources().unwrap().iter().chain(b.face_sources().unwrap()).cloned().collect()));
+        let combined = side_by_side(&a, &b, true);
         let result = a.clone().with_preserved_planar_sources(&combined).unwrap();
-        for (i, face) in result.solid.face_iter().enumerate() {
-            if actual_plane(face).unwrap().normal().dot(Vec3::Z).abs() > 0.999 {
+        for (i, p) in actual_planes(&result).unwrap().into_iter().enumerate() {
+            if p.unwrap().normal().dot(Vec3::Z).abs() > 0.999 {
                 assert!(result.face_sources().unwrap()[i].is_none());
             }
         }
-        let mut mixed = combined.clone();
-        mixed.face_sources =
-            Some(Arc::new(a.face_sources().unwrap().iter().cloned().chain(std::iter::repeat_n(None, b.solid.face_iter().count())).collect()));
+        let mixed = side_by_side(&a, &b, false);
         let guarded = a.clone().with_preserved_planar_sources(&mixed).unwrap();
-        for (i, face) in guarded.solid.face_iter().enumerate() {
-            if actual_plane(face).unwrap().normal().dot(Vec3::Z).abs() > 0.999 {
+        for (i, p) in actual_planes(&guarded).unwrap().into_iter().enumerate() {
+            if p.unwrap().normal().dot(Vec3::Z).abs() > 0.999 {
                 assert!(guarded.face_sources().unwrap()[i].is_none(), "uncertified competing support must not gain identity");
             }
         }
         let cup = shell(&a, &[Vec3::new(5., 5., 10.)], 1.).unwrap().with_shell_certificate(3).unwrap();
         let tool = box_solid(Vec3::new(2., 2., 1.), Vec3::new(4., 4., 3.)).unwrap();
         let preserved = cup.clone().with_preserved_boolean_planar_sources(&cup, &tool, false).unwrap();
-        for (i, face) in preserved.solid.face_iter().enumerate() {
-            let Some(p) = actual_plane(face) else { continue };
+        for (i, p) in actual_planes(&preserved).unwrap().into_iter().enumerate() {
+            let Some(p) = p else { continue };
             if p.normal().dot(Vec3::Z) > 0.999 && (p.origin.z - 1.).abs() < 1e-9 {
                 assert!(preserved.face_sources().unwrap()[i].is_none());
             }
@@ -554,16 +671,15 @@ mod tests {
         let raw = pocket.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let display = pocket.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let sources = pocket.face_sources().unwrap();
-        assert_eq!(pocket.solid.face_iter().count(), 11, "four outer walls, four inner walls, rim, floor, bottom");
+        assert_eq!(pocket.face_count(), 11, "four outer walls, four inner walls, rim, floor, bottom");
         let sides: Vec<_> =
             sources.iter().enumerate().filter_map(|(i, s)| matches!(s, Some(FaceSource::CertifiedExtrudeSide { .. })).then_some(i)).collect();
         assert_eq!(sides.len(), 4);
         for i in sides {
-            let face = pocket.solid.face_iter().nth(i).unwrap();
-            let z: Vec<_> = face.vertex_iter().map(|v| v.point().z).collect();
+            let z: Vec<_> = face_points(&pocket, i).iter().map(|p| p.z).collect();
             assert!(z.iter().any(|z| z.abs() < 1e-9));
             assert!(z.iter().any(|z| (*z - 10.).abs() < 1e-9));
-            assert!(!face.edge_iter().any(|e| (e.front().point().z - 1.).abs() < 1e-9 && (e.back().point().z - 1.).abs() < 1e-9));
+            assert!(!face_edges(&pocket, i).iter().any(|(a, b)| (a.z - 1.).abs() < 1e-9 && (b.z - 1.).abs() < 1e-9));
         }
         assert!(display.contains(Vec3::new(0., 0., 0.5)));
         assert!(!display.contains(Vec3::new(0., 0., 5.)));
@@ -574,7 +690,7 @@ mod tests {
         let imported = crate::step_import(&crate::step_export(&[&pocket], "regularized pocket").unwrap()).unwrap();
         assert!(imported.warnings.is_empty());
         let copy = &imported.bodies[0].body;
-        assert_eq!(copy.solid.face_iter().count(), 11);
+        assert_eq!(copy.face_count(), 11);
         let copy_mesh = copy.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         assert!((copy_mesh.measure().volume - raw.measure().volume).abs() < 1e-6);
         assert!(copy_mesh.contains(Vec3::new(0., 0., 0.5)));
