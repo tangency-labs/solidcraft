@@ -1,28 +1,28 @@
 # Kernel regression rig
 
 Every geometry case the old kernel (truck) got wrong, recorded in an issue, a pull request or a
-crash report, is a use case here with its own right answer. The rig holds every kernel to all of
+crash report, is a use case here with its own right answer. The kernel, SMLib, is held to all of
 them. `cargo xtask kernel-cases` runs them and writes [`docs/kernel-cases.md`](../../docs/kernel-cases.md).
 
 ```sh
-cargo xtask kernel-cases                        # the default kernel
-cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli   # and SMLib
-cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>     # one case
-cargo run -p solidcraft-cli --features smlib -- kernel-cases --dumps=/tmp/dumps <case-dir>  # failing SMLib calls leave replayable inputs
+cargo xtask kernel-cases                                    # every case
+cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
+cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
-For the `smlib` column, build `solidcraft-cli` with `--features smlib` (after
-`scripts/fetch-smlib.sh`). The rig sets `SOLIDCRAFT_KERNEL=smlib` for those runs.
+The CLI needs `--features smlib` (after `scripts/fetch-smlib.sh`); without it every operation
+answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
+gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
+SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
 
 ## Rules
 
 - **The answer never comes from a kernel.** Not from truck's output, nor any commercial
   kernel's. It comes from analysis or a hand calculation, or else from the invariants below.
-- **Kernels are graded against the case, never against each other.**
 - **No user designs.** A crash report or a repro design becomes a small synthetic recipe that
   shows the same geometry. Check for private content before committing anything.
-- **No workaround on SolidCraft's side.** A case that fails on a kernel stays failing until that
-  kernel is fixed. SMLib defects go to tangency-labs/solidcore as issues (`priority: high`,
+- **No workaround on SolidCraft's side.** A case that fails stays failing until the kernel is
+  fixed. SMLib defects go to tangency-labs/solidcore as issues (`priority: high`,
   `bug`), and the fix goes into the fork.
 
 ## Layout
@@ -83,7 +83,7 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `source` | `analytic` (numbers worked out by hand; `method` gives the formulas) or `invariants` (no number is known: only the outcome, validity and counts are graded). |
 | `method` | How the numbers were derived, or which invariants hold and why. |
 | `outcome` | `solid` (default: the script succeeds), `refused` (the right answer is a clean error, never a panic or a hang), or `solid_or_refused` (either a clean error or a result graded as usual, where the geometry has no single manifold answer, such as two bodies touching along a curve only). |
-| `valid` | Default `true`: every body is one closed shell (or `shells` in all) that passes the record's structure and geometry checks and, in builds with SMLib, SMLib's `check(All)`. `false` only where the result is legitimately not a solid (a sheet). Where SMLib can't take the record yet (a surface kind its conversion lacks), its check gives no verdict and is not graded. |
+| `valid` | Default `true`: every body is one closed shell (or `shells` in all) that passes the record's structure and geometry checks and SMLib's `check(All)`. `false` only where the result is legitimately not a solid (a sheet). Where SMLib can't take the record yet (a surface kind its conversion lacks), its check gives no verdict and is not graded. |
 | `shells` | The total number of shells, where it isn't one per body: a body with a sealed void (2), several lumps kept in one body. |
 | `body_count`, `faces`, `edges`, `vertices` | Exact counts, where the geometry fixes them. Faces and edges count whole analytic surfaces and curves once (a full cylinder side is one face). |
 | `volume_mm3`, `area_mm2`, `center_of_mass`, `bbox` | As in `tests/oracle`: totals over every body, relative tolerance 1e-3 for volume and area, 1e-3 of the box diagonal for positions. |
@@ -103,25 +103,25 @@ running part grows one tier at a time through `base`), so the last case carries 
 - `ladder/<NN-tier>/<NNN-name>/`: cases in the format above, each a test with its own answer.
 - `ladder/ladder.json`: the tiers in order and, per tier, its cases in order (paths under
   `tests/kernel-cases/`, so a tier may also list a rig case from another area).
-- `ladder/golden.json`: per case and kernel the status, the commands' time and what the kernel
-  made (counts, volume, area). Runs compare with it and flag slowdowns (over twice the time and
+- `ladder/golden.json`: per case the status, the commands' time and what was made (counts,
+  volume, area). Runs compare with it and flag slowdowns (over twice the time and
   0.25 s more) and changed counts or statuses. It is re-recorded only with a reason.
 - `tools/kernel-ladder/cases.py` writes the recipes and answers (standard-library Python; each
   `method` gives the derivation).
 
 ```sh
-cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-cli
-cargo xtask kernel-cases --ladder --kernel both --cli target/release/solidcraft-cli --record "why"
+cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli
+cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --record "why"
 ```
 
-Ladder runs measure one case at a time (unless `--jobs`); `--record` rewrites the golden and sorts each tier by the first
-kernel's time, fastest first; commit both files. The report, `docs/kernel-ladder.md`, gives per
-tier and kernel the counts per status and the **frontier**: the first case in ladder order the
-kernel fails.
+Ladder runs measure one case at a time (unless `--jobs`) and keep their output in
+`target/kernel-ladder` (`--out`); `--record` rewrites the golden and sorts each tier by time,
+fastest first; commit both files. The report, `docs/kernel-ladder.md`, gives per tier the counts
+per status and the **frontier**: the first case in ladder order that fails.
 
 ## Results
 
-Per case and kernel: **pass**; **fail** with the numbers; **not supported yet** (the kernel says
+Per case: **pass**; **fail** with the numbers; **not supported yet** (the kernel says
 so, or the case names a `missing` capability); **crash** (a panic caught by the guards, or the process died); **hang** (no result before
 the timeout).
 
