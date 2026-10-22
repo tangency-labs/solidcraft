@@ -4755,3 +4755,14 @@ fn second_choice_metric_threads_are_known_by_name() {
         assert_eq!(sized["thread"]["designation"], name, "a Ø{dia} shaft: {sized}");
     }
 }
+
+/// #4085: a Ø7 shaft is threaded M7. It took M6 (as near as M8, and first) and then refused
+/// it: "an M6 thread does not fit a 7.00 mm shaft".
+#[test]
+fn an_automatic_thread_is_a_size_that_fits() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 7, "height": 20}));
+    let t = run(&mut s, "solid.thread", json!({"face": [3.5, 0, 10]}));
+    assert_eq!(t["thread"]["designation"], "M7", "{t}");
+    assert!((t["thread"]["pitch"].as_f64().unwrap() - 1.0).abs() < 1e-9, "{t}");
+}

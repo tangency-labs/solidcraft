@@ -359,8 +359,9 @@ pub struct ThreadInfo {
     pub end: f64,
 }
 
-/// ISO metric coarse threads (ISO 261, first and second choice): (nominal diameter, pitch).
-const ISO_COARSE: [(f64, f64); 34] = [
+/// ISO metric coarse threads (ISO 261: first and second choice, and M4.5 and M7 of the third):
+/// (nominal diameter, pitch).
+const ISO_COARSE: [(f64, f64); 36] = [
     (1.0, 0.25),
     (1.2, 0.25),
     (1.4, 0.3),
@@ -372,8 +373,10 @@ const ISO_COARSE: [(f64, f64); 34] = [
     (3.0, 0.5),
     (3.5, 0.6),
     (4.0, 0.7),
+    (4.5, 0.75),
     (5.0, 0.8),
     (6.0, 1.0),
+    (7.0, 1.0),
     (8.0, 1.25),
     (10.0, 1.5),
     (12.0, 1.75),
@@ -419,14 +422,26 @@ pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
 }
 
 /// The metric thread a cylinder of this diameter takes: a shaft is the major diameter, a hole
-/// the tap drill (major − pitch).
+/// the tap drill (major − pitch). Of the sizes near enough, the nearest one that
+/// [`thread_fits`] is taken, so the size chosen is never one the thread then refuses (#4085).
 fn thread_for(diameter: f64, internal: bool) -> Option<(f64, f64)> {
-    ISO_COARSE
+    let mut near: Vec<(f64, f64, f64)> = ISO_COARSE
         .iter()
         .map(|&(n, p)| (n, p, if internal { n - p } else { n }))
-        .min_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()))
         .filter(|(_, _, want)| (want - diameter).abs() <= 0.15 * diameter)
-        .map(|(n, p, _)| (n, p))
+        .collect();
+    near.sort_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()));
+    near.iter().find(|(n, p, _)| thread_fits(*n, *p, diameter, internal, false)).or(near.first()).map(|(n, p, _)| (*n, *p))
+}
+
+/// Does the thread `major` × `pitch` fit a cylinder of diameter `dia`: a shaft about its major
+/// diameter (or, `turned`, thicker: a modelled thread turns it down), a hole about its tap drill?
+fn thread_fits(major: f64, pitch: f64, dia: f64, internal: bool, turned: bool) -> bool {
+    if internal {
+        (major - pitch * 1.0825 - dia).abs() < 0.2 * major || (major - pitch - dia).abs() < 0.15 * major
+    } else {
+        (major - dia).abs() < 0.15 * major || (turned && dia > major)
+    }
 }
 
 pub(crate) fn format_thread(d: f64, p: f64) -> String {
@@ -497,10 +512,8 @@ fn thread_on_impl(
     let fits = if let Some(size) = tapped_size.as_ref().filter(|s| s.family != crate::TappedThreadFamily::Metric) {
         // Fit the recommended physical drill, without borrowing an ISO minor-diameter rule.
         cyl.internal && (size.tap_drill - dia).abs() < 0.15 * major
-    } else if cyl.internal {
-        (major - pitch * 1.0825 - dia).abs() < 0.2 * major || (major - pitch - dia).abs() < 0.15 * major
     } else {
-        (major - dia).abs() < 0.15 * major || (turned && dia > major)
+        thread_fits(major, pitch, dia, cyl.internal, turned)
     };
     if !fits {
         return Err(DocError::Invalid(format!("an {} thread does not fit a {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
