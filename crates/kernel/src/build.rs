@@ -1288,7 +1288,7 @@ pub(crate) fn smooth_loft_faces(wires: &[mt::Wire], numbers: &[Vec<Vec<usize>>],
 }
 
 /// A 3D path segment for sweeps.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PathSeg {
     Line {
         a: Vec3,
@@ -1306,11 +1306,9 @@ pub enum PathSeg {
         plane: Plane,
         seg: Seg2,
     },
-    /// A cubic Bézier in space with control points `p`: a span of a drawn 3D sketch spline
-    /// ([`crate::PathPiece::Spline`]).
-    Cubic {
-        p: [Vec3; 4],
-    },
+    /// A rational Bézier span in space: a span of a drawn 3D sketch spline
+    /// ([`crate::PathPiece::Spline`]) or of an edge's curve ([`crate::edge_path`]).
+    Bezier(crate::point_path::SpaceBezier),
 }
 
 impl PathSeg {
@@ -1319,7 +1317,7 @@ impl PathSeg {
         match *self {
             PathSeg::Line { a, .. } | PathSeg::Arc { a, .. } => a,
             PathSeg::Curve { plane, seg } => plane.to_world(seg.start()),
-            PathSeg::Cubic { p } => p[0],
+            PathSeg::Bezier(b) => b.start(),
         }
     }
 
@@ -1329,7 +1327,7 @@ impl PathSeg {
             PathSeg::Line { b, .. } => b,
             PathSeg::Arc { a, center, axis, angle } => axis.normalized().map_or(a, |k| rotate_about(a, center, k, angle)),
             PathSeg::Curve { plane, seg } => plane.to_world(seg.end()),
-            PathSeg::Cubic { p } => p[3],
+            PathSeg::Bezier(b) => b.end(),
         }
     }
 
@@ -1348,9 +1346,39 @@ impl PathSeg {
             PathSeg::Curve { plane, seg } => {
                 Some((plane.dir_to_world(seg.start_tangent()).normalized()?, plane.dir_to_world(seg.end_tangent()).normalized()?))
             }
-            PathSeg::Cubic { p } => {
-                Some((crate::point_path::cubic_derivative(&p, 0.0).normalized()?, crate::point_path::cubic_derivative(&p, 1.0).normalized()?))
-            }
+            PathSeg::Bezier(b) => Some((b.derivative(0.0)?.normalized()?, b.derivative(1.0)?.normalized()?)),
+        }
+    }
+
+    /// The segment the other way round.
+    pub fn reversed(&self) -> PathSeg {
+        match *self {
+            PathSeg::Line { a, b } => PathSeg::Line { a: b, b: a },
+            PathSeg::Arc { center, axis, angle, .. } => PathSeg::Arc { a: self.end(), center, axis: axis * -1.0, angle },
+            PathSeg::Curve { plane, seg } => PathSeg::Curve { plane, seg: seg.reversed() },
+            PathSeg::Bezier(b) => PathSeg::Bezier(b.reversed()),
+        }
+    }
+
+    /// The segment carried by the rigid motion `point` of points and `vector` of directions
+    /// (a placement); `None` where a carried span no longer evaluates.
+    pub fn mapped(&self, point: impl Fn(Vec3) -> Vec3, vector: impl Fn(Vec3) -> Vec3) -> Option<PathSeg> {
+        Some(match *self {
+            PathSeg::Line { a, b } => PathSeg::Line { a: point(a), b: point(b) },
+            PathSeg::Arc { a, center, axis, angle } => PathSeg::Arc { a: point(a), center: point(center), axis: vector(axis), angle },
+            PathSeg::Curve { plane, seg } => PathSeg::Curve { plane: Plane::new(point(plane.origin), vector(plane.x), vector(plane.y))?, seg },
+            PathSeg::Bezier(b) => PathSeg::Bezier(b.mapped(point)?),
+        })
+    }
+
+    /// A sketch segment on `plane` as the path segment that is the same curve: a line, an arc
+    /// about the plane's normal, or the free curve on its plane.
+    pub fn of_sketch(plane: &Plane, s: &Seg2) -> PathSeg {
+        let w = |p: Vec2| plane.to_world(p);
+        match *s {
+            Seg2::Line { a, b } => PathSeg::Line { a: w(a), b: w(b) },
+            Seg2::Arc { center, sweep, .. } => PathSeg::Arc { a: w(s.start()), center: w(center), axis: plane.normal() * sweep.signum(), angle: sweep.abs() },
+            Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => PathSeg::Curve { plane: *plane, seg: *s },
         }
     }
 
@@ -1372,7 +1400,7 @@ impl PathSeg {
         match *self {
             PathSeg::Line { b, .. } => vec![b],
             PathSeg::Curve { plane, seg } => seg.polyline(tol).into_iter().skip(1).map(|q| plane.to_world(q)).collect(),
-            PathSeg::Cubic { p } => crate::point_path::cubic_polyline(&p, tol),
+            PathSeg::Bezier(b) => b.polyline(tol),
             PathSeg::Arc { a, center, axis, angle } => {
                 let Some(k) = axis.normalized() else { return vec![a] };
                 let r = (a - center).len();
