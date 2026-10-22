@@ -291,7 +291,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
   `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
-  OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
+  Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
@@ -301,7 +302,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   the mismatch.
   For OpenClaw, turn on its chat endpoint (`gateway.http.endpoints.chatCompletions.enabled` in its
   config) and use its gateway token as the key; the models it lists are its agents, such as `openclaw/default`.
-- **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
+- **Anthropic-compatible API:** a preset (Anthropic, DeepSeek `https://api.deepseek.com/anthropic`,
+  Qwen `https://dashscope-intl.aliyuncs.com/apps/anthropic`) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
 - The **Model** picker lists the endpoint's models, without a key where the endpoint allows that

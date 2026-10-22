@@ -308,12 +308,18 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
     ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
 /// `ANTHROPIC_BASE_URL`: the `/v1` is added where needed.
-pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" }];
+pub const ANTHROPIC_PRESETS: &[ApiPreset] = &[
+    ApiPreset { name: "Anthropic", base_url: "https://api.anthropic.com/v1" },
+    ApiPreset { name: "DeepSeek", base_url: "https://api.deepseek.com/anthropic" },
+    ApiPreset { name: "Qwen", base_url: "https://dashscope-intl.aliyuncs.com/apps/anthropic" },
+];
 
 /// The presets offered for an endpoint protocol.
 pub fn presets(protocol: Protocol) -> &'static [ApiPreset] {
@@ -470,6 +476,12 @@ mod tests {
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
+        for name in ["DeepSeek", "Qwen"] {
+            assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");
+            assert!(presets(Protocol::Anthropic).iter().any(|p| p.name == name), "Anthropic-compatible preset for {name}");
+        }
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.deepseek.com/anthropic"));
+        assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://dashscope-intl.aliyuncs.com/apps/anthropic"));
     }
 
     /// The first preset is the one an Add dialog opens with, and the one taken for Ollama.
