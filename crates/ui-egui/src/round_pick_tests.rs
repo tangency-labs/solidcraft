@@ -198,6 +198,32 @@ fn move_rotates_about_a_cylinder_wall_and_moves_from_a_circle_centre() {
 }
 
 #[test]
+fn move_takes_the_centre_of_a_circle_in_a_placed_component_where_it_is_shown() {
+    use crate::dialogs_move::{POINT_TO_POINT, inputs, kind, params};
+    let mut h = shaft();
+    h.app.run("solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [60, 0, 0], "body_name": "Lug"})).unwrap();
+    h.app.run("component.from_bodies", json!({"bodies": ["Shaft"]})).unwrap();
+    let occ = h.app.session.doc.occurrences[0].id;
+    // A design's first part is grounded when it is made.
+    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": occ, "translate": [0, 30, 0]})).unwrap();
+    h.frames(2);
+    // The rim as picked in the viewport: on the shaft where the occurrence puts it.
+    let (_, rim, _) = picks(&h);
+    let Sel::Edge { point, .. } = &rim else { panic!("{rim:?}") };
+    assert!((point.y - 30.0).abs() < 5.0 + 1e-6, "picked in the world: {point:?}");
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.kind = kind(POINT_TO_POINT);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Lug".into() }];
+    d.inputs[1].items = vec![rim];
+    d.inputs[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::ZERO }];
+    let p = params(&h.app, &d).unwrap();
+    assert_eq!(p["translate"], json!(["-40 mm", "-30 mm", "-10 mm"]), "the centre where the component shows it");
+}
+
+#[test]
 fn point_inputs_take_a_circles_centre() {
     let mut h = shaft();
     let (_, rim, _) = picks(&h);

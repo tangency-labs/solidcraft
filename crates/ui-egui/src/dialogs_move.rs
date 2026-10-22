@@ -93,13 +93,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
 }
 
 /// Where a point pick is: a round edge stands for its centre, where the model is before this
-/// move; any other pick is where it was picked.
+/// move, in the world (a body of a placed component where its occurrence puts it, as it was
+/// picked); any other pick is where it was picked.
 fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
     match s? {
         Sel::Edge { body, index, point } => {
             let st = match d.editing {
-                Some((id, _)) => app.session.model.state_before(id),
-                None => app.session.model.state(),
+                Some((id, _)) => std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id))),
+                None => app.session.world_state(),
             };
             Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| c))
         }
