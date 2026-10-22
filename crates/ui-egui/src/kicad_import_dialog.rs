@@ -91,8 +91,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     for (mode, label) in [
                         (KicadCopper::None, "None"),
                         (KicadCopper::Overlay, "Overlay on the board"),
-                        (KicadCopper::Mesh, "Modelled (mesh)"),
-                        (KicadCopper::Brep, "Modelled (B-rep)"),
+                        (KicadCopper::Mesh, "Modelled"),
                     ] {
                         let r = ui.radio(dialog.copper == mode, crate::i18n::tr_label(label));
                         crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
@@ -236,14 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn b_rep_copper_is_an_offer_the_window_accepts() {
-        let mut d = Dialog::new("board.kicad_pcb");
-        d.copper = KicadCopper::Brep;
-        assert!(d.problem().is_none(), "B-rep copper is not refused");
-        assert_eq!(d.params()["copper"], json!("brep"));
-    }
-
-    #[test]
     fn the_window_follows_its_switches_and_imports() {
         let mut h = crate::scenario::Harness::new();
         open(&mut h.app, "board.kicad_pcb");
@@ -253,14 +244,13 @@ mod tests {
             "Copper (traces, vias, zones, pads)",
             "None",
             "Overlay on the board",
-            "Modelled (mesh)",
-            "Modelled (B-rep)",
+            "Modelled",
             "Silkscreen",
         ] {
             assert!(h.widget(label).is_some(), "`{label}` is missing");
         }
         h.frames(4);
-        h.step(&json!({"widget": "Modelled (mesh)"})).unwrap();
+        h.step(&json!({"widget": "Modelled"})).unwrap();
         h.frames(1);
         h.step(&json!({"click": {"handle": "kicad:silkscreen"}})).unwrap();
         h.frames(1);
