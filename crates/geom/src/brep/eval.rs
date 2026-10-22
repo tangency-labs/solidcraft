@@ -14,7 +14,6 @@ use crate::Vec3;
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
-use std::cell::Cell;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 /// Newton steps of one intersection point.
@@ -286,9 +285,6 @@ pub enum CurveEval {
 pub struct Intersection {
     surfaces: [SurfaceEval; 2],
     leader: CurveEval,
-    tolerance: f64,
-    /// Both surfaces' parameters of the last point found: the next point starts from them.
-    hint: Cell<Option<[[f64; 2]; 2]>>,
 }
 
 impl CurveEval {
@@ -300,7 +296,7 @@ impl CurveEval {
             Curve::Polyline { points } => CurveEval::Polyline(points.iter().copied().map(v3).collect()),
             Curve::Spline { knots, points } => spline(knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect())?,
             Curve::RationalSpline { knots, homogeneous } => spline(knots, homogeneous.clone())?,
-            Curve::SurfaceIntersection { surfaces, leader, tolerance } => {
+            Curve::SurfaceIntersection { surfaces, leader, .. } => {
                 let leader = CurveEval::new(leader)?;
                 if !matches!(leader, CurveEval::Polyline(_) | CurveEval::Spline(_)) {
                     return Err(Error::Invalid("intersection leader".into()));
@@ -308,8 +304,6 @@ impl CurveEval {
                 CurveEval::Intersection(Box::new(Intersection {
                     surfaces: [SurfaceEval::new(&surfaces[0])?, SurfaceEval::new(&surfaces[1])?],
                     leader,
-                    tolerance: *tolerance,
-                    hint: Cell::new(None),
                 }))
             }
         })
@@ -380,29 +374,21 @@ fn spline(knots: &[f64], ctrl: Vec<[f64; 4]>) -> Result<CurveEval, Error> {
 }
 
 impl Intersection {
-    /// The point in the leader's normal plane at `t`: from the last point's parameters when that
-    /// lands within the trace tolerance of the leader (as truck takes a hinted point), else from
-    /// the leader's point alone.
+    /// The point in the leader's normal plane at `t`, found from the leader's point: a function
+    /// of `t` alone, whatever was evaluated before (and so the same on every thread).
     fn point(&self, t: f64) -> Option<Vec3> {
         let (lead, along) = self.leader.leader(t)?;
         if !(along.len2() > 0.0) {
             return None;
         }
-        let near = self.tolerance.max(1e-6);
-        let hinted = self.hint.get().and_then(|h| self.solve(lead, along, Some(h))).filter(|(x, _)| x.dist(lead) <= near);
-        let (x, uv) = match hinted {
-            Some(found) => found,
-            None => self.solve(lead, along, None)?,
-        };
-        self.hint.set(Some(uv));
-        Some(x)
+        self.solve(lead, along)
     }
 
     /// Newton on the planes: each surface's tangent plane at the foot of the current point, and
     /// the leader's normal plane, until the point stops moving.
-    fn solve(&self, lead: Vec3, along: Vec3, hint: Option<[[f64; 2]; 2]>) -> Option<(Vec3, [[f64; 2]; 2])> {
+    fn solve(&self, lead: Vec3, along: Vec3) -> Option<Vec3> {
         let mut x = lead;
-        let mut uv = hint;
+        let mut uv: Option<[[f64; 2]; 2]> = None;
         for _ in 0..MAX_NEWTON {
             let mut planes = [(Vec3::ZERO, 0.0); 2];
             let mut feet = [[0.0; 2]; 2];
@@ -419,7 +405,7 @@ impl Intersection {
             let step = y.dist(x);
             x = y;
             if step <= 1e-12 * (1.0 + x.len()) {
-                return Some((x, feet));
+                return Some(x);
             }
         }
         None
