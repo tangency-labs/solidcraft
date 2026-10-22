@@ -275,9 +275,9 @@ fn rounds_together_in_any_order() {
     }
 }
 
-/// The blends this part needs the corner build for (and the back edge, rolled into the tip) at
+/// The blends this part has corners in (and the back edge, rounded into the tip) at
 /// 0.01 and 100 times the part's size, the radius scaled with it: they take off what they take at
-/// full size, scaled by the cube, so the build's tolerances and limits follow the model's size.
+/// full size, scaled by the cube, so the tolerances and limits follow the model's size.
 #[test]
 fn corner_blends_hold_at_any_scale() {
     let cases: [(&str, Vec<Vec<Vec3>>); 6] = [
