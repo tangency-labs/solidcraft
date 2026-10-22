@@ -482,10 +482,12 @@ fn offset(s: BSurface, d: f64) -> R<BSurface> {
 
 /// A face's surface as a schema surface, and whether the record's natural normal is opposite
 /// STEP's surface normal (an extruded circle or revolved circle read as a cylinder or torus,
-/// whose natural normals point away from their axes); `ext` bounds swept surfaces' profiles.
-pub(super) fn map_surface(s: &Surface, ext: &Extent) -> R<(BSurface, bool)> {
+/// whose natural normals point away from their axes); `ext` bounds swept surfaces' profiles,
+/// and a cone that stays within `tol` (the file's distance uncertainty) of its limit plane
+/// over `ext` is read as that plane.
+pub(super) fn map_surface(s: &Surface, ext: &Extent, tol: f64) -> R<(BSurface, bool)> {
     let mut reversed = false;
-    let s = map_surface_in(s, ext, 0, &mut reversed)?;
+    let s = map_surface_in(s, ext, tol, 0, &mut reversed)?;
     Ok((s, reversed))
 }
 
@@ -538,7 +540,7 @@ fn canonical(s: &Surface, reversed: &mut bool) -> Option<BSurface> {
     }
 }
 
-fn map_surface_in(s: &Surface, ext: &Extent, depth: usize, reversed: &mut bool) -> R<BSurface> {
+fn map_surface_in(s: &Surface, ext: &Extent, tol: f64, depth: usize, reversed: &mut bool) -> R<BSurface> {
     if depth > MAX_NESTING {
         return Err("surfaces nested too deeply".into());
     }
@@ -549,6 +551,9 @@ fn map_surface_in(s: &Surface, ext: &Extent, depth: usize, reversed: &mut bool) 
         Surface::Plane { position } => BSurface::Plane { origin: position.origin, u_axis: position.ref_direction, v_axis: position.y() },
         Surface::Cylinder { position, radius } => BSurface::Cylinder { frame: frame(position), radius: *radius },
         Surface::Cone { position, radius, semi_angle } => {
+            if let Some(plane) = flat_cone(position, *radius, *semi_angle, ext, tol, reversed) {
+                return Ok(plane);
+            }
             if !(*radius >= 0.0) || !(semi_angle.abs() > 1e-12 && semi_angle.abs() < FRAC_PI_2) {
                 return Err(unsupported(format!("a cone of radius {radius} and semi-angle {semi_angle}")));
             }
@@ -563,15 +568,46 @@ fn map_surface_in(s: &Surface, ext: &Extent, depth: usize, reversed: &mut bool) 
         }
         Surface::DegenerateTorus { .. } => return Err(unsupported("DEGENERATE_TOROIDAL_SURFACE")),
         Surface::BSpline(b) => super::map_bspline_surface(b)?,
-        Surface::RectangularTrimmed { basis, .. } => map_surface_in(basis, ext, depth + 1, reversed)?,
+        Surface::RectangularTrimmed { basis, .. } => map_surface_in(basis, ext, tol, depth + 1, reversed)?,
         Surface::Revolution { profile, axis } => revolution(profile, axis, ext)?,
         Surface::Extrusion { profile, direction, magnitude } => extrusion(profile, *direction, *magnitude, ext)?,
         Surface::Offset { basis, distance, .. } => {
             // Along STEP's normal: the record's, or its opposite.
-            let b = map_surface_in(basis, ext, depth + 1, reversed)?;
+            let b = map_surface_in(basis, ext, tol, depth + 1, reversed)?;
             offset(b, if *reversed { -*distance } else { *distance })?
         }
     })
+}
+
+/// A cone written for a plane (a semi-angle a whisker short of 90°, as exporters write one) as
+/// that plane: the plane through the placement's origin across its axis, the cone's limit as
+/// its angle opens to 90°. The cone's height above it is `(rho - radius) cot a` at parameter
+/// radius `rho`, monotone in `rho` away from the apex: over the face it stays within the
+/// heights of the boundary points and, should the face hold the axis, the apex's
+/// (`radius cot a`). `None` unless that deviation is within `tol`. STEP's normal there is
+/// `-rho tan a` along the axis, so the record's (the axis) is opposite STEP's where
+/// `rho tan a > 0`.
+fn flat_cone(position: &Placement, radius: f64, semi_angle: f64, ext: &Extent, tol: f64, reversed: &mut bool) -> Option<BSurface> {
+    let (o, k) = (v3(position.origin), v3(position.axis).normalized()?);
+    let cot = semi_angle.cos() / semi_angle.sin();
+    let mut deviation = (radius * cot).abs();
+    let mut widest: Option<(f64, f64)> = None;
+    for p in &ext.points {
+        let d = *p - o;
+        let h = d.dot(k);
+        deviation = deviation.max(h.abs());
+        let r = (d - k * h).len();
+        if widest.is_none_or(|(w, _)| r > w) {
+            widest = Some((r, h));
+        }
+    }
+    let (_, h) = widest?;
+    if !(deviation <= tol) {
+        return None;
+    }
+    // The parameter radius at the widest boundary point (it keeps one sign off the apex).
+    *reversed ^= (radius + h * semi_angle.tan()) * semi_angle.tan() > 0.0;
+    Some(BSurface::Plane { origin: position.origin, u_axis: position.ref_direction, v_axis: position.y() })
 }
 
 /// The STEP parameters of `ps` and `pe` on a hyperbola or parabola.

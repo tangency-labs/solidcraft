@@ -580,7 +580,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
         }
         let extent = self.extent(&loops)?;
-        let (surface, reversed) = swept::map_surface(&step_surface, &extent).map_err(|m| format!("face #{id}: {m}"))?;
+        let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
         // normal when same_sense, and the record's is STEP's unless `reversed`.
         let sense = same_sense != reversed;
