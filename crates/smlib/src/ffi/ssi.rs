@@ -70,27 +70,22 @@ unsafe extern "C" {
     fn smlib_surface_free(s: *mut RawSurface);
     fn smlib_surface_domain(s: *const RawSurface, out: *mut f64) -> i32;
     fn smlib_surface_evaluate(s: *const RawSurface, u: f64, v: f64, out: *mut f64) -> i32;
-    fn smlib_ssi(a: *const RawSurface, b: *const RawSurface, method: i32, approx_tol: f64, samples_per_curve: i32, out: *mut *mut RawResult) -> i32;
+    fn smlib_ssi(a: *const RawSurface, b: *const RawSurface, method: i32, approx_tol: f64, out: *mut *mut RawResult) -> i32;
     fn smlib_ssi_result_free(r: *mut RawResult);
     fn smlib_ssi_curve_count(r: *const RawResult, out: *mut i32) -> i32;
-    fn smlib_ssi_curve_info(
+    fn smlib_ssi_curve_info(r: *const RawResult, i: i32, ty: *mut i32, flags: *mut i32, deviation: *mut f64, interval: *mut f64) -> i32;
+    fn smlib_ssi_curve_nurbs(
         r: *const RawResult,
         i: i32,
-        ty: *mut i32,
-        flags: *mut i32,
-        samples: *mut i32,
-        deviation: *mut f64,
-        interval: *mut f64,
-    ) -> i32;
-    fn smlib_ssi_curve_samples(
-        r: *const RawResult,
-        i: i32,
-        cap: i64,
-        xyz: *mut f64,
-        uv_a: *mut f64,
-        uv_b: *mut f64,
-        a_at_uv: *mut f64,
-        b_at_uv: *mut f64,
+        which: i32,
+        degree: *mut i32,
+        n_points: *mut i64,
+        n_knots: *mut i64,
+        cap_points: i64,
+        points: *mut f64,
+        weights: *mut f64,
+        cap_knots: i64,
+        knots: *mut f64,
     ) -> i32;
     fn smlib_ssi_point_count(r: *const RawResult, out: *mut i32) -> i32;
     fn smlib_ssi_point(r: *const RawResult, i: i32, xyz: *mut f64, uv_a: *mut f64, uv_b: *mut f64) -> i32;
@@ -139,20 +134,22 @@ impl Drop for ResultHandle {
 #[derive(Clone, Copy, Debug)]
 pub struct CurveInfo {
     pub ty: i32,
-    pub flags: i32,
-    pub samples: i32,
     pub deviation: f64,
     pub interval: [f64; 2],
 }
 
-/// One curve's samples, flat: 3 (xyz, a_at_uv, b_at_uv) or 2 (uv_a, uv_b) values per sample.
+/// `smlib_ssi_curve_nurbs` `which`: the 3D curve, the UV curve on a, on b.
+pub const CURVE_3D: i32 = 0;
+pub const CURVE_UV_A: i32 = 1;
+pub const CURVE_UV_B: i32 = 2;
+
+/// One B-spline as `smlib_ssi_curve_nurbs` gives it: cartesian control points, `dim` values each,
+/// one weight each, and every knot (as many as points + degree + 1).
 #[derive(Clone, Debug, Default)]
-pub struct Samples {
-    pub xyz: Vec<f64>,
-    pub uv_a: Vec<f64>,
-    pub uv_b: Vec<f64>,
-    pub a_at_uv: Vec<f64>,
-    pub b_at_uv: Vec<f64>,
+pub struct Nurbs {
+    pub points: Vec<f64>,
+    pub weights: Vec<f64>,
+    pub knots: Vec<f64>,
 }
 
 #[cfg(feature = "native")]
@@ -258,9 +255,9 @@ mod calls {
             st => Err(st),
         }
     }
-    pub fn ssi(a: &SurfaceHandle, b: &SurfaceHandle, method: i32, approx_tol: f64, samples: i32) -> Result<ResultHandle, i32> {
+    pub fn ssi(a: &SurfaceHandle, b: &SurfaceHandle, method: i32, approx_tol: f64) -> Result<ResultHandle, i32> {
         let mut out: *mut RawResult = std::ptr::null_mut();
-        match (unsafe { smlib_ssi(a.0.as_ptr(), b.0.as_ptr(), method, approx_tol, samples, &mut out) }, std::ptr::NonNull::new(out)) {
+        match (unsafe { smlib_ssi(a.0.as_ptr(), b.0.as_ptr(), method, approx_tol, &mut out) }, std::ptr::NonNull::new(out)) {
             (OK, Some(p)) => Ok(ResultHandle(p)),
             (OK, None) => Err(ERR_EMPTY),
             (s, _) => Err(s),
@@ -274,30 +271,43 @@ mod calls {
         }
     }
     pub fn curve_info(r: &ResultHandle, i: i32) -> Result<CurveInfo, i32> {
-        let mut c = CurveInfo { ty: 0, flags: 0, samples: 0, deviation: 0.0, interval: [0.0; 2] };
-        match unsafe { smlib_ssi_curve_info(r.0.as_ptr(), i, &mut c.ty, &mut c.flags, &mut c.samples, &mut c.deviation, c.interval.as_mut_ptr()) } {
+        let mut c = CurveInfo { ty: 0, deviation: 0.0, interval: [0.0; 2] };
+        match unsafe { smlib_ssi_curve_info(r.0.as_ptr(), i, &mut c.ty, std::ptr::null_mut(), &mut c.deviation, c.interval.as_mut_ptr()) } {
             OK => Ok(c),
             s => Err(s),
         }
     }
-    pub fn curve_samples(r: &ResultHandle, i: i32, n: usize) -> Result<Samples, i32> {
-        let cap = i64::try_from(n).map_err(|_| ERR_ARG)?;
-        let three = n.checked_mul(3).ok_or(ERR_ARG)?;
-        let mut s =
-            Samples { xyz: vec![0.0; three], uv_a: vec![0.0; 2 * n], uv_b: vec![0.0; 2 * n], a_at_uv: vec![0.0; three], b_at_uv: vec![0.0; three] };
+    /// Curve `i`'s `which` B-spline, `dim` coordinates per control point: the counts first, then
+    /// the arrays.
+    pub fn curve_nurbs(r: &ResultHandle, i: i32, which: i32, dim: usize) -> Result<Nurbs, i32> {
+        let (mut degree, mut np, mut nk) = (0i32, 0i64, 0i64);
+        let null = std::ptr::null_mut();
+        let st = unsafe { smlib_ssi_curve_nurbs(r.0.as_ptr(), i, which, &mut degree, &mut np, &mut nk, 0, null, null, 0, null) };
+        if st != OK {
+            return Err(st);
+        }
+        let (n, k) = (usize::try_from(np).map_err(|_| ERR_ARG)?, usize::try_from(nk).map_err(|_| ERR_ARG)?);
+        let degree = usize::try_from(degree).map_err(|_| ERR_ARG)?;
+        if !(n > degree && k == n + degree + 1) {
+            return Err(ERR_ARG);
+        }
+        let mut c = Nurbs { points: vec![0.0; n.checked_mul(dim).ok_or(ERR_ARG)?], weights: vec![0.0; n], knots: vec![0.0; k] };
         let st = unsafe {
-            smlib_ssi_curve_samples(
+            smlib_ssi_curve_nurbs(
                 r.0.as_ptr(),
                 i,
-                cap,
-                s.xyz.as_mut_ptr(),
-                s.uv_a.as_mut_ptr(),
-                s.uv_b.as_mut_ptr(),
-                s.a_at_uv.as_mut_ptr(),
-                s.b_at_uv.as_mut_ptr(),
+                which,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                np,
+                c.points.as_mut_ptr(),
+                c.weights.as_mut_ptr(),
+                nk,
+                c.knots.as_mut_ptr(),
             )
         };
-        if st == OK { Ok(s) } else { Err(st) }
+        if st == OK { Ok(c) } else { Err(st) }
     }
     pub fn point_count(r: &ResultHandle) -> Result<i32, i32> {
         let mut n = 0;
@@ -345,7 +355,7 @@ mod calls {
     pub fn evaluate(_: &SurfaceHandle, _: f64, _: f64) -> Result<[f64; 3], i32> {
         Err(NOT_BUILT)
     }
-    pub fn ssi(_: &SurfaceHandle, _: &SurfaceHandle, _: i32, _: f64, _: i32) -> Result<ResultHandle, i32> {
+    pub fn ssi(_: &SurfaceHandle, _: &SurfaceHandle, _: i32, _: f64) -> Result<ResultHandle, i32> {
         Err(NOT_BUILT)
     }
     pub fn curve_count(_: &ResultHandle) -> Result<i32, i32> {
@@ -354,7 +364,7 @@ mod calls {
     pub fn curve_info(_: &ResultHandle, _: i32) -> Result<CurveInfo, i32> {
         Err(NOT_BUILT)
     }
-    pub fn curve_samples(_: &ResultHandle, _: i32, _: usize) -> Result<Samples, i32> {
+    pub fn curve_nurbs(_: &ResultHandle, _: i32, _: i32, _: usize) -> Result<Nurbs, i32> {
         Err(NOT_BUILT)
     }
     pub fn point_count(_: &ResultHandle) -> Result<i32, i32> {
