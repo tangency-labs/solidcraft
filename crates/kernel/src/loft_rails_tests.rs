@@ -42,15 +42,15 @@ fn volume(b: &crate::Body) -> f64 {
     b.volume_at(1e-4).unwrap()
 }
 
-/// How far `p` is from the nearest face of the body.
+/// How far `p` is from the nearest face's surface of the body.
 fn off(b: &crate::Body, p: Vec3) -> f64 {
-    use truck_modeling::{ParametricSurface, SearchNearestParameter};
-    b.solid
-        .face_iter()
+    b.record()
+        .faces
+        .iter()
         .filter_map(|f| {
-            let s = f.surface();
-            let (u, v) = s.search_nearest_parameter(crate::body::p3(p), None, 100)?;
-            Some(crate::body::from_p3(s.subs(u, v)).dist(p))
+            let s = solidcraft_geom::brep::eval::SurfaceEval::new(&f.surface).ok()?;
+            let uv = s.project(p, None, f64::INFINITY)?;
+            Some(s.point(uv)?.dist(p))
         })
         .fold(f64::INFINITY, f64::min)
 }
