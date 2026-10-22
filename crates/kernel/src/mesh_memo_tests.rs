@@ -57,7 +57,8 @@ fn a_copy_with_another_solid_makes_its_own_meshes() {
     let kept = plate().keeping_meshes();
     let other = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     let mut swapped = kept.clone();
-    swapped.solid = other.solid.clone();
+    swapped.record = other.record.clone();
+    swapped.smlib = other.smlib.clone();
     let _ = kept.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
     let m = swapped.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
     assert_eq!(m.triangles.len(), other.mesh(&crate::MeshTolerance::chord(0.5)).unwrap().triangles.len());

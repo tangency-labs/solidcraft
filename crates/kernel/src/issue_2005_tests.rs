@@ -33,7 +33,8 @@ fn tube(body: &Body, volume: f64, genus: usize) {
     assert!((m.volume - volume).abs() < volume * 0.01, "{m:?}, expected {volume}");
     // A closed orientable tube has Euler characteristic 2 - 2g. Coincident caps gave 2.
     assert_eq!(m.vertices + m.faces + 2 * genus, m.edges + 2, "{m:?}");
-    assert!(body.solid.boundaries().iter().all(|s| s.extract_boundaries().is_empty()));
+    // Every shell closed: each edge bounds two faces.
+    assert!(body.record().edges.iter().all(|e| e.uses.len() >= 2));
     let h = body.history().expect("sweep provenance");
     assert!(h.faces.iter().all(|f| f.origins.iter().all(|o| matches!(o, crate::history::FaceOrigin::Profile { .. }))));
 }
