@@ -288,7 +288,8 @@ impl FilletSolver {
     /// # Errors
     ///
     /// Those of the solver's virtuals (`GetSolverType`, `GetJacobianSize`,
-    /// `LoadInitialValues`), the evaluations and the solvers; `SM_ERR` for a failed
+    /// `SetupOffsetValues` (a radius law that cannot be evaluated), `LoadInitialValues`),
+    /// the evaluations and the solvers; `SM_ERR` for a failed
     /// variable-radius drop, a failed constant-radius-assisted plane solve, or more
     /// extra unknowns than `SM_MAX_USER_DOUBLES`; [`SolidError::InvalidInput`] for a
     /// missing offset surface or a Jacobian size below 4 (upstream indexes past
@@ -385,7 +386,11 @@ impl FilletSolver {
 
             // locals
             let mut radius = 0.0;
-            ignore_status(ops.setup_offset_values(current, Some(&mut radius)))?;
+            // Upstream ignores the status (its `SetupOffsetValues` never reports one, but sets
+            // the offsets from an unset radius when the law cannot be evaluated: UB-252). The
+            // port's reports that failure, and so does this, as the fork's `StepSolve` does
+            // (tangency-labs/smlib@9a12ad7).
+            ops.setup_offset_values(current, Some(&mut radius))?;
 
             // branch on SolverType
             let solver_type = ops.solver_type()?;
@@ -1574,6 +1579,8 @@ mod tests {
     struct TestSolver {
         base: FilletSolver,
         ty: FilletSolverType,
+        /// `SetupOffsetValues` fails (a law that cannot be evaluated), before it sets anything.
+        setup_fails: bool,
     }
 
     impl TestSolver {
@@ -1593,7 +1600,11 @@ mod tests {
                 )
                 .expect("set");
             }
-            Self { base, ty }
+            Self {
+                base,
+                ty,
+                setup_fails: false,
+            }
         }
     }
 
@@ -1614,6 +1625,11 @@ mod tests {
             Ok(4)
         }
         fn setup_offset_values(&mut self, _t: &TsectPnt, d: Option<&mut f64>) -> Result<()> {
+            if self.setup_fails {
+                return Err(SolidError::sm_err(
+                    "test: the radius law cannot be evaluated",
+                ));
+            }
             for s in self.base.surfaces.iter_mut().flatten() {
                 s.surface.set_offset_distance(R);
             }
@@ -1705,10 +1721,17 @@ mod tests {
     fn step_flags(
         ty: FilletSolverType,
         y: f64,
+        step: f64,
+    ) -> (Result<()>, StepSolveOutcome, f64, TsectPnt) {
+        step_with(TestSolver::new(ty), y, step)
+    }
+
+    fn step_with(
+        mut fs: TestSolver,
+        y: f64,
         mut step: f64,
     ) -> (Result<()>, StepSolveOutcome, f64, TsectPnt) {
         let k = Kernel::default();
-        let mut fs = TestSolver::new(ty);
         let mut next = TsectPnt::new();
         let mut out = StepSolveOutcome {
             found_good_point: true,
@@ -1796,6 +1819,38 @@ mod tests {
             out.found_good_point && out.clipped && !out.boundary_hit,
             "{out:?}"
         );
+    }
+
+    /// UB-252: a radius that `SetupOffsetValues` could not set is not stepped on. Upstream ignores
+    /// the status (`SmFilletSolver.cpp:5254`) and goes on with the radius unset; the fork returns
+    /// the failure (tangency-labs/smlib@9a12ad7, tangency-labs/solidcore#458), and so does the
+    /// port. Run in the clipped branch, where the call sits.
+    #[test]
+    fn step_solve_returns_a_failed_setup_of_the_offsets() {
+        for ty in [
+            FilletSolverType::Unknown,
+            FilletSolverType::ConstRadius,
+            FilletSolverType::ConstDist,
+            FilletSolverType::VariableRadius,
+        ] {
+            let mut fs = TestSolver::new(ty);
+            fs.setup_fails = true;
+            let (r, out, _, next) = step_with(fs, 1.8, 0.5);
+            let e = r.expect_err(&format!("{ty:?}: a failed setup is a failed step"));
+            assert!(
+                !e.is_unported(),
+                "{ty:?}: the setup's own failure, not a deferral: {e:?}"
+            );
+            assert!(
+                out.clipped && !out.found_good_point,
+                "{ty:?}: nothing found after the failure: {out:?}"
+            );
+            assert_eq!(
+                next.uv_pos(SrfIndex::First),
+                TsectPnt::new().uv_pos(SrfIndex::First),
+                "{ty:?}: no point stored"
+            );
+        }
     }
 
     #[test]
