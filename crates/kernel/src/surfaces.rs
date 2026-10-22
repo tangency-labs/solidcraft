@@ -29,7 +29,7 @@ use crate::{KernelError, Result, record};
 impl Body {
     /// A surface body: some shell does not close (an edge bounds a face on one side only).
     pub fn is_surface(&self) -> bool {
-        !self.is_mesh() && crate::native::brep_record(self).is_ok_and(|r| r.edges.iter().any(|e| e.uses.len() == 1))
+        !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
     }
 }
 
@@ -339,9 +339,9 @@ fn uv_box(loops: &[b::Loop]) -> Option<[[f64; 2]; 2]> {
 }
 
 /// A body of a record this module built, and whether it numbers its faces and edges as the
-/// record does (so a history in the record's order is the body's).
+/// record does (so a history in the record's order is the body's): the record is the body's own.
 fn record_body(r: &Brep) -> Result<(Body, bool)> {
-    imp::record_body(r)
+    Ok((Body::from_record(r.clone())?, true))
 }
 
 /// `body` with the history `h` over operands of `counts` faces and edges when its order is the
@@ -358,7 +358,7 @@ pub(crate) fn surface_body(r: &Brep) -> Result<Body> {
 /// `body` (made by an operation on `operands`) with the history that every face and edge is new to
 /// it.
 pub(crate) fn all_new(body: Body, operands: &[&Body]) -> Result<Body> {
-    let r = crate::native::brep_record(&body)?;
+    let r = body.record();
     let faces = vec![record::generated(Vec::new()); r.faces.len()];
     let h = record_history(&r, operands.len(), faces, |_, _, _| Vec::new());
     body.with_history_counts(h, &record::counts(operands))
@@ -495,7 +495,7 @@ fn sketch_loop(parts: &mut Parts, plane: &Plane, segs: &[Seg2]) -> Result<b::Loo
 /// The edge of a body nearest a point (by samples along each edge), within 5% of the body's size:
 /// its index in the body's edge order.
 pub(crate) fn edge_near(body: &Body, p: Vec3) -> Option<usize> {
-    let r = crate::native::brep_record(body).ok()?;
+    let r = body.record();
     let mut best: Option<(f64, usize)> = None;
     for (i, e) in r.edges.iter().enumerate() {
         let Ok(c) = CurveEval::new(&e.curve) else { continue };
@@ -525,7 +525,7 @@ pub fn patch_edges(body: &Body, at: &[Vec3]) -> Result<Body> {
     if at.is_empty() || at.len() > 10_000 {
         return Err(invalid("pick the edges of a closed loop"));
     }
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let chain = picked_loop(body, at)?;
     let Some(plane) = chain_plane(&r, &chain, crate::fill::planarity_tolerance(body))? else {
         return crate::fill::fill_loop(body, &chain);
@@ -625,7 +625,7 @@ pub(crate) fn picked_loop(body: &Body, at: &[Vec3]) -> Result<Chain> {
 /// chain runs from the free end met first in pick order. Edges that branch, or form more than one
 /// chain, are refused.
 pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Chain, bool)> {
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let mut edges: Vec<usize> = Vec::new();
     for p in at {
         let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))?;
@@ -715,7 +715,7 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
         return Err(invalid("pick the faces to copy"));
     }
     let chosen = picked_faces(body, at)?;
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     taken(body, &r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
@@ -724,7 +724,7 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
 /// surfaces. Histories are over `[body]`: each face is the body's.
 pub fn unstitch(body: &Body, at: &[Vec3]) -> Result<(Vec<Body>, Option<Body>)> {
     body.require_brep("unstitch")?;
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     if r.faces.len() < 2 {
         return Err(invalid("the body has one face: nothing to unstitch"));
     }
@@ -744,7 +744,7 @@ pub fn reverse_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
         return Err(invalid("a solid's faces face out: unstitch it into surfaces first"));
     }
     let chosen = picked_faces(body, at)?;
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     taken(body, &r, &(0..r.faces.len()).map(|f| (f, chosen.contains(&f))).collect::<Vec<_>>())
 }
 
@@ -756,7 +756,7 @@ pub fn remove_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     if faces.is_empty() {
         return Err(invalid("no faces given"));
     }
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let left: Vec<(usize, bool)> = (0..r.faces.len()).filter(|f| !faces.contains(f)).map(|f| (f, false)).collect();
     if left.is_empty() {
         return Err(invalid("that would delete every face of the body"));
@@ -813,8 +813,8 @@ pub fn stitch(bodies: &[&Body], tol: f64) -> Result<Body> {
     }
     let size = bodies.iter().map(|b| b.size()).fold(0.0, f64::max);
     let tol = if tol.is_finite() && tol > 0.0 { tol } else { size * 1e-6 + 1e-6 };
-    let records = bodies.iter().map(|b| crate::native::brep_record(b)).collect::<Result<Vec<_>>>()?;
-    let (parts, offsets) = Parts::joined(&records.iter().collect::<Vec<_>>())?;
+    let records: Vec<&Brep> = bodies.iter().map(|b| b.record()).collect();
+    let (parts, offsets) = Parts::joined(&records)?;
     let c = parts.canonical()?;
     let (body, h) = imp::stitched(&c.brep, tol)?;
     let h = h.and_then(|h| carried(&h, &c, &offsets, bodies.len(), |operand, face| FaceOrigin::Face { operand, face }));
@@ -835,7 +835,7 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 /// apart): see [`crate::offset_surface`]. A distance of zero copies the faces. Each face is the
 /// offset of the one it came from.
 pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, tolerance: f64) -> Result<Body> {
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     if distance == 0.0 {
         return taken(body, &r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
@@ -847,7 +847,7 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     let faces = h
         .and_then(|h| carried(&h, &c, &offsets, 1, offset))
         .map(|h| h.faces.into_iter().map(|f| FaceProv { change: Change::Generated, ..f }).collect::<Vec<_>>());
-    let rec = crate::native::brep_record(&result)?;
+    let rec = result.record();
     let h = faces.map(|faces| record_history(&rec, 1, faces, |_, between, faces| record::meeting(between, faces)));
     Ok(result.with_checked_history(h, &record::counts(&[body])))
 }
@@ -860,7 +860,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     if !(distance.is_finite() && distance > 0.0) {
         return Err(invalid("the extension distance must be positive"));
     }
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let [face] = r.faces.as_slice() else { return Err(invalid("not supported yet: extending a surface of more than one face")) };
     let (origin, du, dv) = match face.surface {
         b::Surface::Plane { origin, u_axis, v_axis } => (v3(origin), v3(u_axis), v3(v_axis)),
@@ -1012,7 +1012,7 @@ fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
     let faces: Option<Vec<FaceProv>> = c.faces.iter().map(|p| prov(*p)).collect();
     if !stitch {
         let (body, same) = record_body(&c.brep)?;
-        return record::attach(body, &[], faces.filter(|_| same), Default::default());
+        return Ok(record::attach(body, &[], faces.filter(|_| same), &[]));
     }
     let (body, h) = imp::stitched(&c.brep, c.brep.tolerance * 10.0)?;
     // A stitched face keeps the tag of the joined record's face it was.
@@ -1025,7 +1025,7 @@ fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool) -> Result<Body> {
             })
             .collect::<Option<Vec<_>>>()
     });
-    record::attach(body, &[], sewn, Default::default())
+    Ok(record::attach(body, &[], sewn, &[]))
 }
 
 /// A surface extruded from chains of sketch segments on `plane`: each chain (open, or closed such
@@ -1272,25 +1272,37 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
-    pub(super) fn record_body(r: &Brep) -> Result<(Body, bool)> {
-        let (brep, order) = crate::native::smlib_record_ordered(r)?;
-        let (body, kept) = crate::native::body_from_smlib_ordered(&brep)?;
-        Ok((body, order.is_some() && kept.is_some()))
+    /// Whether two records of one body number its faces, edges and vertices alike: the same
+    /// loops of the same edges, run the same ways, and each edge between the same vertices.
+    fn same_numbering(a: &Brep, b: &Brep) -> bool {
+        let loops = |f: &b::Face| -> Vec<Vec<(u32, bool)>> {
+            f.loops
+                .iter()
+                .map(|l| match l {
+                    b::Loop::Edges { edges } => edges.iter().map(|u| (u.edge, u.forward)).collect(),
+                    b::Loop::Vertex { vertex } => vec![(*vertex, true)],
+                })
+                .collect()
+        };
+        a.faces.len() == b.faces.len()
+            && a.edges.len() == b.edges.len()
+            && a.vertices.len() == b.vertices.len()
+            && a.faces.iter().zip(&b.faces).all(|(x, y)| loops(x) == loops(y))
+            && a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices == y.vertices)
     }
 
     /// The record `r` sewn by SMLib at `tol` (`smlib_stitch`), with its history over `[r]` (faces
-    /// and edges by their index in `r`); none where the orders cannot be matched.
+    /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
+    /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
-        let (brep, order) = crate::native::smlib_record_ordered(r)?;
+        let brep = SmBrep::from_record(r, true).map_err(sm("stitch"))?;
+        let (back, order) = brep.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
         let tagged = brep.tagged(0).map_err(sm("stitch"))?;
         let (sewn, _closed) = tagged.stitch(tol).map_err(sm("stitch"))?;
         checked(&sewn, "stitch")?;
-        let (body, kept) = crate::native::body_from_smlib_ordered(&sewn)?;
-        let h = match (order, kept) {
-            (Some(o), Some(k)) => sewn.history().ok().and_then(|raw| raw.history(&[o], &k).ok()),
-            _ => None,
-        };
-        Ok((body, h))
+        let (record, kept) = sewn.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
+        let h = if same_numbering(r, &back) { sewn.history().ok().and_then(|raw| raw.history(&[order], &kept).ok()) } else { None };
+        Ok((Body::from_smlib_record(sewn, record)?, h))
     }
 
     pub(super) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
@@ -1491,9 +1503,6 @@ mod imp {
     }
     pub(super) fn refuse(what: &str) -> KernelError {
         crate::smlib_sweeps::refuse(what)
-    }
-    pub(super) fn record_body(_: &Brep) -> Result<(Body, bool)> {
-        Err(not_built())
     }
     pub(super) fn stitched(_: &Brep, _: f64) -> Result<(Body, Option<History>)> {
         Err(not_built())

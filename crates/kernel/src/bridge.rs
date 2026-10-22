@@ -96,7 +96,7 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
     if at.is_empty() || at.len() > 10_000 || at.iter().any(|p| !p.is_finite()) {
         return Err(KernelError::Invalid("pick 1 to 10000 points on the edges of a chain".into()));
     }
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let mut pool: Vec<usize> = Vec::new();
     for p in at {
         let e = crate::surfaces::edge_near(body, *p).ok_or_else(|| KernelError::Invalid("no edge near a picked point".to_string()))?;
@@ -132,8 +132,7 @@ pub fn chain(body: &Body, at: &[Vec3]) -> Result<Chain> {
 
 /// Whether a chain of `body`'s edges closes back on itself.
 pub fn chain_closes(body: &Body, chain: &Chain) -> bool {
-    let Ok(r) = crate::native::brep_record(body) else { return false };
-    closes(&r, chain)
+    closes(body.record(), chain)
 }
 
 fn closes(r: &Brep, chain: &Chain) -> bool {
@@ -166,7 +165,7 @@ impl ChainLine {
     fn of(body: &Body, chain: &Chain) -> Result<ChainLine> {
         /// Samples per edge used for the length table.
         const PER_EDGE: usize = 64;
-        let r = crate::native::brep_record(body)?;
+        let r = body.record();
         let mut samples: Vec<Sample> = Vec::with_capacity(chain.len() * (PER_EDGE + 1) + 1);
         let mut curves = Vec::with_capacity(chain.len());
         let push = |samples: &mut Vec<Sample>, p: Vec3, edge: usize, t: f64| {
@@ -322,7 +321,7 @@ pub fn frames(body: &Body, face: usize, chain: &Chain, leave: Vec3, count: usize
     }
     let line = ChainLine::of(body, chain)?;
     let stations = line.stations(count, 0.0, false)?;
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     frames_on(&r, &vec![face; chain.len()], &stations, &line, leave)
 }
 
@@ -392,7 +391,7 @@ pub fn frames_across(body: &Body, face: usize, stations: &[(Vec3, Vec3)], length
     if stations.len() > 1 << 16 || !(length.is_finite() && length > 0.0) {
         return Err(KernelError::Invalid("frames across a boundary need at most 65536 stations on a boundary of finite size".into()));
     }
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let support = Support::of(&r, face, length)?;
     let outward = if support.forward { 1.0 } else { -1.0 };
     let mut walk = Walk::new(length);
@@ -733,7 +732,7 @@ pub fn bridge(a: &[Frame], b: &[Frame], orders: [Continuity; 2], crown: [f64; 2]
 
 /// The one face of a bridge body: its surface and its parameter box.
 pub(crate) fn the_face(body: &Body) -> Result<(SurfaceEval, [[f64; 2]; 2])> {
-    let r = crate::native::brep_record(body)?;
+    let r = body.record();
     let face = r.faces.first().ok_or_else(|| KernelError::Failed("bridge: no face".into()))?;
     let surf = SurfaceEval::new(&face.surface).map_err(|e| KernelError::Failed(format!("bridge: {e}")))?;
     Ok((surf, face.domain))
@@ -903,7 +902,7 @@ pub fn blend_between(
     let chain_a = chain(a, picks_a)?;
     let chain_b = chain(b, picks_b)?;
     let (line_a, line_b) = (ChainLine::of(a, &chain_a)?, ChainLine::of(b, &chain_b)?);
-    let (record_a, record_b) = (crate::native::brep_record(a)?, crate::native::brep_record(b)?);
+    let (record_a, record_b) = (a.record(), b.record());
     if line_a.closed != line_b.closed {
         return Err(KernelError::Invalid("a closed chain blends only to a closed chain, and an open one only to an open one".into()));
     }

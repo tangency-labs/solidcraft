@@ -79,14 +79,14 @@ fn valley_between_cylinders(count: usize, r: f64) -> (Vec<Frame>, Vec<Frame>) {
 
 /// The edges of `body`'s face `face` chained into one loop (its outer loop, as it runs).
 fn loop_of(body: &Body, face: usize) -> Chain {
-    let r = crate::native::brep_record(body).unwrap();
+    let r = body.record();
     let solidcraft_geom::brep::Loop::Edges { edges } = &r.faces[face].loops[0] else { panic!("a vertex loop") };
     edges.iter().map(|u| (u.edge as usize, u.forward)).collect()
 }
 
 /// The face of `body` (its index) whose surface contains `at`.
 fn face_at(body: &Body, at: Vec3) -> usize {
-    let r = crate::native::brep_record(body).unwrap();
+    let r = body.record();
     r.faces.iter().position(|f| SurfaceEval::new(&f.surface).unwrap().project(at, None, 1e-6).is_some()).unwrap()
 }
 
