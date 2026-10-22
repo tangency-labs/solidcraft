@@ -237,16 +237,41 @@ impl UnitDiff for Runner {
         let Some(c) = counts(&fixture.graph) else {
             return Ok(Output::rejected("native fixture constructor"));
         };
-        let output = ffi::eval(&path, &input, &request(&i, c)).map_err(harness)?;
+        let request = request(&i, c);
+        let output = ffi::eval(&path, &input, &request).map_err(harness)?;
         if output.first().is_some_and(|v| *v == -1.0 || *v == -2.0) {
             return Ok(Output::rejected(format!(
                 "native fixture constructor: {output:?}"
             )));
         }
-        Ok(Output::new().ints(
-            "state",
-            output.into_iter().map(|v| v as i64).collect::<Vec<_>>(),
-        ))
+        if request.op != 0 {
+            return Ok(Output::new().ints(
+                "state",
+                output.into_iter().map(|v| v as i64).collect::<Vec<_>>(),
+            ));
+        }
+        // op 0: the fixed state (status, outputs, marks of each face use, face-use
+        // shells, counts), then the tagged post-split graph
+        let header = 3 + MARKS.len() * (2 + c[2]) + c[2] + 7;
+        let mut ints: Vec<i64> = output
+            .get(..header)
+            .ok_or_else(|| harness("short output"))?
+            .iter()
+            .map(|v| *v as i64)
+            .collect();
+        let mut values = Vec::new();
+        for pair in output.get(header..).unwrap_or(&[]).chunks(2) {
+            let [tag, v] = pair else {
+                return Err(harness("odd tagged output"));
+            };
+            if *tag == 0.0 {
+                ints.extend([0, *v as i64]);
+            } else {
+                ints.push(1);
+                values.push(*v);
+            }
+        }
+        Ok(Output::new().ints("state", ints).values("geom", values))
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -410,7 +435,15 @@ impl UnitDiff for Runner {
             lock.release(std::slice::from_mut(&mut k.context))
                 .map_err(harness)?;
         }
-        Ok(Output::new().ints("state", output))
+        if request.op != 0 {
+            return Ok(Output::new().ints("state", output));
+        }
+        // op 0: the whole post-split graph
+        let g = Graph::walk(&b).map_err(harness)?;
+        let mut w = W::default();
+        export_graph(&b, &g, &mut w).map_err(harness)?;
+        output.extend(w.ints);
+        Ok(Output::new().ints("state", output).values("geom", w.values))
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

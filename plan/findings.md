@@ -16270,6 +16270,20 @@ Moves vs main (after #536): of the 110 cases that stopped at the OMITTED stop, 1
 `FindInfiniteRegion` -> `SmEdge::IsSeam` -> `NormalizedEvaluate` builds a UV trim curve),
 16 at geom.tol `GetZoneTol3d(const SmObject*)` and 3 at `topology.face_p2`. No case
 fails and no former pass changed.
+
+**Coverage follow-up (port/brep-p6-closure-coverage).** brep_p6 op 0 now exports the
+whole post-split graph on both sides: regions with their infinite and void flags and
+shells, shells, face uses and the rest, via the op-3 `post::export_graph` and
+`export_graph`. Previously only face-use shells and counts were compared. All op-0
+cases still pass. Eight `MakeFaceTopology` network fixtures target the remainder's
+ray-fire branches: `two_cubes_at_a_vertex` (face uses joined only by a vertex),
+`two_disjoint_cubes` and `cube_in_cube` (shell nesting), `cube_with_wire` and
+`cube_with_inner_wire` (wires), `cube_with_inner_vertex` and `cube_with_outer_vertex`
+(vertex shells), and `cube_faces_6_reversed`. All eight defer at geom.tol
+`GetZoneTol3d(const SmObject*)` in the topology solver (`object_zone_tol_3d` on an
+opaque handle). Wiring its null-object branch to the system tolerance only moves the
+stop to `SmFace::PointClassify` (`query.face_p2`, `face_point_classify`), so those
+branches stay uncompared until both opaque-handle stubs get the owning B-rep.
 ## blend.fillet_geom_p1: the `sm_ClassifyFacePoint` disagreement was the runner's Rust face, not the kernel (2026-10-22)
 
 Follow-up to "blend.fillet_geom_p1: `sm_ClassifyFacePoint` returns 0 where the C++ returns
