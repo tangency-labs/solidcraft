@@ -589,6 +589,7 @@ impl SurfOfRevolution {
             requested,
             this,
             &|k, uv| self.evaluate_step_point(k, uv),
+            &|_, uv| self.base.evaluate_point(uv),
             &|k, domain, operation, point, guess| {
                 surface_local_point_solve(k, self, domain, operation, point, guess)
             },
@@ -596,9 +597,9 @@ impl SurfOfRevolution {
     }
 
     /// [`Self::drop_point_fast`] with upstream's virtual calls on `this` supplied by
-    /// the derived class (`SmSphere`, `SmTorus`): `step_point` is its
-    /// `EvaluateSTEPPoint` and `local_solve` its `LocalPointSolve` (`found` and the
-    /// solution).
+    /// the derived class (`SmCone`, `SmSphere`, `SmTorus`): `step_point` is its
+    /// `EvaluateSTEPPoint`, `evaluate_point` its `EvaluatePoint`, and `local_solve`
+    /// its `LocalPointSolve` (`found` and the solution).
     ///
     /// # Errors
     ///
@@ -617,6 +618,7 @@ impl SurfOfRevolution {
         requested: SolutionRequested,
         this: Option<O>,
         step_point: &dyn Fn(&Kernel, Point2) -> Result<Point3>,
+        evaluate_point: &dyn Fn(&Kernel, Point2) -> Result<Point3>,
         local_solve: &dyn Fn(
             &Kernel,
             &Extent2d,
@@ -815,7 +817,7 @@ impl SurfOfRevolution {
                 }
 
                 // set SolutionValue = dropSurfacePoint to TestPoint distance
-                let surf_pnt = self.base.evaluate_point(uv)?;
+                let surf_pnt = evaluate_point(k, uv)?;
                 sol.start.solution_value = test_point.distance(surf_pnt);
 
                 // skip intersection solutions whose value exceed the DistanceTolerance
