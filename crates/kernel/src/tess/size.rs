@@ -26,6 +26,13 @@ const MIN_LEN_FRACTION: f64 = 1.0 / 4.0;
 /// Curvature samples per parameter direction.
 const SAMPLES: usize = 9;
 
+/// Most segments a face's boundary may get from the facet angle: past it, the face's curved
+/// edges are sampled again at twice the angle (a plate with a thousand small holes is not worth
+/// a hundred times the work to draw each hole round).
+pub(crate) const MAX_ANGLE_BOUNDARY: usize = 4096;
+/// How often the angle is doubled for a crowded face before only the chord tolerance is left.
+pub(crate) const MAX_RELAX: u8 = 4;
+
 /// The most one facet may turn (radians): an edge segment's tangent or a cell's surface normal.
 /// The angle divides only where a facet would sag more than `floor` (mm), so a radius far below
 /// the tolerance keeps its chord facets.
@@ -41,12 +48,11 @@ impl Turn {
         sag > self.floor && angle > self.angle
     }
 
-    /// The angle doubled `level` times, as the reference mesher relaxes it for a crowded face;
-    /// from its last level, or past half a turn, no angle at all (the tolerance alone).
+    /// The angle doubled `level` times, for a crowded face (see [`MAX_ANGLE_BOUNDARY`]); from
+    /// level [`MAX_RELAX`], or past half a turn, no angle at all (the tolerance alone).
     pub(crate) fn relaxed(&self, level: u8) -> Option<Turn> {
-        use truck_meshalgo::tessellation::Deflection;
-        let angle = self.angle * f64::from(1u32 << u32::from(level.min(Deflection::MAX_RELAX)));
-        (level == 0 || (level < Deflection::MAX_RELAX && angle < std::f64::consts::PI)).then_some(Turn { angle, ..*self })
+        let angle = self.angle * f64::from(1u32 << u32::from(level.min(MAX_RELAX)));
+        (level == 0 || (level < MAX_RELAX && angle < std::f64::consts::PI)).then_some(Turn { angle, ..*self })
     }
 }
 
