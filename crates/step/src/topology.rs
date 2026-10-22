@@ -936,7 +936,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let mut u = Vec::with_capacity(l.len());
                 for &(e, forward) in l {
                     let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                    u.push(EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: 0.0 });
+                    u.push(EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: 0.0, given: None });
                 }
                 uses.push(u);
             }

@@ -168,9 +168,16 @@ pcurves and tessellation, one active knot interval per period: a seam on it has
 its two uses an interval apart. The record is unchanged; a parameter outside the
 interval is evaluated a whole number of periods back inside it.
 
-Pcurves are SolidCraft's own, never a kernel's internal parameter space:
-`brep::pcurve::pcurves` computes them from a face's surface record and each
-use's curve record and interval, for every backend. It is exact in closed form
+Where a kernel holds a use's pcurve exactly in the record's parameters, the
+record keeps the kernel's own: the SMLib export takes SMLib's UV trims on
+B-spline faces for edges recorded as splines or lines (the face's parameters
+are SMLib's, the edge's parameter SMLib's or an affine image of it). SMLib keeps
+an analytic face's trims on its internal rational B-spline, whose angle
+parameter is not the record's angle, and a circle's or ellipse's on its NURBS
+parameter, not its angle; neither is an exact B-spline in the record's
+parameters. The rest come from `brep::pcurve::pcurves`, which computes them from
+a face's surface record and each use's curve record and interval, for every
+backend (a use's `given` pcurve is taken as it is). It is exact in closed form
 for lines, polylines and whole splines on planes, circles about the axis of a
 cylinder, cone, sphere or torus (v fixed, u the circle's angle plus a constant)
 and lines along a cylinder's or cone's ruling (u fixed, v linear), each checked

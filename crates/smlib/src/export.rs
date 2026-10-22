@@ -25,9 +25,15 @@
 //!   two faces.
 //! - **Order:** faces, edges and vertices renumbered in the canonical walk; each edge's uses
 //!   from that walk (`upper = !forward`), never SMLib's radial entry flags.
-//! - **Pcurves:** computed from each edge record on its face's surface record
-//!   (`solidcraft_geom::brep::pcurve`), never SMLib's UV trims, moved by whole periods into the
-//!   face's domain.
+//! - **Pcurves:** on a B-spline face, SMLib's own UV trims, exactly: the face's parameters are
+//!   SMLib's, and each trim's knots are moved onto its edge record's parameter where that is an
+//!   affine image of SMLib's (a spline edge's is SMLib's own; a line's the line's STEP
+//!   parameter, which the C side maps the trims onto). SMLib keeps an analytic surface's trims
+//!   on the surface's internal rational B-spline, whose angular parameter is not the angle
+//!   (SmCylinder.h: "the map from one to the other is not linear"), and a circle's or ellipse's
+//!   on its NURBS parameter, not its angle; those pcurves are computed from the edge record on
+//!   the face's surface record (`solidcraft_geom::brep::pcurve`). Every loop is moved by whole
+//!   periods into the face's domain.
 //! - **Tolerances:** each edge's and vertex's own as SMLib reports it (`EDGE_TOLERANCE`,
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
 //!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
@@ -166,6 +172,8 @@ const I64_IDS: &[i32] = &[
     EDGEUSE_ORIENTATION,
     EDGEUSE_NEXT_RADIAL,
     EDGEUSE_RADIAL_ENTRY,
+    EDGEUSE_NURBS_VERTEX_COUNT,
+    EDGEUSE_NURBS_ORDER,
     EDGE_CURVE_TYPE,
     EDGE_VERTICES,
     EDGE_NURBS_VERTEX_COUNT,
@@ -197,6 +205,9 @@ const F64_IDS: &[i32] = &[
     EDGE_ELLIPSE_REF_DIRECTION,
     EDGE_ELLIPSE_X_RADIUS,
     EDGE_ELLIPSE_Y_RADIUS,
+    EDGEUSE_NURBS_CVS,
+    EDGEUSE_NURBS_KNOTS,
+    EDGEUSE_NURBS_WEIGHTS,
     FACE_NURBS_CVS,
     FACE_NURBS_U_KNOTS,
     FACE_NURBS_V_KNOTS,
@@ -476,9 +487,14 @@ fn as_circle(n: &Nurbs, range: [f64; 2]) -> Option<(b::Curve, [f64; 2])> {
     Some((b::Curve::Circle { frame: b::Frame { origin: arr(center), x_axis: arr(x), y_axis: arr(y) }, radius }, [a0, total]))
 }
 
-/// Each edge's record and interval (in SMLib's direction along it), and how many NURBS edges
-/// were recognised as lines or circles and how many stayed splines.
-fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2])>, usize, usize)> {
+/// How a UV trim's parameter (SMLib's edge parameter, as the arrays carry it) becomes the edge
+/// record's: t ↦ scale · t + offset, scale > 0. None where the record's parameter is not an
+/// affine image of SMLib's (a circle or ellipse, whose angle is not its NURBS parameter).
+type TrimMap = Option<[f64; 2]>;
+
+/// Each edge's record and interval (in SMLib's direction along it) and its [`TrimMap`], and how
+/// many NURBS edges were recognised as lines or circles and how many stayed splines.
+fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2], TrimMap)>, usize, usize)> {
     let kinds = flat.i(EDGE_CURVE_TYPE);
     let range = flat.f(EDGE_RANGE);
     if kinds.len() != n_edges || range.len() != 2 * n_edges {
@@ -494,7 +510,8 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2])>, usize, 
             CURVE_LINE => {
                 let (o, d) = (v3(flat.f(EDGE_LINE_ORIGIN), lines, "line")?, v3(flat.f(EDGE_LINE_DIRECTION), lines, "line")?);
                 lines += 1;
-                (b::Curve::Line { start: o, end: [o[0] + d[0], o[1] + d[1], o[2] + d[2]] }, r)
+                // The C side maps a line's trims onto the line's STEP parameter, the record's.
+                (b::Curve::Line { start: o, end: [o[0] + d[0], o[1] + d[1], o[2] + d[2]] }, r, Some([1.0, 0.0]))
             }
             CURVE_CIRCLE => {
                 let f = frame(
@@ -504,7 +521,7 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2])>, usize, 
                 );
                 let radius = at(flat.f(EDGE_CIRCLE_RADIUS), circles, "circle")?;
                 circles += 1;
-                (b::Curve::Circle { frame: f, radius }, r)
+                (b::Curve::Circle { frame: f, radius }, r, None)
             }
             CURVE_ELLIPSE => {
                 let f = frame(
@@ -514,7 +531,7 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2])>, usize, 
                 );
                 let radii = [at(flat.f(EDGE_ELLIPSE_X_RADIUS), ellipses, "ellipse")?, at(flat.f(EDGE_ELLIPSE_Y_RADIUS), ellipses, "ellipse")?];
                 ellipses += 1;
-                (b::Curve::Ellipse { frame: f, radii }, r)
+                (b::Curve::Ellipse { frame: f, radii }, r, None)
             }
             CURVE_NURBS => {
                 let n = count(at(flat.i(EDGE_NURBS_VERTEX_COUNT), nurbs, "NURBS edge")?, "NURBS edge")?;
@@ -530,21 +547,106 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, [f64; 2])>, usize, 
                 kn += n + o;
                 let c = Nurbs { knots, points: cvs.as_chunks::<3>().0.to_vec(), weights };
                 // A fallback: SMLib exports lines, circles and ellipses as their own kinds.
-                match as_line(&c, r).or_else(|| as_circle(&c, r)) {
-                    Some(x) => {
-                        recognised += 1;
-                        x
-                    }
-                    None => {
-                        kept += 1;
-                        (c.record(), r)
-                    }
+                if let Some((line, s)) = as_line(&c, r) {
+                    recognised += 1;
+                    // as_line's t ↦ (t − k₁)/(k₂ − k₁).
+                    let (k1, k2) = (c.knots.get(1).copied().unwrap_or(0.0), c.knots.get(2).copied().unwrap_or(1.0));
+                    (line, s, Some([1.0 / (k2 - k1), -k1 / (k2 - k1)]))
+                } else if let Some((circle, s)) = as_circle(&c, r) {
+                    recognised += 1;
+                    (circle, s, None)
+                } else {
+                    kept += 1;
+                    (c.record(), r, Some([1.0, 0.0]))
                 }
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });
     }
     Ok((out, recognised, kept))
+}
+
+/// Each edgeuse record's UV trim as SMLib holds it (`EDGEUSE_NURBS_*`), along its edgeuse (the
+/// C side writes a trim whose edgeuse runs against its edge reversed, on the reversed parameter
+/// a + b − t of the edge's interval [a, b]); none where the arrays carry none for it (an analytic
+/// face's, or an analytic edge's).
+fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
+    let (counts, orders) = (flat.i(EDGEUSE_NURBS_VERTEX_COUNT), flat.i(EDGEUSE_NURBS_ORDER));
+    if counts.is_empty() && orders.is_empty() {
+        return Ok(vec![None; n_edgeuses]);
+    }
+    if counts.len() != n_edgeuses || orders.len() != n_edgeuses {
+        return Err(invalid("UV trim arrays"));
+    }
+    let (cvs, knots, weights) = (flat.f(EDGEUSE_NURBS_CVS), flat.f(EDGEUSE_NURBS_KNOTS), flat.f(EDGEUSE_NURBS_WEIGHTS));
+    let (mut cv, mut kn) = (0usize, 0usize);
+    let mut out = Vec::with_capacity(n_edgeuses);
+    for (&n, &o) in counts.iter().zip(orders) {
+        let (n, o) = (count(n, "UV trim")?, count(o, "UV trim")?);
+        if n == 0 || o == 0 {
+            out.push(None);
+            continue;
+        }
+        if o < 2 || n < o {
+            return Err(invalid("UV trim order"));
+        }
+        let pts = cvs.get(2 * cv..2 * (cv + n)).ok_or_else(|| invalid("UV trim points"))?;
+        let k = knots.get(kn..kn + n + o).ok_or_else(|| invalid("UV trim knots"))?.to_vec();
+        let w = match weights {
+            [] => vec![1.0; n],
+            w => w.get(cv..cv + n).ok_or_else(|| invalid("UV trim weights"))?.to_vec(),
+        };
+        cv += n;
+        kn += n + o;
+        let pts = pts.as_chunks::<2>().0;
+        out.push(Some(if w.iter().all(|x| *x == 1.0) {
+            b::Curve2::Spline { knots: k, points: pts.to_vec() }
+        } else {
+            b::Curve2::RationalSpline { knots: k, homogeneous: pts.iter().zip(&w).map(|(p, w)| [p[0] * w, p[1] * w, *w]).collect() }
+        }));
+    }
+    if 2 * cv != cvs.len() || kn != knots.len() {
+        return Err(invalid("UV trim arrays: blocks do not cover them"));
+    }
+    Ok(out)
+}
+
+/// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
+/// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
+/// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
+/// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends are the
+/// edge record's interval ends, so the pcurve is defined there; farther apart is an error.
+fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
+    fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
+        if same {
+            return (knots.to_vec(), points.to_vec());
+        }
+        let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
+        (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
+    }
+    let map = |k: Vec<f64>, n: usize| -> Res<Vec<f64>> {
+        let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
+        let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
+        let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
+        let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        if (a - t0).abs() > slack || (z - t1).abs() > slack {
+            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
+        }
+        k.iter_mut().filter(|x| **x == a).for_each(|x| *x = t0);
+        k.iter_mut().filter(|x| **x == z).for_each(|x| *x = t1);
+        Ok(k)
+    };
+    Ok(match trim {
+        b::Curve2::Spline { knots, points } => {
+            let (k, points) = along(knots, points, same);
+            b::Curve2::Spline { knots: map(k, points.len())?, points }
+        }
+        b::Curve2::RationalSpline { knots, homogeneous } => {
+            let (k, homogeneous) = along(knots, homogeneous, same);
+            b::Curve2::RationalSpline { knots: map(k, homogeneous.len())?, homogeneous }
+        }
+    })
 }
 
 /// A domain side moved onto the natural range where it overshoots it by rounding (a sphere's
@@ -580,6 +682,10 @@ struct Face {
     loops: Vec<Loop>,
     /// The array edgeuse record of each use, loop by loop as `loops` (none for a vertex loop).
     records: Vec<Vec<usize>>,
+    /// Each use's pcurve, SMLib's own UV trim on the record's parameters, loop by loop as
+    /// `loops`: on a B-spline face, for an edge whose record's parameter is an affine image of
+    /// SMLib's; none elsewhere.
+    given: Vec<Vec<Option<b::Curve2>>>,
 }
 
 #[derive(Clone)]
@@ -596,6 +702,8 @@ struct Edge {
     vertices: [u32; 2],
     /// The record's parameter runs against SMLib's edge direction.
     reversed: bool,
+    /// How SMLib's UV trims of this edge map onto the record's parameter.
+    trim_map: TrimMap,
 }
 
 /// The schema 4 B-rep of SMLib's flat arrays: mapped, renumbered canonically and validated.
@@ -677,7 +785,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     report.recognised_edges = recognised;
     report.nurbs_edges = kept;
     let mut edges = Vec::with_capacity(n_edges);
-    for (e, (curve, [a, z])) in records.into_iter().enumerate() {
+    for (e, (curve, [a, z], trim_map)) in records.into_iter().enumerate() {
         if !(a.is_finite() && z.is_finite()) || a == z {
             return Err(invalid("edge interval"));
         }
@@ -689,11 +797,13 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
             interval: if reversed { [z, a] } else { [a, z] },
             vertices: if reversed { [end, start] } else { [start, end] },
             reversed,
+            trim_map,
         });
     }
 
     // Faces: loops as SMLib keeps them, then turned where SMLib's normal is not the record's.
     let surfaces = surfaces(flat, n_faces)?;
+    let trims = trims(flat, n_edgeuses)?;
     let range = flat.f(FACE_RANGE);
     if range.len() != 4 * n_faces {
         return Err(invalid("face ranges"));
@@ -703,27 +813,37 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         let natural = surface.natural();
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
+        let spline = matches!(surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. });
         let mut out = Vec::with_capacity(loops.len());
         let mut records = Vec::with_capacity(loops.len());
+        let mut given = Vec::with_capacity(loops.len());
         for l in loops.clone() {
             let uses = loop_edgeuses.get(l).ok_or_else(|| invalid("loop"))?;
             if uses.is_empty() {
                 let v = idx(at(flat.i(LOOP_VERTEX), l, "loop vertex")?, n_vertices, "loop vertex")?;
                 out.push(Loop::Vertex(index(v)?));
                 records.push(Vec::new());
+                given.push(Vec::new());
                 continue;
             }
             let mut l = Vec::with_capacity(uses.len());
+            let mut g = Vec::with_capacity(uses.len());
             records.push(uses.clone().collect());
             for u in uses.clone() {
                 let e = idx(at(flat.i(EDGEUSE_EDGE), u, "edgeuse")?, n_edges, "edgeuse edge")?;
                 let same = at(flat.i(EDGEUSE_ORIENTATION), u, "edgeuse")? == 1;
                 let edge = edges.get(e).ok_or_else(|| invalid("edge"))?;
                 l.push((index(e)?, same != edge.reversed));
+                let trim = trims.get(u).ok_or_else(|| invalid("edgeuse"))?.as_ref();
+                g.push(match (spline, edge.trim_map, trim) {
+                    (true, Some(map), Some(trim)) => Some(mapped(trim, same, map, edge.interval)?),
+                    _ => None,
+                });
             }
             out.push(Loop::Edges(l));
+            given.push(g);
         }
-        faces.push(Face { surface, domain, agrees: true, loops: out, records });
+        faces.push(Face { surface, domain, agrees: true, loops: out, records, given });
     }
     for face in &mut faces {
         if outer_area(face, &edges, largest)? < 0.0 {
@@ -735,6 +855,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                 }
             }
             face.records.iter_mut().for_each(|r| r.reverse());
+            face.given.iter_mut().for_each(|g| g.reverse());
             report.reversed_faces += 1;
         }
     }
@@ -1033,7 +1154,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
                 Loop::Vertex(v) => Ok(Loop::Vertex(*v)),
             })
             .collect::<Res<_>>()?;
-        let mut curves = pcurves(&face.surface, face.domain, &renumbered, &edge_records, tolerance)?.into_iter();
+        let mut curves = pcurves(&face.surface, face.domain, &renumbered, &face.given, &edge_records, tolerance)?.into_iter();
         let mut loops = Vec::with_capacity(renumbered.len());
         for (li, l) in renumbered.iter().enumerate() {
             loops.push(match l {
@@ -1294,16 +1415,37 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
     Ok(())
 }
 
-/// A face's pcurves, edge loop by edge loop, from the plain-record routine on the face's
-/// records, each loop moved by whole periods into the face's domain.
-fn pcurves(surface: &b::Surface, domain: [[f64; 2]; 2], loops: &[Loop], edges: &[b::Edge], tolerance: f64) -> Res<Vec<Vec<b::Curve2>>> {
+/// A face's pcurves, edge loop by edge loop: SMLib's own UV trims where `given` (loop by loop as
+/// `loops`) has them, the plain-record routine on the face's records for the rest; each loop moved
+/// by whole periods into the face's domain.
+fn pcurves(
+    surface: &b::Surface,
+    domain: [[f64; 2]; 2],
+    loops: &[Loop],
+    given: &[Vec<Option<b::Curve2>>],
+    edges: &[b::Edge],
+    tolerance: f64,
+) -> Res<Vec<Vec<b::Curve2>>> {
+    if given.len() != loops.len() {
+        return Err(invalid("UV trims of a face"));
+    }
     let mut uses = Vec::new();
-    for l in loops {
+    for (l, g) in loops.iter().zip(given) {
         let Loop::Edges(l) = l else { continue };
+        if g.len() != l.len() {
+            return Err(invalid("UV trims of a loop"));
+        }
         let mut loop_uses = Vec::with_capacity(l.len());
-        for &(e, forward) in l {
+        for (&(e, forward), given) in l.iter().zip(g) {
             let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(b::pcurve::EdgeUse { edge: e, curve: &edge.curve, interval: edge.interval, forward, tolerance: edge.tolerance });
+            loop_uses.push(b::pcurve::EdgeUse {
+                edge: e,
+                curve: &edge.curve,
+                interval: edge.interval,
+                forward,
+                tolerance: edge.tolerance,
+                given: given.as_ref(),
+            });
         }
         uses.push(loop_uses);
     }
@@ -1318,7 +1460,8 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     let Some(Loop::Edges(outer)) = face.loops.first() else { return Ok(0.0) };
     let records: Vec<b::Edge> =
         edges.iter().map(|e| b::Edge { curve: e.curve.clone(), interval: e.interval, vertices: e.vertices, tolerance, uses: Vec::new() }).collect();
-    let curves = pcurves(&face.surface, face.domain, &[Loop::Edges(outer.clone())], &records, tolerance)?;
+    let given = face.given.first().map(std::slice::from_ref).unwrap_or(&[]);
+    let curves = pcurves(&face.surface, face.domain, &[Loop::Edges(outer.clone())], given, &records, tolerance)?;
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
         let edge = edges.get(e as usize).ok_or_else(|| invalid("edge"))?;

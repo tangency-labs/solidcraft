@@ -36,7 +36,14 @@ fn fit_pcurves(b: &mut Brep) {
                     .iter()
                     .map(|u| {
                         let e = &b.edges[u.edge as usize];
-                        pcurve::EdgeUse { edge: u.edge, curve: &e.curve, interval: e.interval, forward: u.forward, tolerance: e.tolerance }
+                        pcurve::EdgeUse {
+                            edge: u.edge,
+                            curve: &e.curve,
+                            interval: e.interval,
+                            forward: u.forward,
+                            tolerance: e.tolerance,
+                            given: None,
+                        }
                     })
                     .collect(),
                 Loop::Vertex { .. } => vec![],
