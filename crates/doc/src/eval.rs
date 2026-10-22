@@ -986,7 +986,6 @@ pub struct EvalCache {
 struct CachedEval {
     error: Option<String>,
     warning: Option<String>,
-    boolean_diagnostics: kernel::BooleanDiagnostics,
     ms: f64,
     state: Arc<ModelState>,
     /// What the state costs, worked out once when it was stored (see
@@ -1192,7 +1191,6 @@ pub struct FeatureResult {
     pub name: String,
     pub error: Option<String>,
     pub warning: Option<String>,
-    pub boolean_diagnostics: kernel::BooleanDiagnostics,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -2122,7 +2120,6 @@ impl Model {
                     name: f.name.clone(),
                     error: None,
                     warning: None,
-                    boolean_diagnostics: Default::default(),
                     ms: 0.0,
                     skipped: true,
                     stale: false,
@@ -2158,7 +2155,6 @@ impl Model {
                     name: f.name.clone(),
                     error: c.error,
                     warning: c.warning,
-                    boolean_diagnostics: c.boolean_diagnostics,
                     ms: c.ms,
                     skipped: false,
                     stale: false,
@@ -2205,12 +2201,12 @@ impl Model {
             };
             // A parameter with an error fails the features using it, with that error.
             let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
-            let (r, mut boolean_diagnostics) = kernel::capture_boolean_diagnostics(|| match bad_param {
+            let r = match bad_param {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
                     eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
                 }),
-            });
+            };
             if r.is_ok() {
                 // Profiles picked by curves that no longer bound a profile exactly were found
                 // by their best match: say which.
@@ -2222,13 +2218,8 @@ impl Model {
                         }
                     }
                 }
-                if let Some(note) = boolean_diagnostics.warning() {
-                    append_warning(&mut warning, note);
-                }
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
-            } else {
-                boolean_diagnostics = Default::default();
             }
             let ms = t0.elapsed().as_secs_f64() * 1000.0;
             let error = match r {
@@ -2268,7 +2259,6 @@ impl Model {
                 let e = CachedEval {
                     error: error.clone(),
                     warning: warning.clone(),
-                    boolean_diagnostics: boolean_diagnostics.clone(),
                     ms,
                     bytes: state.added_bytes(&before),
                     state: state.clone(),
@@ -2286,7 +2276,6 @@ impl Model {
                 name: f.name.clone(),
                 error,
                 warning,
-                boolean_diagnostics,
                 ms,
                 skipped: false,
                 stale: false,
