@@ -355,7 +355,7 @@ pub fn raise_band(body: &Body, at: Vec3, width: f64, height: f64, outside: bool)
         }
         asm.face(top);
         let finished = asm.finish()?;
-        let b = crate::assemble::body_with_history(&finished, &asm, body, history)?;
+        let b = crate::assemble::body_with_history(finished, &asm, body, history)?;
         let problems = b.validity();
         if !problems.is_empty() {
             return Err(fail(&problems.join("; ")));

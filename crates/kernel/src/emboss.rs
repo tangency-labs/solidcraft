@@ -389,7 +389,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             asm.face(f);
         }
         let finished = asm.finish()?;
-        let result = crate::assemble::body_with_history(&finished, &asm, body, history)?;
+        let result = crate::assemble::body_with_history(finished, &asm, body, history)?;
         if !result.validity().is_empty() {
             return Err(fail("rebuilt cylinder is not a closed manifold"));
         }
