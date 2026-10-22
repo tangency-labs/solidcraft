@@ -9,7 +9,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{GridPlane, colors, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -1117,7 +1117,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             // the world, as the camera's direction is.
             let n = u.cross(v);
             let slant = app.cam.back().dot(n);
-            let far_reach = grid_far_reach(app, proj, c, n);
+            let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, c, n);
             (c, u, v, slant, far_reach, Box::new(|p| p.to_f32()))
         } else {
             let tf = app.cam.to_frame(app.cam.target);
@@ -1144,7 +1144,8 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let snap = |a: Vec3| a * ((centre.dot(a) / major).round() * major);
             let c = snap(u) + snap(v);
             // The far plane cuts the ground, and the grid's plane is the camera's frame's.
-            let far_reach = grid_far_reach(app, proj, app.cam.from_frame(c), app.cam.from_frame(n));
+            let far_reach =
+                solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, app.cam.from_frame(c), app.cam.from_frame(n));
             (c, u, v, slant, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
         };
         // The grid fades out with the distance from the middle of the view (#4214): it used to
@@ -1160,7 +1161,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let wd = if maj { 1.0 } else { 0.7 };
             // Two lines through the point `c + u * t`: one along v, one along u.
             for (along, across) in [(v, u), (u, v)] {
-                for (s0, s1, alpha) in grid_pieces(&fade, t) {
+                for (s0, s1, alpha) in fade.pieces(t) {
                     sc.under_line(w3(c + across * t + along * s0), w3(c + across * t + along * s1), grid_colour(col, alpha), wd);
                 }
             }
@@ -4486,103 +4487,6 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// How the grid fades out with the distance from the middle of the view (#4214).
-///
-/// The grid used to stop at a fixed distance from the view, so its edge showed as a cut across
-/// the picture. It now fades: at full strength near the middle of the view, and gone before the
-/// grid's own edge, which is therefore never seen.
-struct GridFade {
-    /// The distance from the middle of the view where the grid starts to dim.
-    start: f64,
-    /// The distance from the middle of the view where the grid is gone.
-    end: f64,
-}
-
-impl GridFade {
-    /// The fade for a view of the given half height, seen at the given slant (the cosine of the
-    /// angle between the view and the grid's plane), over a grid of the given half size, that
-    /// reaches no further than `far_reach` before the picture's far plane cuts the ground.
-    fn new(half_height: f64, slant: f64, ext: f64, far_reach: f64) -> Self {
-        // The distance from the middle of the view to its edge, measured on the grid's plane: the
-        // ground stretches as it is seen at a slant, as the grid's own size does (#3087).
-        let reach = half_height / slant.abs().max(0.25);
-        // The grid is gone before its own edge, and before the far plane cuts the ground, so that
-        // neither of them shows as a cut.
-        let end = (2.2 * reach).min(ext).min(far_reach);
-        GridFade { start: 0.6 * reach.min(end), end }
-    }
-
-    /// How much of the grid is left at a distance from the middle of the view.
-    fn alpha(&self, d: f64) -> f32 {
-        if !d.is_finite() {
-            return 0.0;
-        }
-        if d <= self.start {
-            return 1.0;
-        }
-        if d >= self.end || self.end <= self.start {
-            return 0.0;
-        }
-        ((self.end - d) / (self.end - self.start)) as f32
-    }
-}
-
-/// How far the grid reaches before the picture's far plane cuts the ground: the distance on the
-/// grid's plane from the middle of the view to where the far plane ends it (#4214). Looking
-/// straight down, the ground's depth does not grow and the far plane never cuts it.
-fn grid_far_reach(app: &SolveApp, proj: &Proj, c: Vec3, n: Vec3) -> f64 {
-    let far = proj.cam.clip(scene_radius(app)).1;
-    let eye = app.cam.eye();
-    // The direction the camera looks, and where it looks on the grid's plane: the ground's
-    // forward direction, which the depth grows along.
-    let view = -app.cam.back();
-    let forward = view - n * view.dot(n);
-    let len = forward.len();
-    if len < 1e-9 {
-        return f64::INFINITY;
-    }
-    let depth = (c - eye).dot(view);
-    if far <= depth {
-        return 0.0;
-    }
-    (far - depth) / len
-}
-
-/// The pieces a grid line is drawn in: each with the alpha the fade gives it at the distance from
-/// the middle of the view where it lies. The line at the given offset from the middle runs along
-/// the grid's other axis; it is drawn whole where the grid is at full strength, and in pieces
-/// that fade towards its ends.
-fn grid_pieces(fade: &GridFade, offset: f64) -> Vec<(f64, f64, f32)> {
-    let mut out = Vec::new();
-    let off = offset.abs();
-    if !(fade.end > 0.0) || off >= fade.end {
-        return out;
-    }
-    // Where the grid is still at full strength.
-    let solid = if off < fade.start { (fade.start * fade.start - off * off).max(0.0).sqrt() } else { 0.0 };
-    if solid > 0.0 {
-        out.push((-solid, solid, 1.0));
-    }
-    // The fading ends, in pieces whose distance from the middle grows evenly, so that the grid
-    // dims evenly too.
-    let from = off.max(fade.start);
-    for k in 0..GRID_FADE_STEPS {
-        let (d0, d1) =
-            (from + (fade.end - from) * k as f64 / GRID_FADE_STEPS as f64, from + (fade.end - from) * (k + 1) as f64 / GRID_FADE_STEPS as f64);
-        let (s0, s1) = ((d0 * d0 - off * off).max(0.0).sqrt(), (d1 * d1 - off * off).max(0.0).sqrt());
-        let alpha = fade.alpha((d0 + d1) * 0.5);
-        if alpha > 0.0 {
-            out.push((s0, s1, alpha));
-            out.push((-s1, -s0, alpha));
-        }
-    }
-    out
-}
-
-/// How many pieces a grid line's fading end is drawn in: enough that the grid dims evenly, few
-/// enough that the grid stays cheap to draw.
-const GRID_FADE_STEPS: u32 = 12;
-
 /// A grid line's colour, as faint as the fade makes it.
 fn grid_colour(c: [u8; 4], alpha: f32) -> [u8; 4] {
     [c[0], c[1], c[2], (f64::from(c[3]) * f64::from(alpha)).round().clamp(0.0, 255.0) as u8]
@@ -7643,6 +7547,7 @@ mod tests {
                             scene.lines.push(solidcraft_engine::render::SceneLine {
                                 points: edge.clone(),
                                 color: solidcraft_engine::view::colors::EDGE,
+                                alpha: 1.0,
                                 width: 1.2,
                                 on_top: false,
                             });
@@ -9296,25 +9201,6 @@ mod grid_plane_tests {
             .fold(([f32::MAX; 2], [f32::MIN; 2]), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])]));
         let (x, y) = (mid.x as f32, mid.y as f32);
         assert!(x > lo[0] && x < hi[0] && y > lo[1] && y < hi[1], "the grid spans {lo:?}..{hi:?}, the middle of the view is at {mid:?}");
-    }
-
-    /// #4214: the grid's fade is at full strength in the middle of the view, and gone before the
-    /// grid's own edge and before the picture's far plane cuts the ground, so that neither of
-    /// them shows as a cut.
-    #[test]
-    fn the_grid_fades_out_before_its_edge_and_before_the_far_plane() {
-        let fade = GridFade::new(40.0, 1.0, 120.0, 90.0);
-        assert!(fade.start < fade.end, "the fade has a width");
-        assert!(fade.end <= 90.0, "the grid is gone before the far plane cuts the ground at 90");
-        assert!(fade.end <= 120.0, "the grid is gone before its own edge at 120");
-        assert_eq!(fade.alpha(0.0), 1.0, "the middle of the grid is at full strength");
-        assert_eq!(fade.alpha(fade.start), 1.0, "the grid is at full strength up to {}", fade.start);
-        assert_eq!(fade.alpha(fade.end), 0.0, "the grid is gone at {}", fade.end);
-        assert_eq!(fade.alpha(fade.end * 2.0), 0.0, "the grid does not come back");
-        assert_eq!(fade.alpha(f64::NAN), 0.0, "a distance that is not a number fades the grid away");
-        // The fade falls evenly.
-        let mid = (fade.start + fade.end) * 0.5;
-        assert!((fade.alpha(mid) - 0.5).abs() < 0.01, "the fade falls evenly: {} at {mid}", fade.alpha(mid));
     }
 
     /// #4214: the grid used to stop at a fixed distance from the view, so its edge showed as a

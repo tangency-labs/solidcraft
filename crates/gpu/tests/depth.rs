@@ -153,7 +153,7 @@ fn front(mesh: Mesh, lines: Vec<SceneLine>, radius: f64, fov: f64) -> (Scene, Ca
 }
 
 fn red_line(a: Vec3, b: Vec3, on_top: bool) -> SceneLine {
-    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), width: 1.2, on_top }
+    SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 1.2, on_top }
 }
 
 fn red_pixels(c: &Capturer, scene: &Scene, cam: &Camera) -> usize {
@@ -193,7 +193,7 @@ fn a_selected_edge_on_a_grazing_face_draws_whole() {
         sc.lifted_line(a.to_f32(), b.to_f32(), [255, 0, 0, 255], 6.0, [n.to_f32(), n.to_f32()]);
         sc
     };
-    let reference = |a: Vec3, b: Vec3| vec![SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), width: 6.0, on_top: true }];
+    let reference = |a: Vec3, b: Vec3| vec![SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 6.0, on_top: true }];
     for (mode, c) in capturers() {
         for tilt in [60.0_f64, 80.0, 85.0, 88.0] {
             let tr = tilt.to_radians();

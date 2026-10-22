@@ -209,6 +209,105 @@ pub fn grid_step(half_height: f64) -> (f64, f64) {
     (minor, minor * 5.0)
 }
 
+/// How the grid fades out with the distance from the middle of the view (#4214).
+///
+/// The grid used to stop at a fixed distance, so its edge showed as a cut across the picture. It
+/// now fades: at full strength near the middle of the view, and gone before the grid's own edge
+/// and before the picture's far plane cuts the ground, so that neither of them shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridFade {
+    /// The distance from the middle of the view where the grid starts to dim.
+    pub start: f64,
+    /// The distance from the middle of the view where the grid is gone.
+    pub end: f64,
+}
+
+impl GridFade {
+    /// The fade for a view of the given half height, seen at the given slant (the cosine of the
+    /// angle between the view and the grid's plane), over a grid of the given half size, that
+    /// reaches no further than `far_reach` before the picture's far plane cuts the ground.
+    pub fn new(half_height: f64, slant: f64, ext: f64, far_reach: f64) -> Self {
+        // The distance from the middle of the view to its edge, measured on the grid's plane: the
+        // ground stretches as it is seen at a slant, as the grid's own size does (#3087).
+        let reach = half_height / slant.abs().max(0.25);
+        // The grid is gone before its own edge, and before the far plane cuts the ground, so that
+        // neither of them shows as a cut.
+        let end = (2.2 * reach).min(ext).min(far_reach);
+        GridFade { start: 0.6 * reach.min(end), end }
+    }
+
+    /// How much of the grid is left at a distance from the middle of the view.
+    pub fn alpha(&self, d: f64) -> f32 {
+        if !d.is_finite() {
+            return 0.0;
+        }
+        if d <= self.start {
+            return 1.0;
+        }
+        if d >= self.end || self.end <= self.start {
+            return 0.0;
+        }
+        ((self.end - d) / (self.end - self.start)) as f32
+    }
+
+    /// The pieces the grid's line at the given offset from the middle is drawn in: each with the
+    /// alpha the fade gives it at the distance where it lies. The line runs along the grid's other
+    /// axis; it is drawn whole where the grid is at full strength, and in pieces that fade
+    /// towards its ends.
+    pub fn pieces(&self, offset: f64) -> Vec<(f64, f64, f32)> {
+        let mut out = Vec::new();
+        let off = offset.abs();
+        if !(self.end > 0.0) || off >= self.end {
+            return out;
+        }
+        // Where the grid is still at full strength.
+        let solid = if off < self.start { (self.start * self.start - off * off).max(0.0).sqrt() } else { 0.0 };
+        if solid > 0.0 {
+            out.push((-solid, solid, 1.0));
+        }
+        // The fading ends, in pieces whose distance from the middle grows evenly, so that the
+        // grid dims evenly too.
+        let from = off.max(self.start);
+        for k in 0..GRID_FADE_STEPS {
+            let (d0, d1) =
+                (from + (self.end - from) * k as f64 / GRID_FADE_STEPS as f64, from + (self.end - from) * (k + 1) as f64 / GRID_FADE_STEPS as f64);
+            let (s0, s1) = ((d0 * d0 - off * off).max(0.0).sqrt(), (d1 * d1 - off * off).max(0.0).sqrt());
+            let alpha = self.alpha((d0 + d1) * 0.5);
+            if alpha > 0.0 {
+                out.push((s0, s1, alpha));
+                out.push((-s1, -s0, alpha));
+            }
+        }
+        out
+    }
+}
+
+/// How many pieces a grid line's fading end is drawn in: enough that the grid dims evenly, few
+/// enough that the grid stays cheap to draw.
+const GRID_FADE_STEPS: u32 = 12;
+
+/// How far the grid reaches before the picture's far plane cuts the ground: the distance on the
+/// grid's plane from the middle of the view to where the far plane ends it (#4214). Looking
+/// straight down, the ground's depth does not grow and the far plane never cuts it.
+///
+/// `c` is the middle of the view and `n` the grid's normal, both in the world.
+pub fn grid_far_reach(cam: &Camera, far: f64, c: Vec3, n: Vec3) -> f64 {
+    let eye = cam.eye();
+    // The direction the camera looks, and where it looks on the grid's plane: the ground's
+    // forward direction, which the depth grows along.
+    let view = -cam.back();
+    let forward = view - n * view.dot(n);
+    let len = forward.len();
+    if len < 1e-9 {
+        return f64::INFINITY;
+    }
+    let depth = (c - eye).dot(view);
+    if far <= depth {
+        return 0.0;
+    }
+    (far - depth) / len
+}
+
 /// Sketch curves as world polylines with their colour.
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_with_sampler(sk, plane, active, determined, world_curve_parts)
@@ -480,34 +579,55 @@ fn build_scene(
     // Grid on the ground plane (XY with Z up, XZ with Y up), drawn under the model as in the viewport.
     if guides.grid {
         let (minor, major) = grid_step(cam.half_height());
-        let ext = (cam.half_height() * 3.0 / major).ceil() * major;
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
-        let (c, u, v, w): (Vec3, Vec3, Vec3, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
+        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
             let (c, u, v) = sketch_grid_frame(&pl, cam.target, major);
-            (c, u, v, Box::new(|p| p))
+            let n = u.cross(v);
+            (c, u, v, cam.back().dot(n), Box::new(|p| p))
         } else {
             let tf = cam.to_frame(cam.target);
             let (u, v) = (Vec3::X, Vec3::Y);
+            let back = cam.to_frame(cam.back());
+            let n = u.cross(v);
             let snap = |a: Vec3| a * ((tf.dot(a) / major).round() * major);
-            (snap(u) + snap(v), u, v, Box::new(|p| cam.from_frame(p)))
+            (snap(u) + snap(v), u, v, back.dot(n), Box::new(|p| cam.from_frame(p)))
         };
-        let n = ((ext / minor) as i64).clamp(1, 400);
+        // The grid reaches as far on the ground as the view is wide (the ground stretches as it
+        // is seen at a slant) and fades out with the distance, so that it dissolves into the
+        // distance instead of ending in a cut (#4214).
+        let ext = {
+            let ext = (cam.half_height() * 3.0 / major).ceil() * major;
+            (ext / slant.abs().max(0.25) / major).ceil() * major
+        };
+        let far_reach = grid_far_reach(cam, cam.clip(sc.radius).1, w(c), w(u.cross(v)));
+        let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
+        let n = ((fade.end / minor) as i64).clamp(1, 400);
         for i in -n..=n {
             let t = i as f64 * minor;
             let major_line = (t / major).fract().abs() < 1e-9;
             let col = if major_line { p.grid_major } else { p.grid };
             // The viewport's widths (pixels).
             let width = if major_line { 1.0 } else { 0.7 };
-            sc.grid.push(SceneLine { points: vec![w(c + u * t - v * ext), w(c + u * t + v * ext)], color: col, width, on_top: false });
-            sc.grid.push(SceneLine { points: vec![w(c - u * ext + v * t), w(c + u * ext + v * t)], color: col, width, on_top: false });
+            // Two lines through the point `c + u * t`: one along v, one along u.
+            for (along, across) in [(v, u), (u, v)] {
+                for (s0, s1, alpha) in fade.pieces(t) {
+                    sc.grid.push(SceneLine {
+                        points: vec![w(c + across * t + along * s0), w(c + across * t + along * s1)],
+                        color: col,
+                        alpha,
+                        width,
+                        on_top: false,
+                    });
+                }
+            }
         }
     }
     // The origin's axes, each unless hidden one by one (`browser.visibility`), as in the viewport.
     let axis = cam.half_height() * 0.25;
     for ((name, d), col) in [("X", Vec3::X), ("Y", Vec3::Y), ("Z", Vec3::Z)].into_iter().zip(p.axes) {
         if guides.axes && !s.visibility.hidden_origin.iter().any(|h| h == name) {
-            sc.lines.push(SceneLine { points: vec![Vec3::ZERO, d * axis], color: col, width: 1.6, on_top: false });
+            sc.lines.push(SceneLine { points: vec![Vec3::ZERO, d * axis], color: col, alpha: 1.0, width: 1.6, on_top: false });
         }
     }
     let selected_occurrences: Vec<String> = s
@@ -548,19 +668,19 @@ fn build_scene(
             && s.doc.face_colors(body).iter().all(|(_, l)| l.opacity >= 0.999)
         {
             for (a, b) in crate::cosmetic_threads::segments_with_budget(body, &mesh, &st.threads, &mut thread_budget) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, width: 0.85, on_top: false });
+                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 0.85, on_top: false });
             }
         }
         for (i, e) in mesh.edges.iter().enumerate() {
             if !mesh.shaded_edge_visible(i) {
                 continue;
             }
-            sc.lines.push(SceneLine { points: e.clone(), color: p.edge, width: 1.2, on_top: false });
+            sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
         }
         // The outline of the body where the section cuts it.
         if let Some((o, n)) = section {
             for (a, b) in section_segments(&mesh, o, n) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, width: 1.6, on_top: false });
+                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
             }
         }
     }
@@ -570,7 +690,7 @@ fn build_scene(
             continue;
         }
         for (pts, col, cons) in sketch_lines_in(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, &mut sampler, p) {
-            sc.lines.push(SceneLine { points: pts, color: col, width: if cons { 1.0 } else { 1.6 }, on_top: active });
+            sc.lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
         }
     }
     sc
@@ -933,7 +1053,13 @@ mod tests {
             assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
             // A marker inside the body, behind the cut face.
             let red = Rgb(255, 0, 0);
-            sc.lines.push(SceneLine { points: vec![Vec3::new(5.0, 25.0, 10.0), Vec3::new(35.0, 25.0, 10.0)], color: red, width: 3.0, on_top: false });
+            sc.lines.push(SceneLine {
+                points: vec![Vec3::new(5.0, 25.0, 10.0), Vec3::new(35.0, 25.0, 10.0)],
+                color: red,
+                alpha: 1.0,
+                width: 3.0,
+                on_top: false,
+            });
             let img = solidcraft_render::render(&sc, &cam, 300, 220);
             let px = || img.rgba.chunks(4);
             let marker = px().filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();

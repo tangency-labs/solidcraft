@@ -430,15 +430,15 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             }
         }
     }
-    let c4 = |c: Rgb| [c.0, c.1, c.2, 255];
+    let c4 = |c: Rgb, a: f32| [c.0, c.1, c.2, (a.clamp(0.0, 1.0) * 255.0).round() as u8];
     for l in &scene.grid {
         for w in l.points.windows(2) {
-            sc.under_line(w[0].to_f32(), w[1].to_f32(), c4(l.color), l.width as f32);
+            sc.under_line(w[0].to_f32(), w[1].to_f32(), c4(l.color, l.alpha), l.width as f32);
         }
     }
     for l in &scene.lines {
         for w in l.points.windows(2) {
-            sc.line(w[0].to_f32(), w[1].to_f32(), c4(l.color), l.width as f32, l.on_top);
+            sc.line(w[0].to_f32(), w[1].to_f32(), c4(l.color, l.alpha), l.width as f32, l.on_top);
         }
     }
     sc
