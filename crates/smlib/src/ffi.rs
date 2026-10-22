@@ -35,6 +35,7 @@ unsafe extern "C" {
     pub fn smlib_brep_write(brep: *const RawBrep, path: *const c_char, ascii: i32) -> i32;
     pub fn smlib_brep_free(brep: *mut RawBrep);
     pub fn smlib_brep_copy(brep: *const RawBrep, out: *mut *mut RawBrep) -> i32;
+    pub fn smlib_brep_transform(brep: *const RawBrep, matrix: *const [f64; 4], out: *mut *mut RawBrep) -> i32;
     pub fn smlib_make_box(origin: *const f64, size: *const f64, out: *mut *mut RawBrep) -> i32;
     pub fn smlib_brep_volume(brep: *const RawBrep, relative_accuracy: f64, out: *mut f64) -> i32;
     pub fn smlib_brep_counts(brep: *const RawBrep, out: *mut i64) -> i32;
@@ -119,6 +120,9 @@ mod calls {
     pub fn copy(b: &Handle) -> Result<Handle, i32> {
         new_brep(|out| unsafe { smlib_brep_copy(b.raw(), out) })
     }
+    pub fn transform(b: &Handle, matrix: &[[f64; 4]; 4]) -> Result<Handle, i32> {
+        new_brep(|out| unsafe { smlib_brep_transform(b.raw(), matrix.as_ptr(), out) })
+    }
     pub fn make_box(origin: &[f64; 3], size: &[f64; 3]) -> Result<Handle, i32> {
         new_brep(|out| unsafe { smlib_make_box(origin.as_ptr(), size.as_ptr(), out) })
     }
@@ -164,6 +168,9 @@ mod calls {
         NOT_BUILT
     }
     pub fn copy(_: &Handle) -> Result<Handle, i32> {
+        Err(NOT_BUILT)
+    }
+    pub fn transform(_: &Handle, _: &[[f64; 4]; 4]) -> Result<Handle, i32> {
         Err(NOT_BUILT)
     }
     pub fn make_box(_: &[f64; 3], _: &[f64; 3]) -> Result<Handle, i32> {

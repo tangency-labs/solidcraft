@@ -197,6 +197,14 @@ impl Brep {
         ffi::copy(&self.0).map(Brep).map_err(error)
     }
 
+    /// This body moved by the affine `matrix` (column-major: columns 0–2 the images of x, y and
+    /// z, column 3 the translation), as SMLib's `SmBrep::Transform` takes a matrix: reflections
+    /// mirror it, a non-uniform scale or a shear turns its geometry into NURBS, tolerances scale
+    /// with it.
+    pub fn transformed(&self, matrix: &[[f64; 4]; 4]) -> Result<Brep> {
+        ffi::transform(&self.0, matrix).map(Brep).map_err(error)
+    }
+
     /// The enclosed volume (mm³) at `relative_accuracy` (SMLib clamps it to [1e-8, 1e-1]).
     pub fn volume(&self, relative_accuracy: f64) -> Result<f64> {
         ffi::volume(&self.0, relative_accuracy).map_err(error)
