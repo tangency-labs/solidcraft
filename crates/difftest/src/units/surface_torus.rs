@@ -1,7 +1,8 @@
 //! Runner for unit `surface.torus`: `SmTorus` (construction through `CreateCanonical`,
 //! `operator==`, `Copy`, `CreateOffsetSurface`, the STEP/NURB conversions, STEP
 //! evaluation, iso curves, `RebuildSTEPFromNURBParameters`, `Transform`, and the
-//! inherited `SmSurfOfRevolution::TrimWithDomain`).
+//! inherited `SmSurfOfRevolution::TrimWithDomain`, `IntersectWithPlane` and
+//! `GlobalSurfaceIntersect` with a plane).
 //!
 //! C++: `solidcore_ffi::units::surface_torus` (upstream `source/SMLib/src/SmTorus.cpp`).
 //! Rust: `solidcore::surface::torus`.
@@ -13,7 +14,8 @@
 //! `SmStatus`; `-1` on the Rust side for an error upstream cannot produce.
 //!
 //! Deferred cases: `Transform` other than the identity or a rejected scale
-//! (`SmSurfOfRevolution::Transform`, `surface.surf_of_revolution_p3`).
+//! (`SmSurfOfRevolution::Transform`, `surface.surf_of_revolution_p3`); a plane
+//! intersection reaching the general intersector (`GlobalSurfaceIntersect`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,7 +25,7 @@ use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::vector2d::Point2;
+use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
@@ -31,6 +33,8 @@ use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::surface::surface::p2::{
     B_SPLINE_SURFACE_TYPE, SURF_OF_REVOLUTION_TYPE, TORUS_TYPE, TYPE,
 };
+use solidcore::surface::plane::Plane;
+use solidcore::surface::surface::p2::{Surface, SurfaceIntersection};
 use solidcore::surface::torus::{Torus, TorusOptions};
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_torus as ffi;
@@ -77,6 +81,38 @@ struct TorusIn {
     circle: Option<CircleIn>,
 }
 
+/// A NURB domain argument.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DomIn {
+    Natural,
+    Explicit { d: [f64; 4] },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PlaneIn {
+    Bounded {
+        origin: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        scale: [f64; 2],
+        dom: [f64; 4],
+    },
+    Infinite {
+        origin: [f64; 3],
+        normal: [f64; 3],
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct Args {
+    dom: DomIn,
+    other_dom: DomIn,
+    #[serde(default)]
+    tol: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum OpIn {
@@ -120,6 +156,14 @@ enum OpIn {
         other: TorusIn,
     },
     Copy {},
+    IsectPlane {
+        plane: PlaneIn,
+        args: Args,
+    },
+    Global {
+        plane: PlaneIn,
+        args: Args,
+    },
     TrimDomain {
         dom: [f64; 4],
     },
@@ -151,6 +195,43 @@ fn ffi_torus(t: &TorusIn) -> ffi::TorusIn {
             d: c.d,
             r: c.r,
         }),
+    }
+}
+
+fn ffi_dom(d: DomIn) -> ffi::Dom {
+    match d {
+        DomIn::Natural => ffi::Dom::Natural,
+        DomIn::Explicit { d } => ffi::Dom::Explicit(d),
+    }
+}
+
+fn ffi_args(a: &Args) -> ffi::IsectArgs {
+    ffi::IsectArgs {
+        dom: ffi_dom(a.dom),
+        other_dom: ffi_dom(a.other_dom),
+        tol: a.tol,
+    }
+}
+
+fn ffi_plane(p: &PlaneIn) -> ffi::Plane {
+    match p {
+        PlaneIn::Bounded {
+            origin,
+            x,
+            y,
+            scale,
+            dom,
+        } => ffi::Plane::Bounded {
+            origin: *origin,
+            x: *x,
+            y: *y,
+            scale: *scale,
+            dom: *dom,
+        },
+        PlaneIn::Infinite { origin, normal } => ffi::Plane::Infinite {
+            origin: *origin,
+            normal: *normal,
+        },
     }
 }
 
@@ -191,6 +272,14 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             other: Box::new(ffi_torus(other)),
         },
         OpIn::Copy {} => ffi::Op::Copy,
+        OpIn::IsectPlane { plane, args } => ffi::Op::IsectPlane {
+            plane: ffi_plane(plane),
+            args: ffi_args(args),
+        },
+        OpIn::Global { plane, args } => ffi::Op::Global {
+            plane: ffi_plane(plane),
+            args: ffi_args(args),
+        },
         OpIn::TrimDomain { dom } => ffi::Op::TrimDomain { dom: *dom },
     };
     let flat = ffi::torus_op(&ffi_torus(&i.torus), &op).map_err(|e| harness(e.to_string()))?;
@@ -389,6 +478,49 @@ fn param_of(p: u8) -> SurfParamType {
     }
 }
 
+fn dom_of(d: DomIn, natural: Extent2d) -> Extent2d {
+    match d {
+        DomIn::Natural => natural,
+        DomIn::Explicit { d: [a, b, c, e] } => Extent2d::from_bounds(a, b, c, e),
+    }
+}
+
+fn rust_plane(p: &PlaneIn) -> Plane {
+    match p {
+        PlaneIn::Bounded {
+            origin,
+            x,
+            y,
+            scale,
+            dom,
+        } => Plane::new(
+            v3(*origin),
+            v3(*x),
+            v3(*y),
+            Vec2::new(scale[0], scale[1]),
+            &Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]),
+        ),
+        PlaneIn::Infinite { origin, normal } => Plane::from_normal(v3(*origin), v3(*normal)),
+    }
+}
+
+/// `more ncurves curves ntypes types ndevs devs nuv1 nuv2 nnull1 nnull2`.
+fn put_intersection(o: &mut Vec<f64>, more: bool, out: &SurfaceIntersection) {
+    o.push(flag(more));
+    o.push(out.curves_3d.len() as f64);
+    for c in &out.curves_3d {
+        put_curve(o, Some(c));
+    }
+    o.push(out.curve_types.len() as f64);
+    o.extend(out.curve_types.iter().map(|t| f64::from(*t as i32)));
+    o.push(out.deviations.len() as f64);
+    o.extend_from_slice(&out.deviations);
+    o.push(out.surface1_uv_curves.len() as f64);
+    o.push(out.surface2_uv_curves.len() as f64);
+    o.push(out.surface1_uv_curves.iter().filter(|c| c.is_none()).count() as f64);
+    o.push(out.surface2_uv_curves.iter().filter(|c| c.is_none()).count() as f64);
+}
+
 /// What a Rust op run produced: the record continues (`Ok`), or the op failed with an
 /// error whose status ends the record (`Err`). Ops that write the state after a
 /// failure push it themselves.
@@ -506,6 +638,49 @@ fn rust_op(
             let c = t.copy();
             o.push(0.0);
             put_state(o, &c).map(|()| o.push(flag(t.approx_eq(&c))))
+        }
+        OpIn::IsectPlane { plane, args } => {
+            let p = rust_plane(plane);
+            let pnat = p.natural_uv_domain();
+            match t.intersect_with_plane(k, &p, &dom_of(args.other_dom, pnat), args.tol) {
+                Ok((more, out)) => {
+                    o.push(0.0);
+                    put_intersection(o, more, &out);
+                    Ok(())
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => {
+                    o.push(status(&e));
+                    Ok(())
+                }
+            }
+        }
+        OpIn::Global { plane, args } => {
+            let p = rust_plane(plane);
+            let nat = t.base().base().natural_uv_domain();
+            let pnat = p.natural_uv_domain();
+            let other = Surface::from(p);
+            match Surface::from(t.copy()).global_surface_intersect(
+                k,
+                &dom_of(args.dom, nat),
+                &other,
+                &dom_of(args.other_dom, pnat),
+                [true, true],
+                args.tol,
+                None,
+            ) {
+                Ok(out) => {
+                    o.push(0.0);
+                    // (`more` is not reported by the general entry point)
+                    put_intersection(o, false, &out);
+                    Ok(())
+                }
+                Err(e) if e.is_unported() => Err(e),
+                Err(e) => {
+                    o.push(status(&e));
+                    Ok(())
+                }
+            }
         }
         OpIn::TrimDomain { dom } => {
             let [a, b, c, d] = *dom;
@@ -664,6 +839,126 @@ fn gen_torus(rng: &mut Rng) -> TorusIn {
     }
 }
 
+/// A sub-box of `d` or `d` itself.
+fn some_dom(rng: &mut Rng, d: Extent2d) -> DomIn {
+    if rng.chance(0.6) {
+        DomIn::Natural
+    } else {
+        let a = d.evaluate(rng.uniform(0.0, 0.4), rng.uniform(0.0, 0.4));
+        let b = d.evaluate(rng.uniform(0.6, 1.0), rng.uniform(0.6, 1.0));
+        DomIn::Explicit {
+            d: [a.x, a.y, b.x, b.y],
+        }
+    }
+}
+
+fn gen_args(rng: &mut Rng, nd: Extent2d, other: Extent2d) -> Args {
+    Args {
+        dom: some_dom(rng, nd),
+        other_dom: some_dom(rng, other),
+        tol: rng
+            .choose(&[None, None, Some(1e-6), Some(1e-3), Some(0.05)])
+            .copied()
+            .flatten(),
+    }
+}
+
+/// A plane for the torus's plane intersection: through the axis (the generator
+/// rotated into it), normal to the axis at a height through, tangent to or missing the
+/// tube (the sweep iso circles), parallel to the axis off it or oblique (the general
+/// intersector), bounded or infinite. `exact` keeps to the planes the special case
+/// answers itself: through the axis, or normal to it cutting the tube transversally or
+/// missing it.
+fn gen_plane(rng: &mut Rng, t: &TorusIn, exact: bool) -> PlaneIn {
+    let axis = normalize(cross3(t.x, t.y));
+    let r = t.minor.abs();
+    let big = t.major.abs() + r;
+    if exact {
+        let (origin, normal, px) = if rng.chance(0.5) {
+            let a = rng.uniform(0.0, 360.0).to_radians();
+            let dir = add(add([0.0; 3], t.x, a.cos()), t.y, a.sin());
+            (t.origin, normalize(cross3(axis, dir)), axis)
+        } else {
+            let h = if rng.chance(0.2) {
+                1.2 * r
+            } else {
+                rng.uniform(-0.9, 0.9) * r
+            };
+            (add(t.origin, axis, h), axis, t.x)
+        };
+        return finish_plane(rng, origin, normal, px, big);
+    }
+    let (origin, normal, px) = match rng.below(8) {
+        // through the axis
+        0..=2 => {
+            let ang = *rng.choose(&[0.0, 30.0, 90.0, 135.0, 180.0, 270.0]).unwrap_or(&0.0)
+                + if rng.chance(0.5) {
+                    rng.uniform(0.0, 360.0)
+                } else {
+                    0.0
+                };
+            let a = ang.to_radians();
+            let dir = add([0.0; 3], t.x, a.cos());
+            let dir = add(dir, t.y, a.sin());
+            let n = normalize(cross3(axis, dir));
+            let shift = if rng.chance(0.2) {
+                rng.uniform(-0.5, 0.5) * r
+            } else {
+                0.0
+            };
+            (add(add(t.origin, axis, rng.uniform(-1.0, 1.0) * r), n, shift), n, axis)
+        }
+        // normal to the axis
+        3..=5 => {
+            let h = match rng.below(7) {
+                0 => r,
+                1 => -r,
+                2 => 0.0,
+                3 => 1.2 * r,
+                4 => r * (1.0 - 1e-9),
+                _ => rng.uniform(-1.0, 1.0) * r,
+            };
+            let n = if rng.chance(0.5) {
+                axis
+            } else {
+                [-axis[0], -axis[1], -axis[2]]
+            };
+            (add(t.origin, axis, h), n, t.x)
+        }
+        // oblique
+        _ => {
+            let n = normalize(add(axis, unit_vec(rng), rng.uniform(0.2, 1.0)));
+            (add(t.origin, n, rng.uniform(-0.5, 0.5) * r), n, cross3(n, unit_vec(rng)))
+        }
+    };
+    finish_plane(rng, origin, normal, px, big)
+}
+
+/// The infinite plane through `origin` normal to `normal`, or a bounded one with X axis
+/// along `px` and half sizes up to `1.5 big`.
+fn finish_plane(rng: &mut Rng, origin: [f64; 3], normal: [f64; 3], px: [f64; 3], big: f64) -> PlaneIn {
+    if rng.chance(0.5) || len3(px) < 1e-3 {
+        PlaneIn::Infinite { origin, normal }
+    } else {
+        let x = normalize(px);
+        let y = normalize(cross3(normal, x));
+        let a = rng.uniform(0.3, 1.5) * big;
+        let b = rng.uniform(0.3, 1.5) * big;
+        PlaneIn::Bounded {
+            origin,
+            x,
+            y,
+            scale: [1.0, 1.0],
+            dom: [-a, -b, a, b],
+        }
+    }
+}
+
+fn len3(a: [f64; 3]) -> f64 {
+    let [x, y, z] = a;
+    (x * x + y * y + z * z).sqrt()
+}
+
 /// A `TrimWithDomain` domain for the NURB domain `nd`: the whole domain, one sticking
 /// out of it, one direction trimmed, a thin strip, one within `SM_EFF_ZERO_PARAM` of
 /// the edge, or a sub-domain.
@@ -765,7 +1060,24 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             tol: *rng.choose(&[0.0, 1e-6, 1e-3, 0.1])?,
             rebuild: rng.chance(0.4),
         },
-        9 => OpIn::Rebuild {},
+        // (a sub-draw keeps the other ops' generated cases unchanged)
+        9 => {
+            if rng.below(3) == 0 {
+                OpIn::Rebuild {}
+            } else {
+                // (`Global` takes only the planes its special case answers: the general
+                // intersection behind it is not ported for a torus)
+                let global = rng.chance(0.25);
+                let plane = gen_plane(rng, &torus, global);
+                let pnat = rust_plane(&plane).natural_uv_domain();
+                let args = gen_args(rng, nd, pnat);
+                if global {
+                    OpIn::Global { plane, args }
+                } else {
+                    OpIn::IsectPlane { plane, args }
+                }
+            }
+        }
         10 => {
             let identity = rng.chance(0.4);
             let (x, y) = if identity {
@@ -870,6 +1182,8 @@ mod tests {
             OpIn::Transform { .. } => "transform",
             OpIn::Eq { .. } => "eq",
             OpIn::Copy {} => "copy",
+            OpIn::IsectPlane { .. } => "isect_plane",
+            OpIn::Global { .. } => "global",
             OpIn::TrimDomain { .. } => "trim_domain",
         }
     }
@@ -908,6 +1222,8 @@ mod tests {
             "transform",
             "eq",
             "copy",
+            "isect_plane",
+            "global",
             "trim_domain",
         ] {
             let ok = tally.iter().any(|((o, k), _)| {

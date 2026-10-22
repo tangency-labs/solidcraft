@@ -17,6 +17,7 @@
 //! | [`Torus::make_nurb`]                         | `SmSurfOfRevolution::MakeNurb` on a torus (virtual iso curves) |
 //! | [`Torus::reparameterize`], [`Torus::adjust_step_uv_domain`] | `SmSurfOfRevolution::Reparameterize`, `AdjustSTEPUVDomain` on a torus (virtual iso curves) |
 //! | [`Torus::trim_with_domain`]                 | `SmSurfOfRevolution::TrimWithDomain` on a torus (virtual conversion and iso curves) |
+//! | [`Torus::intersect_with_plane`]             | `SmSurfOfRevolution::IntersectWithPlane` on a torus (virtual iso curves) |
 //! | [`Torus::create_offset_surface`]             | `CreateOffsetSurface`                        |
 //! | [`Torus::convert_uv_from_step_to_nurbs`]     | `ConvertUVFromSTEPToNURBS`                   |
 //! | [`Torus::convert_uv_from_nurbs_to_step`]     | `ConvertUVFromNURBSToSTEP`                   |
@@ -41,6 +42,8 @@
 //!   and the private `rebuild_polar_converter`. [`Torus::trim_with_domain`] also takes
 //!   the torus's `ConvertUVFromNURBSToSTEP`, and returns a failed corner conversion
 //!   (upstream ignores it and reads the corner it may not have written).
+//!   [`Torus::intersect_with_plane`] runs the inherited `IntersectWithPlane` with the
+//!   torus's iso circles.
 //! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
 //!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
 //!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
@@ -81,10 +84,14 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, IsoCurveOptions, SurfParamType};
 use crate::nurbs::nurbs_crv::to_euclid;
+use crate::surface::plane::p2::PlaneOwner;
+use crate::surface::plane::Plane;
 use crate::surface::surf_of_revolution::{
     test_for_iso_circles, RevolutionIsoCurve, SurfOfRevolution,
 };
-use crate::surface::surface::p2::{scale_step_angular_derivatives, TORUS_TYPE};
+use crate::surface::surface::p2::{
+    scale_step_angular_derivatives, SurfaceIntersection, TORUS_TYPE,
+};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_NEW: &str = "surface::torus::Torus::new";
@@ -361,6 +368,58 @@ impl Torus {
     /// The `SmSurfOfRevolution` base object, mutable.
     pub fn base_mut(&mut self) -> &mut SurfOfRevolution {
         &mut self.base
+    }
+
+    /// The special-case intersection with `plane` and whether the general intersector
+    /// is still needed (`SmSurfOfRevolution::IntersectWithPlane` on a torus): the
+    /// inherited body, its sweep iso circles (a plane normal to the axis) made by the
+    /// torus's `CreateIsoParametricCurve` override. The plane is taken as without
+    /// owner, as for [`SurfOfRevolution::intersect_with_plane`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::intersect_with_plane`] and of the torus's iso
+    /// circles.
+    pub fn intersect_with_plane(
+        &self,
+        k: &Kernel,
+        plane: &Plane,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
+        self.intersect_with_plane_owned(
+            k,
+            plane,
+            PlaneOwner::NoFace,
+            other_uv_domain,
+            approx_tol_3d,
+        )
+    }
+
+    /// [`Torus::intersect_with_plane`] with the plane's owner: its box is expanded by
+    /// the tolerance of the plane's face (`GetFace()->GetTolerance()`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Torus::intersect_with_plane`]; [`SolidError::Unported`]
+    /// (`SmFace::GetTolerance`) for a plane with a face whose tolerance is not cached.
+    pub(crate) fn intersect_with_plane_owned(
+        &self,
+        k: &Kernel,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
+        let shape = self.shape();
+        self.base.intersect_with_plane_owned_using(
+            k,
+            plane,
+            plane_owner,
+            other_uv_domain,
+            approx_tol_3d,
+            &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+        )
     }
 
     /// Trims to the NURB domain `new_nurb_uv_domain` (`SmSurfOfRevolution::TrimWithDomain`

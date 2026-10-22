@@ -485,7 +485,8 @@ fn push_sphere(o: &mut Vec<f64>, s: &SphereIn) -> Result<(), FfiError> {
     Ok(())
 }
 
-fn push_plane(o: &mut Vec<f64>, p: &Plane) -> Result<(), FfiError> {
+/// Validates and encodes the plane block (also the torus shim's).
+pub(crate) fn push_plane(o: &mut Vec<f64>, p: &Plane) -> Result<(), FfiError> {
     match p {
         Plane::Bounded {
             origin,
@@ -522,7 +523,8 @@ fn push_plane(o: &mut Vec<f64>, p: &Plane) -> Result<(), FfiError> {
     Ok(())
 }
 
-fn push_args(o: &mut Vec<f64>, a: &IsectArgs) -> Result<(), FfiError> {
+/// Validates and encodes the domain and tolerance arguments (also the torus shim's).
+pub(crate) fn push_args(o: &mut Vec<f64>, a: &IsectArgs) -> Result<(), FfiError> {
     push_dom(o, a.dom, "domain")?;
     push_dom(o, a.other_dom, "other domain")?;
     let tol = a.tol.unwrap_or(0.0);

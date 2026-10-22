@@ -1488,13 +1488,8 @@ impl Surface {
             SurfaceKind::Sphere(s) => {
                 s.intersect_with_plane(k, uv_domain, plane, other_uv_domain, approx_tol_3d)
             }
-            SurfaceKind::Torus(_) => {
-                // DISPATCH GAP (#76): the inherited SmSurfOfRevolution::IntersectWithPlane
-                // makes iso curves through the torus's virtual CreateIsoParametricCurve.
-                Err(SolidError::unported(
-                    "SurfaceKind::Torus::IntersectWithPlane callbacks",
-                    "surface.surface_p2",
-                ))
+            SurfaceKind::Torus(s) => {
+                s.intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
             }
             SurfaceKind::SurfOfRevolution(s) => {
                 s.intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
@@ -2138,17 +2133,48 @@ impl Surface {
                     )
                 },
             ),
-            // the inherited SmSurfOfRevolution::GlobalSurfaceIntersect: its special
-            // cases (plane, sphere, cone, surface of revolution) run through the
-            // torus's virtual iso curves and conversions (DISPATCH GAP, #76); any
-            // other surface takes the general intersection
-            SurfaceKind::Torus(_) => match other.kind() {
-                SurfaceKind::Plane(_)
-                | SurfaceKind::Sphere(_)
-                | SurfaceKind::SurfOfRevolution(_) => Err(SolidError::unported(
-                    "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
-                    "surface.surface_p2",
-                )),
+            // the inherited SmSurfOfRevolution::GlobalSurfaceIntersect: the plane
+            // special case runs the inherited IntersectWithPlane with the torus's iso
+            // circles, then the general intersection when it needs more (its curves
+            // follow: upstream appends to the same arrays); the other special cases
+            // (sphere, cone, surface of revolution) run through the torus's virtual
+            // iso curves and conversions (DISPATCH GAP, #76); any other surface takes
+            // the general intersection
+            SurfaceKind::Torus(t) => match other.kind() {
+                SurfaceKind::Plane(p) => {
+                    // the plane's boxes take its face's tolerance
+                    let (more, mut out) = t.intersect_with_plane_owned(
+                        k,
+                        p,
+                        crate::surface::plane::p2::PlaneOwner::of(other)?,
+                        other_uv_domain,
+                        approx_tol_3d,
+                    )?;
+                    if more {
+                        let more = base_global_surface_intersect(
+                            k,
+                            self,
+                            uv_domain,
+                            other,
+                            other_uv_domain,
+                            use_surface_edges,
+                            approx_tol_3d,
+                            ang_tol_rad,
+                        )?;
+                        out.curves_3d.extend(more.curves_3d);
+                        out.surface1_uv_curves.extend(more.surface1_uv_curves);
+                        out.surface2_uv_curves.extend(more.surface2_uv_curves);
+                        out.curve_types.extend(more.curve_types);
+                        out.deviations.extend(more.deviations);
+                    }
+                    Ok(out)
+                }
+                SurfaceKind::Sphere(_) | SurfaceKind::SurfOfRevolution(_) => {
+                    Err(SolidError::unported(
+                        "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
+                        "surface.surface_p2",
+                    ))
+                }
                 SurfaceKind::Cone(c) if c.type_code() == CONE_TYPE => Err(SolidError::unported(
                     "SurfaceKind::Torus::GlobalSurfaceIntersect special cases",
                     "surface.surface_p2",

@@ -4,7 +4,8 @@
 // (the constructor and MakeNurb), operator==, Copy, CreateOffsetSurface,
 // ConvertUVFromSTEPToNURBS, ConvertUVFromNURBSToSTEP, EvaluateSTEP, EvaluateSTEPPoint,
 // CreateIsoParametricCurve, RebuildSTEPFromNURBParameters, Transform, GetMaxAnalyticDomain,
-// GetInsideOut and IsKindOf; and the inherited SmSurfOfRevolution::TrimWithDomain.
+// GetInsideOut and IsKindOf; and the inherited SmSurfOfRevolution::TrimWithDomain,
+// IntersectWithPlane and GlobalSurfaceIntersect (with a plane).
 //
 // One entry point, sc_surface_torus_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_torus.rs, which validates every input
@@ -23,8 +24,10 @@
 #include <SmExtent2d.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
+#include <SmPlane.h>
 #include <SmSurfOfRevolution.h>
 #include <SmSurface.h>
+#include <SmTArray.h>
 #include <SmTorus.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
@@ -54,6 +57,8 @@ enum : int32_t
     OP_EQ = 8,
     OP_COPY = 9,
     OP_TRIM_DOMAIN = 10,
+    OP_ISECT_PLANE = 11,
+    OP_GLOBAL = 12,
 };
 
 // Reads the protected members through pointers to members named in a derived class.
@@ -240,6 +245,61 @@ void put_state(std::vector<double>& o, const SmTorus* s)
         o.push_back(sur->knv->U[i]);
 }
 
+// A domain block `natural D[4]`: the surface's natural domain or D.
+SmExtent2d read_dom(Rd& rd, const SmSurface* s)
+{
+    bool natural = rd.flag();
+    SmExtent2d d = rd.domain();
+    return natural ? s->GetNaturalUVDomain() : d;
+}
+
+// A plane block `kind`: 0 `O[3] X[3] Y[3] su sv D[4]` (SmPlane(O, X, Y, (su, sv), D)),
+// 1 `O[3] N[3]` (SmPlane(O, N)).
+SmPlane* read_plane(Rd& rd, const SmContext& ctx)
+{
+    int64_t kind = rd.idx();
+    if (kind == 0)
+    {
+        SmPoint3d o = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double su = rd.num();
+        double sv = rd.num();
+        SmExtent2d d = rd.domain();
+        return new (ctx) SmPlane(o, x, y, SmVector2d(su, sv), d, &ctx);
+    }
+    SmPoint3d o = rd.vec();
+    SmVector3d n = rd.vec();
+    return new (ctx) SmPlane(o, n, &ctx);
+}
+
+// The intersection record: `more ncurves curves ntypes types ndevs devs nuv1 nuv2 nnull1
+// nnull2`.
+void put_intersection(std::vector<double>& o, SmBoolean more, SmTArray<SmCurve*>& c3d,
+                      SmTArray<SmCurve*>& uv1, SmTArray<SmCurve*>& uv2,
+                      SmTArray<SmTsectCurveType>& types, SmTArray<double>& devs)
+{
+    o.push_back(flg(more));
+    o.push_back((double)c3d.GetSize());
+    for (ULONG i = 0; i < c3d.GetSize(); i++)
+        put_curve(o, c3d[i]);
+    o.push_back((double)types.GetSize());
+    for (ULONG i = 0; i < types.GetSize(); i++)
+        o.push_back((double)types[i]);
+    o.push_back((double)devs.GetSize());
+    for (ULONG i = 0; i < devs.GetSize(); i++)
+        o.push_back(devs[i]);
+    ULONG null1 = 0, null2 = 0;
+    for (ULONG i = 0; i < uv1.GetSize(); i++)
+        null1 += uv1[i] == NULL ? 1 : 0;
+    for (ULONG i = 0; i < uv2.GetSize(); i++)
+        null2 += uv2[i] == NULL ? 1 : 0;
+    o.push_back((double)uv1.GetSize());
+    o.push_back((double)uv2.GetSize());
+    o.push_back((double)null1);
+    o.push_back((double)null2);
+}
+
 void torus_op(int32_t op, Rd& rd, const SmContext& ctx, SmTorus* s, std::vector<double>& o)
 {
     switch (op)
@@ -381,6 +441,34 @@ void torus_op(int32_t op, Rd& rd, const SmContext& ctx, SmTorus* s, std::vector<
             o.push_back(flg(*s == *c));
         }
         delete c;
+        break;
+    }
+    case OP_ISECT_PLANE:
+    case OP_GLOBAL:
+    {
+        SmPlane* plane = read_plane(rd, ctx);
+        SmExtent2d dom = read_dom(rd, s);
+        SmExtent2d odom = read_dom(rd, plane);
+        bool has_tol = rd.flag();
+        SmApproxTol3d tol = rd.num();
+        SmBoolean edges[2] = {TRUE, TRUE};
+        SmBoolean more = FALSE;
+        SmTArray<SmCurve*> c3d, uv1, uv2;
+        SmTArray<SmTsectCurveType> types;
+        SmTArray<double> devs;
+        SmStatus stt = op == OP_ISECT_PLANE
+                           ? s->IntersectWithPlane(ctx, dom, *plane, odom, edges,
+                                                   has_tol ? &tol : NULL, NULL, more, &c3d,
+                                                   &uv1, &uv2, &types, &devs)
+                           : s->GlobalSurfaceIntersect(ctx, dom, *plane, odom, edges,
+                                                       has_tol ? &tol : NULL, NULL, &c3d, &uv1,
+                                                       &uv2, &types, &devs);
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+            put_intersection(o, more, c3d, uv1, uv2, types, devs);
+        for (ULONG i = 0; i < c3d.GetSize(); i++)
+            delete c3d[i];
+        delete plane;
         break;
     }
     case OP_TRIM_DOMAIN:

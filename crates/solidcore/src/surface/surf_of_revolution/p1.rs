@@ -1458,7 +1458,6 @@ impl SurfOfRevolution {
     ///
     /// Those of [`SurfOfRevolution::intersect_with_plane`]; [`SolidError::Unported`]
     /// (`SmFace::GetTolerance`) for a plane with a face whose tolerance is not cached.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub(crate) fn intersect_with_plane_owned(
         &self,
         k: &Kernel,
@@ -1466,6 +1465,34 @@ impl SurfOfRevolution {
         plane_owner: PlaneOwner,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
+    ) -> Result<(bool, SurfaceIntersection)> {
+        self.intersect_with_plane_owned_using(
+            k,
+            plane,
+            plane_owner,
+            other_uv_domain,
+            approx_tol_3d,
+            &Self::own_sweep_iso,
+        )
+    }
+
+    /// [`SurfOfRevolution::intersect_with_plane_owned`] with the sweep iso circles of
+    /// a plane normal to the axis made by `iso` (upstream's virtual
+    /// `CreateIsoParametricCurve`: a derived class such as `SmTorus`, which inherits
+    /// `IntersectWithPlane`, passes its override).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`SurfOfRevolution::intersect_with_plane_owned`] and of `iso`.
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub(crate) fn intersect_with_plane_owned_using(
+        &self,
+        k: &Kernel,
+        plane: &Plane,
+        plane_owner: PlaneOwner,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+        iso: SweepIsoFn<'_>,
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
 
@@ -1617,9 +1644,7 @@ impl SurfOfRevolution {
                     continue;
                 }
 
-                let crv = self
-                    .create_iso_parametric_curve(k, surf_param, iso_param, None)?
-                    .curve;
+                let crv = iso(self, k, surf_param, iso_param)?;
                 for c in trim(&crv, &plane_pbox)? {
                     out.curves_3d.push(c);
                     types.push(if is_tangent {
