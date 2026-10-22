@@ -182,6 +182,7 @@ const I64_IDS: &[i32] = &[
     FACE_NURBS_V_VERTEX_COUNT,
     FACE_NURBS_U_ORDER,
     FACE_NURBS_V_ORDER,
+    FACE_NURBS_FORM,
 ];
 
 /// The double arrays this mapping reads.
