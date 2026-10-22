@@ -80,21 +80,6 @@ fn chamfers_meeting_at_a_corner_still_build() {
     assert!(crate::fillet(&b, &edges, 5.0).is_ok());
 }
 
-/// A result that changes more of the part than the blends can is refused (#871's shelled box
-/// lost 240 mm³ more than any round of its edge could take).
-#[test]
-fn a_result_that_removes_more_than_the_blend_is_refused() {
-    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
-    let e = [Vec3::new(10.0, 0.0, 20.0)];
-    let size = crate::blend_fit::Size::Chamfer(2.0);
-    let good = crate::chamfer(&b, &e, 2.0).unwrap();
-    assert!(crate::blend_fit::check_volume(&b, good, &e, size).is_ok());
-    // A chamfer and a 1 mm slab off the far side as well.
-    let worse = cut(&crate::chamfer(&b, &e, 2.0).unwrap(), [0.0, 19.0, 0.0], [20.0, 20.0, 20.0]);
-    let m = too_large(crate::blend_fit::check_volume(&b, worse, &e, size));
-    assert!(m.contains("more than the chamfer can"), "{m}");
-}
-
 /// #1668: a box shelled outward 2 mm, open at the bottom. R5 on its top outer edge alone leaves
 /// the sharp inside corner 2 mm away on its ball's side, 0.76 mm inside the round; it reaches
 /// the corner only past 2√2 / (√2 - 1) ≈ 6.83 mm. With the inside edge rounded in the same

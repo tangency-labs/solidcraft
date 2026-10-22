@@ -48,7 +48,8 @@ pub enum Error {
     NoMatch { point: usize },
     /// Selection point `point` is equally near to two edges (faces).
     Ambiguous { point: usize },
-    /// An inward offset (a shell's wall, faces moved in) leaves no room inside the body.
+    /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
+    /// inside the body, or a blend is larger than the faces it rolls on allow.
     NoRoom,
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
@@ -80,7 +81,7 @@ impl std::fmt::Display for Error {
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
-            Error::NoRoom => write!(f, "the offset leaves no room inside the body"),
+            Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),

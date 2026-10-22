@@ -15,7 +15,6 @@
 mod assemble;
 mod blend;
 mod blend_corner;
-mod blend_fit;
 mod blend_smlib;
 mod blend_variable;
 #[cfg(test)]
