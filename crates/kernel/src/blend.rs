@@ -769,3 +769,7 @@ mod tests {
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
 }
+
+#[cfg(test)]
+#[path = "curvecorner_tests.rs"]
+mod corner_tests;
