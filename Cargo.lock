@@ -4260,6 +4260,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-cloud"
+version = "0.24.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "zstd 0.13.3",
+]
+
+[[package]]
 name = "solidcraft-derive"
 version = "0.29.0"
 dependencies = [
