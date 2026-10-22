@@ -67,7 +67,7 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
     let kept: Vec<bool> = match keep {
         TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => {
-            let side = ToolSide::of(tool)?;
+            let side = ToolSide::of(tool, body)?;
             let want = side.at(p);
             if !want.is_finite() {
                 return Err(KernelError::Invalid("the side of the tool the point is on can't be told".into()));
@@ -162,7 +162,7 @@ pub fn mutual_trim(a: &Body, b: &Body, keep_a: TrimKeep, keep_b: TrimKeep, exten
 /// `x` trimmed by `tool` where the tool crosses it; whole where it ends on the tool; extended to
 /// the tool first (when `extend`) where it stops short of it.
 fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) -> Result<Body> {
-    let side = ToolSide::of(tool)?;
+    let side = ToolSide::of(tool, x)?;
     let size = x.size();
     let touch = size * 1e-6 + 1e-9;
     let m = x.mesh(&crate::MeshTolerance::chord(size * 2e-3))?;
