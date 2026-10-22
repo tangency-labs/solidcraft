@@ -131,7 +131,7 @@
       "rolled_back": false,
       "suppressed": false,
       "type": "BoxFeature",
-      "warning": "Boolean retry: exact planar fallback (no displacement)"
+      "warning": null
     },
     {
       "error": null,

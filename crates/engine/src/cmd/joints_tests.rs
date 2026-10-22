@@ -1826,10 +1826,9 @@ mod motion_analysis;
 mod motion_sweep;
 
 /// A pin through a hole of its own radius whose axis is a hair off the hole's (parts placed from
-/// rounded coordinates): the walls are all but tangent along two lines, which the boolean can't
-/// intersect. Each offset gets a checked answer: clear on the axis and within the kernel's
-/// same-surface tolerance, and otherwise the crescent the pin shares with the plate, against
-/// the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
+/// rounded coordinates): the walls are all but tangent along two lines. Each offset gets a
+/// checked answer: clear on the axis and within the kernel's same-surface tolerance, and
+/// otherwise the crescent the pin shares with the plate, against the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
 #[test]
 fn interference_of_a_pin_a_hair_off_its_hole() {
     let crescent = |r: f64, e: f64| std::f64::consts::PI * r * r - (2.0 * r * r * (e / (2.0 * r)).acos() - e / 2.0 * (4.0 * r * r - e * e).sqrt());
@@ -1849,7 +1848,6 @@ fn interference_of_a_pin_a_hair_off_its_hole() {
         let want = 5.0 * crescent(3.0, offset);
         let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
         assert!((got - want).abs() < 1e-6 * want, "{offset}: {got} against {want}: {i}");
-        assert!((i["interferences"][0]["near_coaxial"]["offset_mm"].as_f64().unwrap_or(0.0) - offset).abs() < 1e-9, "{i}");
     }
 }
 
@@ -1870,7 +1868,6 @@ fn interference_of_a_headed_pin_a_hair_off_a_bush_of_its_heads_radius() {
     let want = 5.0 * crescent(3.0, offset);
     let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
     assert!((got - want).abs() < 1e-6 * want, "{got} against {want}: {i}");
-    assert!(i["interferences"][0]["near_coaxial"].is_object(), "{i}");
 }
 
 /// A headed pin made before the plate it sits in, a hair off the plate's hole: the crescent

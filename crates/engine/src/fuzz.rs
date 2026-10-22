@@ -64,8 +64,6 @@ pub struct Run {
     pub unsupported: Vec<(String, String)>,
     /// Steps whose generated parameters a command refused.
     pub rejected: usize,
-    pub boolean_fallbacks: std::collections::BTreeMap<solidcraft_kernel::BooleanStrategy, usize>,
-    pub boolean_reports_truncated: bool,
 }
 
 impl Run {
@@ -84,9 +82,8 @@ fn classify(e: &EngineError) -> Outcome {
     match e {
         EngineError::Internal(..) => Outcome::new("panic", msg),
         EngineError::BadParams { .. } | EngineError::Disabled(..) | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
-        // A failed boolean is a failure even when it says "not supported" (the planar fallback on
-        // curved bodies): those are the cases to fix. Features the kernel doesn't do yet (a
-        // fillet between curved faces) are limitations.
+        // A failed boolean is a failure even when it says "not supported": those are the cases
+        // to fix. Features the kernel doesn't do yet are limitations.
         // Picks the generator got wrong (a centroid off its face).
         EngineError::Other(_) if msg.starts_with("invalid input") => Outcome::new("rejected", msg),
         EngineError::Other(_) if msg.contains("boolean") => Outcome::new("failed", msg),
@@ -340,8 +337,6 @@ fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (
         outcome: Outcome::ok(),
         unsupported: Vec::new(),
         rejected: 0,
-        boolean_fallbacks: Default::default(),
-        boolean_reports_truncated: false,
     };
     let mut last_feature: Option<String> = None;
     let n = 2 + r.below(max_steps.max(2) - 1);
@@ -367,12 +362,6 @@ fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (
             continue;
         }
         let kind = st.kind;
-        for result in s.model.results.iter().skip(before).filter(|result| result.error.is_none()) {
-            run.boolean_reports_truncated |= result.boolean_diagnostics.truncated;
-            for event in &result.boolean_diagnostics.events {
-                *run.boolean_fallbacks.entry(event.strategy).or_default() += 1;
-            }
-        }
         run.steps.push(st);
         if out.kind != "ok" {
             run.outcome = out;
@@ -388,19 +377,14 @@ fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (
 /// Run fixed steps (a recorded or minimised design): the index and outcome of the first step
 /// that isn't ok (or the last step's, ok).
 pub fn replay(steps: &[Step]) -> (usize, Outcome) {
-    let (index, outcome, _) = replay_session(steps);
-    (index, outcome)
-}
-
-fn replay_session(steps: &[Step]) -> (usize, Outcome, Session) {
     let mut s = Session::default();
     for (i, st) in steps.iter().enumerate() {
         let out = apply(&mut s, st);
         if out.kind != "ok" {
-            return (i, out, s);
+            return (i, out);
         }
     }
-    (steps.len().saturating_sub(1), Outcome::ok(), s)
+    (steps.len().saturating_sub(1), Outcome::ok())
 }
 
 /// The start of a message, to tell failures apart (numbers vary between versions of a case).
@@ -431,16 +415,8 @@ pub fn minimise(run: &Run) -> Run {
             }
         }
     }
-    let (_, outcome, session) = replay_session(&steps);
-    let mut boolean_fallbacks = std::collections::BTreeMap::new();
-    let mut boolean_reports_truncated = false;
-    for result in &session.model.results {
-        boolean_reports_truncated |= result.boolean_diagnostics.truncated;
-        for event in &result.boolean_diagnostics.events {
-            *boolean_fallbacks.entry(event.strategy).or_default() += 1;
-        }
-    }
-    Run { seed: run.seed, steps, outcome, unsupported: Vec::new(), rejected: 0, boolean_fallbacks, boolean_reports_truncated }
+    let (_, outcome) = replay(&steps);
+    Run { seed: run.seed, steps, outcome, unsupported: Vec::new(), rejected: 0 }
 }
 
 #[cfg(test)]
