@@ -4253,6 +4253,7 @@ dependencies = [
  "serde_json",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-kernel",
  "solidcraft-mcp",
 ]
 

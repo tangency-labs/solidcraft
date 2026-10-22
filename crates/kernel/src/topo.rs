@@ -122,8 +122,6 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     let mut weld_e: HashMap<(usize, usize, (i64, i64, i64)), usize> = HashMap::new();
     let mut welded_faces: Vec<Vec<usize>> = Vec::new();
     let mut welded_ends: Vec<(usize, usize)> = Vec::new();
-    // How many face uses each welded edge has (a seam: two, on one face).
-    let mut welded_uses: Vec<usize> = Vec::new();
     // A record edge standing for each welded edge (for its points).
     let mut rep: Vec<u32> = Vec::new();
     for (ei, (e, between)) in record.edges.iter().zip(edge_faces(record)).enumerate() {
@@ -135,11 +133,7 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
         if we == welded_faces.len() {
             welded_faces.push(Vec::new());
             welded_ends.push((a, z));
-            welded_uses.push(0);
             rep.push(ei as u32);
-        }
-        if let Some(n) = welded_uses.get_mut(we) {
-            *n += e.uses.len();
         }
         if let Some(fs) = welded_faces.get_mut(we) {
             for f in between {
@@ -212,12 +206,8 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             }
             continue;
         }
-        // An edge between two pieces of one merged face, or a seam (one face on both its sides),
-        // is no edge of the merged topology; one face on one side only is an open edge.
-        let seam = welded_uses.get(we).is_some_and(|n| *n >= 2);
         let pair = match gs[..] {
             [a, b] if a == b => continue,
-            [_] if seam => continue,
             [a, b] => (a.min(b), a.max(b)),
             [a] => (a, a),
             _ => (usize::MAX, usize::MAX),

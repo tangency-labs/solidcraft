@@ -88,9 +88,8 @@ impl Faces {
     }
 
     /// The outward unit normal of face `f` at `p` (a point within `accept` of its surface).
-    #[cfg(test)]
     pub(crate) fn normal_at(&self, f: usize, p: Vec3, accept: f64) -> Option<Vec3> {
-        let s = SurfaceEval::new(&self.rec.faces.get(f)?.surface).ok()?;
+        let s = SurfaceEval::new(self.rec.faces.get(f)?.parameters()).ok()?;
         let uv = s.project(p, None, accept)?;
         let (_, su, sv) = s.derivs(uv[0], uv[1])?;
         Some(su.cross(sv).normalized()? * self.side(f)?)
@@ -392,7 +391,8 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
 /// tangentially (within 0.5° at a shared vertex), until no more do. An edge only one face uses
-/// ends a chain. Picks that find no edge are refused.
+/// ends a chain, and so does a smooth edge (its two faces meet tangentially, within 0.5°): it has
+/// no corner to round. Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     /// Edges meeting at an angle below this continue one another.
     const TANGENT_DEGREES: f64 = 0.5;
@@ -421,6 +421,16 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
     };
     let cos = TANGENT_DEGREES.to_radians().cos();
+    let accept = rec.rec.tolerance.max(1e-7) * 10.0;
+    // Whether edge `e`'s two faces meet tangentially at its start.
+    let smooth = |e: usize| -> bool {
+        let faces: Vec<u32> = rec.faces_of(e).into_iter().collect();
+        let (Some(&a), Some(&b), Some((p, _))) = (faces.first(), faces.get(1), rec.ends(e)) else { return false };
+        match (rec.normal_at(a as usize, p, accept), rec.normal_at(b as usize, p, accept)) {
+            (Some(na), Some(nb)) => faces.len() == 2 && na.dot(nb) > cos,
+            _ => false,
+        }
+    };
     let mut k = 0;
     while k < chain.len() {
         let Some(&e) = chain.get(k) else { break };
@@ -429,7 +439,7 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         for v in edge.vertices {
             let Some(d) = leaving(e, v) else { continue };
             for (f, other) in rec.rec.edges.iter().enumerate() {
-                if chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) {
+                if chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth(f) {
                     continue;
                 }
                 if leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
