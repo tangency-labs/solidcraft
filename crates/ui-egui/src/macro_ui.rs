@@ -30,7 +30,9 @@ pub(crate) fn toolbar(app: &mut SolveApp, id: &str) {
         "macro.stop" => {
             if let Ok(r) = app.run(id, json!({})) {
                 let steps = r.get("steps").and_then(Value::as_u64).unwrap_or(0);
-                if steps == 0 {
+                if r.get("capped").and_then(Value::as_bool).unwrap_or(false) {
+                    app.set_status(app.tr("macro.stopped_capped").to_string(), false);
+                } else if steps == 0 {
                     app.set_status(app.tr("macro.stopped_empty").to_string(), false);
                 } else {
                     app.set_status(crate::i18n::format("macro.stopped", &[("steps", &steps.to_string())]), false);

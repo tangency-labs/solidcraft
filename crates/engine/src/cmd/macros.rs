@@ -93,11 +93,22 @@ pub struct MacroParam {
     pub gate: Option<ParamGate>,
 }
 
+impl MacroParam {
+    /// Check a value against this parameter's kind and turn it into the JSON type Rhai sees —
+    /// the same check `macro.play` runs, so a caller (the Play dialog, a remembered value) can
+    /// validate before offering it.
+    pub fn coerce(&self, v: &Value) -> std::result::Result<Value, String> {
+        coerce_param(self.kind, &self.options, v)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Recorder {
     pub recording: bool,
     pub paused: bool,
     pub playing: bool,
+    /// The last recording ended because it hit `MAX_STEPS`, not because the user stopped it.
+    pub capped: bool,
     pub captured: Macro,
     pub loaded: Option<Macro>,
 }
@@ -119,6 +130,7 @@ impl Recorder {
         if run_count(&self.captured.source) >= MAX_STEPS {
             self.recording = false;
             self.paused = false;
+            self.capped = true;
             if run_count(&self.captured.source) > 0 {
                 self.loaded = Some(self.captured.clone());
             }
@@ -258,6 +270,7 @@ fn record(s: &mut Session, p: &Value) -> Result<Value> {
     s.macros.captured = Macro { name, source, ..Default::default() };
     s.macros.recording = true;
     s.macros.paused = false;
+    s.macros.capped = false;
     Ok(json!({"recording": true, "paused": false, "steps": 0}))
 }
 
@@ -278,7 +291,7 @@ fn stop(s: &mut Session, _p: &Value) -> Result<Value> {
     if steps > 0 {
         s.macros.loaded = Some(s.macros.captured.clone());
     }
-    Ok(json!({"recording": false, "paused": false, "steps": steps}))
+    Ok(json!({"recording": false, "paused": false, "steps": steps, "capped": s.macros.capped}))
 }
 
 fn clear_macro(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -302,12 +315,25 @@ fn named(cmd: &str, name: &str) -> Result<PathBuf> {
     {
         return Err(bad(cmd, "`name` must be one plain file name ending in .rhai (letters, numbers, spaces, -_.)"));
     }
+    // Windows refuses these device names whatever the extension, so a macro saved under one
+    // could never be opened back; reject them here rather than at open time.
+    if cfg!(windows) {
+        let stem = name[..name.len() - ".rhai".len()].to_ascii_uppercase();
+        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (stem.starts_with("COM") && stem[3..].bytes().all(|b| b.is_ascii_digit()) && stem.len() > 3)
+            || (stem.starts_with("LPT") && stem[3..].bytes().all(|b| b.is_ascii_digit()) && stem.len() > 3)
+        {
+            return Err(bad(cmd, format!("`{name}` is a reserved Windows device name")));
+        }
+    }
     let dir = macros_dir().ok_or_else(|| bad(cmd, "no macros folder on this system; give a path instead"))?;
     Ok(dir.join(name))
 }
 
 fn is_param_name(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    // Rhai identifiers cannot hold `-`, and a name the macro body can never reference is a
+    // trap, not a dialect: reject it when the macro opens rather than at play time.
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 fn read_macro_file(cmd: &str, path: &Path) -> Result<String> {
@@ -557,17 +583,16 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     if !invalid.is_empty() {
         return Err(bad(cmd, format!("macro `{}` got bad values — {}", loaded.name.as_deref().unwrap_or("macro"), invalid.join("; "))));
     }
-    let mark = (s.doc.clone(), s.active_sketch, s.pending_moves.clone(), s.redo.clone(), s.undo.len());
-    s.macros.playing = true;
+    let mark = (s.doc.clone(), s.active_sketch, s.pending_moves.clone(), s.redo.clone(), s.undo.clone());
     let _top = TopLevel::enter();
     let outcome = eval_rhai(s, &loaded.source, &bound);
-    s.macros.playing = false;
     match outcome {
         Ok(()) => {
-            // One undo step for the whole macro: drop the snapshots its own commands pushed and
-            // keep a single one holding the design as it was before Play, so one Ctrl+Z undoes
-            // the macro (docs/macros.md). A macro that changed nothing adds no undo step.
-            s.undo.truncate(mark.4);
+            // One undo step for the whole macro: put the undo list back as Play found it (the
+            // snapshots the macro's own commands pushed are dropped) and keep a single one
+            // holding the design as it was before Play, so one Ctrl+Z undoes the macro
+            // (docs/macros.md). A macro that changed nothing adds no undo step.
+            s.undo = mark.4;
             if !std::sync::Arc::ptr_eq(&s.doc, &mark.0) || s.active_sketch != mark.1 || s.pending_moves != mark.2 {
                 let label = loaded.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| "Play Macro".to_string());
                 s.undo.push(crate::Snapshot { label, doc: mark.0, active_sketch: mark.1, pending_moves: mark.2 });
@@ -582,15 +607,38 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
             s.active_sketch = mark.1;
             s.pending_moves = mark.2;
             s.redo = mark.3;
-            s.undo.truncate(mark.4);
+            s.undo = mark.4;
             s.refresh();
             Err(e)
         }
     }
 }
 
+/// Hands the session back to its slot whatever happens to the evaluation — including a panic
+/// escaping Rhai itself — and always clears `playing`, so a wedged macro can never leave the
+/// session stuck in "playing" or emptied into its default.
+struct EvalSlot<'a> {
+    slot: &'a mut Session,
+    shared: Rc<RefCell<Session>>,
+}
+
+impl Drop for EvalSlot<'_> {
+    fn drop(&mut self) {
+        *self.slot = match Rc::try_unwrap(Rc::clone(&self.shared)) {
+            Ok(cell) => cell.into_inner(),
+            // A leaked reference (a registered closure outliving the engine) cannot be moved
+            // out while shared; take what it holds instead of leaving the slot empty.
+            Err(rc) => std::mem::take(&mut *rc.borrow_mut()),
+        };
+        self.slot.macros.playing = false;
+    }
+}
+
 fn eval_rhai(s: &mut Session, source: &str, bound: &[(String, Value)]) -> Result<()> {
-    let shared = Rc::new(RefCell::new(std::mem::take(s)));
+    s.macros.playing = true;
+    let taken = std::mem::take(s);
+    let _slot = EvalSlot { slot: s, shared: Rc::new(RefCell::new(taken)) };
+    let shared = Rc::clone(&_slot.shared);
     let eval = {
         let mut engine = Engine::new();
         engine.set_max_operations(MAX_OPS);
@@ -620,10 +668,8 @@ fn eval_rhai(s: &mut Session, source: &str, bound: &[(String, Value)]) -> Result
         }
         engine.eval_with_scope::<Dynamic>(&mut scope, source).map(|_| ()).map_err(|e| EngineError::Other(format!("macro: {e}")))
     };
-    match Rc::try_unwrap(shared) {
-        Ok(cell) => *s = cell.into_inner(),
-        Err(_) => return Err(EngineError::Other("macro still holds the session".into())),
-    }
+    // `_slot` drops here: the session comes back and `playing` clears whether the
+    // evaluation returned or unwound.
     eval
 }
 
@@ -640,13 +686,21 @@ fn list_dir_host(path: ImmutableString) -> std::result::Result<Dynamic, Box<Eval
         }
         let mut names: Vec<Dynamic> = Vec::new();
         let entries = std::fs::read_dir(path.as_str()).map_err(|e| Box::new(EvalAltResult::from(e.to_string())))?;
-        for e in entries.flatten().take(1000) {
+        // Collect (bounded), then sort, then truncate: cutting before the sort would keep an
+        // arbitrary readdir-order subset of a big folder instead of the first 1000 names.
+        let mut files: Vec<String> = Vec::new();
+        for e in entries.flatten() {
+            if files.len() >= 10_000 {
+                break;
+            }
             let p = e.path();
             if p.is_file() {
-                names.push(Dynamic::from(p.to_string_lossy().into_owned()));
+                files.push(p.to_string_lossy().into_owned());
             }
         }
-        names.sort_by_key(ToString::to_string);
+        files.sort();
+        files.truncate(1000);
+        names.extend(files.into_iter().map(Dynamic::from));
         Ok(Dynamic::from_array(names))
     }
 }
@@ -679,6 +733,15 @@ fn write_file_host(path: ImmutableString, text: ImmutableString) -> std::result:
     }
 }
 
+/// A macro's display name as a plain file stem: characters `named` would refuse become `-`
+/// (the way the Save dialog already sanitizes the design name), so saving without a name never
+/// fails on a quirky document title.
+pub(crate) fn sanitize_stem(name: &str) -> String {
+    let out: String = name.chars().take(100).map(|c| if c.is_alphanumeric() || matches!(c, '_' | '-' | ' ') { c } else { '-' }).collect();
+    let out = out.trim_matches([' ', '-', '.']);
+    if out.is_empty() { "macro".to_string() } else { out.to_string() }
+}
+
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "macro.save";
     let name = p.get("name").filter(|v| !v.is_null());
@@ -701,7 +764,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         (None, Some(path)) => path.as_str().ok_or_else(|| bad(cmd, "`path` must be a file path"))?.to_string(),
         _ => {
             let stem = m.name.as_deref().filter(|n| !n.is_empty()).unwrap_or("macro");
-            named(cmd, &format!("{stem}.rhai"))?.display().to_string()
+            named(cmd, &format!("{}.rhai", sanitize_stem(stem)))?.display().to_string()
         }
     };
     if !path.rsplit('.').next().is_some_and(|e| e.eq_ignore_ascii_case("rhai")) {
@@ -737,7 +800,9 @@ fn saved_macros() -> Vec<(String, u64)> {
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {
     let dir = macros_dir().map(|d| d.display().to_string());
     let macros: Vec<Value> = saved_macros().into_iter().map(|(name, bytes)| json!({"name": name, "bytes": bytes})).collect();
-    Ok(json!({"recording": s.macros.recording, "paused": s.macros.paused, "steps": s.macros.steps(), "dir": dir, "macros": macros}))
+    Ok(
+        json!({"recording": s.macros.recording, "paused": s.macros.paused, "capped": s.macros.capped, "steps": s.macros.steps(), "dir": dir, "macros": macros}),
+    )
 }
 
 fn delete(_: &mut Session, p: &Value) -> Result<Value> {
@@ -764,12 +829,32 @@ fn append_run(source: &mut String, id: &str, params: &Value) {
     }
 }
 
+/// A Rhai string literal for `s`. Control characters must be escaped: a recorded value with a
+/// newline would otherwise emit a literal line break inside the quotes and break the replay.
+fn rhai_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn json_to_rhai(v: &Value) -> String {
     match v {
         Value::Null => "#{ }".into(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::String(s) => rhai_string(s),
         Value::Array(a) => {
             let parts: Vec<String> = a.iter().map(json_to_rhai).collect();
             format!("[{}]", parts.join(", "))
@@ -778,7 +863,7 @@ fn json_to_rhai(v: &Value) -> String {
             let parts: Vec<String> = o
                 .iter()
                 .map(|(k, val)| {
-                    let key = if k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { k.clone() } else { format!("\"{k}\"") };
+                    let key = if k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { k.clone() } else { rhai_string(k) };
                     format!("{key}: {}", json_to_rhai(val))
                 })
                 .collect();
@@ -789,6 +874,6 @@ fn json_to_rhai(v: &Value) -> String {
 
 impl Session {
     pub fn macro_state(&self) -> Value {
-        json!({"recording": self.macros.recording, "paused": self.macros.paused, "steps": self.macros.steps()})
+        json!({"recording": self.macros.recording, "paused": self.macros.paused, "capped": self.macros.capped, "steps": self.macros.steps()})
     }
 }
