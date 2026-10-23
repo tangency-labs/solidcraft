@@ -43,7 +43,9 @@
 //! `ComputeSilhouettes` and `ComputeGlobalVisibility` are not run: their C++ path reaches
 //! UB-170 on open silhouette chains.
 
-use super::topology_vertexuse::{gen_brep, import, path_of, push_curve, push_surface, sel, BrepIn, CrvIn};
+use super::topology_vertexuse::{
+    gen_brep, import, import_raw, path_of, push_curve, push_surface, sel, BrepIn, CrvIn,
+};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -306,7 +308,7 @@ impl UnitDiff for Runner {
             Err(msg) => return Ok(Output::err(msg)),
         };
         let s = ffi::split(&p.scene).ok_or_else(|| harness("short scene output"))?;
-        let (_, exact_faces) = import(s.export)?;
+        let (_, exact_faces) = import_raw(s.export)?;
         if inexact(&p.r, s.curve_types, &exact_faces) {
             return Ok(Output::err("inexact_geometry"));
         }

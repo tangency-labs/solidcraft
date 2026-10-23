@@ -125,7 +125,7 @@ use solidcore::topology::{
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::offset_offset_geometry_creation::{self as ffi, Op};
 
-use super::topology_vertexuse::{import_with_types, refill_face_gaps};
+use super::topology_vertexuse::{import_raw_with_types, recalc_gaps};
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -2401,7 +2401,7 @@ struct Prepared {
     two: Two,
     hdr: RHeader,
     ops: Vec<ROp>,
-    /// The failure of [`refill_face_gaps`] on either B-rep, which only the Rust side
+    /// The failure of [`recalc_gaps`] on either B-rep, which only the Rust side
     /// reports.
     refill: Option<SolidError>,
 }
@@ -2416,25 +2416,26 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     };
     let [surfaces_a, surfaces_b] =
         ffi::split_surface_records(&ex).ok_or_else(|| Box::new(Err(harness("surface records"))))?;
-    let (mut brep_a, mut exact_a, types_a) = import_with_types(&a).map_err(|e| Box::new(Err(e)))?;
+    let (mut brep_a, mut exact_a, types_a) = import_raw_with_types(&a).map_err(|e| Box::new(Err(e)))?;
     read_face_surfaces(&mut brep_a, &mut exact_a, &types_a, &surfaces_a)
         .map_err(|e| Box::new(Err(e)))?;
-    // The export says which vertex uses have their vertex/face gap cached, not its
-    // values (the importer leaves the face UV at SM_UNDEF_DOUBLE): recompute them on
-    // the restored face surfaces, as the topology.vertexuse runner does, before the
-    // cache tree states are seeded (the native gaps were computed before its export).
-    let mut refill = refill_face_gaps(&mut brep_a).err();
+    // The export says which gaps are cached, not their values (the raw import leaves
+    // them at SM_UNDEF_DOUBLE): recompute them on the restored face surfaces, as the
+    // refilling importers do, before the cache tree states are seeded (the native gaps
+    // were computed before its export). This runs on both sides; only the Rust side
+    // reports a failure.
+    let mut refill = recalc_gaps(&mut brep_a).err();
     let [states_a, states_b] = ffi::split_cache_tree_states(&ex)
         .ok_or_else(|| Box::new(Err(harness("cache states"))))?;
     seed_cache_tree_states(&brep_a, &states_a).map_err(|e| Box::new(Err(e)))?;
     let (brep_b, exact_b) = match &b {
         Some(b) => {
             let (mut brep, mut exact, types) =
-                import_with_types(b).map_err(|e| Box::new(Err(e)))?;
+                import_raw_with_types(b).map_err(|e| Box::new(Err(e)))?;
             read_face_surfaces(&mut brep, &mut exact, &types, &surfaces_b)
                 .map_err(|e| Box::new(Err(e)))?;
             if refill.is_none() {
-                refill = refill_face_gaps(&mut brep).err();
+                refill = recalc_gaps(&mut brep).err();
             }
             seed_cache_tree_states(&brep, &states_b).map_err(|e| Box::new(Err(e)))?;
             (Some(brep), exact)
@@ -3301,7 +3302,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if let Some(e) = &p.refill {
         return match Output::unported(e) {
             Some(o) => Ok(o),
-            None => Err(harness(format!("rust: vertex/face gap refill: {e}"))),
+            None => Err(harness(format!("rust: cached gap refill: {e}"))),
         };
     }
     match run_rust_script(i, p) {
@@ -4641,7 +4642,7 @@ mod tests {
             let (a, b) = ffi::split_exports(&out).unwrap();
             let records = ffi::split_surface_records(&out).unwrap();
             for (block, records) in [a, b.unwrap()].iter().zip(&records) {
-                let (mut brep, mut exact, types) = import_with_types(block).unwrap();
+                let (mut brep, mut exact, types) = import_raw_with_types(block).unwrap();
                 assert!(types.contains(&Some(expected_type)), "{name}: {types:?}");
                 let before: Vec<_> = brep
                     .faces()
@@ -4678,7 +4679,7 @@ mod tests {
         let records = ffi::split_surface_records(&out).unwrap();
         for (arena, (block, records)) in [a, b.unwrap()].iter().zip(&records).enumerate() {
             for unowned in [false, true] {
-                let (mut brep, mut exact, types) = import_with_types(block).unwrap();
+                let (mut brep, mut exact, types) = import_raw_with_types(block).unwrap();
                 let faces: Vec<_> = brep.faces().ids().collect();
                 for &face_id in &faces {
                     let face = brep.face_mut(face_id).unwrap();
@@ -4764,7 +4765,7 @@ mod tests {
         let [records, _] = ffi::split_surface_records(&out).unwrap();
         let index = records.iter().position(Option::is_some).unwrap();
         for mutation in 0..5 {
-            let (mut brep, mut exact, mut types) = import_with_types(&a).unwrap();
+            let (mut brep, mut exact, mut types) = import_raw_with_types(&a).unwrap();
             let mut records = records.clone();
             match mutation {
                 0 => {

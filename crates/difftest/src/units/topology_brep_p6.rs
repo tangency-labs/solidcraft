@@ -611,7 +611,7 @@ fn make_faces_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     if counts(&fixture.graph).is_none() {
         return Ok(Output::rejected("native fixture constructor"));
     }
-    let (b, _) = shared::import(&fixture.graph)?;
+    let (b, _) = shared::import_raw(&fixture.graph)?;
     let resolved = resolve(i, &b)?;
     let mut specs = Vec::new();
     for (f, r) in i.faces.iter().zip(resolved) {

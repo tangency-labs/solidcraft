@@ -5,7 +5,7 @@
 //! snapshot. Successful native mutations on deferred paths are not parity passes.
 use super::boolean_merge_p1::{graph_reachable, Canon};
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
-use super::topology_vertexuse::import;
+use super::topology_vertexuse::{import, import_raw};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -529,7 +529,7 @@ impl UnitDiff for Runner {
             raw.get(2..2 + n)
                 .ok_or_else(|| error("short native record"))?,
         );
-        let (b, _) = import(
+        let (b, _) = import_raw(
             raw.get(2 + n..)
                 .ok_or_else(|| error("short native graph"))?,
         )?;

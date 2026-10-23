@@ -973,9 +973,17 @@ fn read_face_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), Harness
     }
 }
 
-/// Builds the Rust B-rep from the shim's export (see the module docs).
+/// Builds the Rust B-rep from the shim's export (see the module docs), with its cached
+/// gaps refilled ([`super::topology_vertexuse::refill_gaps`]).
 pub(crate) fn import(ex: &[f64]) -> Result<Brep, HarnessError> {
     import_with_types(ex).map(|(b, _)| b)
+}
+
+/// [`import`], with the type codes of the geometry it imported.
+pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), HarnessError> {
+    let (mut b, types) = import_raw_with_types(ex)?;
+    super::topology_vertexuse::refill_gaps(&mut b);
+    Ok((b, types))
 }
 
 /// Restores the cache slot of every face surface of `b` (imported from the export of
@@ -1011,8 +1019,11 @@ pub(crate) fn seed_cache_tree_states(
     Ok(())
 }
 
-/// [`import`], with the type codes of the geometry it imported.
-pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), HarnessError> {
+/// [`import_with_types`] without refilling the cached gaps: they stay marked as set
+/// with `SM_UNDEF_DOUBLE` placeholder values. For the C++ side (which only resolves
+/// selectors on the import) and for Rust-side callers that change the geometry after
+/// the import (they refill the gaps themselves).
+pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), HarnessError> {
     let mut extras = ImportTypes::default();
     let c = ffi::counts(ex).ok_or_else(|| harness("import of a failed build"))?;
     let [n_r, n_s, n_fu, n_f, n_lu, n_l, n_eu, n_e, n_vu, n_v] = c;

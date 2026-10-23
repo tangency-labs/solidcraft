@@ -52,7 +52,7 @@ use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::heal_heal_data_p2 as ffi;
 use solidcore_ffi::units::topology_vertexuse::counts;
 
-use super::topology_vertexuse::{gen_brep, import, path_of, push_curve, push_surface, BrepIn};
+use super::topology_vertexuse::{gen_brep, import_raw, path_of, push_curve, push_surface, BrepIn};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -1272,7 +1272,8 @@ fn rust_heal(
     ffi::check_heal(&args_of(targets, voxels, steps, n))
         .map_err(|e| harness(format!("heal script: {e}")))?;
     let c = counts(&ex).ok_or_else(|| harness("export counts"))?;
-    let (mut b, exact) = import(&ex)?;
+    // raw: `restore` replaces every cached gap with the C++ record
+    let (mut b, exact) = import_raw(&ex)?;
     if exact.iter().any(|x| !x) {
         return Err(harness("a face surface was not imported exactly"));
     }
@@ -2065,7 +2066,7 @@ mod tests {
             let (path, block) = block_of(&input, false, false).unwrap();
             let (export, counts) = export_of(&path, &block).unwrap();
             assert!(counts.is_some(), "sphere construction failed");
-            let (brep, exact) = import(&export).unwrap();
+            let (brep, exact) = import_raw(&export).unwrap();
             assert_eq!(exact, vec![true]);
             let (_, face) = brep.faces().iter().next().unwrap();
             let surface = face.surface.as_ref().unwrap();

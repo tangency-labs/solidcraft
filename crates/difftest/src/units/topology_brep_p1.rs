@@ -52,7 +52,7 @@ use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_brep_p1::{self as ffi, Op, N_EXTRA_SCALARS, TARGET_TYPES};
 
 use super::topology_edgeuse_p1::{
-    brep_block_of, bspline_of, flag, gen_brep, gen_curve, import_with_types, path_of, push_curve,
+    brep_block_of, bspline_of, flag, gen_brep, gen_curve, import_raw_with_types, path_of, push_curve,
     sel, BrepIn, CrvIn, ImportTypes, FILES,
 };
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -775,11 +775,24 @@ pub(crate) fn import_file(path: &str, rebuild: bool) -> Result<Brep, HarnessErro
 }
 
 /// The Rust B-rep of an export with this unit's extras applied, and the geometry
-/// types of the import.
+/// types of the import, with its cached gaps refilled on the finished B-rep
+/// ([`super::topology_vertexuse::refill_gaps`]).
 pub(crate) fn import(ex: &[f64], graph_at: usize) -> Result<(Brep, ImportTypes), HarnessError> {
+    let (mut b, types) = import_raw(ex, graph_at)?;
+    super::topology_vertexuse::refill_gaps(&mut b);
+    Ok((b, types))
+}
+
+/// [`import`] without refilling the cached gaps (they stay marked as set with
+/// `SM_UNDEF_DOUBLE` placeholder values), for the C++ side, which only resolves
+/// selectors on the import.
+pub(crate) fn import_raw(
+    ex: &[f64],
+    graph_at: usize,
+) -> Result<(Brep, ImportTypes), HarnessError> {
     let mut graph = vec![0.0];
     graph.extend_from_slice(ex.get(graph_at..).ok_or_else(|| harness("short export"))?);
-    let (mut b, types) = import_with_types(&graph)?;
+    let (mut b, types) = import_raw_with_types(&graph)?;
     let x = ex
         .get(1..1 + N_EXTRA_SCALARS)
         .ok_or_else(|| harness("short extras"))?;

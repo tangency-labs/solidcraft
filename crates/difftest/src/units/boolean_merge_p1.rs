@@ -3,7 +3,7 @@
 //! are constructed in C++ and imported as raw arena records before either helper
 //! runs, following the topology units. Deferred paths still run the native helper.
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
-use super::topology_vertexuse::import;
+use super::topology_vertexuse::{import, import_raw};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1009,7 +1009,7 @@ impl UnitDiff for Runner {
             .checked_add(2)
             .ok_or_else(|| harness("record count overflow"))?;
         let raw = v.get(end..).ok_or_else(|| harness("short graph"))?;
-        let (b, _) = import(raw)?;
+        let (b, _) = import_raw(raw)?;
         let record = v.get(2..end).ok_or_else(|| harness("short record"))?;
         Ok(graph(&b, record.to_vec()))
     }

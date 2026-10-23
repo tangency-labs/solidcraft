@@ -62,7 +62,9 @@ use solidcore::SolidError;
 use solidcore_ffi::units::heal_gap::{self as ffi, Op, UNDEF};
 use solidcore_ffi::units::topology_vertexuse::counts;
 
-use super::topology_vertexuse::{gen_brep, import, path_of, push_curve, push_surface, sel, BrepIn};
+use super::topology_vertexuse::{
+    gen_brep, import, import_raw, path_of, push_curve, push_surface, sel, BrepIn,
+};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -933,7 +935,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
             let Some(c) = counts(&ex) else {
                 return Ok(state(vec![-1.0, ex.get(1).copied().unwrap_or(0.0)]));
             };
-            let (b, _) = import(&ex)?;
+            let (b, _) = import_raw(&ex)?;
             let args = topo_args(&b, c, *kind, *sel0, *sel1, *f0, *f1, *uv)?;
             let out = ffi::topo(&path, &block, &args).map_err(|e| harness(format!("c++: {e}")))?;
             Ok(state(out))

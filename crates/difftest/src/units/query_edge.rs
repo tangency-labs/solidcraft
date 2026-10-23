@@ -502,7 +502,8 @@ fn scene(k: &Kernel, i: &Inputs) -> Result<Result<Scene, Output>, HarnessError> 
         .checked_sub(n_edges)
         .ok_or_else(|| harness("export without curve kinds"))?;
     let (graph, kinds) = ex.split_at(split);
-    let mut brep = crate::units::topology_edgeuse_p1::import(graph)?;
+    // raw: the wire edge curves are set below, so the cached gaps are refilled after
+    let (mut brep, _) = crate::units::topology_edgeuse_p1::import_raw_with_types(graph)?;
     for (e, &kind) in kinds.iter().enumerate() {
         let kind = kind as i64;
         let id = EdgeId::from_index(e as u32);
@@ -522,6 +523,7 @@ fn scene(k: &Kernel, i: &Inputs) -> Result<Result<Scene, Output>, HarnessError> 
             }
         }
     }
+    crate::units::topology_vertexuse::refill_gaps(&mut brep);
     let loop_eus = brep
         .edgeuses()
         .ids()

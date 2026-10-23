@@ -335,7 +335,7 @@ fn run_cpp_case(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(b) => b,
         Err(out) => return Ok(out),
     };
-    let (rb, _) = shared::import(&b.export)?;
+    let (rb, _) = shared::import_raw(&b.export)?;
     let Some(a) = args(&i.op, &b, |f| first_loop(&rb, f)) else {
         return Ok(Output::err("no face"));
     };

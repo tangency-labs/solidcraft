@@ -24,7 +24,7 @@ use solidcore_ffi::units::topology_brep_p5::{self as ffi, Op};
 use solidcore_ffi::FfiError;
 
 use super::boolean_merge_p1::graph;
-use super::topology_vertexuse::import;
+use super::topology_vertexuse::{import, import_raw};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
 /// Part 5's runner.
@@ -544,7 +544,7 @@ impl UnitDiff for Runner {
             .get(1..=n)
             .ok_or_else(|| HarnessError::new("short record"))?
             .to_vec();
-        let (b, _) = import(
+        let (b, _) = import_raw(
             raw.get(n + 1..)
                 .ok_or_else(|| HarnessError::new("short graph"))?,
         )?;
