@@ -9,6 +9,15 @@ struct MockHost(Mutex<Vec<(Job, Operation)>>);
 impl Host for MockHost {
     fn submit(&self, operation: Operation, _: String) -> solidcraft_cloud::Result<Job> {
         let connection = match &operation {
+            Operation::Configure(settings) => {
+                let job = Job::new(String::new())?;
+                job.update(|status| {
+                    status.result = Some(json!(settings));
+                    status.phase = Phase::Synced;
+                })?;
+                return Ok(job);
+            }
+            Operation::LoadSettings => return Err(solidcraft_cloud::Error::Storage("no stored settings".into())),
             Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
@@ -54,6 +63,50 @@ fn configured() -> (Session, Arc<MockHost>, Destination) {
         .unwrap();
     let destination = Destination { connection: "github".into(), project: "Robot".into(), file: "parts/bracket".into() };
     (session, host, destination)
+}
+
+#[test]
+fn configuration_is_adopted_after_storage_and_failure_keeps_previous_settings() {
+    struct SettingsHost(Mutex<Vec<Job>>);
+    impl Host for SettingsHost {
+        fn submit(&self, _: Operation, _: String) -> solidcraft_cloud::Result<Job> {
+            let job = Job::new(String::new())?;
+            self.0.lock().unwrap().push(job.clone());
+            Ok(job)
+        }
+    }
+    let host = Arc::new(SettingsHost(Mutex::new(Vec::new())));
+    let mut session = Session::default();
+    session.set_cloud_host(Some(host.clone()));
+    let requested = Settings { connections: vec![Connection::default()], ..Default::default() };
+    let job = session.execute("cloud.configure", &json!({"settings":requested})).unwrap();
+    assert!(session.cloud_configuring());
+    assert!(session.cloud_settings().connections.is_empty());
+    assert!(session.execute("cloud.configure", &json!({"settings":requested})).is_err());
+    assert!(session.execute("cloud.list", &json!({"connection":"github"})).is_err());
+    host.0.lock().unwrap()[0]
+        .update(|s| {
+            s.result = Some(json!(requested));
+            s.phase = Phase::Synced;
+        })
+        .unwrap();
+    session.execute("cloud.status", &json!({"operation":job["operation"]})).unwrap();
+    assert!(!session.cloud_configuring());
+    assert_eq!(session.take_cloud_settings_change(), Some(requested.clone()));
+    session.execute("cloud.configure", &json!({"settings":Settings::default()})).unwrap();
+    host.0.lock().unwrap()[1].fail(solidcraft_cloud::Error::Storage("disk full".into())).unwrap();
+    session.poll_cloud().unwrap();
+    assert_eq!(session.cloud_settings(), &requested);
+    assert_eq!(session.take_cloud_settings_change(), None);
+    session.execute("cloud.settings", &json!({"reload":true})).unwrap();
+    host.0.lock().unwrap()[2]
+        .update(|s| {
+            s.result = Some(json!(Settings::default()));
+            s.phase = Phase::Ready;
+        })
+        .unwrap();
+    session.poll_cloud().unwrap();
+    assert!(session.cloud_settings().connections.is_empty());
 }
 
 #[test]
@@ -182,6 +235,7 @@ fn offline_operation_history_does_not_limit_the_number_of_durable_saves() {
 #[test]
 fn replacing_a_design_keeps_connections_and_operations_but_cannot_adopt_an_old_capture() {
     let (mut session, host, destination) = configured();
+    let before = session.cloud_operations().unwrap().len();
     session.execute("cloud.save", &json!({"destination":destination})).unwrap();
     session.execute("file.new", &json!({"name":"Another design"})).unwrap();
     session.doc_mut().name = "An unsaved edit to the new design".into();
@@ -190,7 +244,7 @@ fn replacing_a_design_keeps_connections_and_operations_but_cannot_adopt_an_old_c
     assert!(session.is_dirty());
     assert!(session.cloud_binding().is_none());
     assert_eq!(session.cloud_settings().connections.len(), 1);
-    assert_eq!(session.cloud_operations().unwrap().len(), 1);
+    assert_eq!(session.cloud_operations().unwrap().len(), before + 1);
     session.execute("cloud.save", &json!({"destination":destination})).unwrap();
     assert_eq!(host.0.lock().unwrap().len(), 2);
 }
@@ -258,11 +312,12 @@ fn cancelling_an_upload_keeps_its_capture_and_cannot_undo_confirmed_publication(
 #[test]
 fn cloud_configuration_rejects_invalid_destinations_without_changing_the_editor() {
     let (mut session, _host, destination) = configured();
+    let before = session.cloud_operations().unwrap().len();
     assert!(session.execute("cloud.configure", &json!({"settings":{"default_connection":"missing"}})).is_err());
     assert_eq!(session.cloud_settings().connections.len(), 1);
     let invalid = Destination { project: "../outside".into(), ..destination };
     assert!(session.execute("cloud.save", &json!({"destination":invalid})).is_err());
-    assert!(session.cloud_operations().unwrap().is_empty());
+    assert_eq!(session.cloud_operations().unwrap().len(), before);
     session.set_cloud_host(None);
     assert!(session.execute("cloud.test", &json!({})).unwrap_err().to_string().contains("unavailable"));
 }

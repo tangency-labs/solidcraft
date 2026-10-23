@@ -14,12 +14,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("settings")
         .noundo()
         .doc_only()
-        .params("settings: local repository connections and defaults; contains credential identifiers only"),
+        .params("settings: local connections/defaults, credential identifiers only; returns operation id; settings apply after persistence"),
     CommandSpec::new("cloud.settings", "Cloud Saves Settings", settings)
         .icon("settings")
         .noundo()
         .doc_only()
-        .params("Returns local connection settings and current destination"),
+        .params("reload?: load host settings asynchronously; otherwise returns settings, configuring flag, and destination"),
     CommandSpec::new("cloud.test", "Test Repository Connection", test)
         .icon("inspect")
         .noundo()
@@ -62,8 +62,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("operation: operation id; pending local saves are retained"),
 ];
 
-fn settings(session: &mut Session, _: &Value) -> Result<Value> {
-    Ok(json!({"settings":session.cloud.settings,"binding":session.cloud.binding}))
+fn settings(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
+    if params.get("reload").and_then(Value::as_bool) == Some(true) {
+        return configure_operation(session, Operation::LoadSettings);
+    }
+    Ok(json!({"settings":session.cloud.settings,"binding":session.cloud.binding,"configuring":session.cloud_configuring()}))
 }
 
 #[derive(Deserialize)]
@@ -75,8 +79,23 @@ struct Configure {
 fn configure(session: &mut Session, params: &Value) -> Result<Value> {
     let input: Configure = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.configure", e.to_string()))?;
     input.settings.validate().map_err(error)?;
-    session.cloud.settings = input.settings;
-    settings(session, &Value::Null)
+    session.poll_cloud()?;
+    if session.cloud.host.is_none() {
+        session.cloud.settings = input.settings;
+        session.cloud.settings_changed = true;
+        return settings(session, &Value::Null);
+    }
+    configure_operation(session, Operation::Configure(input.settings))
+}
+
+fn configure_operation(session: &mut Session, operation: Operation) -> Result<Value> {
+    if session.cloud_configuring() {
+        return Err(bad("cloud.configure", "connection settings are still being stored or loaded"));
+    }
+    let reply = submit(session, operation)?;
+    session.cloud.configuration = Some(operation_id(&reply)?.to_owned());
+    session.poll_cloud()?;
+    Ok(reply)
 }
 
 fn submit(session: &mut Session, operation: Operation) -> Result<Value> {
@@ -120,17 +139,23 @@ struct ConnectionInput {
 }
 
 fn connection(session: &Session, params: &Value) -> Result<solidcraft_cloud::Connection> {
+    if session.cloud_configuring() {
+        return Err(bad("cloud", "connection settings are still being stored or loaded"));
+    }
     let input: ConnectionInput = serde_json::from_value(params.clone()).map_err(|e| bad("cloud", e.to_string()))?;
     session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)
 }
 
 fn test(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
     submit(session, Operation::Test(connection(session, params)?))
 }
 fn list(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
     submit(session, Operation::List(connection(session, params)?))
 }
 fn sync(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
     submit(session, Operation::Synchronize(connection(session, params)?))
 }
 
@@ -141,6 +166,10 @@ struct Open {
 }
 
 fn open(session: &mut Session, params: &Value) -> Result<Value> {
+    session.poll_cloud()?;
+    if session.cloud_configuring() {
+        return Err(bad("cloud.open", "connection settings are still being stored or loaded"));
+    }
     let input: Open = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.open", e.to_string()))?;
     input.destination.validate().map_err(error)?;
     let connection = session.cloud.settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
@@ -175,6 +204,9 @@ struct Save {
 
 pub(super) fn save(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;
+    if session.cloud_configuring() {
+        return Err(bad("cloud.save", "connection settings are still being stored or loaded"));
+    }
     if !session.cloud.captures.is_empty() {
         return Err(bad("cloud.save", "the previous save is still being persisted locally"));
     }

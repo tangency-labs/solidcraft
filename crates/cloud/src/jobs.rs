@@ -8,11 +8,13 @@ use std::sync::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{Connection, Destination, Error, Published, Result, Snapshot, StagedSave};
+use crate::{Connection, Destination, Error, Published, Result, Settings, Snapshot, StagedSave};
 
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 pub enum Operation {
+    LoadSettings,
+    Configure(Settings),
     Test(Connection),
     List(Connection),
     Open { connection: Connection, destination: Destination },

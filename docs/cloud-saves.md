@@ -71,7 +71,7 @@ the durable host store, independently of the engine's bounded status history.
 
 | Commands | Behavior |
 | --- | --- |
-| `cloud.configure`, `cloud.settings` | Validate local connections/defaults and inspect the current design binding. Configuration contains credential identifiers only. Application preference persistence is a separate integration. |
+| `cloud.configure`, `cloud.settings` | Validate local connections/defaults and inspect the current design binding. With a host installed, configuration returns an operation id and applies after durable persistence; `cloud.settings {"reload":true}` reloads it asynchronously. Configuration contains credential identifiers only. |
 | `cloud.test`, `cloud.list`, `cloud.sync` | Submit a connection-scoped operation and return its operation identifier. |
 | `cloud.open` | Submit an opening operation for `{connection, project, file}`. |
 | `cloud.open.finish` | Validate and adopt the completed snapshot, preserving the host and connection settings. |
@@ -86,13 +86,23 @@ previous local persistence boundary, then uses its captured revision as parent.
 The status history retains at most 128 operations; durable offline saves can
 continue beyond that limit.
 
+Native connection settings live in the private recovery root's `connections.json`,
+outside repository checkouts and ordinary UI preferences. Its
+`solidcraft-connections/1` envelope is bounded to 1 MiB, preserves compatible
+optional metadata (including connection fields matched by id), and refuses
+future formats before any replacement. Writes use the existing atomic writer
+and a separate settings lock; they do not wait on network synchronization.
+The engine retains its previous settings if persistence fails. Reload and
+configuration are serialized; other cloud commands wait for configuration to
+finish. Browser hosts implement the same operations using IndexedDB.
+
 Ordinary `file.save` uses a cloud binding when no explicit path is provided.
 Saving to an explicit native path or adopting a native Save As detaches that
 binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
 These foundations, commands, the native worker adapter, and browser recovery storage are implemented.
-Application installation of that adapter, browser workers and connection persistence,
+Application installation of that adapter, browser workers and browser connection persistence,
 credential entry, guided setup, Home/Preferences
 integration, and end-to-end application evidence remain unfinished. User-facing
 documentation must remain marked unreleased until those paths have been

@@ -13,6 +13,22 @@ fn storage(e: impl std::fmt::Display) -> Error {
 }
 
 impl LocalOutbox {
+    /// Settings live beside connection queues, never in a shared checkout.
+    pub(super) fn load_settings(&self) -> Result<solidcraft_cloud::Configuration> {
+        let path = self.path("connections.json")?;
+        if !path.exists() {
+            return Ok(Default::default());
+        }
+        solidcraft_cloud::Configuration::read(&crate::vfs::read(&path.to_string_lossy(), solidcraft_cloud::MAX_SETTINGS_BYTES).map_err(storage)?)
+    }
+
+    pub(super) fn configure(&self, settings: &solidcraft_cloud::Settings) -> Result<()> {
+        let lock = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(self.path("settings.lock")?).map_err(storage)?;
+        lock.try_lock().map_err(|_| storage("connection settings are being changed by another process"))?;
+        let bytes = self.load_settings()?.update(settings)?;
+        crate::safe_write::write_atomic(&self.path("connections.json")?, &bytes, false).map_err(storage)
+    }
+
     pub fn new(root: PathBuf) -> Result<Self> {
         crate::vfs::check(&root.to_string_lossy()).map_err(storage)?;
         fs::create_dir_all(&root).map_err(storage)?;

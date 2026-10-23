@@ -30,6 +30,23 @@ impl NativeHost {
     fn run(operation: Operation, executable: &str, outbox: &LocalOutbox, job: &Job) -> Result<()> {
         check_cancelled(job)?;
         match operation {
+            Operation::LoadSettings => {
+                let settings = outbox.load_settings()?.settings()?;
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(settings));
+                    status.phase = Phase::Ready;
+                })?;
+            }
+            Operation::Configure(settings) => {
+                outbox.configure(&settings)?;
+                // Like publication, a committed settings change cannot be undone by a
+                // cancellation racing its acknowledgement. Cancel in Preferences discards
+                // the draft before this operation is submitted.
+                job.update(|status| {
+                    status.result = Some(serde_json::json!(settings));
+                    status.phase = Phase::Synced;
+                })?;
+            }
             Operation::Save { connection, save, synchronize } => {
                 save.record.check_connection(&connection)?;
                 let document = save
@@ -182,17 +199,24 @@ impl NativeHost {
 impl Host for NativeHost {
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job> {
         let connection = match &operation {
+            Operation::LoadSettings | Operation::Configure(_) => None,
             Operation::Test(connection)
             | Operation::List(connection)
             | Operation::Synchronize(connection)
             | Operation::Open { connection, .. }
-            | Operation::Save { connection, .. } => connection,
+            | Operation::Save { connection, .. } => Some(connection),
         };
-        connection.validate()?;
-        let job = Job::new(connection.id.clone())?;
+        if let Some(connection) = connection {
+            connection.validate()?;
+        }
+        if let Operation::Configure(settings) = &operation {
+            settings.validate()?;
+        }
+        let job = Job::new(connection.map(|c| c.id.clone()).unwrap_or_default())?;
         // Hash identifiers so case-insensitive filesystems and reserved device names cannot
         // alias two distinct connections' private queues.
-        let outbox = LocalOutbox::new(self.root.join(solidcraft_cloud::digest(connection.id.as_bytes())))?;
+        let root = connection.map(|c| self.root.join(solidcraft_cloud::digest(c.id.as_bytes()))).unwrap_or_else(|| self.root.clone());
+        let outbox = LocalOutbox::new(root)?;
         let worker = job.clone();
         let scope = crate::vfs::current_scope();
         std::thread::Builder::new()

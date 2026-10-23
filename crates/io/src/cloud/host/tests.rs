@@ -94,6 +94,31 @@ fn published(job: &Job) -> solidcraft_cloud::jobs::JobStatus {
 }
 
 #[test]
+fn connection_settings_survive_restart_and_future_settings_are_never_overwritten() {
+    let fixture = Fixture::new();
+    let host = fixture.host();
+    let empty = complete(&host.submit(Operation::LoadSettings, String::new()).unwrap());
+    assert_eq!(empty.phase, Phase::Ready);
+    assert_eq!(empty.result.unwrap(), serde_json::json!(solidcraft_cloud::Settings::default()));
+    let settings = solidcraft_cloud::Settings {
+        connections: vec![fixture.connection("one"), fixture.connection("two")],
+        default_connection: Some("two".into()),
+        sync_after_save: false,
+        ..Default::default()
+    };
+    assert_eq!(complete(&host.submit(Operation::Configure(settings.clone()), String::new()).unwrap()).phase, Phase::Synced);
+    let reloaded = complete(&fixture.host().submit(Operation::LoadSettings, String::new()).unwrap());
+    assert_eq!(reloaded.result.unwrap(), serde_json::json!(settings));
+    let file = fixture.0.join("recovery/connections.json");
+    let future = br#"{"format":"solidcraft-connections/999","settings":{}}"#;
+    fs::write(&file, future).unwrap();
+    let failed = complete(&fixture.host().submit(Operation::Configure(Default::default()), String::new()).unwrap());
+    assert_eq!(failed.phase, Phase::Failed);
+    assert!(failed.message.unwrap().contains("Upgrade SolidCraft"));
+    assert_eq!(fs::read(file).unwrap(), future);
+}
+
+#[test]
 fn restart_lists_and_opens_latest_offline_capture_without_a_checkout_or_git() {
     let fixture = Fixture::new();
     let connection = fixture.connection("offline");

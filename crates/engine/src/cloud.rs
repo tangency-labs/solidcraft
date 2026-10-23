@@ -31,6 +31,8 @@ pub(crate) struct State {
     pub jobs: BTreeMap<String, Job>,
     pub captures: BTreeMap<String, Capture>,
     pub binding: Option<Binding>,
+    pub configuration: Option<String>,
+    pub settings_changed: bool,
 }
 
 impl State {
@@ -51,6 +53,20 @@ impl Session {
     pub fn cloud_settings(&self) -> &Settings {
         &self.cloud.settings
     }
+
+    /// Host preferences are shared by tabs, while bindings and captured saves stay per design.
+    pub fn inherit_cloud_services(&mut self, source: &Session) {
+        self.cloud.settings = source.cloud.settings.clone();
+        self.cloud.host = source.cloud.host.clone();
+    }
+
+    pub fn take_cloud_settings_change(&mut self) -> Option<Settings> {
+        std::mem::take(&mut self.cloud.settings_changed).then(|| self.cloud.settings.clone())
+    }
+
+    pub fn cloud_configuring(&self) -> bool {
+        self.cloud.configuration.is_some()
+    }
     pub fn cloud_binding(&self) -> Option<&Binding> {
         self.cloud.binding.as_ref()
     }
@@ -62,6 +78,23 @@ impl Session {
     /// A captured save may become the saved baseline after later edits. Adopting the captured
     /// Arc instead of calling mark_saved keeps those newer edits dirty.
     pub fn poll_cloud(&mut self) -> Result<()> {
+        if let Some(id) = self.cloud.configuration.as_ref() {
+            let status =
+                self.cloud.jobs.get(id).ok_or_else(|| EngineError::Other("cloud settings operation missing".into()))?.status().map_err(error)?;
+            match status.phase {
+                Phase::Ready | Phase::Synced => {
+                    let settings: Settings =
+                        serde_json::from_value(status.result.ok_or_else(|| EngineError::Other("cloud settings missing".into()))?)
+                            .map_err(|e| EngineError::Other(e.to_string()))?;
+                    settings.validate().map_err(error)?;
+                    self.cloud.settings = settings;
+                    self.cloud.settings_changed = true;
+                    self.cloud.configuration = None;
+                }
+                Phase::Failed | Phase::Cancelled => self.cloud.configuration = None,
+                _ => {}
+            }
+        }
         let ids: Vec<String> = self.cloud.captures.keys().cloned().collect();
         for id in ids {
             let status =
