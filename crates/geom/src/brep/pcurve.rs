@@ -199,17 +199,6 @@ impl On {
         Ok(On { surface, starts: uv::Starts::default(), dom, face: None })
     }
 
-    fn surface_kind(&self) -> &'static str {
-        match &self.surface {
-            SurfaceEval::Eval(crate::tess::EvalSurface::Plane { .. }, _) => "plane",
-            SurfaceEval::Cylinder { .. } => "cylinder",
-            SurfaceEval::Cone { .. } => "cone",
-            SurfaceEval::Sphere { .. } => "sphere",
-            SurfaceEval::Torus { .. } => "torus",
-            _ => "other",
-        }
-    }
-
     fn within(self, face: Option<[[f64; 2]; 2]>) -> Self {
         let face = face.filter(|f| f.iter().flatten().all(|x| x.is_finite()));
         On { face, ..self }
@@ -221,8 +210,7 @@ impl On {
         {
             return Ok(pc);
         }
-        let _ = tol;
-        Err(Error::Failed(format!("no exact pcurve: {:?} on {}", std::mem::discriminant(record), self.surface_kind())))
+        self.fit(record, curve, range, tol)
     }
 
     /// The closed-form pcurve where there is one (unchecked).
