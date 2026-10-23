@@ -504,8 +504,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| Some(o.id) == occ) {
         o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
     }
-    let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, inherited: Vec::new() });
+    s.doc_mut().links.insert(comp, DesignLink {
+        path: file.to_string_lossy().into_owned(),
+        feature: id,
+        inherited: Vec::new(),
+        version: None,
+    });
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));

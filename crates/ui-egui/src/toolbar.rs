@@ -388,7 +388,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         let step = if compact_actions { 22.0 } else { 34.0 };
         // Save, Undo and Redo use the same actions as the File menu and shortcuts.
-        let shown = design_shown(app) && idle;
+        let shown = design_shown(app) && idle && app.session.version_view.is_none();
         let tip = |id: &str, key: &str| {
             let label = app.tr(id);
             if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
@@ -856,6 +856,18 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
 
 /// Choose at most two lines at spaces or after `/`, then truncate each line at
 /// Unicode character boundaries. An oversized word stays on one line with an ellipsis.
+/// A tool that cannot edit the design while a version is on screen is drawn as a soft smear.
+fn paint_tool_icon(painter: &egui::Painter, rect: Rect, icon: &str, opacity: f32, blurred: bool) {
+    if blurred {
+        for offset in [vec2(-1.8, 0.0), vec2(1.8, 0.0), vec2(0.0, -1.8), vec2(0.0, 1.8)] {
+            icons::paint_icon(painter, rect.translate(offset), icon, 0.16);
+        }
+        icons::paint_icon(painter, rect, icon, opacity.min(0.3));
+    } else {
+        icons::paint_icon(painter, rect, icon, opacity);
+    }
+}
+
 fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
     let mut lines = ribbon_label_lines(painter, label, width);
     // Right-to-left labels come in display order (see `bidi`): a line reads from its right end,
@@ -1605,11 +1617,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if let Some(c) = shown.first().or(cmds.first()) {
                     let info = c.info(&app.session);
-                    icons::paint_icon(
+                    paint_tool_icon(
                         &painter,
                         Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0)),
                         info.icon,
                         f32::from(t.icon.a()) / 255.0,
+                        app.session.version_view.is_some() && c.undoable,
                     );
                 }
                 dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
@@ -1699,7 +1712,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let side = if finish { 30.0 } else { 26.0 };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-                icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
+                paint_tool_icon(
+                    &painter,
+                    icon_rect,
+                    icon,
+                    if info.enabled { 1.0 } else { 0.35 },
+                    app.session.version_view.is_some() && selected.undoable,
+                );
                 let tr_label = app.tr_label(info.label).to_string();
                 if !persistent {
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &tr_label));

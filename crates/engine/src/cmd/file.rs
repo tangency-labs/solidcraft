@@ -406,6 +406,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
 }
 
 fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+    if s.version_view.is_some() {
+        return Err(bad("file.save", "go back to the workspace before saving"));
+    }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     if s.path.as_deref() == Some(path) {
         if s.read_only {
@@ -483,10 +486,11 @@ impl Session {
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
-        let mut design = std::borrow::Cow::Borrowed(&*self.doc);
+        let base = self.persisted_doc();
+        let mut design = std::borrow::Cow::Borrowed(&**base);
         if let Some(path) = path {
-            let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
-            if links != self.doc.links {
+            let links = super::design_link::rebased(base, self.path.as_deref(), path);
+            if links != base.links {
                 design.to_mut().links = links;
             }
         }
