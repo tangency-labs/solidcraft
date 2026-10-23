@@ -147,11 +147,7 @@ const KICAD_IMPORT: &[OptionSpec] = &[
         kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modelled")], default: 0 },
     },
     OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
-    OptionSpec {
-        param: "representation",
-        label: "Board",
-        kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 },
-    },
+    OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
 ];
 
 /// Binary is the `stl` format value, ASCII is `stla` (see `file.export`).

@@ -139,6 +139,38 @@ fn builds_a_closed_mesh_from_a_concave_outline() {
 }
 
 #[test]
+fn the_import_reports_the_outlines_lower_left_corner() {
+    // A board drawn away from KiCad's origin: world X 30..90, and KiCad's Y 40..70 becomes
+    // world Y -70..-40, so the lower-left corner is (30, -70).
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 30 40) (end 90 70) (layer "Edge.Cuts")))"#;
+    let mut load = |_: &str| Err("no models".to_string());
+    let imported = read_kicad(source.as_bytes(), "corner.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert_eq!(imported.corner, Some([30.0, -70.0]), "the corner the caller shifts the board by");
+}
+
+#[test]
+fn a_model_that_stays_out_says_why_in_a_few_words() {
+    // The kernel's own words, with its layers of context and the resolved path taken off.
+    assert_eq!(short_reason("kernel internal error: STEP body preparation: This wire is not simple."), "this wire is not simple");
+    assert_eq!(
+        short_reason(r"C:\models\part.step: The system cannot find the file specified. (os error 2)"),
+        "the system cannot find the file specified"
+    );
+    assert_eq!(short_reason("   "), "unsupported");
+    assert!(short_reason(&"a very long reason ".repeat(20)).chars().count() <= 61);
+    // A model that only partly came in says how much, and why; one that gave nothing says why.
+    assert_eq!(
+        model_loss_warning("DIN41612_C_2x16.step", 1, 33, "this wire is not simple"),
+        "DIN41612_C_2x16.step: 1 of 33 solids not imported (this wire is not simple)"
+    );
+    assert_eq!(
+        model_loss_warning("DIN41612_C_2x16.step", 33, 33, "this wire is not simple"),
+        "DIN41612_C_2x16.step: not imported (this wire is not simple)"
+    );
+}
+
+#[test]
 fn curved_outlines_and_circular_cutouts_make_an_annular_board() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_circle (center 0 0) (end 10 0) (layer "Edge.Cuts"))

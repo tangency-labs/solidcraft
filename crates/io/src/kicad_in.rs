@@ -2,6 +2,9 @@
 //!
 //! Board coordinates are read as KiCad stores them (X right, Y down) and the board itself is
 //! placed in SolidCraft's Z-up frame with Y negated: a board point `(x, y)` becomes `(x, -y)`.
+//! The board keeps the coordinates the file was drawn with; [`KicadImport::corner`] reports its
+//! lower-left outline corner so the caller can place the import with that corner at the origin
+//! (a board is usually drawn far from it).
 //! Footprint children (pads, silkscreen shapes) are stored in the board file already flipped
 //! when the footprint is on the back, so they are placed with the footprint's position and
 //! rotation alone. 3D models are authored for the front and get a half turn about X on a back
@@ -275,6 +278,10 @@ pub struct KicadImport {
     /// The board substrate as a solid (STEP), when it could be built: the engine adds it as an
     /// Import feature in the board's component. `None`: the mesh feature holds the board.
     pub board_step: Option<String>,
+    /// The board outline's lower-left corner in the import's own frame (the smallest X and Y):
+    /// moving the import by `-corner` puts that corner at the origin. `None`: the board has no
+    /// closed outline to measure.
+    pub corner: Option<[f64; 2]>,
 }
 
 /// A model file a loader found for a footprint's reference (`(model "…")`): the reference can
@@ -911,6 +918,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     report_import(0);
     let board = parse_kicad_board_with(bytes, file, options.clone())?;
     report_import(1);
+    let corner = board_corner(&board);
     let thickness = options.thickness.unwrap_or(board.thickness);
     let mut warnings = board.warnings.clone();
     let mut meshes = Vec::new();
@@ -947,11 +955,11 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
             for model in &footprint.models {
                 let ext = Path::new(&model.path).extension().and_then(|e| e.to_str()).unwrap_or("");
                 if !ext.eq_ignore_ascii_case("step") && !ext.eq_ignore_ascii_case("stp") && !ext.eq_ignore_ascii_case("wrl") {
-                    warnings.push(format!("{}: unsupported 3D model format", model.path));
+                    warnings.push(format!("{}: unsupported 3D model format", model_label(&model.path)));
                     continue;
                 }
                 if model.scale.iter().any(|v| !v.is_finite() || *v <= 0.0) {
-                    warnings.push(format!("{}: invalid or mirrored 3D model scale is unsupported", model.path));
+                    warnings.push(format!("{}: mirrored 3D model scale is unsupported", model_label(&model.path)));
                     continue;
                 }
                 let key = (model.path.clone(), model_transform_key(model, back));
@@ -962,7 +970,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 let file = match load(&model.path) {
                     Ok(file) => file,
                     Err(reason) => {
-                        warnings.push(format!("{}: {reason}", model.path));
+                        warnings.push(format!("{}: {}", model_label(&model.path), short_reason(&reason)));
                         continue;
                     }
                 };
@@ -977,63 +985,39 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     continue;
                 }
                 let format = Path::new(&model_path).extension().and_then(|e| e.to_str()).unwrap_or("");
-                let (imported_meshes, reason) = if format.eq_ignore_ascii_case("wrl") {
+                let (imported_meshes, reason, notes) = if format.eq_ignore_ascii_case("wrl") {
                     if model_bytes.len() > crate::MAX_VRML_BYTES {
-                        (Vec::new(), Some("model file exceeds the VRML size limit".to_string()))
+                        (Vec::new(), Some("the model file is too large".to_string()), Vec::new())
                     } else {
                         match crate::vrml_in::read_vrml(&model_bytes, &model_path) {
                             Ok(m) => {
-                                warnings.extend(m.warnings.iter().map(|w| format!("{model_path}: {w}")));
+                                let mut notes: Vec<String> = m.warnings.iter().map(|w| format!("{}: {w}", model_label(&model_path))).collect();
                                 match solidcraft_kernel::mesh_body(&m.positions, &m.triangles) {
-                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), m.positions, m.triangles, m.color)], None),
-                                    Err(e) => (Vec::new(), Some(e.to_string())),
+                                    Ok(_) => {
+                                        (vec![mesh_data(component_name(footprint, &model.path), m.positions, m.triangles, m.color)], None, notes)
+                                    }
+                                    Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), std::mem::take(&mut notes)),
                                 }
                             }
-                            Err(e) => (Vec::new(), Some(e.to_string())),
+                            Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), Vec::new()),
                         }
                     }
+                } else if model_bytes.len() > crate::MAX_STEP_BYTES {
+                    (Vec::new(), Some("the model file is too large".to_string()), Vec::new())
                 } else {
-                    if model_bytes.len() > crate::MAX_STEP_BYTES {
-                        (Vec::new(), Some("model file exceeds the STEP size limit".to_string()))
-                    } else {
-                        let text = String::from_utf8_lossy(&model_bytes);
-                        match solidcraft_kernel::step_import_shared(&text) {
-                            Ok(imported) => {
-                                let mut out = Vec::new();
-                                let mut failed = None;
-                                for body in &imported.bodies {
-                                    let parts = match model_body_meshes(&body.name, &body.body, body.color) {
-                                        Ok(parts) => parts,
-                                        Err(error) => {
-                                            failed = Some(error.to_string());
-                                            break;
-                                        }
-                                    };
-                                    for mesh in parts {
-                                        totals.0 = totals.0.saturating_add(mesh.positions.len());
-                                        totals.1 = totals.1.saturating_add(mesh.triangles.len());
-                                        if totals.0 > MAX_MODEL_VERTICES || totals.1 > MAX_MODEL_TRIANGLES {
-                                            failed = Some("KiCad model geometry exceeds the import limits".into());
-                                            break;
-                                        }
-                                        out.push(mesh);
-                                    }
-                                    if failed.is_some() {
-                                        break;
-                                    }
-                                }
-                                (out, failed)
-                            }
-                            Err(error) => (Vec::new(), Some(error.to_string())),
-                        }
+                    let text = String::from_utf8_lossy(&model_bytes);
+                    match step_model_meshes(&text, model_label(&model_path), &mut totals) {
+                        Ok((meshes, notes)) => (meshes, None, notes),
+                        Err(reason) => (Vec::new(), Some(reason), Vec::new()),
                     }
                 };
+                warnings.extend(notes);
                 if let Some(reason) = reason {
-                    warnings.push(format!("{model_path}: {reason}"));
+                    warnings.push(format!("{}: not imported ({reason})", model_label(&model_path)));
                     continue;
                 }
                 if imported_meshes.is_empty() {
-                    warnings.push(format!("{model_path}: no solid bodies found"));
+                    warnings.push(format!("{}: no solid bodies found", model_label(&model_path)));
                     continue;
                 }
                 let slot = plan.slots.len();
@@ -1093,12 +1077,101 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
         body_names,
         warnings,
     };
-    Ok(KicadImport { feature, plan, board_step })
+    Ok(KicadImport { feature, plan, board_step, corner })
+}
+
+/// The lower-left corner of the board's outline: the smallest X and Y over the closed Edge.Cuts
+/// contours the substrate is built from (cutouts included — they lie inside the outline). `None`
+/// when the contours cannot be measured, which no board that is built has.
+fn board_corner(board: &KicadBoard) -> Option<[f64; 2]> {
+    let loops = outline_loops(board).ok()?;
+    let mut corner = [f64::INFINITY, f64::INFINITY];
+    for point in loops.iter().flat_map(|outline| outline.polyline(CURVE_TOLERANCE)) {
+        corner[0] = corner[0].min(point.x);
+        corner[1] = corner[1].min(point.y);
+    }
+    corner.iter().all(|value| value.is_finite()).then_some(corner)
 }
 
 fn component_name(footprint: &KicadFootprint, path: &str) -> String {
     let label = footprint.reference.trim();
     if label.is_empty() { path.to_string() } else { label.to_string() }
+}
+
+/// A model's name as a warning shows it: its file name, not the whole resolved path.
+fn model_label(path: &str) -> &str {
+    Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or(path)
+}
+
+/// Why a model or one of its solids did not come in, in a few words: the status line shows one
+/// line, and "this wire is not simple" tells a user more than "failed to import".
+fn short_reason(reason: &str) -> String {
+    let mut text = reason.trim();
+    // The kernel wraps its cause in layers of context.
+    for prefix in ["kernel internal error: ", "the operation failed: ", "STEP body preparation: ", "step brep: ", "KiCad model: ", "STEP import: "] {
+        while let Some(rest) = text.strip_prefix(prefix) {
+            text = rest.trim();
+        }
+    }
+    // A resolved path in front of the reason (the file is already named in the message).
+    if let Some((head, tail)) = text.split_once(": ")
+        && (head.contains('\\') || head.contains('/'))
+    {
+        text = tail.trim();
+    }
+    let clause = text.split(['.', ';', '\n']).next().unwrap_or(text).trim();
+    let mut out = String::with_capacity(clause.len());
+    for (index, ch) in clause.chars().enumerate() {
+        if index == 60 {
+            out.push('…');
+            break;
+        }
+        out.push(if index == 0 { ch.to_ascii_lowercase() } else { ch });
+    }
+    if out.is_empty() { "unsupported".to_string() } else { out }
+}
+
+/// A STEP model as meshes: the solids that built, and a warning saying how many solids stayed
+/// out and why (the others still come in — one unusable face costs that solid, not the model).
+/// `Err` says why the model gave nothing at all, in a few words.
+fn step_model_meshes(
+    text: &str,
+    label: &str,
+    totals: &mut (usize, usize),
+) -> std::result::Result<(Vec<solidcraft_doc::MeshData>, Vec<String>), String> {
+    let imported = solidcraft_kernel::step_import_shared(text).map_err(|error| short_reason(&error.to_string()))?;
+    let total = imported.bodies.len().saturating_add(imported.skipped.len());
+    let mut missing: Vec<String> = imported.skipped.iter().map(|skip| short_reason(&skip.reason)).collect();
+    let mut meshes = Vec::new();
+    for body in &imported.bodies {
+        let parts = match model_body_meshes(&body.name, &body.body, body.color) {
+            Ok(parts) => parts,
+            Err(error) => {
+                missing.push(short_reason(&error.to_string()));
+                continue;
+            }
+        };
+        for mesh in parts {
+            totals.0 = totals.0.saturating_add(mesh.positions.len());
+            totals.1 = totals.1.saturating_add(mesh.triangles.len());
+            if totals.0 > MAX_MODEL_VERTICES || totals.1 > MAX_MODEL_TRIANGLES {
+                return Err("the models are too large to import".into());
+            }
+            meshes.push(mesh);
+        }
+    }
+    let mut warnings = Vec::new();
+    if !missing.is_empty() {
+        let why = missing.first().map(String::as_str).unwrap_or("unsupported");
+        warnings.push(model_loss_warning(label, missing.len(), total, why));
+    }
+    Ok((meshes, warnings))
+}
+
+/// The one line a model that only partly came in is reported with: how much of it is missing and
+/// the first reason, in a few words (`label` is the model's file name).
+fn model_loss_warning(label: &str, missing: usize, total: usize, why: &str) -> String {
+    if missing >= total { format!("{label}: not imported ({why})") } else { format!("{label}: {missing} of {total} solids not imported ({why})") }
 }
 
 /// A model file's identity for the `files` cache. One file can arrive spelled two ways — the
