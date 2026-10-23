@@ -1152,12 +1152,34 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         }
         g
     };
-    let forms: Vec<Option<(b::Curve, [f64; 2])>> = edges
+    // A circle on a cylinder, cone, sphere or torus about its axis is labelled on that face's
+    // frame, so its form lies on the face's quarter grid and its pcurve there is a straight line.
+    let mut frame_of: Vec<Option<&b::Frame>> = vec![None; edges.len()];
+    for f in &faces {
+        let (b::Surface::Cylinder { frame, .. }
+        | b::Surface::Cone { frame, .. }
+        | b::Surface::Sphere { frame, .. }
+        | b::Surface::Torus { frame, .. }) = &f.surface
+        else {
+            continue;
+        };
+        for u in f.loops.iter().flatten() {
+            if let Some(slot) = frame_of.get_mut(u.edge as usize).filter(|s| s.is_none()) {
+                *slot = Some(frame);
+            }
+        }
+    }
+    let labels: Vec<(b::Curve, [f64; 2])> = edges
+        .iter()
+        .zip(&frame_of)
+        .map(|(e, frame)| frame.and_then(|f| b::form::on_frame(&e.curve, e.interval, f, tol)).unwrap_or_else(|| (e.curve.clone(), e.interval)))
+        .collect();
+    let forms: Vec<Option<(b::Curve, [f64; 2])>> = labels
         .iter()
         .zip(&given_on)
-        .map(|(e, given)| match e.curve {
+        .map(|((curve, interval), given)| match curve {
             b::Curve::Circle { .. } | b::Curve::Ellipse { .. } if !given => {
-                b::form::curve(&e.curve, e.interval).ok_or_else(|| fail("an arc of more than one turn".into())).map(Some)
+                b::form::curve(curve, *interval).ok_or_else(|| fail("an arc of more than one turn".into())).map(Some)
             }
             _ => Ok(None),
         })
@@ -1300,13 +1322,13 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     }
     let record_edges = edges
         .iter()
-        .zip(&forms)
-        .map(|(e, form)| {
+        .zip(forms.iter().zip(&labels))
+        .map(|(e, (form, (label, label_interval)))| {
             let (nurbs, interval) = match form {
                 Some((c, i)) => (Some(c.clone()), *i),
-                None => (None, e.interval),
+                None => (None, *label_interval),
             };
-            b::Edge { nurbs, curve: e.curve.clone(), interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() }
+            b::Edge { nurbs, curve: label.clone(), interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() }
         })
         .collect();
     let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
@@ -1424,7 +1446,8 @@ fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field: &d
         let [t0, t1] = c.interval()?;
         let at = |k: f64| {
             let f = k / FLUX_PIECES as f64;
-            c.eval(if *forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })
+            // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
+            c.eval(if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
         };
         for k in 0..FLUX_PIECES {
             let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);

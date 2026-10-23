@@ -176,3 +176,22 @@ pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
         _ => None,
     }
 }
+
+/// A circle edge labelled on another frame about the same axis: the same circle, its angle
+/// measured from `frame`'s x axis (its y axis taken so the circle keeps its own direction), and
+/// its interval shifted to match, so its form lies on `frame`'s quarter grid. `None` when the
+/// circle is not about `frame`'s axis (centre on it, normal along it, within `tol`).
+pub fn on_frame(c: &Curve, [t0, t1]: [f64; 2], frame: &Frame, tol: f64) -> Option<(Curve, [f64; 2])> {
+    let Curve::Circle { frame: own, radius } = c else { return None };
+    let (o, x, _, z) = axes(own)?;
+    let (fo, fx, _, fz) = axes(frame)?;
+    let d = o - fo;
+    if !((d - fz * d.dot(fz)).len() <= tol && (z.dot(fz).abs() - 1.0).abs() <= 1e-9) {
+        return None;
+    }
+    let nx = (fx - z * fx.dot(z)).normalized()?;
+    let ny = z.cross(nx);
+    let shift = x.dot(ny).atan2(x.dot(nx));
+    let relabel = Frame { origin: [o.x, o.y, o.z], x_axis: [nx.x, nx.y, nx.z], y_axis: [ny.x, ny.y, ny.z] };
+    Some((Curve::Circle { frame: relabel, radius: *radius }, [t0 + shift, t1 + shift]))
+}

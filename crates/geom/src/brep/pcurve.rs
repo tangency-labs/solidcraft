@@ -317,9 +317,15 @@ impl On {
         if let (Some(a), Some(b)) = (self.project(p0, None, exact), self.project(p1, None, exact)) {
             candidates.push(line(a, b));
         }
+        // u or v the edge's own parameter, either way along and offset (forms on one frame's
+        // quarter grid, or on the same grid turned over), the other fixed.
         if let Some([u, v]) = self.project(pm, None, exact) {
-            candidates.push(line([t0, v], [t1, v]));
-            candidates.push(line([u, t0], [u, t1]));
+            let tm = 0.5 * (t0 + t1);
+            for sign in [1.0, -1.0] {
+                let (cu, cv) = (u - sign * tm, v - sign * tm);
+                candidates.push(line([cu + sign * t0, v], [cu + sign * t1, v]));
+                candidates.push(line([u, cv + sign * t0], [u, cv + sign * t1]));
+            }
         }
         candidates.into_iter().find(|pc| self.lifts(pc, curve, [t0, t1], exact))
     }
