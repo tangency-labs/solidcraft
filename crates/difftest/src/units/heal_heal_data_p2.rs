@@ -1514,7 +1514,7 @@ fn rust_heal(
                 }
             }
             Step::CacheFacePropsStage2 => {
-                h.cache_face_props_stage2(&k, &b, HealerOpType::CacheFaceprops2)
+                h.cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2)
             }
             Step::CacheFacePropsStage3 => {
                 h.cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3)

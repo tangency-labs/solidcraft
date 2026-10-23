@@ -54,16 +54,17 @@
 //!   parts when it owns the curve. Unowned parts and temporary `this` copies use
 //!   exact snapshots, retaining their NURBS data and owner chains; native owned
 //!   branches still use virtual `Copy`. Notifications and contexts are not modelled.
-//! - **Caches.** `GetKnots`, `GetOrCreateBSApproxPointer` and the `const` methods that
-//!   call them (`CalculateContinuities`, `GetNumberNaturalKnots`,
-//!   `CalculateBoundingBox`, `DropPoint`, `ApproximateCurve`) update the break and
-//!   approximation caches through a `const_cast`: here they take `&mut self`. The
-//!   [`Curve`] dispatch only has `&self`: it runs them on a copy of the object
-//!   (same answer as upstream's call, the cache update is lost; the `*_ref` methods).
+//! - **Caches.** Upstream's const knot queries update the break cache. Here that
+//!   value-only cache uses interior mutability; no cache borrow spans a geometry
+//!   call. `breaks()` returns an owned snapshot. Shared [`Curve`] knot dispatch
+//!   retains these writes. Approximation queries still use `&mut self`; their
+//!   `*_ref` variants run on an exact copy and do not retain approximation updates.
 //! - **Base-class calls.** `SmCurve::ApproximateCurve`, `SmCurve::DropPoint` and
 //!   `SmCurve::CalculateBoundingBox` on `this` run on a [`Curve`] wrapping a copy of
 //!   this object ([`Curve::approximate_curve_base`], [`Curve::drop_point_base`],
-//!   [`calculate_bounding_box_base`]). Where upstream falls back to the base class
+//!   [`calculate_bounding_box_base`]). The base drop's actual break-cache state is
+//!   copied back even on failure; local solves do not force a cache build. Where
+//!   upstream falls back to the base class
 //!   after a failed approximation (`CalculateBoundingBox`, `DropPoint`), a
 //!   [`SolidError::Unported`] failure is propagated instead.
 //! - **Out-params.** Outputs are returned: `GetKnots` returns the multiplicities
@@ -108,6 +109,8 @@
 //!   geometry visitor before any recursive domain or copy operation. The children
 //!   are private and exposed only immutably, so infallible `Clone` and temporary
 //!   evaluation snapshots can safely copy this validated graph exactly.
+
+use std::cell::RefCell;
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::{
@@ -171,23 +174,13 @@ fn surface_read_from_db(
 /// (tolerance `tol`) against the knot iso-parameter lines of `surface`
 /// (`IntersectUVDiscontinuties`), in order.
 fn classify_against_surface(
-    _k: &Kernel,
-    _curve: &Curve,
-    _interval: &Extent1d,
-    _tol: f64,
-    _surface: &Surface,
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    tol: f64,
+    surface: &Surface,
 ) -> Result<Vec<Extent1d>> {
-    // The call is `intersect::curve_class::p8::uv_discontinuity_intervals(k, curve,
-    // *interval, tol, &Surface::from(surface.clone()))`. It stays a stub because upstream
-    // runs the base `SmCurve::DropPoint` on this curve (whose `GetKnots` caches the breaks
-    // on some solver paths) while the port runs it on a `Curve` copy: with the call wired,
-    // 17 generated drop cases end with different break caches (plan/findings.md,
-    // "intersect.curve_class_p4").
-    // UNPORTED(intersect.curve_class_p2): SmCurveClassification::ReSet
-    Err(SolidError::unported(
-        "SmCurveClassification::ReSet",
-        "intersect.curve_class_p2",
-    ))
+    crate::intersect::curve_class::p8::uv_discontinuity_intervals(k, curve, *interval, tol, surface)
 }
 
 /// `smsurf_LiftSecondDerivative(Cs, Css, DU, DV, DUU, DUV, DVV)`: the second
@@ -263,6 +256,14 @@ pub struct SurfaceNormalEval {
 
 // ---- the curve ----------------------------------------------------------------------
 
+/// The two fields written by upstream's const `GetKnots`. No borrow of this
+/// value is held while calling geometry or a solver (which can query knots again).
+#[derive(Debug, Clone)]
+struct BreakCache {
+    need_breaks: bool,
+    breaks: Vec<f64>,
+}
+
 /// A curve on a surface (`SmCrvOnSurf`): `C(t) = S(uv(t))` for a 2D parameter-space
 /// curve `uv` and a surface `S`. Its "knots" are the UV curve's knots plus the
 /// parameters where it crosses the surface's knot lines (cached once computed); a
@@ -275,10 +276,8 @@ pub struct CrvOnSurf {
     surface: Box<Surface>,
     /// `m_vUVDomain`: the domain of interest on the surface.
     uv_domain: Extent2d,
-    /// `m_bNeedBreaks`: the break cache is not computed.
-    need_breaks: bool,
-    /// `m_vBreaks`: cached breaks (UV curve knots plus surface knot-line crossings).
-    breaks: Vec<f64>,
+    /// `m_bNeedBreaks`, `m_vBreaks`: mutable even in upstream's const queries.
+    break_cache: RefCell<BreakCache>,
     /// `m_lOwnerFlag`: 0 shares both parts, 1 owns (a copy of) the curve, 2 owns copies
     /// of both, 3 owns both originals.
     owner_flag: u64,
@@ -297,8 +296,7 @@ impl Clone for CrvOnSurf {
             uv_curve: Box::new(self.uv_curve.clone_exact_bounded()),
             surface: Box::new(self.surface.clone_exact_bounded()),
             uv_domain: self.uv_domain,
-            need_breaks: self.need_breaks,
-            breaks: self.breaks.clone(),
+            break_cache: self.break_cache.clone(),
             owner_flag: self.owner_flag,
             bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
             max_gap_3d: self.max_gap_3d,
@@ -316,8 +314,7 @@ impl CrvOnSurf {
             uv_curve: Box::new(self.uv_curve.clone_for_evaluation_depth(depth)?),
             surface: Box::new(self.surface.clone_exact_bounded()),
             uv_domain: self.uv_domain,
-            need_breaks: self.need_breaks,
-            breaks: self.breaks.clone(),
+            break_cache: self.break_cache.clone(),
             owner_flag: self.owner_flag,
             bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
             max_gap_3d: self.max_gap_3d,
@@ -336,8 +333,10 @@ impl CrvOnSurf {
             uv_curve: Box::new(uv_curve),
             surface: Box::new(surface),
             uv_domain: Extent2d::new(),
-            need_breaks: true,
-            breaks: Vec::new(),
+            break_cache: RefCell::new(BreakCache {
+                need_breaks: true,
+                breaks: Vec::new(),
+            }),
             owner_flag,
             bs_approx: None,
             max_gap_3d: BIG_DOUBLE,
@@ -457,7 +456,7 @@ impl CrvOnSurf {
 
         let mut c = Self::bare(uv_curve, surface, 0)?;
         c.uv_domain = self.uv_domain;
-        c.need_breaks = self.need_breaks;
+        c.break_cache.get_mut().need_breaks = self.need_breaks();
 
         // set the owner flag
         c.owner_flag = if owns_curve && owns_surface {
@@ -467,8 +466,8 @@ impl CrvOnSurf {
         };
 
         // copy curve discontinuity break points when appropriate
-        if !self.need_breaks {
-            c.breaks.clone_from(&self.breaks);
+        if !self.need_breaks() {
+            c.break_cache.get_mut().breaks = self.breaks();
         }
 
         if let Some(a) = &self.bs_approx {
@@ -512,20 +511,23 @@ impl CrvOnSurf {
 
     /// Whether the break cache still has to be computed (`m_bNeedBreaks`).
     #[must_use]
-    pub const fn need_breaks(&self) -> bool {
-        self.need_breaks
+    pub fn need_breaks(&self) -> bool {
+        self.break_cache.borrow().need_breaks
     }
 
-    /// The cached breaks (`m_vBreaks`).
+    /// A snapshot of the cached breaks (`m_vBreaks`). Returning owned values keeps
+    /// callers from holding a cache borrow across a knot query.
     #[must_use]
-    pub fn breaks(&self) -> &[f64] {
-        &self.breaks
+    pub fn breaks(&self) -> Vec<f64> {
+        self.break_cache.borrow().breaks.clone()
     }
 
     /// Loads the break cache (`m_bNeedBreaks`, `m_vBreaks`), as `ReadFromDB` does.
     pub fn set_breaks_cache(&mut self, need_breaks: bool, breaks: Vec<f64>) {
-        self.need_breaks = need_breaks;
-        self.breaks = breaks;
+        *self.break_cache.get_mut() = BreakCache {
+            need_breaks,
+            breaks,
+        };
     }
 
     /// The cached B-spline approximation (`m_pBSApproxCurve`), if any.
@@ -857,20 +859,21 @@ impl CrvOnSurf {
     /// classification; [`SolidError::InvalidInput`] where upstream would read
     /// outside its arrays.
     pub fn knots_with_status(
-        &mut self,
+        &self,
         k: &Kernel,
         interval: Option<&Extent1d>,
     ) -> Result<KnotsWithStatus> {
         // low work
-        if !self.need_breaks {
-            let num = self.breaks.len();
+        if !self.need_breaks() {
+            let breaks = self.breaks();
+            let num = breaks.len();
             if num >= 2 {
                 // copy saved breaks array; multiplicities as if degree 3
                 let mut mults = Vec::with_capacity(num);
                 mults.push(4);
                 mults.extend(core::iter::repeat_n(2, num - 2));
                 mults.push(4);
-                return Ok(KnotsWithStatus::success(self.breaks.clone(), mults));
+                return Ok(KnotsWithStatus::success(breaks, mults));
             }
         }
 
@@ -968,8 +971,10 @@ impl CrvOnSurf {
         }
 
         // cache the discontinuity break points
-        self.breaks.clone_from(&knots);
-        self.need_breaks = false;
+        *self.break_cache.borrow_mut() = BreakCache {
+            need_breaks: false,
+            breaks: knots.clone(),
+        };
         Ok(KnotsWithStatus::success(knots, mults))
     }
 
@@ -978,16 +983,11 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// As [`Self::knots_with_status`], and its failing status.
-    pub fn knots(
-        &mut self,
-        k: &Kernel,
-        interval: Option<&Extent1d>,
-    ) -> Result<(Vec<f64>, Vec<usize>)> {
+    pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
         self.knots_with_status(k, interval)?.into_result()
     }
 
-    /// [`Self::knots`] on a copy (for `&self` callers): upstream's answer, without
-    /// storing the cache.
+    /// [`Self::knots`] for shared callers, retaining upstream's cache update.
     ///
     /// # Errors
     ///
@@ -997,7 +997,7 @@ impl CrvOnSurf {
         k: &Kernel,
         interval: Option<&Extent1d>,
     ) -> Result<(Vec<f64>, Vec<usize>)> {
-        self.clone().knots(k, interval)
+        self.knots(k, interval)
     }
 
     /// The sum of the break multiplicities (`GetNumberNaturalKnots`), caching the
@@ -1006,18 +1006,18 @@ impl CrvOnSurf {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from [`Self::knots`].
-    pub fn number_natural_knots(&mut self, k: &Kernel) -> Result<usize> {
+    pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
         let (_, mults) = knots_ignoring_status(self.knots_with_status(k, None))?;
         Ok(mults.iter().sum())
     }
 
-    /// [`Self::number_natural_knots`] without storing the cache.
+    /// [`Self::number_natural_knots`] for shared callers, retaining the cache.
     ///
     /// # Errors
     ///
     /// As [`Self::number_natural_knots`].
     pub fn number_natural_knots_ref(&self, k: &Kernel) -> Result<usize> {
-        self.clone().number_natural_knots(k)
+        self.number_natural_knots(k)
     }
 
     /// The minimum continuity of the interior breaks and the continuity at every
@@ -1030,7 +1030,7 @@ impl CrvOnSurf {
     /// [`SolidError::Unported`] from [`Self::knots`]; those of the evaluations;
     /// [`SolidError::InvalidInput`] without breaks.
     pub fn calculate_continuities(
-        &mut self,
+        &self,
         k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
@@ -1077,7 +1077,7 @@ impl CrvOnSurf {
         Ok((min_cont, conts))
     }
 
-    /// [`Self::calculate_continuities`] without storing the cache.
+    /// [`Self::calculate_continuities`] for shared callers, retaining the cache.
     ///
     /// # Errors
     ///
@@ -1087,7 +1087,7 @@ impl CrvOnSurf {
         k: &Kernel,
         angle_tol: f64,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-        self.clone().calculate_continuities(k, angle_tol)
+        self.calculate_continuities(k, angle_tol)
     }
 
     // ---- the B-spline approximation -------------------------------------------------
@@ -1124,10 +1124,9 @@ impl CrvOnSurf {
         // If we need breaks and have been given them, or have breaks and they are not
         // the same, then we will build a bspline using the supplied breaks.
         if let Some(b) = breaks {
-            if self.need_breaks || b != self.breaks.as_slice() {
+            if self.need_breaks() || b != self.breaks().as_slice() {
                 recompute = true;
-                self.breaks = b.to_vec();
-                self.need_breaks = false;
+                self.set_breaks_cache(false, b.to_vec());
             }
         }
 
@@ -1147,10 +1146,9 @@ impl CrvOnSurf {
         }
 
         // otherwise make one
-        if self.need_breaks {
+        if self.need_breaks() {
             let (knots, _) = knots_ignoring_status(self.knots_with_status(k, None))?;
-            self.breaks = knots;
-            self.need_breaks = false;
+            self.set_breaks_cache(false, knots);
         }
         self.bs_approx = None;
         self.parametrization_matches = match_param;
@@ -1160,9 +1158,9 @@ impl CrvOnSurf {
             match_parameterization: match_param,
             just_copy_bsplines: false,
         };
-        let approx = self
-            .as_curve()
-            .approximate_curve_base(k, &self.breaks, approx_tol, &opts)?;
+        let approx =
+            self.as_curve()
+                .approximate_curve_base(k, &self.breaks(), approx_tol, &opts)?;
         if let Some(g) = approx.achieved_tol {
             self.max_gap_3d = g;
         }
@@ -1267,7 +1265,7 @@ impl CrvOnSurf {
         };
 
         if guess.is_some() {
-            return self.as_curve().drop_point_base(
+            return self.drop_point_base_preserving_breaks(
                 k,
                 interval,
                 point,
@@ -1282,7 +1280,7 @@ impl CrvOnSurf {
             Ok(bs) => bs,
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => {
-                return self.as_curve().drop_point_base(
+                return self.drop_point_base_preserving_breaks(
                     k,
                     interval,
                     point,
@@ -1308,7 +1306,7 @@ impl CrvOnSurf {
 
         let min_param = interval.snap_value(bs.greville_abscissa(min_index)?, EFF_ZERO);
 
-        self.as_curve().drop_point_base(
+        self.drop_point_base_preserving_breaks(
             k,
             interval,
             point,
@@ -1317,6 +1315,27 @@ impl CrvOnSurf {
             Some(min_param),
             op,
         )
+    }
+
+    /// Run the base algorithm on an exact evaluation copy, then keep only the
+    /// break-cache writes it actually made, including writes before an error.
+    /// A successful local/fast solve may never request knots; do not force them.
+    fn drop_point_base_preserving_breaks(
+        &mut self,
+        k: &Kernel,
+        interval: &Extent1d,
+        point: Point3,
+        vec_to_inside: Option<Vec3>,
+        dist_tol: f64,
+        guess: Option<f64>,
+        op: SolverOperation,
+    ) -> Result<DroppedPoint> {
+        let curve = self.as_curve();
+        let result = curve.drop_point_base(k, interval, point, vec_to_inside, dist_tol, guess, op);
+        if let CurveKind::CrvOnSurf(c) = curve.into_kind() {
+            *self.break_cache.get_mut() = c.break_cache.into_inner();
+        }
+        result
     }
 
     /// [`Self::drop_point`] without storing the caches.
@@ -1348,17 +1367,18 @@ impl CrvOnSurf {
     /// Those of the UV curve's edit (the breaks are rescaled already).
     pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
         // when appropriate scale breaks
-        if !self.need_breaks {
+        if !self.need_breaks() {
             let ivl = self.uv_curve.natural_interval();
+            let cache = self.break_cache.get_mut();
             if ivl.length() > EFF_ZERO && new_param.length() > EFF_ZERO {
                 // for every break
-                for b in &mut self.breaks {
+                for b in &mut cache.breaks {
                     *b = ((*b - ivl.min()) / ivl.length()) * new_param.length() + new_param.min();
                 }
             } else {
                 // working with zero length intervals
-                self.breaks.clear();
-                self.need_breaks = true;
+                cache.breaks.clear();
+                cache.need_breaks = true;
             }
         }
 
@@ -1400,9 +1420,8 @@ impl CrvOnSurf {
         self.uv_curve.trim(k, trim_interval, mode)?;
 
         // clear the knots
-        if !self.need_breaks {
-            self.breaks.clear();
-            self.need_breaks = true;
+        if !self.need_breaks() {
+            self.set_breaks_cache(true, Vec::new());
         }
         Ok(())
     }
@@ -1792,8 +1811,7 @@ impl CrvOnSurf {
         let mut c = Self::bare(uv_curve, surface, 2)?;
         // (SetMinMax's status is ignored: an inverted domain keeps the empty one)
         let _ = c.uv_domain.set_min_max(min, max);
-        c.need_breaks = need_breaks;
-        c.breaks = breaks;
+        c.set_breaks_cache(need_breaks, breaks);
         Ok(c)
     }
 }
@@ -1858,6 +1876,68 @@ mod tests {
         cur.knots_mut()
             .copy_from_slice(&[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
         Curve::from(BSplineCurve::from_nurb(cur, 2, false))
+    }
+
+    #[test]
+    fn shared_knots_cache_refreshes_short_records_without_sharing_clones() {
+        let k = Kernel::default();
+        let mut c = CrvOnSurf::new(&k, uv(), patch().into(), None, 3).unwrap();
+        // Native GetKnots refreshes a loaded cache with fewer than two breaks,
+        // even when its need-breaks flag says it is already computed.
+        c.set_breaks_cache(false, vec![0.25]);
+        let copy = c.clone();
+        let before = c.breaks();
+        let curve = Curve::from(c);
+        let (knots, _) = curve.knots(&k, None).unwrap();
+        let CurveKind::CrvOnSurf(c) = curve.kind() else {
+            panic!("wrong curve kind");
+        };
+        assert_eq!(knots, vec![0.0, 1.0]);
+        assert_eq!(c.breaks(), knots);
+        assert!(!c.need_breaks());
+        assert_eq!(before, vec![0.25]);
+        assert_eq!(copy.breaks(), before);
+        let (_, mults) = curve
+            .knots(&k, Some(&Extent1d::from_raw(0.2, 0.8)))
+            .unwrap();
+        assert_eq!(mults, vec![4, 4]);
+    }
+
+    #[test]
+    fn base_drop_keeps_only_the_cache_writes_of_the_taken_solver_path() {
+        let k = Kernel::default();
+        let mut c = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
+        let ivl = c.natural_interval();
+        let point = c.evaluate_point(&k, 0.25).unwrap();
+        let local = c
+            .drop_point(
+                &k,
+                &ivl,
+                point,
+                None,
+                1e-6,
+                Some(0.25),
+                SolverOperation::Minimize,
+            )
+            .unwrap();
+        assert!(local.success);
+        assert!(c.need_breaks());
+        assert!(c.breaks().is_empty());
+
+        // Normalize without a guess skips the fast Minimize/Intersect solve and
+        // requests the curve cache. Its knot queries must survive the base copy.
+        c.drop_point_base_preserving_breaks(
+            &k,
+            &ivl,
+            point,
+            None,
+            1e-6,
+            None,
+            SolverOperation::Normalize,
+        )
+        .unwrap();
+        assert!(!c.need_breaks());
+        assert_eq!(c.breaks(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -2032,7 +2112,7 @@ mod tests {
                 .unwrap();
             let cached_before = approx.evaluate_point(sample).unwrap();
             let gap = curve.bs_approx_max_gap_3d();
-            let breaks = curve.breaks().to_vec();
+            let breaks = curve.breaks();
 
             assert!(matches!(
                 curve.transform(&k, &motion, None),
@@ -2241,10 +2321,8 @@ mod tests {
     fn cached_knots_and_edits() {
         let k = Kernel::default();
         let mut c = CrvOnSurf::new(&Kernel::default(), uv(), patch().into(), None, 0).unwrap();
-        assert!(matches!(
-            c.knots(&k, None),
-            Err(SolidError::Unported { .. })
-        ));
+        assert_eq!(c.knots(&k, None).unwrap(), (vec![0.0, 1.0], vec![4, 4]));
+        assert!(!c.need_breaks());
         c.set_breaks_cache(false, vec![0.0, 0.25, 1.0]);
         let (kn, m) = c.knots(&k, None).unwrap();
         assert_eq!(kn, vec![0.0, 0.25, 1.0]);

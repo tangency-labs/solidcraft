@@ -90,6 +90,8 @@
 //!   properties' closed flags (an `UNSURE` flag reads as `TRUE`) and the properties
 //!   themselves, as `SetProps_Stage2` does. The seam curves are temporaries of the
 //!   caller's handle type ([`ClassObject::temporary`]).
+//!   Mutable healer callers carry explicit query state through both directions and
+//!   retain the vertex/face and edge/face gap-cache updates, including error paths.
 //! - **`sm_FaceClassifyUVLine` and `SmFace::SectorClassifyCurveOn`** call
 //!   `query::face::p3`; the UV line's classification handles are `topology::face::p2`'s.
 //! - **`ClassifyProblem`** is the co-port of `query.face_p1` (re-exported).
@@ -120,8 +122,8 @@ use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::{
-    curve_on_classify, face_surface_cache, point_classify, BrepCacheFace, CurveOnClassifyObjects,
-    PointClassifyOptions,
+    curve_on_classify_cached, face_surface_cache, point_classify, BrepCacheFace,
+    CurveOnClassifyCache, CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::p8::{FaceSolveCache, HeldSolveCache};
@@ -1585,6 +1587,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     outer_loop_only: bool,
     loops: &[LoopId],
     props: &mut FaceProps<O>,
+    cache: &mut CurveOnClassifyCache,
 ) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves)> {
     // Build SeamConst curve
     let seam = surface
@@ -1622,7 +1625,9 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     class.set_ok_to_set_tolerance(false);
 
     // classify the SeamCurve3d against this face (status ignored)
-    match curve_on_classify(k, b, f, &objects, false, &mut class, true, false, false) {
+    match curve_on_classify_cached(
+        k, b, f, &objects, false, &mut class, true, false, false, cache,
+    ) {
         Err(e) if must_propagate(&e) => return Err(e),
         _ => {}
     }
@@ -1658,7 +1663,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyObjects<O>>(
 /// `SM_SUCCESS`, `1000`, upstream returns as `SmBoolean`).
 ///
 /// `objects` names the face's topology and geometry in the classifications, as for
-/// [`curve_on_classify`]; the seam curves are its temporaries 0 and 1
+/// [`crate::query::face::p2::curve_on_classify`]; the seam curves are its temporaries 0 and 1
 /// ([`ClassObject::temporary`]).
 ///
 /// # Errors
@@ -1675,6 +1680,20 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     f: FaceId,
     objects: &M,
     opts: HasSeamProblemOptions<'_, O>,
+) -> Result<SeamCheck<O>> {
+    has_seam_problem_cached(k, b, f, objects, opts, &mut CurveOnClassifyCache::default())
+}
+
+/// Seam checking with explicit query state. Sharing it across U and V preserves
+/// lazy gap writes and sibling invalidations in native query order.
+#[allow(clippy::too_many_lines)]
+fn has_seam_problem_cached<O: LoopObject, M: CurveOnClassifyObjects<O>>(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    objects: &M,
+    opts: HasSeamProblemOptions<'_, O>,
+    cache: &mut CurveOnClassifyCache,
 ) -> Result<SeamCheck<O>> {
     let HasSeamProblemOptions {
         outer_loop_only,
@@ -1697,8 +1716,10 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
         seam_v: None,
     };
 
+    // Use the face's actual surface, as upstream does. A geometry copy drops its
+    // owner and would make surface_zone_tol_3d use the system tolerance instead.
     // no work - no surface - return Okay
-    let Some(surface) = b.face(f)?.surface.clone() else {
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
         return Ok(out);
     };
 
@@ -1729,7 +1750,7 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
     }
 
     // locals
-    let surface_zone_tol_3d = surface_zone_tol_3d(k, b, f, &surface)?;
+    let surface_zone_tol_3d = surface_zone_tol_3d(k, b, f, surface)?;
     let mut crossed_u = false;
     let mut crossed_v = false;
     let mut missing_u = false;
@@ -1764,7 +1785,7 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
                 // HasSeamProblem(*m_pCrvClassU, *m_pCrvClassV, .., FALSE, &m_bClosedU,
                 // &m_bClosedV, this): an UNSURE closed flag reads as TRUE
                 let (closed_u, closed_v) = (p.closed_u != Tri::False, p.closed_v != Tri::False);
-                let check = has_seam_problem(
+                let check = has_seam_problem_cached(
                     k,
                     b,
                     f,
@@ -1775,6 +1796,7 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
                         periodic_v: Some(closed_v),
                         face_props: Some(p),
                     },
+                    cache,
                 )?;
                 *cu = check.class_u;
                 *cv = check.class_v;
@@ -1815,13 +1837,14 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
             b,
             f,
             objects,
-            &surface,
+            surface,
             SurfParamType::U,
             periodic_u,
             surface_zone_tol_3d,
             outer_loop_only,
             &loops,
             props,
+            cache,
         )?;
         out.class_u = class;
         out.seam_u = Some(curves);
@@ -1835,13 +1858,14 @@ pub fn has_seam_problem<O: LoopObject, M: CurveOnClassifyObjects<O>>(
             b,
             f,
             objects,
-            &surface,
+            surface,
             SurfParamType::V,
             periodic_v,
             surface_zone_tol_3d,
             outer_loop_only,
             &loops,
             props,
+            cache,
         )?;
         out.class_v = class;
         out.seam_v = Some(curves);
@@ -2111,8 +2135,19 @@ pub fn has_seam_problem_in_brep<O: LoopObject>(
     f: FaceId,
     opts: HasSeamProblemOptions<'_, O>,
 ) -> Result<SeamCheck<O>> {
+    has_seam_problem_in_brep_cached(k, b, f, opts, &mut CurveOnClassifyCache::default())
+}
+
+/// The B-rep seam objects with caller-owned query state, for the mutable healer.
+pub(crate) fn has_seam_problem_in_brep_cached<O: LoopObject>(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    opts: HasSeamProblemOptions<'_, O>,
+    cache: &mut CurveOnClassifyCache,
+) -> Result<SeamCheck<O>> {
     let objects = BrepSeamObjects::new(k, b, f)?;
-    has_seam_problem(k, b, f, &objects, opts)
+    has_seam_problem_cached(k, b, f, &objects, opts, cache)
 }
 
 #[cfg(test)]

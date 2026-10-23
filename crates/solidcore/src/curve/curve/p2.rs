@@ -1306,7 +1306,7 @@ impl Curve {
     ) -> Result<KnotsWithStatus> {
         match &self.kind {
             CurveKind::CrvInVolume(c) => c.knots_with_status_ref(k, interval),
-            CurveKind::CrvOnSurf(c) => c.as_ref().clone().knots_with_status(k, interval),
+            CurveKind::CrvOnSurf(c) => c.knots_with_status(k, interval),
             _ => {
                 let (knots, mults) = self.knots(k, interval)?;
                 Ok(KnotsWithStatus::success(knots, mults))

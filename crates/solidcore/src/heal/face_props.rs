@@ -69,6 +69,9 @@
 //!   `SmCurveClassification::ReSet` (`intersect.curve_class_p2`) and
 //!   `SmFace::ClassifyLoops` ([`crate::query::face::p4::classify_loops`], whose status
 //!   `SetProps_Stage3` ignores as upstream) are wired.
+//! - **Query caches.** The mutable healer explicitly applies the vertex/face and
+//!   edge/face gap caches produced by seam queries, even on errors. Read-only props
+//!   queries still leave the B-rep unchanged; no geometry or topology is copied back.
 
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones};
@@ -82,6 +85,7 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::face::p2::CurveOnClassifyCache;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::loopuse;
@@ -1159,9 +1163,10 @@ fn face_has_seam_problem<O: LoopObject>(
     class_u: &mut CurveClassification<O>,
     class_v: &mut CurveClassification<O>,
     props: &mut FaceProps<O>,
+    cache: &mut CurveOnClassifyCache,
 ) -> Result<SeamProblem> {
     let (closed_u, closed_v) = (props.closed_u != Tri::False, props.closed_v != Tri::False);
-    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+    let check = crate::topology::face::p4::has_seam_problem_in_brep_cached(
         k,
         b,
         f,
@@ -1171,6 +1176,7 @@ fn face_has_seam_problem<O: LoopObject>(
             periodic_v: Some(closed_v),
             face_props: Some(props),
         },
+        cache,
     )?;
     *class_u = check.class_u;
     *class_v = check.class_v;
@@ -1611,6 +1617,53 @@ impl<O: LoopObject> FaceProps<O> {
         face_index: u64,
         exe_heal_op: HealerOpType,
     ) -> Result<()> {
+        let mut cache = CurveOnClassifyCache::default();
+        self.set_props_with_seam(
+            k,
+            b,
+            stage,
+            face,
+            face_index,
+            exe_heal_op,
+            &mut |k, b, f, cu, cv, p| face_has_seam_problem(k, b, f, cu, cv, p, &mut cache),
+        )
+    }
+
+    /// The healer's `SetProps` call with explicit propagation of gap-cache values.
+    /// Apply writes even if a query fails after invalidating a sibling's cache.
+    pub(crate) fn set_props_with_query_gaps(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        stage: PropStage,
+        face: FaceId,
+        face_index: u64,
+        exe_heal_op: HealerOpType,
+    ) -> Result<()> {
+        let mut cache = CurveOnClassifyCache::default();
+        let result = self.set_props_with_seam(
+            k,
+            b,
+            stage,
+            face,
+            face_index,
+            exe_heal_op,
+            &mut |k, b, f, cu, cv, p| face_has_seam_problem(k, b, f, cu, cv, p, &mut cache),
+        );
+        cache.apply_gap_updates(b)?;
+        result
+    }
+
+    fn set_props_with_seam(
+        &mut self,
+        k: &Kernel,
+        b: &Brep,
+        stage: PropStage,
+        face: FaceId,
+        face_index: u64,
+        exe_heal_op: HealerOpType,
+        seam: &mut SeamProblemFn<'_, O>,
+    ) -> Result<()> {
         // init rtn
         let mut rtn: Result<()> = Ok(());
         let some_face = Some(face);
@@ -1627,7 +1680,7 @@ impl<O: LoopObject> FaceProps<O> {
         if stage == PropStage::Stage2
             || (stage > PropStage::Stage2 && !self.has_props(PropStage::Stage2, some_face))
         {
-            rtn = self.set_props_stage2(k, b, face, face_index, exe_heal_op);
+            rtn = self.set_props_stage2_with(k, b, face, face_index, exe_heal_op, seam);
             keep_unported(&rtn)?;
         }
 
@@ -1709,13 +1762,14 @@ impl<O: LoopObject> FaceProps<O> {
         face_index: u64,
         exe_heal_op: HealerOpType,
     ) -> Result<()> {
+        let mut cache = CurveOnClassifyCache::default();
         self.set_props_stage2_with(
             k,
             b,
             face,
             face_index,
             exe_heal_op,
-            &mut |k, b, f, cu, cv, p| face_has_seam_problem(k, b, f, cu, cv, p),
+            &mut |k, b, f, cu, cv, p| face_has_seam_problem(k, b, f, cu, cv, p, &mut cache),
         )
     }
 

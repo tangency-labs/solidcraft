@@ -34,6 +34,8 @@
 //!   statuses ([`SolidError::Upstream`], [`SolidError::Nlib`]) are ignored here too;
 //!   [`SolidError::Unported`], [`SolidError::InvalidInput`] (a null pointer upstream
 //!   dereferences) and [`SolidError::NotFound`] (a dangling id) propagate.
+//!   Stage two takes `&mut Brep` to retain the gap-cache writes of its seam queries,
+//!   including sibling invalidations made before an ignored error.
 //! - **Props without a face.** `Cache_FaceProps_Stage2/3` call `SetProps` with the
 //!   props' `m_pFace`, which is null only when `Cache_FaceProps_Gaps` has not run on
 //!   them (never in the upstream heal sequence). Upstream then runs `SetProps_Gaps`
@@ -332,6 +334,8 @@ impl<O: LoopObject> HealData<O> {
     /// poles, flat corners, seams) of the (new) target faces that lack them and lists
     /// the sheets, the faces with poles and the flat corner and seam problems.
     /// Returns whether new problems were found.
+    /// Lazy seam-query gap writes and invalidations are retained in `b`, including
+    /// those made before an ignored stage-two error.
     ///
     /// # Errors
     ///
@@ -341,7 +345,7 @@ impl<O: LoopObject> HealData<O> {
     pub fn cache_face_props_stage2(
         &mut self,
         k: &Kernel,
-        b: &Brep,
+        b: &mut Brep,
         _this_healer_op: HealerOpType,
     ) -> Result<bool> {
         // init output
@@ -365,7 +369,14 @@ impl<O: LoopObject> HealData<O> {
                 let Some(face) = p.face else {
                     return Err(no_face());
                 };
-                ignore_status(p.set_props(k, b, PropStage::Stage2, face, ii as u64, done_heal_op))?;
+                ignore_status(p.set_props_with_query_gaps(
+                    k,
+                    b,
+                    PropStage::Stage2,
+                    face,
+                    ii as u64,
+                    done_heal_op,
+                ))?;
             }
 
             // count the kinds of faces that force healing checks later on
@@ -922,11 +933,11 @@ mod tests {
     fn stage_steps_without_new_faces_do_nothing() {
         let (v, e, f) = ids();
         let k = Kernel::default();
-        let b = Brep::default();
+        let mut b = Brep::default();
         let mut h: HealData<H> = HealData::with_targets(&v, &e, &f);
         h.old_face_cnt = 4;
         assert!(!h
-            .cache_face_props_stage2(&k, &b, HealerOpType::CacheFaceprops2)
+            .cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2)
             .unwrap());
         assert!(!h
             .cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3)
@@ -940,9 +951,9 @@ mod tests {
     fn stage2_needs_the_face_set_by_the_gap_step() {
         let (v, e, f) = ids();
         let k = Kernel::default();
-        let b = Brep::default();
+        let mut b = Brep::default();
         let mut h: HealData<H> = HealData::with_targets(&v, &e, &f);
-        let r = h.cache_face_props_stage2(&k, &b, HealerOpType::CacheFaceprops2);
+        let r = h.cache_face_props_stage2(&k, &mut b, HealerOpType::CacheFaceprops2);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
         let r = h.cache_face_props_stage3(&k, &b, HealerOpType::CacheFaceprops3);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));

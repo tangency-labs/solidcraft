@@ -15,13 +15,11 @@
 //! `0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a
 //! Rust error upstream cannot produce, then its outputs), compared as `out`.
 //!
-//! Deferred cases: what reaches the unported parts: the curve classification of
-//! uncached breaks (`intersect.curve_class_*`, behind `GetKnots`, the approximation
-//! without breaks, ...), `SmSurface::EvaluateNormal` (`surface.surface_p7`: the surface
-//! normal and the gap sampler), `SmSurface::Evaluate2ndDerivatives`
-//! (`surface.surface_p1`) and `SmSurface::ReadFromDB` (`surface.surface_p2`). Every run
-//! has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper
-//! rejects are redrawn.
+//! Knot and drop operations compare the break-cache state as well as their answers:
+//! a local solve may leave breaks uncached, while a later global solve populates
+//! them through the base curve's virtual knot queries. Every run has at least
+//! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
+//! redrawn. Any genuinely unported downstream call still defers the whole case.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -681,8 +679,9 @@ fn put_state(o: &mut Vec<f64>, c: &CrvOnSurf) {
     let d = c.uv_domain();
     o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
     o.push(b(c.need_breaks()));
-    o.push(c.breaks().len() as f64);
-    o.extend_from_slice(c.breaks());
+    let breaks = c.breaks();
+    o.push(breaks.len() as f64);
+    o.extend_from_slice(&breaks);
     o.push(c.bs_approx_max_gap_3d());
     o.push(b(c.parametrization_matches()));
     match c.bs_approx() {

@@ -74,7 +74,9 @@
 //!   classification handles and [`ClassGeometry`] callbacks.
 //! - Boundary views use required handle mappings and the same [`ClassGeometry`]
 //!   implementation as part 5. Lazy UV and gap calculations run on a private B-rep
-//!   snapshot; numerical results are preserved while cache-only updates are discarded.
+//!   snapshot. Mutable healer callers explicitly retain its vertex/face and edge/face
+//!   gap-cache writes, including invalidations before errors; read-only callers discard
+//!   them. Geometry, topology and UV trim edits are not copied back.
 //! - **Vertex/face gaps.** With `bHasBigGaps`, `IntersectVertices` reads each vertex's
 //!   `GetVertexuseOfFace(pFace)->GetVertexFaceGap()` length. [`curve_on_classify`]
 //!   computes them from the B-rep (on one private snapshot per call, which keeps the
@@ -86,7 +88,8 @@
 //! - The UV trim curves `IntersectTSBound`'s `ComputeUVPoint` calls make there (upstream
 //!   on the face's own B-rep) stay visible for the rest of the classification through
 //!   the private `WithMadeTrimCurves` geometry. The gap caches and these trim curves
-//!   share one snapshot per call, as upstream mutates the one B-rep.
+//!   share one snapshot per call, as upstream mutates the one B-rep. The healer shares
+//!   that snapshot across both seam directions before applying its gap-cache values.
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -870,6 +873,33 @@ pub trait CurveOnClassifyObjects<O: ClassObject>: ClassGeometry<O> {
     }
 }
 
+/// The lazy B-rep query state shared by classifications of the same face. Only gap
+/// caches are copied back: replacing the B-rep would also replace geometry ownership
+/// and unrelated topology. Keep this state alive on error, since `CalcVertexFaceGap`
+/// invalidates same-face siblings before attempting the projection.
+#[derive(Default)]
+pub(crate) struct CurveOnClassifyCache {
+    snapshot: Option<Brep>,
+}
+
+impl CurveOnClassifyCache {
+    pub(crate) fn apply_gap_updates(self, b: &mut Brep) -> Result<()> {
+        if let Some(snapshot) = self.snapshot {
+            for (id, vu) in snapshot.vertexuses().iter() {
+                if b.vertexuse(id)?.vertex_face_gap != vu.vertex_face_gap {
+                    b.vertexuse_mut(id)?.vertex_face_gap = vu.vertex_face_gap;
+                }
+            }
+            for (id, eu) in snapshot.edgeuses().iter() {
+                if b.edgeuse(id)?.max_edge_face_gap != eu.max_edge_face_gap {
+                    b.edgeuse_mut(id)?.max_edge_face_gap = eu.max_edge_face_gap;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// `pVertex->GetVertexuseOfFace(pFace)->GetVertexFaceGap()->GetLength()`, 0 when the
 /// vertex use has no vertex/face gap (`IntersectVertices`' `dMaxGap3d`), on the B-rep
 /// snapshot `b` (which keeps the gap cache `GetVertexFaceGap` fills). `None` for a
@@ -1113,6 +1143,35 @@ pub fn curve_on_classify<O: ClassObject>(
     do_check_3d: bool,
     uv_space_okay: bool,
 ) -> Result<bool> {
+    curve_on_classify_cached(
+        k,
+        b,
+        f,
+        objects,
+        do_point_classify,
+        cc,
+        has_big_gaps,
+        do_check_3d,
+        uv_space_okay,
+        &mut CurveOnClassifyCache::default(),
+    )
+}
+
+/// The same classification with explicit query state, shared by the healer's seam
+/// directions and retained even when the classification returns an error.
+#[allow(clippy::fn_params_excessive_bools)] // upstream's SmBoolean arguments
+pub(crate) fn curve_on_classify_cached<O: ClassObject>(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    objects: &impl CurveOnClassifyObjects<O>,
+    do_point_classify: bool,
+    cc: &mut CurveClassification<O>,
+    has_big_gaps: bool,
+    do_check_3d: bool,
+    uv_space_okay: bool,
+    cache: &mut CurveOnClassifyCache,
+) -> Result<bool> {
     // init output
     reset_classification(k, cc)?;
     cc.set_face(Some(objects.face(f)));
@@ -1120,7 +1179,7 @@ pub fn curve_on_classify<O: ClassObject>(
     // the B-rep as upstream's calls leave it: UV trim curves made by the trim boundary
     // intersection's ComputeUVPoint calls (see WithMadeTrimCurves) and the vertex/face
     // gap caches GetVertexFaceGap fills
-    let mut snapshot: Option<Brep> = None;
+    let snapshot = &mut cache.snapshot;
     let mut made_trims: Vec<(O, Curve)> = Vec::new();
 
     // for two iterations to allow the surf/surf/surf intersection heuristic a chance to
@@ -1191,7 +1250,16 @@ pub fn curve_on_classify<O: ClassObject>(
 
             // 2nd intersect face edges with the curve
             let edges = face_edges(b, f, cc.tgt_loops_only(), Some(&tgt_loops))?;
-            intersect_edges(k, b, objects, cc, &edges, f, has_big_gaps)?;
+            intersect_edges(
+                k,
+                b,
+                snapshot.get_or_insert_with(|| b.clone()),
+                objects,
+                cc,
+                &edges,
+                f,
+                has_big_gaps,
+            )?;
         }
     }
 
@@ -1312,6 +1380,7 @@ fn face_edges(
 fn intersect_edges<O: ClassObject>(
     k: &Kernel,
     b: &Brep,
+    snapshot: &mut Brep,
     objects: &impl CurveOnClassifyObjects<O>,
     cc: &mut CurveClassification<O>,
     edges: &[EdgeId],
@@ -1323,10 +1392,9 @@ fn intersect_edges<O: ClassObject>(
         .surface
         .as_ref()
         .ok_or(SolidError::null_pointer(OP_CURVE))?;
-    let mut snapshot = b.clone();
     let views = edges
         .iter()
-        .map(|&edge| boundary_edge(k, &mut snapshot, objects, face, edge, has_big_gaps))
+        .map(|&edge| boundary_edge(k, snapshot, objects, face, edge, has_big_gaps))
         .collect::<Result<Vec<_>>>()?;
     cc.intersect_edges(
         k,
@@ -1788,6 +1856,122 @@ pub(crate) mod tests {
             self.cache.as_ref()
         }
     }
+
+    fn with_same_face_sibling(b: &mut Brep) -> (FaceId, VertexuseId) {
+        let f = square(b);
+        for i in 0..4 {
+            b.vertex_mut(VertexId::from_index(i))
+                .unwrap()
+                .vertexuses
+                .push(VertexuseId::from_index(i));
+        }
+        let sibling = b
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(VertexId::from_index(0)),
+                owner: VertexuseOwner::Loopuse(Some(LoopuseId::from_index(0))),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        b.vertex_mut(VertexId::from_index(0))
+            .unwrap()
+            .vertexuses
+            .push(sibling);
+        b.vertexuse_mut(sibling).unwrap().vertex_face_gap = crate::heal::gap::VertexFaceGap {
+            gap_3d: 7.0,
+            vertexuse: Some(sibling),
+            face_uv: Point2::ZERO,
+        };
+        (f, sibling)
+    }
+
+    #[test]
+    fn query_gap_state_retains_sibling_invalidation_after_classification_error() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let (f, sibling) = with_same_face_sibling(&mut b);
+        let objects = Handles {
+            b: &b,
+            source: Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 3)),
+            cache: None,
+        };
+        let mut cc = CurveClassification::with_curve_interval(
+            &k,
+            Handle::Source,
+            Extent1d::from_min_max(0.0, 1.0),
+            1e-6,
+        );
+        let mut cache = CurveOnClassifyCache::default();
+        // Handles deliberately supplies no vertex points: IntersectVertices fails,
+        // but its preceding lazy gap queries have already written their caches.
+        let result = curve_on_classify_cached(
+            &k, &b, f, &objects, false, &mut cc, true, false, false, &mut cache,
+        );
+        assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+        assert_eq!(b.vertexuse(sibling).unwrap().vertex_face_gap.gap_3d, 7.0);
+        let snapshot = cache.snapshot.as_ref().unwrap();
+        let first = VertexuseId::from_index(0);
+        assert!(snapshot.vertexuse(first).unwrap().vertex_face_gap.is_init());
+        assert_eq!(
+            snapshot.vertexuse(sibling).unwrap().vertex_face_gap,
+            crate::heal::gap::VertexFaceGap::new()
+        );
+        cache.apply_gap_updates(&mut b).unwrap();
+        assert!(b.vertexuse(first).unwrap().vertex_face_gap.is_init());
+        assert_eq!(
+            b.vertexuse(sibling).unwrap().vertex_face_gap,
+            crate::heal::gap::VertexFaceGap::new()
+        );
+        assert_eq!(b.vertex(VertexId::from_index(0)).unwrap().point, Vec3::ZERO);
+    }
+
+    #[test]
+    fn query_gap_state_keeps_resets_before_a_failed_projection() {
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let (f, sibling) = with_same_face_sibling(&mut b);
+        let first = VertexuseId::from_index(0);
+        b.vertexuse_mut(first).unwrap().vertex_face_gap = crate::heal::gap::VertexFaceGap {
+            gap_3d: 3.0,
+            vertexuse: Some(first),
+            face_uv: Point2::ZERO,
+        };
+        b.face_mut(f).unwrap().surface = None;
+        let mut cache = CurveOnClassifyCache {
+            snapshot: Some(b.clone()),
+        };
+        let result = crate::topology::vertexuse::calc_vertex_face_gap(
+            &k,
+            cache.snapshot.as_mut().unwrap(),
+            first,
+            false,
+            true,
+        );
+        assert!(result.is_err());
+        cache.apply_gap_updates(&mut b).unwrap();
+        for vu in [first, sibling] {
+            assert_eq!(
+                b.vertexuse(vu).unwrap().vertex_face_gap,
+                crate::heal::gap::VertexFaceGap::new()
+            );
+        }
+    }
+
+    #[test]
+    fn unused_query_cache_does_not_force_gap_calculation() {
+        let mut b = Brep::new();
+        let (_, sibling) = with_same_face_sibling(&mut b);
+        let before = *b.vertexuse(sibling).unwrap();
+        CurveOnClassifyCache::default()
+            .apply_gap_updates(&mut b)
+            .unwrap();
+        assert_eq!(b.vertexuse(sibling).unwrap(), &before);
+        assert!(!b
+            .vertexuse(VertexuseId::from_index(0))
+            .unwrap()
+            .vertex_face_gap
+            .is_init());
+    }
+
     #[test]
     fn nonempty_boundary_adapters_reach_both_part9_methods() {
         let k = Kernel::default();
@@ -1848,6 +2032,7 @@ pub(crate) mod tests {
         intersect_edges(
             &k,
             &b,
+            &mut b.clone(),
             &objects,
             &mut cc,
             &[EdgeId::from_index(0)],
