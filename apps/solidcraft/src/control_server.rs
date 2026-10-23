@@ -39,16 +39,55 @@ pub fn remove_token_file() {
     }
 }
 
-pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
+/// Where the port of the control server started at launch came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortSource {
+    /// `--control PORT`.
+    Argument,
+    /// `SOLIDCRAFT_CONTROL_PORT`.
+    Environment,
+    /// Preferences → AI → Start the control server on launch (`prefs::launch_control_port`).
+    Preference,
+}
+
+impl PortSource {
+    /// Started for a script or a test harness, which expects the design view and the focus left
+    /// where it is. A launch that only follows the preference is the person's own: it shows the
+    /// start page and comes to the front like any other.
+    pub fn automation(self) -> bool {
+        self != Self::Preference
+    }
+}
+
+/// The port the control server listens on at launch, and where it came from: `--control` first,
+/// then `SOLIDCRAFT_CONTROL_PORT`, then the preference (`None` when it is off, and in safe mode,
+/// which doesn't read preferences). A value that isn't a port number is skipped with a line on
+/// stderr, and the next source applies.
+pub fn launch_port(argument: Option<&str>, environment: Option<&str>, preference: Option<u16>) -> Option<(u16, PortSource)> {
+    let port = |value: Option<&str>, name: &str| {
+        let value = value?;
+        let port = value.trim().parse::<u16>().ok();
+        if port.is_none() {
+            eprintln!("solidcraft: ignoring {name} `{value}`: not a port number");
+        }
+        port
+    };
+    port(argument, "--control")
+        .map(|p| (p, PortSource::Argument))
+        .or_else(|| port(environment, "SOLIDCRAFT_CONTROL_PORT").map(|p| (p, PortSource::Environment)))
+        .or_else(|| preference.map(|p| (p, PortSource::Preference)))
+}
+
+/// Start the control server on `port`; `None` when it isn't listening (the port is taken, or no
+/// token could be made), which stderr explains.
+pub fn start(port: u16, ctx: egui::Context) -> Option<Receiver<ControlRequest>> {
     let (tx, rx) = channel::<ControlRequest>();
     // Every connection must show the token before anything runs (docs/control-protocol.md).
-    match control_auth::env_token().or_else(new_token) {
-        Some(token) => {
-            listen(port, token, tx, ctx, false);
-        }
-        None => eprintln!("solidcraft: control server not started: no random token available"),
-    }
-    rx
+    let Some(token) = control_auth::env_token().or_else(new_token) else {
+        eprintln!("solidcraft: control server not started: no random token available");
+        return None;
+    };
+    listen(port, token, tx, ctx, false).map(|_| rx)
 }
 
 /// The agent chat's own endpoint for its agent's MCP server (docs/agent-chat.md): a free loopback
@@ -413,6 +452,25 @@ fn serve_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--control` beats `SOLIDCRAFT_CONTROL_PORT`, which beats the preference; a value that
+    /// isn't a port is skipped; nothing given and the preference off (or safe mode): no server.
+    #[test]
+    fn the_launch_port_comes_from_the_argument_then_the_environment_then_the_preference() {
+        use PortSource::{Argument, Environment, Preference};
+        assert_eq!(launch_port(Some("9001"), Some("9002"), Some(7878)), Some((9001, Argument)));
+        assert_eq!(launch_port(None, Some("9002"), Some(7878)), Some((9002, Environment)));
+        assert_eq!(launch_port(None, None, Some(7878)), Some((7878, Preference)));
+        assert_eq!(launch_port(None, None, None), None, "preference off, nothing asked for");
+        assert_eq!(launch_port(Some("9001"), None, None), Some((9001, Argument)));
+        assert_eq!(launch_port(None, Some(" 9002\n"), None), Some((9002, Environment)));
+        for bad in ["", "port", "-1", "65536", "1e3"] {
+            assert_eq!(launch_port(Some(bad), Some("9002"), Some(7878)), Some((9002, Environment)), "--control {bad:?}");
+            assert_eq!(launch_port(None, Some(bad), Some(7878)), Some((7878, Preference)), "env {bad:?}");
+            assert_eq!(launch_port(Some(bad), Some(bad), None), None, "{bad:?}");
+        }
+        assert!(Argument.automation() && Environment.automation() && !Preference.automation());
+    }
 
     /// #1618: a request that outlasts its wait says it is still running; the connection keeps its
     /// reply for `control.pending`, and refuses other requests as `busy` until it lands, so none

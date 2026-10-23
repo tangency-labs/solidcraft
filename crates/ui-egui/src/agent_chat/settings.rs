@@ -1,6 +1,6 @@
 //! Settings → AI: the master switch, the agents (found and added, each with Test, Default and,
 //! for added ones, Remove), permissions (global and per agent, and the "always allow" answers),
-//! and the panel. Plus the Add agent dialog: an installed ACP agent, a custom command, or an
+//! the panel, and the control server MCP clients reach at launch. Plus the Add agent dialog: an installed ACP agent, a custom command, or an
 //! endpoint (OpenAI-compatible or Anthropic-compatible, whose key goes to the system keychain).
 
 use super::agents::{self, AgentConfig, Kind, Mode, Protocol};
@@ -156,7 +156,31 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         permissions_section(app, ui);
         panel_section(app, ui);
     }
+    if !cfg!(target_arch = "wasm32") {
+        control_section(app, ui);
+    }
     pointer_section(app, ui);
+}
+
+/// External MCP clients: the control server the desktop app starts at launch
+/// (`control_on_launch`, read at the next start; docs/control-protocol.md). Independent of the
+/// assistant's master switch, since it serves clients outside the app, and off by default.
+fn control_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get();
+    ui_kit::settings_section(ui, "control_server", tr("ai.prefs.control_server"), |ui| {
+        let response = ui_kit::checkbox(ui, tr("ai.prefs.control_on_launch"), &mut app.preferences.control_on_launch);
+        crate::scenario::publish_handle("prefs:control_on_launch", response.rect.center());
+        ui.add_enabled_ui(app.preferences.control_on_launch, |ui| {
+            ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+                ui_kit::row(ui, tr("ai.prefs.control_port"), |ui| {
+                    let range = crate::prefs::MIN_CONTROL_PORT..=u16::MAX;
+                    ui_kit::settings_number(ui, &mut app.preferences.control_port, range, 1.0);
+                });
+            });
+        });
+        let port = app.preferences.control_port.to_string();
+        ui_kit::text(ui, &crate::i18n::format("ai.prefs.control_on_launch_hint", &[("port", &port)]), ui_kit::Text::Hint("control_server"));
+    });
 }
 
 fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {

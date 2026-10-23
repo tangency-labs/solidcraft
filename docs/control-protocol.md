@@ -6,6 +6,19 @@ line `{"id": …, "ok": true, "result": …}` or `{"id": …, "ok": false, "erro
 handled on the UI thread between frames; pointer and keyboard input is injected as real egui
 events, one pointer event per frame.
 
+### Starting it without a terminal
+
+An app opened from the Dock, Finder, the Start menu or a desktop entry gets neither the argument
+nor the variable. **Preferences → AI → Start the control server on launch** (off by default) makes
+every launch listen on the port set below it (7878 unless changed, 1024–65535), with the same
+token and loopback-only rules as below. It takes effect at the next launch. `--control` comes
+first, then `SOLIDCRAFT_CONTROL_PORT`, then the preference; safe mode ignores it. A launch that
+only follows the preference shows the start page and comes to the front as usual (a server started
+by the argument or the variable doesn't: its clients expect the design view). If the port is taken,
+for example by a second SolidCraft window, that launch says so in its status message and runs
+without the server. `ui.prefs` can't change `control_on_launch` or `control_port`: only the
+person does, in Preferences.
+
 ### Token
 
 Every connection must authenticate. At start the app makes a random 256-bit token for this

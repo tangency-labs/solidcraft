@@ -77,7 +77,8 @@ struct App {
     starting: Option<std::path::PathBuf>,
     /// Frames begun; the second one means the first was drawn (startup is over).
     frames: u32,
-    /// Started over the control channel: the window doesn't ask for the foreground.
+    /// Started for automation (`--control` or `SOLIDCRAFT_CONTROL_PORT`, not the preference): the
+    /// window doesn't ask for the foreground.
     take_focus_unwanted: bool,
     /// The graphics device: lost, it can't draw again (`App::watch_device`, #4172).
     gpu: Option<LostWatch>,
@@ -573,13 +574,16 @@ fn main() -> eframe::Result {
     mark("main");
     adopt_legacy_settings();
     let mut safe_mode = startup::env_on(std::env::var(startup::SAFE_MODE_ENV).ok().as_deref());
-    let mut control_port: Option<u16> = solidcraft_engine::geom::env::var("CONTROL_PORT").and_then(|p| p.parse().ok());
+    // The control server's port: `--control`, else the environment, else the preference, which is
+    // only known once the preferences are read (`control_server::launch_port`).
+    let control_env = solidcraft_engine::geom::env::var("CONTROL_PORT");
+    let mut control_arg: Option<String> = None;
     let mut files = Vec::new();
     let mut sample = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
+            "--control" => control_arg = Some(args.next().unwrap_or_default()),
             "--sample" => sample = true,
             "--safe-mode" => safe_mode = true,
             "--version" | "-V" => {
@@ -741,10 +745,26 @@ fn main() -> eframe::Result {
                 ));
             }
             mark("viewport pipelines");
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
+            // Safe mode leaves the preference unread, so only `--control` and the environment count.
+            let control = control_server::launch_port(
+                control_arg.as_deref(),
+                control_env.as_deref(),
+                solidcraft_ui_egui::prefs::launch_control_port(&app.preferences),
+            );
+            let mut notes = notes;
+            if let Some((port, source)) = control {
+                match control_server::start(port, cc.egui_ctx.clone()) {
+                    Some(rx) => app = app.with_control(rx),
+                    // Launched from the Dock or Finder there is no terminal for stderr: say it here.
+                    None if source == control_server::PortSource::Preference => notes.push(
+                        solidcraft_ui_egui::i18n::Locale::for_language(&app.preferences.language)
+                            .format("ai.prefs.control_on_launch_failed", &[("port", &port.to_string())]),
+                    ),
+                    None => {}
+                }
             }
+            // Driven by a script or a harness (not by the preference alone).
+            let automated = control.is_some_and(|(_, source)| source.automation());
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
@@ -771,9 +791,10 @@ fn main() -> eframe::Result {
             if files.is_empty() && !sample {
                 solidcraft_ui_egui::prefs::apply_new_design(&mut app);
             }
-            // No design given: the start page (not when driven over the control channel, whose
-            // clients expect the design view; `ui.home` shows it there).
-            if files.is_empty() && !sample && control_port.is_none() {
+            // No design given: the start page (not when started for automation, whose clients
+            // expect the design view; `ui.home` shows it there). A control server started by the
+            // preference alone keeps it: the person launched the app as usual.
+            if files.is_empty() && !sample && !automated {
                 let rev = app.session.revision;
                 app.home.show(rev);
             }
@@ -811,7 +832,7 @@ fn main() -> eframe::Result {
                 solve: app,
                 starting,
                 frames: 0,
-                take_focus_unwanted: control_port.is_some(),
+                take_focus_unwanted: automated,
                 gpu,
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,

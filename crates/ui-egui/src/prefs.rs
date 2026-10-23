@@ -361,6 +361,18 @@ impl SpaceMouseDriver {
 /// itself clamps what the user drags to its own range.
 pub const DEFAULT_BROWSER_WIDTH: f32 = 250.0;
 
+/// The port Preferences → AI suggests for the control server started at launch (the one the
+/// MCP docs use).
+pub const DEFAULT_CONTROL_PORT: u16 = 7878;
+/// The lowest port the preference accepts: below it are the system's privileged ports.
+pub const MIN_CONTROL_PORT: u16 = 1024;
+
+/// The port the saved preferences ask the desktop app to serve the control channel on at
+/// launch: `None` when the preference is off or the port (a hand edit) is out of range.
+pub fn launch_control_port(p: &Prefs) -> Option<u16> {
+    (p.control_on_launch && accepted::control_port(p)).then_some(p.control_port)
+}
+
 // The stored fields, their defaults, page resets and simple form controls share this table.
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
@@ -564,6 +576,13 @@ preference_settings! {
     /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
     /// the window thread, and the window waits for each, as before (the default).
     agent_off_thread: bool = false, PAGE_AI;
+    /// The desktop app starts its control server on `control_port` at launch, so MCP clients
+    /// (`solidcraft-cli mcp --connect`) can drive a window opened from the Dock, Finder or a
+    /// desktop entry (docs/control-protocol.md). Read at the next launch; `--control` and
+    /// `SOLIDCRAFT_CONTROL_PORT` come first, and safe mode ignores it. Only the person changes it,
+    /// in Preferences: `ui.prefs` refuses it (see [`set`]).
+    control_on_launch: bool = false, PAGE_AI;
+    control_port: u16 = DEFAULT_CONTROL_PORT, PAGE_AI, accept(MIN_CONTROL_PORT..=u16::MAX);
     /// Agents the user added (the installed ones are found by themselves). API keys are never
     /// here: they live in the system keychain.
     agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
@@ -1476,6 +1495,10 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         return Err("`color_vision` must be off, protan, deutan or tritan".into());
     }
     let new: Prefs = migrate(serde_json::from_value(cur).map_err(|e| e.to_string())?);
+    // A client of the control channel must not leave a control server behind for later launches.
+    if new.control_on_launch != app.preferences.control_on_launch || new.control_port != app.preferences.control_port {
+        return Err("`control_on_launch` and `control_port` are changed in Preferences → AI only".into());
+    }
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }
@@ -1927,6 +1950,37 @@ mod tests {
         assert!(set(&mut app, &serde_json::json!({ "msaa": 1 })).is_ok());
         app.load_prefs(&serde_json::json!({ "preferences": { "msaa": 16 } }).to_string());
         assert_eq!(app.preferences.msaa, Prefs::default().msaa);
+    }
+
+    /// The control server at launch is off by default, is turned on in Preferences → AI (never
+    /// over the control channel), and a saved port out of range starts nothing.
+    #[test]
+    fn the_control_server_at_launch_is_off_by_default_and_set_only_in_preferences() {
+        let p = Prefs::default();
+        assert!(!p.control_on_launch);
+        assert_eq!((launch_control_port(&p), p.control_port), (None, DEFAULT_CONTROL_PORT));
+        let saved = |v: serde_json::Value| launch_control_port(&lenient(&v));
+        assert_eq!(saved(json!({"control_on_launch": true})), Some(DEFAULT_CONTROL_PORT));
+        assert_eq!(saved(json!({"control_on_launch": true, "control_port": 9100})), Some(9100));
+        assert_eq!(saved(json!({"control_on_launch": false, "control_port": 9100})), None);
+        assert_eq!(saved(json!({"control_on_launch": true, "control_port": 80})), None, "a privileged port");
+        assert_eq!(saved(json!({"control_on_launch": true, "control_port": 70000})), Some(DEFAULT_CONTROL_PORT), "not a port: the default");
+
+        let mut h = crate::scenario::Harness::new();
+        for change in [json!({"control_on_launch": true}), json!({"control_port": 9100})] {
+            assert!(h.call("ui.prefs", change.clone()).get("error").is_some(), "{change}");
+        }
+        assert_eq!(launch_control_port(&h.app.preferences), None);
+        h.call("ui.prefs", json!({"open":"AI"}));
+        super::reveal_preference(&mut h, "prefs:control_on_launch");
+        let check = crate::scenario::handle_at("prefs:control_on_launch").unwrap();
+        h.call("ui.click", json!({"x":check.x,"y":check.y}));
+        h.frames(2);
+        assert_eq!(launch_control_port(&h.app.preferences), Some(DEFAULT_CONTROL_PORT));
+        // Unchanged values still pass along with other preferences.
+        assert!(h.call("ui.prefs", json!({"control_on_launch": true, "zoom_reverse": true})).get("error").is_none());
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.control_on_launch, "Restore Defaults on the AI page turns it off");
     }
 
     #[test]

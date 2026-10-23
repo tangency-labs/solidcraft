@@ -29,6 +29,11 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+To bridge to an app you open from the Dock, Finder or the Start menu, turn on **Preferences → AI →
+Start the control server on launch** (port 7878 unless you change it) and start SolidCraft again;
+from then on every launch listens without `--control`
+([control-protocol.md](control-protocol.md#starting-it-without-a-terminal)).
+
 Bridged, the server finds the app's control token in the token file the app wrote for that port
 ([control-protocol.md](control-protocol.md#token)); `--token T` or `SOLIDCRAFT_CONTROL_TOKEN` give
 it explicitly when the app runs in a sandbox whose data folder the server can't see (prefer the
@@ -128,7 +133,9 @@ added under the previous name keeps working, see the [compatibility notes](https
 }
 ```
 
-Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
+Claude Desktop (`claude_desktop_config.json`), bridged to a running app (started with
+`--control 7878`, or with Preferences → AI → Start the control server on launch on and its port
+left at 7878):
 
 ```json
 {
