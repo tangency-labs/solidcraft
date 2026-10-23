@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
          or folder?: bodies|sketches|construction|origin|joints (all of it; showing also shows its browser folders and groups); \
-         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases] (the folder or group itself: its items keep their own state); \
+         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design; not an undo step",
     ),
 ];
@@ -205,8 +205,9 @@ fn tree_folder_key(k: &str) -> bool {
     let Some((scope, last)) = k.rsplit_once('/') else { return false };
     let scope_ok =
         scope == "c0" || scope.strip_prefix("o:").is_some_and(|ids| ids.split('/').count() <= 64 && ids.split('/').all(|i| i.parse::<u64>().is_ok()));
-    let last_ok =
-        FOLDERS.contains(&last) || ["joints", "canvases"].contains(&last) || last.strip_prefix('g').is_some_and(|g| g.parse::<u64>().is_ok());
+    let last_ok = FOLDERS.contains(&last)
+        || ["joints", "canvases", "point_clouds"].contains(&last)
+        || last.strip_prefix('g').is_some_and(|g| g.parse::<u64>().is_ok());
     k.len() <= 2048 && scope_ok && last_ok
 }
 

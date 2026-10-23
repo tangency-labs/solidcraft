@@ -542,3 +542,39 @@ fn fs_img(i: IOut) -> @location(0) vec4<f32> {
 fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
     return out_color(i.c);
 }
+
+// Point clouds: each point is a round dot a few pixels across, facing the screen, depth-tested
+// and written like the model's faces, so the model hides the points behind it and they hide it.
+// The colour's alpha carries the dot's size (eighths of a pixel).
+
+struct POut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) c: vec4<f32>,
+    @location(1) wp: vec3<f32>,
+    @location(2) at: vec2<f32>,
+};
+
+@vertex
+fn vs_point(@builtin(vertex_index) vi: u32, @location(0) p: vec3<f32>, @location(1) c: vec4<f32>) -> POut {
+    var xs = array<f32, 6>(-1.0, 1.0, 1.0, -1.0, 1.0, -1.0);
+    var ys = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let at = vec2<f32>(xs[vi], ys[vi]);
+    let size = max(c.a * 255.0 / 8.0, 1.0);
+    let centre = u.vp * vec4<f32>(p, 1.0);
+    let half = u.screen.xy * 0.5;
+    var o: POut;
+    o.pos = vec4<f32>(centre.xy + at * size * 0.5 / half * centre.w, centre.z, centre.w);
+    // Behind the eye: nothing.
+    if (near_z(centre) < 0.0) { o.pos = vec4<f32>(0.0, 0.0, 0.0, -1.0); }
+    o.c = vec4<f32>(c.rgb, 1.0);
+    o.wp = p;
+    // Dots under two pixels are squares: a disc that small loses its centre pixel.
+    o.at = at * select(1.0, 0.0, size < 2.0);
+    return o;
+}
+
+@fragment
+fn fs_point(i: POut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp) || dot(i.at, i.at) > 1.0) { discard; }
+    return out_color(i.c);
+}

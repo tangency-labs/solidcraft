@@ -108,6 +108,15 @@ pub fn bounds(s: &Session) -> Aabb3 {
     visible_bounds(s, true)
 }
 
+/// The Point Clouds folder's tree key (`Visibility::hidden_folders`).
+pub const POINT_CLOUDS_FOLDER: &str = "c0/point_clouds";
+
+/// The point clouds drawn now: shown, in a shown folder.
+pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::point_cloud::PointCloud> {
+    let folder = !s.folder_hidden(POINT_CLOUDS_FOLDER);
+    s.doc.point_clouds.iter().filter(move |c| folder && c.visible)
+}
+
 /// [`bounds`], with the browser's Sketches folder shown (`sketches`) or hidden.
 pub fn visible_bounds(s: &Session, sketches: bool) -> Aabb3 {
     bounds_by(s, sketches, |body| body.mesh_bounds())
@@ -137,6 +146,11 @@ fn bounds_by(s: &Session, sketches: bool, of: impl Fn(&solidcraft_doc::ModelBody
             for p in &w.pts {
                 b.add(*p);
             }
+        }
+    }
+    for c in shown_point_clouds(s) {
+        for p in c.world_corners().into_iter().flatten() {
+            b.add(p);
         }
     }
     b

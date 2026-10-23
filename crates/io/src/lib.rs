@@ -2,7 +2,8 @@
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]).
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
+//! (see [`read_point_cloud`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -21,6 +22,10 @@ mod legacy_dir;
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+mod ply;
+pub use ply::{ply_counts, read_ply_mesh};
+mod point_cloud;
+pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
 mod sketch2d;
 mod svg;
@@ -258,7 +263,7 @@ pub struct MeshFeature {
     pub warnings: Vec<String>,
 }
 
-/// Read 3MF, STL, OBJ or glTF bytes (the format from `file`'s extension) into a MeshImport
+/// Read 3MF, STL, OBJ, PLY or glTF bytes (the format from `file`'s extension) into a MeshImport
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
@@ -276,6 +281,8 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let (objects, warnings) = if ext == "obj" {
         obj::read_obj(bytes, &stem)?
+    } else if ext == "ply" {
+        ply::read_ply_mesh(bytes, &stem)?
     } else if ext == "stl" {
         let tris = read_stl(bytes)?;
         if tris.is_empty() {

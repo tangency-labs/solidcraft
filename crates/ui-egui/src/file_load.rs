@@ -65,6 +65,7 @@ impl Request {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
             Kind::Insert if solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", json!({"path": self.path})),
+            Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => ("file.insert_step", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
@@ -260,7 +261,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     let command = req.params.get("command").or(req.params.get("id")).and_then(Value::as_str);
     let kind = match command {
         Some("doc.open") => Kind::Open,
-        Some("file.insert_step" | "file.insert_mesh") => Kind::Insert,
+        Some("file.insert_step" | "file.insert_mesh" | "pointcloud.insert") => Kind::Insert,
         Some("file.export_view_dxf") => Kind::ExportDxf,
         _ => return Some(req),
     };
@@ -280,7 +281,13 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     let options = if kind == Kind::ExportDxf {
         params.and_then(Value::as_object).cloned().unwrap_or_default()
     } else {
-        ["up", "names"].iter().filter_map(|k| Some((k.to_string(), params?.get(*k).filter(|v| !v.is_null())?.clone()))).collect()
+        // A point cloud's own options (pointcloud.insert; doc.open takes `units` and `max_points`).
+        let keys: &[&str] = if solidcraft_engine::io::is_point_cloud_path(path) {
+            &["units", "max_points", "center", "point_size", "color", "name"]
+        } else {
+            &["up", "names"]
+        };
+        keys.iter().filter_map(|k| Some((k.to_string(), params?.get(*k).filter(|v| !v.is_null())?.clone()))).collect()
     };
     let _ = begin_request(app, Request { path: path.into(), kind, reply: Some(req.reply.clone()), scope, options });
     None

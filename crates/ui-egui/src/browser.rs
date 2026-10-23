@@ -19,6 +19,8 @@ mod occurrence_gizmo_tests;
 mod model;
 
 mod features;
+mod point_clouds;
+pub use point_clouds::CloudPanel;
 
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
@@ -89,6 +91,8 @@ pub struct TreeState {
     pub timeline_anchor: Option<String>,
     /// The Edit Canvas / Calibrate panel.
     pub canvas_panel: Option<CanvasPanel>,
+    /// The Edit Point Cloud panel.
+    pub cloud_panel: Option<CloudPanel>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
     /// normal), so the eye can bring it back (#822).
     pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
@@ -950,6 +954,7 @@ fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, acts: Actions) {
     crate::browser_prompts::occurrence_panel(app, ui);
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
+    point_clouds::panel(app, ui.ctx());
     crate::sketch_attachment_ui::panel(app, ui.ctx());
 }
 
@@ -1047,6 +1052,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d, acts);
         canvas_rows(app, ui, d, acts);
+        point_clouds::rows(app, ui, d, acts);
         analysis_rows(app, ui, d, acts);
     }
     let _ = t;
@@ -1526,6 +1532,11 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             acts.menu = Some((p, Target::Canvas { id }));
         }
     }
+}
+
+/// The menu of a point cloud.
+pub fn point_cloud_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    point_clouds::items(app, id)
 }
 
 /// The menu of a canvas.

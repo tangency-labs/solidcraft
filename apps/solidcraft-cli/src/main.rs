@@ -168,7 +168,7 @@ pub fn read_json(path: &str) -> Result<Value, String> {
     serde_json::from_str(&s).map_err(|e| format!("{path}: {e}"))
 }
 
-/// A session from a design file, a STEP/3MF/STL file, a command script, or an oracle recipe.
+/// A session from a design file, a STEP/3MF/STL file, a point cloud, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
     load_checked(path, solidcraft_engine::schema::ParamCheck::Off)
 }
@@ -178,7 +178,7 @@ pub fn load(path: &str) -> Result<Session, String> {
 fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Result<Session, String> {
     let mut s = Session::default();
     s.param_check = check;
-    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) {
+    if solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::is_point_cloud_path(path) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         return Ok(s);
     }

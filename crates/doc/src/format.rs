@@ -603,6 +603,7 @@ pub fn read(s: &str) -> Result<Document> {
     {
         return Err(DocError::Invalid("document too large".into()));
     }
+    crate::point_cloud::check_all(&d.point_clouds)?;
     let feature_ids: std::collections::BTreeSet<_> = d.features.iter().map(|feature| feature.id).collect();
     let mut group_ids = std::collections::BTreeSet::new();
     let mut grouped_features = std::collections::BTreeSet::new();

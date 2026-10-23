@@ -434,6 +434,35 @@ pub struct GpuImage {
 /// Image vertex: position (3 × f32), uv (2 × f32), opacity (f32).
 const IMG_SIZE: usize = 24;
 
+/// A point cloud: round dots of a size on screen, depth-tested and written like the model's
+/// faces.
+#[derive(Clone)]
+pub struct GpuPoints {
+    pub id: u64,
+    /// Changes when the points change (they are uploaded again).
+    pub version: u64,
+    /// [`CLOUD_POINT_SIZE`] bytes per point: position (3 × f32, in the design), colour (RGBA8,
+    /// the alpha the dot's size in eighths of a pixel, see [`cloud_point`]).
+    pub bytes: Arc<Vec<u8>>,
+}
+
+/// Bytes per point of a [`GpuPoints`].
+pub const CLOUD_POINT_SIZE: usize = 16;
+
+/// A point of a [`GpuPoints`]: where it is, its colour and its size on screen (pixels, up to 31).
+pub fn cloud_point(out: &mut Vec<u8>, p: [f32; 3], rgb: [u8; 3], size: f32) {
+    for v in p {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&rgb);
+    out.push((size * 8.0).round().clamp(8.0, 255.0) as u8);
+}
+
+fn point_layout() -> wgpu::VertexBufferLayout<'static> {
+    const A: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Unorm8x4];
+    wgpu::VertexBufferLayout { array_stride: CLOUD_POINT_SIZE as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A }
+}
+
 /// Per-frame parameters.
 pub struct Frame {
     /// Product preview uses its own batches, retaining the Design viewport's uploads.
@@ -462,6 +491,8 @@ pub struct Frame {
     pub cap: [f32; 4],
     /// Canvases and decals.
     pub images: Vec<GpuImage>,
+    /// Point clouds.
+    pub points: Vec<GpuPoints>,
     /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature, 4 environment,
     /// 5 accessibility; parameter; scale; size) and the pull / access direction.
     pub analysis: [f32; 8],
@@ -1095,6 +1126,10 @@ pub struct Renderer {
     textures: std::collections::HashMap<u64, (u64, wgpu::BindGroup)>,
     /// This frame's quads: (image id, vertices).
     quads: Vec<(u64, Batch)>,
+    /// Point clouds' dots.
+    point: wgpu::RenderPipeline,
+    /// Point clouds by id: (version, points).
+    clouds: std::collections::HashMap<u64, (u64, Batch)>,
     access_bgl: wgpu::BindGroupLayout,
     /// The accessibility depth map (a 1 × 1 stand-in when there is none) and its version.
     access_bind: wgpu::BindGroup,
@@ -1737,6 +1772,8 @@ impl Renderer {
             sampler,
             textures: Default::default(),
             quads: Vec::new(),
+            point: pipeline("sc_points", "vs_point", "fs_point", point_layout(), depth(wgpu::CompareFunction::Less, true), None),
+            clouds: Default::default(),
             tri: solid("sc_tris", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), TriSource::Built),
             tri_cut: cut(TriSource::Built),
             tri_planned: solid("sc_tris_planned", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), TriSource::Planned),
@@ -1996,6 +2033,20 @@ impl Renderer {
                 res.quads.push((img.id, b));
             }
         }
+        // Point clouds: upload new or changed ones, drop removed ones.
+        res.clouds.retain(|id, _| cb.points.iter().any(|c| c.id == *id));
+        for c in &cb.points {
+            if res.clouds.get(&c.id).is_none_or(|(v, _)| *v != c.version) {
+                match upload(device, "sc_points", &c.bytes, CLOUD_POINT_SIZE) {
+                    Some(b) => {
+                        res.clouds.insert(c.id, (c.version, b));
+                    }
+                    None => {
+                        res.clouds.remove(&c.id);
+                    }
+                }
+            }
+        }
         res.ss_ready = (cb.ssaa != 1.0 || see_through) && res.supersample(device, encoder, cb, see_through);
     }
 
@@ -2109,6 +2160,15 @@ impl Renderer {
             }
         }
         tris(pass, &res.pbr, &m.pbr);
+        if !cb.product {
+            for (_, b) in res.clouds.values() {
+                pass.set_pipeline(&res.point);
+                for (buffer, count) in &b.parts {
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    pass.draw(0..6, 0..*count);
+                }
+            }
+        }
         tris(pass, &res.tri_hl, &h.tris);
         lines(pass, &res.line, &m.lines);
         lines(pass, &res.line, &sk.lines);
@@ -2598,6 +2658,7 @@ mod glass_tests {
             clip: [0.0; 4],
             cap: [0.0; 4],
             images: Vec::new(),
+            points: Vec::new(),
             analysis: [0.0; 8],
             analysis_colors: [0.0; 36],
             access: None,

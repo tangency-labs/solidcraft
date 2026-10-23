@@ -30,6 +30,7 @@ const STEP_LEVEL: i64 = 2;
 const MAX_PART: usize = MAX_DESIGN_BYTES;
 const MAX_EXPANDED: usize = MAX_STEP_PART + MAX_DESIGN_BYTES;
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
+const POINTS_MAGIC: &[u8; 8] = b"SCPNTS01";
 const MAX_PREVIEW_BYTES: usize = 8 << 20;
 const MAX_PREVIEW_TRIANGLES: usize = 100_000;
 
@@ -265,7 +266,19 @@ fn write_container(
         value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
         canvases.push(value);
     }
-    let metadata = replace(doc, fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))])).map_err(invalid)?;
+    let mut clouds = Vec::with_capacity(doc.point_clouds.len());
+    for cloud in &doc.point_clouds {
+        cloud.check().map_err(invalid)?;
+        let blob = writer.blob(&encode_cloud(cloud)?, "points", compression == DesignCompression::Compact)?;
+        let mut value = replace(cloud, fields([("points", json!("")), ("colors", json!(""))])).map_err(invalid)?;
+        value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?.insert("points_blob".into(), blob);
+        clouds.push(value);
+    }
+    let mut replaced = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))]);
+    if !clouds.is_empty() {
+        replaced.insert("point_clouds".into(), Value::Array(clouds));
+    }
+    let metadata = replace(doc, replaced).map_err(invalid)?;
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
@@ -355,6 +368,56 @@ fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
     mesh.triangles =
         bytes.get(middle..).ok_or_else(|| invalid("truncated mesh"))?.as_chunks::<4>().0.iter().map(|&v| u32::from_le_bytes(v)).collect();
     validate_mesh(mesh)
+}
+
+/// A point cloud's points and colours: the magic, the point count and whether there are
+/// colours (u64 each, little-endian), then x, y, z per point (f32) and r, g, b per point.
+fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u8>> {
+    let n = cloud.points.len();
+    let colored = !cloud.colors.is_empty();
+    let size = n
+        .checked_mul(if colored { 15 } else { 12 })
+        .and_then(|b| b.checked_add(24))
+        .filter(|&b| b <= MAX_DESIGN_BYTES)
+        .ok_or_else(|| invalid("point cloud too large"))?;
+    let mut bytes = Vec::with_capacity(size);
+    bytes.extend_from_slice(POINTS_MAGIC);
+    bytes.extend_from_slice(&(n as u64).to_le_bytes());
+    bytes.extend_from_slice(&u64::from(colored).to_le_bytes());
+    bytes.extend_from_slice(&cloud.points.to_bytes());
+    if colored {
+        bytes.extend_from_slice(&cloud.colors.0);
+    }
+    Ok(bytes)
+}
+
+fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointCloud) -> Result<()> {
+    use solidcraft_doc::point_cloud::{Colors, MAX_POINTS, Points};
+    if bytes.get(..8) != Some(POINTS_MAGIC.as_slice()) {
+        return Err(invalid("unsupported point cloud blob version"));
+    }
+    let word = |range: std::ops::Range<usize>| -> Result<u64> {
+        let array: [u8; 8] = bytes.get(range).ok_or_else(|| invalid("truncated point cloud blob"))?.try_into().map_err(invalid)?;
+        Ok(u64::from_le_bytes(array))
+    };
+    let n = usize::try_from(word(8..16)?).ok().filter(|&n| n <= MAX_POINTS).ok_or_else(|| invalid("point cloud too large"))?;
+    let colored = match word(16..24)? {
+        0 => false,
+        1 => true,
+        _ => return Err(invalid("invalid point cloud blob")),
+    };
+    let middle = 24 + n * 12;
+    if bytes.len() != middle + if colored { n * 3 } else { 0 } {
+        return Err(invalid("invalid point cloud blob lengths"));
+    }
+    cloud.points = Points::from_bytes(bytes.get(24..middle).ok_or_else(|| invalid("truncated point cloud"))?)
+        .ok_or_else(|| invalid("invalid point coordinates"))?;
+    cloud.colors = if colored {
+        Colors::from_bytes(bytes.get(middle..).ok_or_else(|| invalid("truncated point cloud"))?).ok_or_else(|| invalid("invalid point colours"))?
+    } else {
+        Colors::default()
+    };
+    cloud.check().map_err(invalid)
 }
 
 struct PackageReader<R: Read + Seek> {
@@ -700,6 +763,13 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
             return Err(invalid("canvas too large"));
         }
         canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
+    }
+    for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
+        if !cloud.points.is_empty() || !cloud.colors.is_empty() {
+            return Err(invalid("ambiguous embedded points and blob"));
+        }
+        let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
+        decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
     }
     Ok(doc)
 }

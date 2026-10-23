@@ -966,11 +966,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_path_async(&path);
             }
         }),
-        FileAction::Import => app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb"], |app, path| {
-            if let Some(path) = path {
-                app.open_path_async(&path);
-            }
-        }),
+        FileAction::Import => {
+            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
+                if let Some(path) = path {
+                    app.open_path_async(&path);
+                }
+            })
+        }
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);

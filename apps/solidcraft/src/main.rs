@@ -213,7 +213,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             }
             let future = dialog
                 .add_filter(
-                    "Designs, CAD files and meshes",
+                    "Designs, CAD files, meshes and point clouds",
                     &[
                         io::DESIGN_EXT,
                         io::LEGACY_DESIGN_EXT,
@@ -240,6 +240,12 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
                         "GLB",
                         "gltf",
                         "GLTF",
+                        "ply",
+                        "PLY",
+                        "xyz",
+                        "XYZ",
+                        "pts",
+                        "PTS",
                     ],
                 )
                 .add_filter("SolidCraft design (container or JSON)", &[io::DESIGN_EXT, io::LEGACY_DESIGN_EXT, "json"])
@@ -247,6 +253,7 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
                 .add_filter("IGES", &["igs", "iges", "IGS", "IGES"])
                 .add_filter("FreeCAD and Rhino", &["FCStd", "fcstd", "3dm", "3DM"])
                 .add_filter("Mesh (3MF, STL, OBJ, glTF)", &["3mf", "3MF", "stl", "STL", "obj", "OBJ", "glb", "GLB", "gltf", "GLTF"])
+                .add_filter("Point cloud (PLY, XYZ, PTS)", &["ply", "PLY", "xyz", "XYZ", "pts", "PTS"])
                 .add_filter("Sketch drawings (DXF, SVG)", &["dxf", "DXF", "svg", "SVG"])
                 .add_filter("All files", &["*"])
                 .pick_file();

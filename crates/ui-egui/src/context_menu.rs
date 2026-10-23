@@ -80,6 +80,10 @@ pub enum Target {
     Canvas {
         id: u64,
     },
+    /// A point cloud.
+    PointCloud {
+        id: u64,
+    },
     /// The Section Analysis in the browser's Analysis folder.
     Section,
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
@@ -353,6 +357,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
+        Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
@@ -1292,6 +1297,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 Some("orbit") => Some(crate::viewport::NavMode::Orbit),
                 _ => None,
             };
+        }
+        "ui.editPointCloud" => {
+            if let Some(c) = id_of(&p, "cloud") {
+                app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(app, c));
+            }
         }
         "ui.editCanvas" | "ui.calibrateCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {

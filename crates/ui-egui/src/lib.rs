@@ -162,6 +162,7 @@ pub(crate) mod open_meshing;
 pub mod params_dialog;
 pub(crate) mod pick_index;
 pub(crate) mod plugins;
+pub mod point_clouds;
 pub mod prefs;
 pub mod prefs_notice;
 #[cfg(test)]
@@ -969,7 +970,7 @@ impl SolveApp {
             linked_source::start_selected(self);
             return;
         }
-        if matches!(id, "file.insert_step" | "file.insert_mesh") {
+        if matches!(id, "file.insert_step" | "file.insert_mesh" | "pointcloud.insert") {
             self.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.insert_path_async(&path);
@@ -1226,7 +1227,13 @@ impl SolveApp {
     /// Insert a STEP file's bodies (an Import base feature) or a mesh file's meshes into the
     /// current design.
     pub fn insert_path(&mut self, path: &str) {
-        let cmd = if solidcraft_engine::io::is_mesh_path(path) { "file.insert_mesh" } else { "file.insert_step" };
+        let cmd = if solidcraft_engine::io::is_mesh_path(path) {
+            "file.insert_mesh"
+        } else if solidcraft_engine::io::is_point_cloud_path(path) {
+            "pointcloud.insert"
+        } else {
+            "file.insert_step"
+        };
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
@@ -1237,11 +1244,12 @@ impl SolveApp {
         }
     }
 
-    /// A dropped file: a STEP or mesh file (3MF, STL, OBJ, glTF) joins a design that has features, anything else
-    /// opens.
+    /// A dropped file: a STEP, mesh (3MF, STL, OBJ, glTF) or point cloud (PLY, XYZ, PTS) file
+    /// joins a design that has features or point clouds, anything else opens.
     pub fn drop_path(&mut self, path: &str) {
-        let import = solidcraft_engine::io::is_step_path(path) || solidcraft_engine::io::is_mesh_path(path);
-        if import && !self.session.doc.features.is_empty() {
+        let io = &solidcraft_engine::io::is_step_path;
+        let import = io(path) || solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::is_point_cloud_path(path);
+        if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
         } else {
             self.open_path_async(path);
