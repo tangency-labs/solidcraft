@@ -148,8 +148,8 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 }
 
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
-    if let Kind::Versions { name, selected, notice, error } = &mut d.kind {
-        return super::versions_ui::rows(app, ui, name, selected, notice, error);
+    if let Kind::Versions { name, selected, notice, error, take_theirs, compared } = &mut d.kind {
+        return super::versions_ui::rows(app, ui, name, selected, notice, error, take_theirs, compared);
     }
     let t = Tokens::get();
     let mut enter = false;

@@ -50,10 +50,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("version.delete", "Delete", delete).icon("checkpoint").doc_only().params(
         "version?: id, or workspace?: id. Main, and the workspace that is open, cannot be deleted. A version's children start from the version before it",
     ),
+    CommandSpec::new("version.changes", "Changes", changes).icon("checkpoint").noundo().doc_only().params(
+        "version?: id, or workspace?: id → added, removed, changed and conflicting parameters and features",
+    ),
     CommandSpec::new("version.merge", "Merge into here", merge)
         .icon("checkpoint")
         .doc_only()
-        .params("workspace: id. Brings that workspace into the open one. The same change on both sides is refused"),
+        .params("workspace: id; take?: paths to take from that workspace; keep?: paths to keep from the open one. A conflict with no choice is refused"),
 ];
 
 fn graph(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -118,10 +121,26 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "workspace": id }))
 }
 
+fn changes(s: &mut Session, p: &Value) -> Result<Value> {
+    let listed = if let Some(id) = str_(p, "version").filter(|text| !text.trim().is_empty()) {
+        s.doc.changes_for_version(id).map_err(into_engine)?
+    } else {
+        s.doc.changes_for_workspace(required(p, "workspace")?).map_err(into_engine)?
+    };
+    Ok(serde_json::to_value(&listed).map_err(|error| EngineError::Other(error.to_string()))?)
+}
+
+fn chosen(p: &Value, key: &str, theirs: bool) -> Vec<(String, bool)> {
+    p.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(|path| (path.to_string(), theirs)).collect()
+}
+
 fn merge(s: &mut Session, p: &Value) -> Result<Value> {
     let id = required(p, "workspace")?;
+    let mut choices = chosen(p, "take", true);
+    choices.extend(chosen(p, "keep", false));
+    let refs: Vec<(&str, bool)> = choices.iter().map(|(path, take)| (path.as_str(), *take)).collect();
     let kept = s.doc.clone();
-    let outcome = s.doc_mut().merge_workspace(id).map_err(into_engine)?;
+    let outcome = s.doc_mut().merge_workspace(id, &refs).map_err(into_engine)?;
     if outcome == solidcraft_doc::versions::MergeOutcome::Already {
         s.doc = kept;
     } else {

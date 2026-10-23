@@ -53,6 +53,42 @@ pub enum GraphKind {
     Workspace,
 }
 
+/// One difference between the open design and a version or another workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DesignChange {
+    /// Stable id for a merge choice, such as `param:width` or `feature:4`.
+    pub path: String,
+    /// The parameter name, or the feature id.
+    pub key: String,
+    /// The name shown in the list.
+    pub name: String,
+    pub what: ChangeWhat,
+    pub kind: ChangeKind,
+}
+
+/// Whether a difference is a parameter, a feature, or the design name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeWhat {
+    Parameter,
+    Feature,
+    Name,
+}
+
+/// How the selected design differs from the open one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    /// The selected design has it and this workspace does not.
+    Added,
+    /// This workspace has it and the selected design does not.
+    Removed,
+    /// Only the selected design changed it since the shared version.
+    Changed,
+    /// Both sides changed it.
+    Conflict,
+}
+
 /// What [`Document::merge_workspace`] did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MergeOutcome {
@@ -427,12 +463,52 @@ impl Document {
         Ok(())
     }
 
+    /// What differs between the open design and a version.
+    pub fn changes_for_version(&self, id: &str) -> Result<Vec<DesignChange>> {
+        let hash = self
+            .versions
+            .versions
+            .iter()
+            .find(|version| version.id == id)
+            .map(|version| version.snapshot.clone())
+            .ok_or_else(|| DocError::Invalid(format!("no version {id}")))?;
+        let theirs = self.versions.blobs.get(&hash).cloned().ok_or_else(|| DocError::Invalid(format!("no version {id}")))?;
+        let ours = self.design_value()?;
+        Ok(design_changes(&ours, &ours, &theirs))
+    }
+
+    /// What a merge of `id` would change in the open workspace.
+    pub fn changes_for_workspace(&self, id: &str) -> Result<Vec<DesignChange>> {
+        let (base, ours, theirs) = self.sides(id)?;
+        Ok(design_changes(&base, &ours, &theirs))
+    }
+
     /// Bring `id` into the open workspace.
     ///
     /// When only one side moved on since the shared version, that side is kept. When both moved,
-    /// features and parameters combine by id and by name. The same thing changed on both sides is
-    /// refused, and nothing is written.
-    pub fn merge_workspace(&mut self, id: &str) -> Result<MergeOutcome> {
+    /// features and parameters combine by id and by name. `choices` names each place both sides
+    /// changed: `true` takes the other workspace, `false` keeps the open one. A conflict with no
+    /// choice is refused, and nothing is written.
+    pub fn merge_workspace(&mut self, id: &str, choices: &[(&str, bool)]) -> Result<MergeOutcome> {
+        let (base, ours, theirs) = self.sides(id)?;
+        if ours == theirs || theirs == base {
+            return Ok(MergeOutcome::Already);
+        }
+        if ours == base {
+            self.install_value(theirs)?;
+            return Ok(MergeOutcome::BroughtIn);
+        }
+        let open = ours.clone();
+        let (ours, theirs) = resolve_conflicts(&base, ours, theirs, choices)?;
+        let merged = merge_values(&base, &ours, &theirs, "")?;
+        if merged == open {
+            return Ok(MergeOutcome::Already);
+        }
+        self.install_value(merged)?;
+        Ok(MergeOutcome::Merged)
+    }
+
+    fn sides(&self, id: &str) -> Result<(Value, Value, Value)> {
         if id == self.versions.current {
             return Err(DocError::Invalid("a workspace cannot be merged into itself".into()));
         }
@@ -451,10 +527,6 @@ impl Document {
             .and_then(|workspace| workspace.snapshot.clone())
             .ok_or_else(|| DocError::Invalid(format!("{theirs_name} has no saved design")))?;
         let theirs = self.versions.blobs.get(&theirs_hash).cloned().ok_or_else(|| DocError::Invalid(format!("{theirs_name} has no saved design")))?;
-        let ours = self.design_value()?;
-        if ours == theirs {
-            return Ok(MergeOutcome::Already);
-        }
         let base = match self.shared_version(id) {
             Some(version_id) => {
                 let hash = self
@@ -468,19 +540,7 @@ impl Document {
             }
             None => return Err(DocError::Invalid(format!("{theirs_name} does not share a version with this workspace"))),
         };
-        if ours == base {
-            self.install_snapshot(&theirs_hash)?;
-            return Ok(MergeOutcome::BroughtIn);
-        }
-        if theirs == base {
-            return Ok(MergeOutcome::Already);
-        }
-        let merged = merge_values(&base, &ours, &theirs, "")?;
-        if merged == ours {
-            return Ok(MergeOutcome::Already);
-        }
-        self.install_value(merged)?;
-        Ok(MergeOutcome::Merged)
+        Ok((base, self.design_value()?, theirs))
     }
 
     /// The newest version that is on both this workspace's history and `other`'s.
@@ -630,6 +690,129 @@ fn checked_name(versions: &Versions, name: &str) -> Result<String> {
         return Err(DocError::Invalid(format!("a version or workspace is already named {name}")));
     }
     Ok(name.to_string())
+}
+
+fn design_changes(base: &Value, ours: &Value, theirs: &Value) -> Vec<DesignChange> {
+    let mut changes = Vec::new();
+    if let Some(kind) = classify(base.get("name"), ours.get("name"), theirs.get("name")) {
+        changes.push(DesignChange { path: "name".into(), key: "name".into(), name: "name".into(), what: ChangeWhat::Name, kind });
+    }
+    collect_keyed(base, ours, theirs, "params", "name", ChangeWhat::Parameter, "param", &mut changes);
+    collect_keyed(base, ours, theirs, "features", "id", ChangeWhat::Feature, "feature", &mut changes);
+    changes
+}
+
+fn collect_keyed(
+    base: &Value,
+    ours: &Value,
+    theirs: &Value,
+    field: &str,
+    key_field: &str,
+    what: ChangeWhat,
+    path_prefix: &str,
+    changes: &mut Vec<DesignChange>,
+) {
+    let base_items = keyed(base, field, key_field);
+    let ours_items = keyed(ours, field, key_field);
+    let theirs_items = keyed(theirs, field, key_field);
+    let mut keys: Vec<String> = base_items.keys().chain(ours_items.keys()).chain(theirs_items.keys()).cloned().collect();
+    keys.sort();
+    keys.dedup();
+    for key in keys {
+        let base_item = base_items.get(&key).copied();
+        let ours_item = ours_items.get(&key).copied();
+        let theirs_item = theirs_items.get(&key).copied();
+        let Some(kind) = classify(base_item, ours_item, theirs_item) else { continue };
+        let name = [ours_item, theirs_item, base_item]
+            .into_iter()
+            .flatten()
+            .find_map(|item| item.get("name").and_then(Value::as_str))
+            .unwrap_or(key.as_str())
+            .to_string();
+        changes.push(DesignChange { path: format!("{path_prefix}:{key}"), key, name, what, kind });
+    }
+}
+
+fn keyed<'a>(value: &'a Value, field: &str, key_field: &str) -> BTreeMap<String, &'a Value> {
+    value
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(|item| field_key(item, key_field).map(|id| (id, item))).collect())
+        .unwrap_or_default()
+}
+
+fn classify(base: Option<&Value>, ours: Option<&Value>, theirs: Option<&Value>) -> Option<ChangeKind> {
+    match (base, ours, theirs) {
+        (_, Some(ours), Some(theirs)) if ours == theirs => None,
+        (Some(base), Some(ours), Some(theirs)) if ours == base && theirs != base => Some(ChangeKind::Changed),
+        (Some(base), Some(_), Some(theirs)) if theirs == base => None,
+        (Some(_), Some(_), Some(_)) => Some(ChangeKind::Conflict),
+        (None, Some(ours), Some(theirs)) if ours != theirs => Some(ChangeKind::Conflict),
+        (None, None, Some(_)) => Some(ChangeKind::Added),
+        (None, Some(_), None) => None,
+        (Some(base), Some(ours), None) if ours == base => Some(ChangeKind::Removed),
+        (Some(_), Some(_), None) => Some(ChangeKind::Conflict),
+        (Some(base), None, Some(theirs)) if theirs == base => None,
+        (Some(_), None, Some(_)) => Some(ChangeKind::Conflict),
+        _ => None,
+    }
+}
+
+fn resolve_conflicts(base: &Value, mut ours: Value, mut theirs: Value, choices: &[(&str, bool)]) -> Result<(Value, Value)> {
+    for change in design_changes(base, &ours, &theirs) {
+        if change.kind != ChangeKind::Conflict {
+            continue;
+        }
+        let choice = choices.iter().find(|(path, _)| *path == change.path);
+        let Some((_, take_theirs)) = choice else {
+            return Err(DocError::Invalid(format!("both workspaces changed {}", change.name)));
+        };
+        if *take_theirs {
+            copy_item(&mut ours, &theirs, &change);
+        } else {
+            copy_item(&mut theirs, &ours, &change);
+        }
+    }
+    Ok((ours, theirs))
+}
+
+fn copy_item(dest: &mut Value, source: &Value, change: &DesignChange) {
+    if change.what == ChangeWhat::Name {
+        match source.get("name").cloned() {
+            Some(name) => {
+                if let Some(object) = dest.as_object_mut() {
+                    object.insert("name".into(), name);
+                }
+            }
+            None => {
+                if let Some(object) = dest.as_object_mut() {
+                    object.remove("name");
+                }
+            }
+        }
+        return;
+    }
+    let (field, key_field) = match change.what {
+        ChangeWhat::Parameter => ("params", "name"),
+        ChangeWhat::Feature => ("features", "id"),
+        ChangeWhat::Name => return,
+    };
+    let item = source
+        .get(field)
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().find(|item| field_key(item, key_field).as_deref() == Some(change.key.as_str())).cloned());
+    let Some(object) = dest.as_object_mut() else { return };
+    let Some(items) = object.entry(field).or_insert_with(|| Value::Array(Vec::new())).as_array_mut() else { return };
+    if let Some(pos) = items.iter().position(|item| field_key(item, key_field).as_deref() == Some(change.key.as_str())) {
+        match item {
+            Some(item) => items[pos] = item,
+            None => {
+                items.remove(pos);
+            }
+        }
+    } else if let Some(item) = item {
+        items.push(item);
+    }
 }
 
 fn merge_values(base: &Value, ours: &Value, theirs: &Value, path: &str) -> Result<Value> {
@@ -831,15 +1014,20 @@ mod tests {
         doc.params[0].expr = "2".into();
         doc.switch_workspace("main").unwrap();
         doc.params.push(Param { name: "height".into(), expr: "3".into(), unit: "mm".into(), comment: String::new(), model: false });
-        assert_eq!(doc.merge_workspace(&side).unwrap(), MergeOutcome::Merged);
+        assert_eq!(doc.merge_workspace(&side, &[]).unwrap(), MergeOutcome::Merged);
         assert_eq!(doc.params.iter().find(|param| param.name == "width").unwrap().expr, "2");
         assert!(doc.params.iter().any(|param| param.name == "height"));
         doc.params[0].expr = "9".into();
         doc.switch_workspace(&side).unwrap();
         doc.params[0].expr = "8".into();
         doc.switch_workspace("main").unwrap();
-        assert!(doc.merge_workspace(&side).is_err(), "the same parameter changed on both sides");
+        let changes = doc.changes_for_workspace(&side).unwrap();
+        assert!(changes.iter().any(|change| change.path == "param:width" && change.kind == ChangeKind::Conflict));
+        assert!(doc.merge_workspace(&side, &[]).is_err(), "the same parameter changed on both sides");
         assert_eq!(doc.params[0].expr, "9", "a refused merge writes nothing");
+        assert_eq!(doc.merge_workspace(&side, &[("param:width", true)]).unwrap(), MergeOutcome::Merged);
+        assert_eq!(doc.params.iter().find(|param| param.name == "width").unwrap().expr, "8");
+        assert!(doc.params.iter().any(|param| param.name == "height"));
         let point = doc.versions.versions[0].id.clone();
         doc.delete_version(&point).unwrap();
         assert!(doc.versions.versions.iter().all(|version| version.id != point));

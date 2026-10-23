@@ -15,6 +15,8 @@ pub(super) fn rows(
     selected: &mut Option<String>,
     notice: &mut Option<String>,
     error: &mut bool,
+    take_theirs: &mut Vec<String>,
+    compared: &mut Option<String>,
 ) -> bool {
     let t = Tokens::get();
     let viewing = app.session.version_view.clone();
@@ -134,7 +136,16 @@ pub(super) fn rows(
                 .find(|workspace| workspace.id == app.session.doc.versions.current)
                 .map(|workspace| workspace.name.clone())
                 .unwrap_or_else(|| "Main".into());
-            if let Some(value) = act(app, notice, error, "version.merge", serde_json::json!({ "workspace": id })) {
+            let changes = app.session.doc.changes_for_workspace(&id).unwrap_or_default();
+            let take: Vec<&str> = take_theirs.iter().map(String::as_str).filter(|path| changes.iter().any(|change| change.path == *path)).collect();
+            let keep: Vec<&str> = changes
+                .iter()
+                .filter(|change| {
+                    change.kind == solidcraft_engine::doc::versions::ChangeKind::Conflict && !take.iter().any(|path| *path == change.path)
+                })
+                .map(|change| change.path.as_str())
+                .collect();
+            if let Some(value) = act(app, notice, error, "version.merge", serde_json::json!({ "workspace": id, "take": take, "keep": keep })) {
                 let key = match value.get("result").and_then(|item| item.as_str()) {
                     Some("brought") => "ui.versions_brought",
                     Some("already") => "ui.versions_merge_none",
@@ -144,6 +155,49 @@ pub(super) fn rows(
             }
         }
     });
+    if compared.as_deref() != selected.as_deref() {
+        *compared = selected.clone();
+        take_theirs.clear();
+    }
+    let preview = match selected.as_deref() {
+        Some(id) if version => app.session.doc.changes_for_version(id).map_err(|err| err.to_string()),
+        Some(id) if other_workspace => app.session.doc.changes_for_workspace(id).map_err(|err| err.to_string()),
+        _ => Ok(Vec::new()),
+    };
+    match preview {
+        Ok(changes) if !changes.is_empty() || version || other_workspace => {
+            egui::ScrollArea::vertical().id_salt("versions-diff").max_height(140.0).show(ui, |ui| {
+                if changes.is_empty() {
+                    ui.label(crate::i18n::tr("ui.versions_same"));
+                }
+                for change in &changes {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = t.space_4;
+                        let key = match change.kind {
+                            solidcraft_engine::doc::versions::ChangeKind::Added => "ui.versions_diff_added",
+                            solidcraft_engine::doc::versions::ChangeKind::Removed => "ui.versions_diff_removed",
+                            solidcraft_engine::doc::versions::ChangeKind::Changed => "ui.versions_diff_changed",
+                            solidcraft_engine::doc::versions::ChangeKind::Conflict => "ui.versions_diff_conflict",
+                        };
+                        ui.label(crate::i18n::format(key, &[("name", change.name.as_str())]));
+                        if change.kind == solidcraft_engine::doc::versions::ChangeKind::Conflict {
+                            let taking = take_theirs.iter().any(|path| path == &change.path);
+                            if ui.selectable_label(!taking, crate::i18n::tr("ui.versions_keep")).clicked() {
+                                take_theirs.retain(|path| path != &change.path);
+                            }
+                            if ui.selectable_label(taking, crate::i18n::tr("ui.versions_take")).clicked() && !taking {
+                                take_theirs.push(change.path.clone());
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        Err(message) => {
+            crate::ui_kit::text(ui, &message, crate::ui_kit::Text::Hint("versions"));
+        }
+        _ => {}
+    }
     if let Some(text) = notice {
         let style = if *error { crate::ui_kit::Text::Error("versions") } else { crate::ui_kit::Text::Hint("versions") };
         crate::ui_kit::text(ui, text, style);
@@ -152,7 +206,9 @@ pub(super) fn rows(
     }
     ui.add_space(t.space_6);
     let viewed = app.session.version_view.as_ref().map(|view| view.version.clone());
-    graph(ui, &app.session.doc.versions.layout(), selected, viewed.as_deref());
+    egui::ScrollArea::both().id_salt("versions-graph").max_height(260.0).show(ui, |ui| {
+        graph(ui, &app.session.doc.versions.layout(), selected, viewed.as_deref());
+    });
     false
 }
 

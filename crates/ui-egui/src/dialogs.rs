@@ -369,6 +369,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 notice: Option<String>,
                 /// `true` when `notice` is a refusal. A success stays in the normal text colour.
                 error: bool,
+                /// Conflict paths the merge should take from the other workspace.
+                take_theirs: Vec<String>,
+                /// The node the conflict choices belong to.
+                compared: Option<String>,
             },
             /// Joints and components (`dialogs_assembly`).
             Assembly(crate::dialogs_assembly::Asm),
@@ -1050,7 +1054,10 @@ impl Dialog {
                 Kind::Combine { operation: 1, keep_tools: false },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
-            "version.graph" => Dialog::new(Kind::Versions { name: String::new(), selected: None, notice: None, error: false }, vec![]),
+            "version.graph" => Dialog::new(
+                Kind::Versions { name: String::new(), selected: None, notice: None, error: false, take_theirs: Vec::new(), compared: None },
+                vec![],
+            ),
             _ => {
                 let (kind, inputs) = Kind::simple_start(id)
                     .map(|(kind, inputs)| (crate::length_input::defaults(&s.doc, kind), inputs))
