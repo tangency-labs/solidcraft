@@ -391,7 +391,7 @@ impl Model {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
-            let result = FeatureResult {
+            let mut result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
@@ -406,6 +406,17 @@ impl Model {
                 fingerprint: prev,
                 state: states.get(index(r.get("state"), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))?,
             };
+            // Older saved models can predate import loss warnings. Check the import's own
+            // result state, even if a later feature consumed or replaced its bodies.
+            if !result.skipped && matches!(f.kind, FeatureKind::Import { .. }) {
+                for body in result.state.bodies.iter().filter(|b| b.feature == f.id) {
+                    if let Some(note) = body.empty_import_warning()
+                        && !result.warning.as_ref().is_some_and(|w| w.contains(&note))
+                    {
+                        append_warning(&mut result.warning, note);
+                    }
+                }
+            }
             // Each result where an evaluation would have put it, so an edit undone (or set back)
             // finds it again rather than evaluating the feature anew.
             if !result.skipped {

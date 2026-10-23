@@ -148,6 +148,13 @@ impl ModelBody {
         }
     }
 
+    /// A named loss warning for an imported body that has no drawable geometry. The source
+    /// and B-rep remain intact, including when the guarded mesher returned an error.
+    pub fn empty_import_warning(&self) -> Option<String> {
+        (self.body.face_count() == 0 || self.mesh().triangles.is_empty())
+            .then(|| format!("body `{}` could not be meshed and was imported empty", self.name))
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -6573,16 +6580,24 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let imp = kernel::step_import_shared(step)?;
             let digest = crate::config::payload_digest(step);
             let names = import_body_names(st, &f.body_names, &imp, skip);
+            let mut empty_warnings = Vec::new();
             for (b, name) in imp.bodies.iter().zip(names) {
                 let Some(name) = name else { continue };
                 let b = crate::lineage::numbered_tool(b.body.clone().with_import_certificate(&digest, f.id)?);
-                st.bodies.push(ModelBody::traced_new(name, b, f.id));
+                let body = ModelBody::traced_new(name, b, f.id);
+                if let Some(note) = body.empty_import_warning() {
+                    empty_warnings.push(note);
+                }
+                st.bodies.push(body);
             }
             if !imp.warnings.is_empty() {
                 let n = imp.warnings.len();
                 let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
                 let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
                 *warning = Some(format!("{}{more}", shown.join("; ")));
+            }
+            for note in empty_warnings {
+                append_warning(warning, note);
             }
             Ok(())
         }

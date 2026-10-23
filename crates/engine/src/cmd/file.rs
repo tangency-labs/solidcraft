@@ -133,7 +133,9 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
     let created = created_bodies(s, id);
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
+    let mut warnings = sf.warnings;
+    warnings.extend(s.model.state().bodies.iter().filter(|b| b.feature == id).filter_map(|b| b.empty_import_warning()));
+    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": warnings, "system": sf.import.system});
     if let Some((up, exporter)) = exporter_up(&sf.import) {
         out["exporter"] = json!(exporter);
         out["exporter_up"] = json!(up);
@@ -292,7 +294,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     s.replace_design(Session::opened(doc, saved.as_ref()));
     s.path = Some(path.to_string());
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name}))
+    let warnings: Vec<&str> = s
+        .model
+        .results
+        .iter()
+        .filter(|r| s.doc.feature(r.id).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. })))
+        .filter_map(|r| r.warning.as_deref())
+        .collect();
+    Ok(json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name, "warnings": warnings}))
 }
 
 /// The name a design never given one by its user is shown under.
@@ -676,6 +685,115 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_step_import_has_no_empty_body_warning() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-normal-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step_path = dir.join("box.step");
+        let mut source = Session::default();
+        source.execute("solid.box", &json!({"length":10,"width":20,"height":30,"body_name":"Box"})).unwrap();
+        source.execute("file.export", &json!({"path":step_path,"format":"step"})).unwrap();
+        for command in ["file.insert_step", "doc.open"] {
+            let mut session = Session::default();
+            let report = session.execute(command, &json!({"path":step_path})).unwrap();
+            assert_eq!(report["warnings"], json!([]));
+            assert!(session.model.results.iter().all(|r| r.warning.is_none()));
+            let design_path = dir.join("box.solidcraft");
+            session.execute("file.save", &json!({"path":design_path})).unwrap();
+            let report = session.execute("doc.open", &json!({"path":design_path})).unwrap();
+            assert_eq!(report["warnings"], json!([]));
+            assert!(session.model.results.iter().all(|r| r.warning.is_none()));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #4598, the other outcome: where the kernel rejects the solid outright, the import fails
+    /// loudly, names the solid and leaves the design as it was.
+    #[test]
+    fn unreadable_step_solid_fails_loudly_and_names_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-unreadable-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step_path = dir.join("rod.step");
+        let mut source = Session::default();
+        source.execute("solid.box", &json!({"length":10,"width":20,"height":30,"body_name":"Rod"})).unwrap();
+        source.execute("file.export", &json!({"path":step_path,"format":"step"})).unwrap();
+        let text = std::fs::read_to_string(&step_path).unwrap();
+        let broken: Vec<String> = text
+            .lines()
+            .map(|l| match l.find("CLOSED_SHELL(") {
+                Some(at) => format!("{}CLOSED_SHELL('',(#1));", &l[..at]),
+                None => l.to_string(),
+            })
+            .collect();
+        std::fs::write(&step_path, broken.join("\n")).unwrap();
+        for command in ["file.insert_step", "doc.open"] {
+            let mut session = Session::new(Document::new("Unreadable import"));
+            let err = session.execute(command, &json!({"path":step_path})).unwrap_err().to_string();
+            assert!(err.contains("no bodies") && err.contains("Rod"), "{err}");
+            assert!(session.doc.features.is_empty(), "{command}: nothing added");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn empty_step_import_warns_on_insert_open_and_reopen() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-empty-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step_path = dir.join("rod.step");
+        let mut source = Session::default();
+        for (command, params) in [
+            ("solid.cylinder", json!({"diameter":40,"height":60,"body_name":"Rod"})),
+            ("solid.cylinder", json!({"diameter":8,"height":15,"base":[10,0,30],"axis":"X","operation":"cut","targets":["Rod"]})),
+            ("solid.move", json!({"bodies":["Rod"],"translate":[100,0,0]})),
+            ("file.export", json!({"path":step_path,"format":"step","bodies":["Rod"]})),
+        ] {
+            source.execute(command, &params).unwrap();
+        }
+        let check = |session: &Session, report: &Value| {
+            assert!(session.model.state().bodies.first().unwrap().mesh().triangles.is_empty(), "the synthetic STEP must reproduce the missing mesh");
+            let warnings = report["warnings"].as_array().expect("warning report");
+            assert_eq!(
+                warnings.iter().filter(|w| w.as_str().is_some_and(|w| w.contains("Rod") && w.contains("imported empty"))).count(),
+                1,
+                "{report}"
+            );
+            let result = session.model.results.iter().find(|r| r.warning.as_ref().is_some_and(|w| w.contains("imported empty"))).unwrap();
+            assert_eq!(result.warning.as_ref().unwrap().matches("imported empty").count(), 1);
+            assert_eq!(session.model.state().bodies.len(), 1, "keep the body");
+        };
+        for command in ["file.insert_step", "doc.open"] {
+            let mut session = Session::new(Document::new("Retained import"));
+            let report = session.execute(command, &json!({"path":step_path})).unwrap();
+            check(&session, &report);
+            let original = (*session.doc).clone();
+            for cache in [false, true] {
+                let design_path = dir.join(format!("rod-{cache}.solidcraft"));
+                session.execute("file.save", &json!({"path":design_path,"cache":cache})).unwrap();
+                let mut reopened = Session::default();
+                let report = reopened.execute("doc.open", &json!({"path":design_path})).unwrap();
+                check(&reopened, &report);
+                assert_eq!(*reopened.doc, original, "keep the embedded source and feature");
+                if cache {
+                    // A saved model from before import loss was reported has no warning field.
+                    let mut saved = saved_geometry(&session, &session.doc).unwrap();
+                    for feature in saved.records["features"].as_array_mut().unwrap() {
+                        feature.as_object_mut().unwrap().remove("warning");
+                    }
+                    let adopted = solidcraft_doc::Model::adopt(&session.doc, &saved).unwrap();
+                    assert!(adopted.results.iter().any(|r| r.warning.as_ref().is_some_and(|w| w.contains("imported empty"))));
+                    let bytes =
+                        solidcraft_io::write_design_container_with_cache(&session.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved))
+                            .unwrap();
+                    std::fs::write(&design_path, bytes).unwrap();
+                    let report = reopened.execute("doc.open", &json!({"path":design_path})).unwrap();
+                    check(&reopened, &report);
+                    assert_eq!(*reopened.doc, original);
+                }
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// #3044: a save run on a scratch copy of the session (on a worker, so the window keeps
     /// drawing) and taken up with `adopt_save` leaves the session as saving it directly does:
