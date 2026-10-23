@@ -1,11 +1,15 @@
 //! CAM setups persisted on the design: tools, setups and 2D milling operations.
 //! Toolpaths are never stored; they are computed when posting (`cam.post`).
+//!
+//! Operation geometry is a sketch profile or a planar face (resolved when posting), not a
+//! copied polygon, so toolpaths follow the design. Depths, feeds and stepdowns are [`Expr`]
+//! values, mapped onto `solidcraft-cam` only at post time.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_cam::{ContourParams, Cut, Feeds, Heights, PocketParams, Post, Side, Tool};
-use solidcraft_geom::{Loop2, Region2, Vec2};
+use solidcraft_cam::{Post, Tool};
+use solidcraft_geom::{Loop2, Region2, Vec2, Vec3};
 
-use crate::{DocError, Result};
+use crate::{DocError, Expr, ProfileSel, Result};
 
 /// Most tools in one design.
 pub const MAX_TOOLS: usize = 256;
@@ -89,6 +93,10 @@ fn is_origin(v: &[f64; 3]) -> bool {
     *v == [0.0, 0.0, 0.0]
 }
 
+fn profile_all() -> ProfileSel {
+    ProfileSel::All
+}
+
 impl CamSetup {
     pub fn new(name: impl Into<String>) -> CamSetup {
         CamSetup { name: name.into(), work_offset: 1, tool_axis: [0.0, 0.0, 1.0], work_origin: [0.0, 0.0, 0.0], stock: None, operations: Vec::new() }
@@ -118,6 +126,14 @@ impl CamSetup {
         }
         Ok(())
     }
+
+    pub fn tool_axis_vec(&self) -> Vec3 {
+        Vec3::new(self.tool_axis[0], self.tool_axis[1], self.tool_axis[2])
+    }
+
+    pub fn work_origin_vec(&self) -> Vec3 {
+        Vec3::new(self.work_origin[0], self.work_origin[1], self.work_origin[2])
+    }
 }
 
 /// Axis-aligned stock box in work coordinates (mm).
@@ -142,6 +158,7 @@ impl StockBox {
 }
 
 /// A planar region as polygon loops (outer CCW, holes CW), work XY in mm.
+/// Used only when a command passes explicit polylines instead of a sketch or face.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PolygonRegion {
     pub outer: Vec<[f64; 2]>,
@@ -179,16 +196,174 @@ fn validate_loop(pts: &[[f64; 2]], label: &str) -> Result<()> {
     Ok(())
 }
 
-/// A 2D milling operation whose geometry is planar polygons in work coordinates.
+/// Where an operation's regions come from. Resolved against the evaluated model at post time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CamGeometry {
+    /// Closed profiles of a sketch (true lines and arcs, not a tessellated copy).
+    Sketch {
+        sketch: u64,
+        #[serde(default = "profile_all")]
+        profiles: ProfileSel,
+    },
+    /// Outlines of planar body faces (inner loops are islands).
+    Faces { faces: Vec<CamFaceRef> },
+    /// Explicit polylines in work XY (tests and commands that do not name a sketch).
+    Polygons { regions: Vec<PolygonRegion> },
+}
+
+/// A body face: persistent name `name` on `body`, else the piece nearest `at`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamFaceRef {
+    pub body: String,
+    pub name: String,
+    #[serde(default)]
+    pub at: [f64; 3],
+}
+
+impl CamFaceRef {
+    pub fn at_vec(&self) -> Vec3 {
+        Vec3::new(self.at[0], self.at[1], self.at[2])
+    }
+}
+
+impl CamGeometry {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            CamGeometry::Sketch { .. } => Ok(()),
+            CamGeometry::Faces { faces } => {
+                if faces.is_empty() || faces.len() > MAX_REGIONS {
+                    return Err(DocError::Invalid(format!("an operation needs 1 to {MAX_REGIONS} faces")));
+                }
+                for f in faces {
+                    if f.body.is_empty() || f.body.len() > 128 || f.name.is_empty() || f.name.len() > 128 {
+                        return Err(DocError::Invalid("each face needs a body and a persistent name".into()));
+                    }
+                    if f.at.iter().any(|x| !x.is_finite() || x.abs() > 1.0e6) {
+                        return Err(DocError::Invalid("face point must be finite and within 1e6 mm".into()));
+                    }
+                }
+                Ok(())
+            }
+            CamGeometry::Polygons { regions } => {
+                if regions.is_empty() || regions.len() > MAX_REGIONS {
+                    return Err(DocError::Invalid(format!("an operation needs 1 to {MAX_REGIONS} regions")));
+                }
+                for r in regions {
+                    r.validate()?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Which side of a contour the tool rides.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CamSide {
+    #[default]
+    Outside,
+    Inside,
+    On,
+}
+
+/// Contour settings held as expressions so the file format is not the cam crate's param struct.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamContourParams {
+    #[serde(default)]
+    pub side: CamSide,
+    #[serde(default = "true_val")]
+    pub climb: bool,
+    #[serde(default = "zero_mm")]
+    pub stock_to_leave: Expr,
+    #[serde(default = "tol_mm")]
+    pub tolerance: Expr,
+    #[serde(default = "zero_deg")]
+    pub ramp_angle: Expr,
+}
+
+/// Pocket settings held as expressions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamPocketParams {
+    pub stepover: Expr,
+    #[serde(default = "true_val")]
+    pub climb: bool,
+    #[serde(default = "zero_mm")]
+    pub stock_to_leave: Expr,
+    #[serde(default = "tol_mm")]
+    pub tolerance: Expr,
+    #[serde(default = "zero_deg")]
+    pub ramp_angle: Expr,
+}
+
+/// Heights and feeds as expressions (`depth + 1 mm`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CamCut {
+    #[serde(default = "clearance_mm")]
+    pub clearance: Expr,
+    #[serde(default = "retract_mm")]
+    pub retract: Expr,
+    #[serde(default = "zero_mm")]
+    pub top: Expr,
+    pub bottom: Expr,
+    pub stepdown: Expr,
+    #[serde(default = "feed_mm")]
+    pub feed: Expr,
+    #[serde(default = "plunge_mm")]
+    pub plunge_feed: Expr,
+}
+
+fn true_val() -> bool {
+    true
+}
+
+fn zero_mm() -> Expr {
+    Expr::new("0 mm")
+}
+
+fn tol_mm() -> Expr {
+    Expr::new("0.01 mm")
+}
+
+fn zero_deg() -> Expr {
+    Expr::new("0 deg")
+}
+
+fn clearance_mm() -> Expr {
+    Expr::new("10 mm")
+}
+
+fn retract_mm() -> Expr {
+    Expr::new("2 mm")
+}
+
+fn feed_mm() -> Expr {
+    Expr::new("600 mm")
+}
+
+fn plunge_mm() -> Expr {
+    Expr::new("200 mm")
+}
+
+fn check_expr(e: &Expr, label: &str) -> Result<()> {
+    let s = e.as_str().trim();
+    if s.is_empty() || s.len() > 4096 {
+        return Err(DocError::Invalid(format!("{label} must be a non-empty expression")));
+    }
+    Ok(())
+}
+
+/// A 2D milling operation. Geometry is linked; numeric cam-crate params are produced at post time.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CamOperation {
     Contour {
         name: String,
         tool: u32,
-        regions: Vec<PolygonRegion>,
-        params: ContourParams,
-        cut: Cut,
+        geometry: CamGeometry,
+        params: CamContourParams,
+        cut: CamCut,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spindle_rpm: Option<f64>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -197,9 +372,9 @@ pub enum CamOperation {
     Pocket {
         name: String,
         tool: u32,
-        regions: Vec<PolygonRegion>,
-        params: PocketParams,
-        cut: Cut,
+        geometry: CamGeometry,
+        params: CamPocketParams,
+        cut: CamCut,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spindle_rpm: Option<f64>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -220,73 +395,73 @@ impl CamOperation {
         }
     }
 
+    pub fn geometry(&self) -> &CamGeometry {
+        match self {
+            CamOperation::Contour { geometry, .. } | CamOperation::Pocket { geometry, .. } => geometry,
+        }
+    }
+
+    pub fn cut(&self) -> &CamCut {
+        match self {
+            CamOperation::Contour { cut, .. } | CamOperation::Pocket { cut, .. } => cut,
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         let name = self.name();
         if name.is_empty() || name.len() > 128 {
             return Err(DocError::Invalid("a CAM operation name must be 1 to 128 characters".into()));
         }
-        let (regions, cut, spindle) = match self {
-            CamOperation::Contour { regions, cut, spindle_rpm, params, .. } => {
-                if !(params.stock_to_leave >= 0.0) || !params.stock_to_leave.is_finite() {
-                    return Err(DocError::Invalid("stock_to_leave must be ≥ 0".into()));
-                }
-                if !(params.tolerance > 0.0) || !params.tolerance.is_finite() {
-                    return Err(DocError::Invalid("tolerance must be above 0".into()));
-                }
-                if !(params.ramp_angle >= 0.0) || !params.ramp_angle.is_finite() {
-                    return Err(DocError::Invalid("ramp_angle must be ≥ 0 radians".into()));
-                }
-                (regions, cut, *spindle_rpm)
+        self.geometry().validate()?;
+        let cut = self.cut();
+        check_expr(&cut.clearance, "clearance")?;
+        check_expr(&cut.retract, "retract")?;
+        check_expr(&cut.top, "top")?;
+        check_expr(&cut.bottom, "bottom")?;
+        check_expr(&cut.stepdown, "stepdown")?;
+        check_expr(&cut.feed, "feed")?;
+        check_expr(&cut.plunge_feed, "plunge_feed")?;
+        match self {
+            CamOperation::Contour { params, spindle_rpm, .. } => {
+                check_expr(&params.stock_to_leave, "stock_to_leave")?;
+                check_expr(&params.tolerance, "tolerance")?;
+                check_expr(&params.ramp_angle, "ramp_angle")?;
+                check_spindle(*spindle_rpm)?;
             }
-            CamOperation::Pocket { regions, cut, spindle_rpm, params, .. } => {
-                if !(params.stepover > 0.0) || !params.stepover.is_finite() {
-                    return Err(DocError::Invalid("stepover must be above 0".into()));
-                }
-                if !(params.stock_to_leave >= 0.0) || !params.stock_to_leave.is_finite() {
-                    return Err(DocError::Invalid("stock_to_leave must be ≥ 0".into()));
-                }
-                if !(params.tolerance > 0.0) || !params.tolerance.is_finite() {
-                    return Err(DocError::Invalid("tolerance must be above 0".into()));
-                }
-                if !(params.ramp_angle >= 0.0) || !params.ramp_angle.is_finite() {
-                    return Err(DocError::Invalid("ramp_angle must be ≥ 0 radians".into()));
-                }
-                (regions, cut, *spindle_rpm)
-            }
-        };
-        if regions.is_empty() || regions.len() > MAX_REGIONS {
-            return Err(DocError::Invalid(format!("an operation needs 1 to {MAX_REGIONS} regions")));
-        }
-        for r in regions {
-            r.validate()?;
-        }
-        cut.heights.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
-        cut.feeds.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
-        if !(cut.stepdown > 0.0) || !cut.stepdown.is_finite() {
-            return Err(DocError::Invalid("stepdown must be above 0".into()));
-        }
-        if let Some(rpm) = spindle {
-            if !(rpm > 0.0) || !rpm.is_finite() || rpm > 1.0e6 {
-                return Err(DocError::Invalid("spindle_rpm must be above 0".into()));
+            CamOperation::Pocket { params, spindle_rpm, .. } => {
+                check_expr(&params.stepover, "stepover")?;
+                check_expr(&params.stock_to_leave, "stock_to_leave")?;
+                check_expr(&params.tolerance, "tolerance")?;
+                check_expr(&params.ramp_angle, "ramp_angle")?;
+                check_spindle(*spindle_rpm)?;
             }
         }
         Ok(())
     }
 }
 
-/// Default contour params for a new operation.
-pub fn default_contour_params() -> ContourParams {
-    ContourParams { side: Side::Outside, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 }
+fn check_spindle(spindle: Option<f64>) -> Result<()> {
+    if let Some(rpm) = spindle {
+        if !(rpm > 0.0) || !rpm.is_finite() || rpm > 1.0e6 {
+            return Err(DocError::Invalid("spindle_rpm must be above 0".into()));
+        }
+    }
+    Ok(())
+}
+
+/// Default contour params.
+pub fn default_contour_params() -> CamContourParams {
+    CamContourParams { side: CamSide::Outside, climb: true, stock_to_leave: zero_mm(), tolerance: tol_mm(), ramp_angle: zero_deg() }
 }
 
 /// Default pocket params; `stepover` must still be set by the caller.
-pub fn default_pocket_params(stepover: f64) -> PocketParams {
-    PocketParams { stepover, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 }
+pub fn default_pocket_params(stepover: Expr) -> CamPocketParams {
+    CamPocketParams { stepover, climb: true, stock_to_leave: zero_mm(), tolerance: tol_mm(), ramp_angle: zero_deg() }
 }
 
-/// Default cut: clearance 10, retract 2, top 0, bottom `bottom`, feeds 600/200, stepdown from depth.
-pub fn default_cut(bottom: f64, stepdown: f64) -> Cut {
-    Cut { heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom }, feeds: Feeds { cut: 600.0, plunge: 200.0 }, stepdown }
+/// Default cut expressions. `bottom` and `stepdown` come from the command.
+pub fn default_cut(bottom: Expr, stepdown: Expr) -> CamCut {
+    CamCut { clearance: clearance_mm(), retract: retract_mm(), top: zero_mm(), bottom, stepdown, feed: feed_mm(), plunge_feed: plunge_mm() }
 }
 
 #[cfg(test)]
