@@ -18,18 +18,23 @@
 //! Three in ten generated scripts add a real one-face B-rep (`face`, as in unit
 //! `intersect.curve_class_p4`: `sc_one_face_brep.h` in the shim, `heal_face_props::rust_brep`
 //! plus its down face use's side in Rust) after the curves on surfaces in the pool; their
-//! face, edge and vertex classifications (and classification faces) then name its real
+//! face, edge and vertex classifications (and most classification faces) then name its real
 //! topology, so the zone tolerances, `HasDeadTopologyPointObject` (also against that B-rep)
 //! and the face surface drop of `GetMinUV` / `GetMaxUV` run the ported topology through
 //! `ClassGeometry::topology_entity`.
+//!
+//! Some classification faces intentionally stay on the base pool's bare face while that
+//! B-rep is present; the bare face owns the same B-spline surface. [`P2Geometry`] falls back
+//! to the bare record only when the real topology lookup misses, so the UV surface drop
+//! compares the native stand-in surface rather than deferring it.
 //!
 //! Without that B-rep, the vertex, edge and face stand-ins are B-rep records in the shim's
 //! bare state (see unit `intersect.curve_class_p1`,
 //! [`BareTopology`](super::intersect_curve_class_p1::BareTopology)), so the members those
 //! records answer (zone tolerances, edge curve / interval, face surface) are compared too.
 //!
-//! Deferred cases: those members on the bare vertex, edge and face stand-ins (no B-rep
-//! behind them: `topology.vertex`, `topology.edge`, `topology.face_p2`, `topology.brep_p1`). Generated scripts are filtered by the
+//! Deferred cases: members on the bare vertex and edge stand-ins (no B-rep behind them:
+//! `topology.vertex`, `topology.edge`, `topology.brep_p1`). Generated scripts are filtered by the
 //! shim's run-time checks (scripts it rejects as undefined upstream, or as topology walks over
 //! the bare stand-ins, are dropped).
 
@@ -44,9 +49,15 @@ use solidcore::geom::tol::zone_tol3d;
 use solidcore::intersect::curve_class::{
     self as cc_mod, CurveClassification, CurveInterval, IntervalPosition, ResetOptions,
 };
-use solidcore::intersect::point_class::{ClassObjectKind, PointClassType, PointClassification};
+use solidcore::intersect::point_class::{
+    ClassGeometry, ClassObjectKind, PointClassType, PointClassification,
+};
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Vec3};
+use solidcore::surface::surface::Surface;
+use solidcore::surface::volume::Volume;
+use solidcore::topology::Brep;
+use solidcore::EntityRef;
 
 use solidcore_ffi::units::intersect_curve_class_p1::kind;
 use solidcore_ffi::units::intersect_curve_class_p2::{self as ffi, op};
@@ -373,6 +384,40 @@ fn build_all(k: &Kernel, s: &Script) -> Result<Pool, Fail> {
     Ok(pool)
 }
 
+/// The pool with bare topology records as a fallback. [`Pool::topology_entity`] resolves
+/// either the real one-face B-rep or the bare stand-ins, never both; a classification face
+/// can stay on a bare face while that B-rep is present. This view keeps every other
+/// [`ClassGeometry`] method delegated unchanged and resolves such a handle through the
+/// bare record only when the pool's real topology lookup misses.
+struct P2Geometry<'a>(&'a Pool);
+
+impl ClassGeometry<H> for P2Geometry<'_> {
+    fn curve(&self, o: H) -> Option<&Curve> {
+        self.0.curve(o)
+    }
+    fn surface(&self, o: H) -> Option<&Surface> {
+        self.0.surface(o)
+    }
+    fn volume(&self, o: H) -> Option<&Volume> {
+        self.0.volume(o)
+    }
+    fn point(&self, o: H) -> Option<Vec3> {
+        self.0.point(o)
+    }
+    fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
+        self.0.classification_vertex_point(o)
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        self.0.topology_zone_tol_3d(o)
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.0.topology_entity(o).or_else(|| self.0.bare.entity(o.0))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        self.0.topology_handle(e)
+    }
+}
+
 fn set_pc(pool: &Pool, p: &mut PointClassification<H>, pc: &PcIn) -> Result<(), Fail> {
     let class = PointClassType::from_code(pc.class).ok_or_else(|| harness("bad class"))?;
     p.set_class_object(class, pool.handle(pc.obj)?);
@@ -495,7 +540,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             }
             OpIn::Dead { brep, live, .. } => {
                 // an empty brep, as on the C++ side, or the face's
-                let empty_brep = solidcore::topology::Brep::new();
+                let empty_brep = Brep::new();
                 let target = if *live {
                     Some(&pool.topo.as_ref().ok_or_else(|| harness("no face"))?.brep)
                 } else {
@@ -550,10 +595,11 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             }
             OpIn::MinUv { j, uv, .. } | OpIn::MaxUv { j, uv, .. } => {
                 let given = Point2::new(uv[0], uv[1]);
+                let geometry = P2Geometry(&pool);
                 let r = if matches!(x, OpIn::MinUv { .. }) {
-                    cc.interval_min_uv(&k, &pool, *j, given)
+                    cc.interval_min_uv(&k, &geometry, *j, given)
                 } else {
-                    cc.interval_max_uv(&k, &pool, *j, given)
+                    cc.interval_max_uv(&k, &geometry, *j, given)
                 };
                 match st(r)? {
                     Ok(p) => o.extend([0.0, p.x, p.y]),
@@ -1225,6 +1271,64 @@ mod tests {
         }
         assert!(total > 250, "{total}");
         assert!(deferred * 3 < total, "{deferred} of {total} deferred");
+    }
+
+    /// The 17 baseline cases (main before the fallback) that deferred on
+    /// `SmFace::GetSurface`: generated name and case index from the baseline report.
+    const MIXED_TOPOLOGY_CASES: [(&str, usize); 17] = [
+        ("gen0009", 9),
+        ("gen0036", 36),
+        ("gen0039", 39),
+        ("gen0205", 205),
+        ("gen0212", 212),
+        ("gen0519", 519),
+        ("gen0667", 667),
+        ("gen0700", 700),
+        ("gen0722", 722),
+        ("gen0748", 748),
+        ("gen0919", 919),
+        ("gen0971", 971),
+        ("gen0973", 973),
+        ("gen1022", 1022),
+        ("gen1025", 1025),
+        ("gen1383", 1383),
+        ("gen1415", 1415),
+    ];
+
+    /// A classification face may stay on the base pool's bare face while a real one-face
+    /// B-rep is also present. The native `SmFace::GetSurface` answers from that stand-in's
+    /// surface, so `GetMinUV` / `GetMaxUV` must compare real values through the bare fallback.
+    #[test]
+    fn baseline_mixed_topology_cases_compare() {
+        for (name, index) in MIXED_TOPOLOGY_CASES {
+            let mut rng = Rng::new(CaseContext::seed_for("intersect.curve_class_p2", index));
+            let v = Runner
+                .generate(&mut rng)
+                .unwrap_or_else(|| panic!("{name}: generation rejected"));
+            let s: Script = serde_json::from_value(v).unwrap();
+            assert!(
+                s.objects.iter().any(|o| matches!(o, ObjIn::Face(Some(_)))),
+                "{name}: no bare face with a surface"
+            );
+            assert!(s.face.is_some(), "{name}: no real one-face B-rep");
+            assert!(
+                s.ops
+                    .iter()
+                    .any(|o| matches!(o, OpIn::MinUv { .. } | OpIn::MaxUv { .. })),
+                "{name}: no GetMinUV/GetMaxUV operation"
+            );
+
+            let native = cpp(&s).unwrap_or_else(|e| panic!("{name}: native: {e}"));
+            let rust_out = rust(&s).unwrap_or_else(|e| panic!("{name}: rust: {e}"));
+            assert!(
+                rust_out.deferred.is_none(),
+                "{name}: unexpected deferral: {:?}",
+                rust_out.deferred
+            );
+            let diff = crate::compare::compare(&native, &rust_out, &[]);
+            assert!(diff.pass(), "{name}: {:?}", diff.mismatches);
+            assert!(diff.values_compared > 0, "{name}: no native values compared");
+        }
     }
 
     #[test]
