@@ -7,7 +7,7 @@ it.
 
 | Panel | Features |
 |---|---|
-| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces or at sketch points), thread, rectangular/circular/path patterns, mirror |
+| Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, cam groove (a path wrapped onto a cylindrical wall), hole (simple, counterbore, countersink, tapped; on faces or at sketch points), thread, rectangular/circular/path patterns, mirror |
 | Modify | press pull, fillet, chamfer, shell, draft, scale, combine, split body, offset face, replace face, move/copy, align, remove |
 | Construct | offset plane, plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
@@ -83,6 +83,16 @@ and reopening retain the chosen instances. Other curved surfaces and free-form p
 unsupported. A new Emboss without an explicit face infers a unique eligible supported cylinder;
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
+
+A **Cam Groove** cuts a groove into a cylindrical wall along a path. Draw the path in a sketch
+on a plane tangent to the wall: the sketch's `x` runs around the circumference and its `y` along
+the axis. The path is wrapped onto the wall, keeping its length, and a cutter of the given
+**Width** follows it, taking **Depth** out of the wall the way a lathe takes it. A path that
+runs around the cylinder cuts a ring groove whose floor is a cylinder; a path that runs along
+the axis cuts a slot across the wall. The wall does not have to be a complete cylinder: a
+circumferential relief groove or a shoulder may interrupt it, and only the part of the path
+that lies on the wall is cut. Select the wall, or leave it out and let the feature take the
+one wall the sketch's plane stands tangent to.
 
 A **Hole** with **Single** placement drills where you pick a planar face. A pick on or near a
 point of a shown sketch that lies on that face, such as a circle's centre, places the hole

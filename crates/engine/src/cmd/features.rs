@@ -477,7 +477,7 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
     };
     let face_names = {
         let pts = kind.face_points();
-        if let FeatureKind::Emboss { face: Some(face), .. } = &kind {
+        if let FeatureKind::Emboss { face: Some(face), .. } | FeatureKind::CamGroove { face: Some(face), .. } = &kind {
             let state = s.model.state();
             let body = state.body(&face.body).ok_or_else(|| EngineError::Other("selected cylinder body no longer exists".into()))?;
             let frame = face.body_frame(&s.doc, body).map_err(|e| EngineError::Other(e.to_string()))?;

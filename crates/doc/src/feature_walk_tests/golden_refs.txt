@@ -111,6 +111,10 @@ emboss
 rib
   sketches: [1]
   remap_refs: sketch
+cam_groove
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: face.body, targets[0]
 replace_face
   remap_refs: target.base.base.name
   remap_bodies: body

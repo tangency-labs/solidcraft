@@ -326,6 +326,23 @@ impl RailFit {
     }
 }
 
+/// The shape of a groove's cutter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrooveTool {
+    /// A square-cornered slot: the cutter has a flat end, so the groove's floor is flat.
+    #[default]
+    Rectangular,
+    /// A slot with a round floor: the cutter is a ball end, so the groove's floor is round.
+    BallEnd,
+}
+
+impl GrooveTool {
+    pub fn is_rectangular(&self) -> bool {
+        *self == GrooveTool::Rectangular
+    }
+}
+
 /// Where a thin wall lies against its curves. A closed loop's inside is the area it encloses;
 /// an open chain's is the side it bends toward (a straight one's, the left of its first
 /// curve as drawn).
@@ -907,6 +924,28 @@ pub enum FeatureKind {
         depth: Expr,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         deboss: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<EmbossFace>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
+    /// Cut a groove along a path wrapped onto a cylindrical wall: the path is drawn in a
+    /// sketch on a plane tangent to the wall, and keeps its length as it is wrapped.
+    CamGroove {
+        /// The sketch the path is drawn on; its plane stands tangent to the wall.
+        sketch: SketchId,
+        /// The path's curves, in order.
+        path: Vec<String>,
+        /// How deep the groove is, measured into the wall.
+        #[walk(length = "Depth")]
+        depth: Expr,
+        /// How wide the groove is, measured across the path on the surface.
+        #[walk(length = "Width")]
+        width: Expr,
+        /// The shape of the cutter.
+        #[serde(default, skip_serializing_if = "GrooveTool::is_rectangular")]
+        tool: GrooveTool,
+        /// The wall the groove is cut into.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         face: Option<EmbossFace>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2177,6 +2216,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::CamGroove { .. } => "CamGrooveFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
             FeatureKind::Lip { .. } => "GrooveFeature",
@@ -2257,6 +2297,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::CamGroove { .. } => "CamGroove",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
             FeatureKind::Lip { .. } => "Groove",

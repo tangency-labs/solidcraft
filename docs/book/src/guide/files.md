@@ -105,7 +105,8 @@ Older patterns keep their fixed vector directions and original placement default
 
 Upgrading keeps what a design meant. Designs keep recorded body transfers, explicit 3D curve coordinate
 spaces and certified face bindings, alongside semantic configuration styles, associative
-free-form offsets and cylindrical emboss selections. Older ownership maps, geometry and
+free-form offsets, cylindrical emboss selections and cam grooves (a path wrapped onto a
+cylindrical wall). Older ownership maps, geometry and
 expressions retain their saved meaning. Legacy 3D curves with retained associations receive
 their producer's coordinate-space marker without changing any saved points; detached curves
 retain world coordinates. A lost cross-component association refreshed by an older build may

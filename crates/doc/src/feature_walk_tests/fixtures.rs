@@ -105,6 +105,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("pipe", json!({"type": "pipe", "path_sketch": 1, "path": ["l1"], "diameter": "pipe.diameter", "wall": "pipe.wall"})),
         ("emboss", json!({"type": "emboss", "sketch": 1, "profiles": {"type": "all"}, "depth": "emboss.depth"})),
         ("rib", json!({"type": "rib", "sketch": 1, "curves": ["l1"], "thickness": "rib.thickness", "depth": "rib.depth"})),
+        ("cam_groove", json!({"type": "cam_groove", "sketch": 1, "path": ["l1"], "depth": "cam_groove.depth", "width": "cam_groove.width"})),
         ("replace_face", json!({"type": "replace_face", "faces": [o], "target": plane("replace_face")})),
         ("align", json!({"type": "align", "bodies": ["B"], "from": o, "to": o})),
         (
@@ -233,6 +234,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "surface_loft" => json!({"sections": [{"sketch": 4}, {"sketch": 5}], "rails": [{"sketch": 6, "curves": ["l1"]}]}),
         "split_face" => json!({"body": "B", "tool": tool, "sketch": 6}),
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
+        "cam_groove" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
         "sheet_fold" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
         _ => json!({}),

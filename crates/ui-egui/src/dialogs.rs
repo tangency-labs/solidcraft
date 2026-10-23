@@ -40,6 +40,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.rib", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.web", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.emboss", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.cam_groove", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.replace_face", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.boundary_fill", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.align", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -135,6 +136,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             depth: String = "1 mm".into() => depth.to_string(),
             deboss: bool = false => *deboss,
         } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
+        CamGroove("solid.cam_groove", "CAM GROOVE", [("Path", CURVES, true), ("Wall (optional)", FACES, false)],
+            FeatureKind::CamGroove { depth, width, .. }) {
+            depth: String = "1 mm".into() => depth.to_string(),
+            width: String = "2 mm".into() => width.to_string(),
+        } => json!({"depth": depth, "width": width});
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
@@ -653,6 +659,7 @@ impl Dialog {
                 Kind::Rib { web: id == "solid.web", thickness: "2 mm".into(), depth: String::new(), flip: false, normal: false },
                 vec![SelInput::new("Curves", CURVES, true)],
             ),
+
             "solid.replace_face" => Dialog::new(
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
@@ -960,6 +967,7 @@ impl Dialog {
                 | Kind::PatternCirc { .. }
                 | Kind::Loft { .. }
                 | Kind::Sweep { .. }
+                | Kind::CamGroove { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
                 | Kind::Construct { .. }
@@ -1009,6 +1017,7 @@ impl Dialog {
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
             Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
             Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
+            Kind::CamGroove { depth, .. } => ("Depth", ValueKind::Length, depth),
             Kind::PathPattern { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
@@ -1664,6 +1673,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
+
         Kind::ReplaceFace => "REPLACE FACE",
         Kind::DeleteFaces => "DELETE FACE",
         Kind::Align { .. } => "ALIGN",
@@ -3450,6 +3460,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.emboss", p)
         }
+        Kind::CamGroove { depth, width } => {
+            need(0, "the path")?;
+            let path: Vec<String> = sels(d, 0).iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect();
+            let sketch = curves_sketch(app, &path, None).ok_or("the path curves must be in one sketch")?;
+            let mut p = json!({"sketch": sketch, "path": path, "depth": depth, "width": width});
+            if let Some(Sel::Face { body, point, .. }) = sels(d, 1).first() {
+                p["face"] = pt(*point);
+                p["targets"] = json!([body]);
+            }
+            ("solid.cam_groove", p)
+        }
         Kind::ReplaceFace => {
             need(0, "faces to move")?;
             need(1, "the target")?;
@@ -4777,6 +4798,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
             }
+            d
+        }
+        FeatureKind::CamGroove { sketch, path, face, .. } => {
+            let mut d = start("solid.cam_groove")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+            }
+            if let Some(face) = face
+                && let Some(input) = d.inputs.get_mut(1)
+            {
+                input.items = vec![emboss_face_sel(s, f.component, face, f.face_names.first()?)?];
+            }
+            let _ = sketch;
             d
         }
         FeatureKind::Emboss { sketch, profiles, targets, face, .. } => {

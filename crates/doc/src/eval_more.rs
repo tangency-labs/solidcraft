@@ -69,6 +69,67 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_op(st, f, tools, if *deboss { Operation::Cut } else { Operation::Join }, &crate::plain(targets))
         }
+        FeatureKind::CamGroove { sketch, path, depth, width, tool, targets, face } => {
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
+            let d = val(vals, depth, Kind::Length)?;
+            if !(d > 0.0) {
+                return Err(DocError::Invalid("the groove depth must be positive".into()));
+            }
+            let w = val(vals, width, Kind::Length)?;
+            if !(w > 0.0) {
+                return Err(DocError::Invalid("the groove width must be positive".into()));
+            }
+            let segs = crate::eval::path_profile_segments(ss, path)?;
+            let face = face.as_ref().ok_or_else(|| DocError::Invalid("the groove has no wall to cut into".into()))?;
+            if !targets.is_empty() && (targets.len() != 1 || targets.first() != Some(&face.body)) {
+                return Err(DocError::Invalid("a cam groove must keep its selected target body".into()));
+            }
+            let i =
+                st.bodies.iter().position(|b| b.name == face.body).ok_or_else(|| DocError::Unknown(format!("cam groove body `{}`", face.body)))?;
+            let mb = st.bodies.get(i).cloned().ok_or_else(|| DocError::Invalid("cam groove body".into()))?;
+            let body_frame = face.body_frame(doc, &mb)?;
+            let inverse = crate::mat_inverse(&body_frame).ok_or_else(|| DocError::Invalid("invalid cylinder body frame".into()))?;
+            let sketch_owner = doc.feature(ss.feature).map(|f| f.component).unwrap_or(0);
+            let author_frame = EmbossFace::component_frame(doc, f.component, &face.author_path)?;
+            let sketch_frame = face.sketch_frame(doc, f.component, sketch_owner, &mb)?;
+            let sketch_transform = crate::mat_mul(&inverse, &sketch_frame);
+            let plane = Plane::new(
+                crate::apply_point(&sketch_transform, ss.plane.origin),
+                crate::apply_vector(&sketch_transform, ss.plane.x),
+                crate::apply_vector(&sketch_transform, ss.plane.y),
+            )
+            .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
+            let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+            let name = f
+                .face_names
+                .first()
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
+            let index = {
+                let mut scoped = ModelState::default();
+                scoped.bodies.push(mb.clone());
+                let (picked, split) = crate::naming::point_on_face(&scoped, name, at)
+                    .ok_or_else(|| DocError::Invalid("selected cylinder face no longer exists".into()))?;
+                if split {
+                    return Err(DocError::Invalid("selected cylinder face was split".into()));
+                }
+                let (index, _, _) = crate::project::nearest_face(&mb.mesh(), picked)
+                    .ok_or_else(|| DocError::Invalid("selected cylinder face cannot be resolved".into()))?;
+                if !crate::naming::face_has_name(&mb, index as usize, name) {
+                    return Err(DocError::Invalid("selected cylinder face is ambiguous".into()));
+                }
+                index as usize
+            };
+            let cutter = match tool {
+                crate::GrooveTool::Rectangular => kernel::GrooveTool::Rectangular,
+                crate::GrooveTool::BallEnd => kernel::GrooveTool::BallEnd,
+            };
+            let result = kernel::cam_groove(&mb.body, index, &plane, &segs, d, w, cutter)?;
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody::new(mb.name, result, mb.feature);
+            }
+            Ok(())
+        }
         FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             let t = val(vals, thickness, Kind::Length)?;

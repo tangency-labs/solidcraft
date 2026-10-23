@@ -221,6 +221,11 @@ rib
     Thickness = rib.thickness (Length)
     Depth = rib.depth (Length)
   expressions: rib.thickness, rib.depth
+cam_groove
+  inputs:
+    Depth = cam_groove.depth (Length)
+    Width = cam_groove.width (Length)
+  expressions: cam_groove.depth, cam_groove.width
 replace_face
   inputs:
     Angle = replace_face.angle (Angle)

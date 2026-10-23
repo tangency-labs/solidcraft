@@ -24,6 +24,11 @@ pub static COMMANDS: &[CommandSpec] = &[
          taken wherever a face name is, and it holds while sizes change and flanges come and go)",
     ),
     CommandSpec::new("model.threads", "List Threads", model_threads).icon("inspect").noundo(),
+    CommandSpec::new("sketch.wrap", "Wrap Sketch", sketch_wrap)
+        .icon("inspect")
+        .noundo()
+        .params("sketch?: id|name (default the active sketch); face: world point [x,y,z] on a cylindrical wall; body?: the body with the wall (the wall the point is on)"),
+
     CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")
@@ -220,6 +225,82 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     }
     .ok_or_else(|| bad("sketch.inspect", "no such sketch (and none is active)"))?;
     sketch_json(s, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
+}
+
+/// Wraps a sketch's curves onto a cylindrical wall and reports where they land.
+///
+/// A cylinder's surface unfolds into a plane without stretching, so the wrapped path keeps the
+/// length it was drawn with: this says how long it is and where its points are.
+fn sketch_wrap(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.wrap";
+    let id = match p.get("sketch") {
+        Some(Value::Number(n)) => s.doc.find_feature(&n.to_string()).map(|f| f.id),
+        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
+        _ => s.active_sketch,
+    }
+    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let value = p.get("face").ok_or_else(|| bad(cmd, "give a point on the wall to wrap onto"))?;
+    let local = crate::params::vec3(value).ok_or_else(|| bad(cmd, "`face` must be a finite point [x,y,z]"))?;
+    let at = solidcraft_doc::apply_point(&s.active_component_frame(), local);
+    let wanted = str_(p, "body");
+    let world = s.world_state();
+    let displayed = world.sketch(id).ok_or_else(|| bad(cmd, "that sketch is not displayed"))?;
+    // The body the point is on.
+    let mut found: Vec<&solidcraft_doc::ModelBody> = Vec::new();
+    for body in &world.bodies {
+        if let Some(name) = wanted
+            && body.definition_name() != name
+            && body.name != name
+        {
+            continue;
+        }
+        // The point stands on the body when it is on one of its triangles.
+        let mesh = body.mesh();
+        let closest = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter_map(|(tri, _)| {
+                let [a, b, c] = mesh.tri(tri)?;
+                let n = (b - a).cross(c - a).normalized()?;
+                let q = at - n * (at - a).dot(n);
+                let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
+                inside.then_some((at - a).dot(n).abs())
+            })
+            .min_by(f64::total_cmp);
+        if closest.is_some_and(|distance| distance < (body.body.size() * 1e-3).max(1e-3)) {
+            found.push(body);
+        }
+    }
+    let body = match found.as_slice() {
+        [] => return Err(bad(cmd, "the point is on no body")),
+        [one] => *one,
+        more => {
+            let names: Vec<&str> = more.iter().map(|b| b.name.as_str()).collect();
+            return Err(bad(cmd, format!("the point is on {} bodies ({}): name one in `body`", names.len(), names.join(", "))));
+        }
+    };
+    let (index, frame) = solidcraft_kernel::cylindrical_wall_at(&body.body, at).map_err(|e| bad(cmd, e.to_string()))?;
+    let dev = solidcraft_kernel::develop(&frame, &displayed.plane).map_err(|e| bad(cmd, e.to_string()))?;
+    // The sketch's curves, in the order they were drawn.
+    let mut segs = Vec::new();
+    for curve in &displayed.sketch.curves {
+        let Some(index) = displayed.sketch.curve_index(&curve.id) else { continue };
+        segs.extend(displayed.sketch.segs(index));
+    }
+    if segs.is_empty() {
+        return Err(bad(cmd, "the sketch has no curve to wrap"));
+    }
+    let path = solidcraft_kernel::wrap_path(&dev, &segs).map_err(|e| bad(cmd, e.to_string()))?;
+    let points: Vec<Value> = path.points.iter().take(512).map(|p| json!([p.x, p.y, p.z])).collect();
+    Ok(json!({
+        "body": body.name,
+        "face": index,
+        "radius": frame.radius,
+        "length": path.length,
+        "points": points,
+        "truncated": path.points.len() > 512,
+    }))
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

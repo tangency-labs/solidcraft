@@ -28,6 +28,9 @@ mod boundary;
 mod boundary_network;
 mod bridge;
 mod build;
+mod cam_groove;
+#[cfg(test)]
+mod cam_groove_tests;
 mod candidate_reach;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
@@ -154,6 +157,9 @@ mod tspline;
 mod untouched_faces_tests;
 pub mod watch;
 mod whole_face;
+mod wrap;
+#[cfg(test)]
+mod wrap_tests;
 
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_max, fillet_max_each};
 pub use blend_corner::fillet_radii;
@@ -167,6 +173,7 @@ pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
     loft_with_rails, path_polyline, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
+pub use cam_groove::{GrooveTool, cam_groove};
 pub use clearance::{Clearance, Occupancy};
 pub use coaxial_overlap::{CoaxialOverlap, coaxial_candidate, coaxial_overlap};
 pub use continuity::{
@@ -222,6 +229,7 @@ pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
 pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
+pub use wrap::{CylFrame, Development, WallSpan, WrappedPath, cylinder_spans, cylindrical_wall_at, develop, tangent_wall, wall_anchor, wrap_path};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {

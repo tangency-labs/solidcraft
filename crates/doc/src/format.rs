@@ -848,11 +848,19 @@ fn validate_emboss_targets(value: &Value) -> Result<()> {
         return Err(DocError::Invalid("document too large".into()));
     }
     for feature in features {
-        if feature.get("type").and_then(Value::as_str) != Some("emboss") {
+        let kind = feature.get("type").and_then(Value::as_str);
+        if !matches!(kind, Some("emboss" | "cam_groove")) {
             continue;
         }
         let Some(target) = feature.get("face").filter(|target| !target.is_null()) else { continue };
-        let invalid = || DocError::Invalid("damaged design: an emboss face needs a bounded body name and three finite coordinates".into());
+        // Each kind names its own face, so the message says which one was damaged.
+        let invalid = || {
+            DocError::Invalid(if kind == Some("cam_groove") {
+                "damaged design: a cam groove face needs a bounded body name and three finite coordinates".into()
+            } else {
+                "damaged design: an emboss face needs a bounded body name and three finite coordinates".into()
+            })
+        };
         let object = target.as_object().ok_or_else(invalid)?;
         if object.keys().any(|key| !matches!(key.as_str(), "body" | "at" | "path" | "author_path")) {
             return Err(invalid());
@@ -2129,5 +2137,147 @@ mod tests {
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);
+    }
+
+    /// A design with a sketch and a Cam Groove on it: the groove cuts a path a sketch draws on
+    /// a plane tangent to a cylindrical wall, and names the wall it is cut into.
+    fn cam_groove_document() -> (Document, u64) {
+        let mut document = Document::new("cam groove");
+        let sketch = document
+            .add_feature(
+                crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: solidcraft_sketch::Sketch::new() },
+                Some("Path"),
+            )
+            .unwrap();
+        let groove = document
+            .add_feature(
+                crate::FeatureKind::CamGroove {
+                    sketch: crate::SketchId(sketch),
+                    path: vec!["l1".into()],
+                    depth: "1 mm".into(),
+                    width: "2.5 mm".into(),
+                    tool: crate::GrooveTool::BallEnd,
+                    face: Some(crate::EmbossFace {
+                        body: "Body1".into(),
+                        at: crate::FacePick(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0)),
+                        path: vec![7],
+                        author_path: vec![9],
+                    }),
+                    targets: vec!["Body1".into()],
+                },
+                None,
+            )
+            .unwrap();
+        (document, groove)
+    }
+
+    /// A Cam Groove is a feature kind of its own: a design that has one keeps it when it is
+    /// saved and read back, with the tool and the face it was written with.
+    #[test]
+    fn a_cam_groove_is_saved_and_read_back() {
+        let (document, groove) = cam_groove_document();
+        let file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        assert_eq!(file["features"][1]["type"], "cam_groove");
+        assert_eq!(file["features"][1]["tool"], "ball_end");
+        assert_eq!(file["features"][1]["face"]["body"], "Body1");
+        let back = read(&document.to_json()).unwrap();
+        assert_eq!(back, document, "the groove survives the round trip");
+        let crate::FeatureKind::CamGroove { sketch, path, depth, width, tool, face, targets } =
+            &back.feature(groove).expect("the groove is in the design").kind
+        else {
+            panic!("a cam groove");
+        };
+        assert_eq!(*sketch, back.features[0].id, "the groove keeps the sketch it was drawn on");
+        assert_eq!(path, &["l1".to_string()]);
+        assert_eq!(depth.as_str(), "1 mm");
+        assert_eq!(width.as_str(), "2.5 mm");
+        assert_eq!(*tool, crate::GrooveTool::BallEnd, "the tool is read back as it was written");
+        let face = face.as_ref().expect("the wall the groove is cut into");
+        assert_eq!(face.body, "Body1");
+        assert_eq!(face.at.0, solidcraft_geom::Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(face.path, vec![7]);
+        assert_eq!(face.author_path, vec![9]);
+        assert_eq!(targets, &["Body1".to_string()]);
+    }
+
+    /// The change is pending: the build writes the next format number, which no release reads,
+    /// and names the change in the design's `format_pending`, so a later build applies only the
+    /// steps a file is missing.
+    #[test]
+    fn a_design_written_now_names_the_cam_groove_change_and_the_next_format() {
+        assert!(!PENDING.is_empty(), "the change is pending");
+        assert!(pending_names().iter().any(|name| name == "cam-groove-feature"), "{:?}", pending_names());
+        let last_folded = HAND_WRITTEN + FOLDED.len() as u32;
+        assert_eq!(FORMAT, last_folded + 1, "a pending change takes the next number");
+        let (document, _) = cam_groove_document();
+        let file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        assert_eq!(file["format"], Value::from(format_string(FORMAT)));
+        assert_eq!(file["format_pending"], serde_json::json!(pending_names()));
+        assert!(
+            file["format_pending"].as_array().is_some_and(|names| names.iter().any(|name| name == "cam-groove-feature")),
+            "{:?}",
+            file["format_pending"]
+        );
+    }
+
+    /// A damaged cam groove face is refused before the file is decoded into typed values: the
+    /// face needs a bounded body name, three finite coordinates and a path of distinct ids.
+    #[test]
+    fn a_damaged_cam_groove_face_is_refused_before_typed_decoding() {
+        let mut value: Value = serde_json::from_str(&Document::new("hostile cam groove").to_json()).unwrap();
+        value["features"] = serde_json::json!([{
+            "type": "cam_groove", "face": {"body": "Body", "at": [0, 0, 0], "path": [1, 2]}
+        }]);
+        assert!(validate_emboss_targets(&value).is_ok(), "a sound face passes");
+        for target in [
+            serde_json::json!({"body": "", "at": [0, 0, 0]}),
+            serde_json::json!({"body": "Body", "at": [0, 0]}),
+            serde_json::json!({"body": "Body", "at": [0, "invalid", 0]}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "unknown": true}),
+            serde_json::json!({"body": "x".repeat(513), "at": [0, 0, 0]}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "path": "bad"}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "path": [0]}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "path": [1, 1]}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "path": (1..=65).collect::<Vec<u64>>()}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "author_path": [1, 1]}),
+            serde_json::json!({"body": "Body", "at": [0, 0, 0], "author_path": (1..=65).collect::<Vec<u64>>()}),
+        ] {
+            let mut damaged = value.clone();
+            damaged["features"] = serde_json::json!([{"type": "cam_groove", "face": target}]);
+            assert!(validate_emboss_targets(&damaged).is_err(), "{target}");
+            let error = read(&damaged.to_string()).unwrap_err().to_string();
+            assert!(error.contains("cam groove face"), "{error}");
+            assert!(!error.contains("design file:"), "must refuse before typed decode: {error}");
+            damaged["format"] = Value::from(format_string(FORMAT + 1));
+            let error = read(&damaged.to_string()).unwrap_err().to_string();
+            assert!(error.contains("newer SolidCraft"), "{error}");
+        }
+    }
+
+    /// A design without a cam groove opens as it was, and a design that claims a format this
+    /// build does not know is still refused.
+    #[test]
+    fn a_design_without_a_cam_groove_opens_unchanged_and_a_newer_format_is_refused() {
+        let mut document = Document::new("older features");
+        document
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10".into(),
+                    width: "20".into(),
+                    height: "5".into(),
+                    operation: crate::Operation::NewBody,
+                },
+                None,
+            )
+            .unwrap();
+        let file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        assert!(file["features"].as_array().is_some_and(|features| features.iter().all(|f| f["type"] != "cam_groove")));
+        let back = read(&document.to_json()).unwrap();
+        assert_eq!(back, document, "an older design opens unchanged");
+        let mut newer = file.clone();
+        newer["format"] = Value::from(format_string(FORMAT + 1));
+        let error = read(&newer.to_string()).unwrap_err().to_string();
+        assert!(error.contains("newer SolidCraft") && error.contains("update SolidCraft"), "{error}");
     }
 }

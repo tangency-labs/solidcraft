@@ -675,6 +675,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     .wrap(),
             );
         }
+        Kind::CamGroove { depth, width } => {
+            enter |= expr_row(ui, "Depth", depth);
+            enter |= expr_row(ui, "Width", width);
+        }
         Kind::Align { flip } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its centre, or a round one's centre.

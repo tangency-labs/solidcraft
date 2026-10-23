@@ -2272,3 +2272,33 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
+
+/// A cam groove: the path's curves and the wall fill the dialog's inputs, and the parameters
+/// it builds name the sketch, the path and the wall.
+#[test]
+fn a_cam_groove_takes_its_path_and_its_wall() {
+    let mut app = app_with(json!([
+        {"command": "solid.cylinder", "params": {"radius": 10, "height": 20, "body_name": "Sleeve"}},
+        {"command": "sketch.create", "params": {"plane": {"origin": [0, 10, 10], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Track"}},
+        {"command": "sketch.line", "params": {"points": [[-6, -1], [6, 1]]}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let sketch = app.session.doc.features.iter().find(|f| f.name == "Track").map(|f| f.id).unwrap_or_default();
+    let curve = {
+        let st = app.session.model.state();
+        st.sketch(sketch).unwrap().sketch.curves[0].id.clone()
+    };
+    // The path's curve and the wall go to the dialog's two inputs.
+    let d = start(&mut app, vec![Sel::SketchCurve { id: curve.clone() }], "solid.cam_groove");
+    assert_eq!(d.inputs[0].items.len(), 1);
+    assert!(d.inputs[1].items.is_empty());
+    // The parameters name the sketch, the path, the depth and the width.
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].0, "solid.cam_groove");
+    let params = &commands[0].1;
+    assert_eq!(params["sketch"], json!(sketch));
+    assert_eq!(params["path"], json!([curve]));
+    assert_eq!(params["depth"], json!("1 mm"));
+    assert_eq!(params["width"], json!("2 mm"));
+    assert!(params.get("face").is_none(), "no wall was picked");
+}

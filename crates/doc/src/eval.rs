@@ -4930,6 +4930,34 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
     Ok(Some(chain))
 }
 
+/// The path's curves as the sketch's own segments, chained end to end.
+///
+/// A path that is drawn as one curve after another may have them the other way round: each
+/// curve is turned to start where the one before it ended.
+fn path_profile_segments(ps: &SolvedSketch, ids: &[String]) -> Result<Vec<solidcraft_geom::Seg2>> {
+    if ids.is_empty() || ids.len() > 1000 {
+        return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
+    }
+    let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
+    for id in ids {
+        let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
+        segs.extend(ps.sketch.segs(ci));
+    }
+    if segs.is_empty() {
+        return Err(DocError::Invalid("the path has no curve".into()));
+    }
+    for i in 1..segs.len() {
+        let previous = segs[i - 1].end();
+        if segs[i].end().dist(previous) < segs[i].start().dist(previous) {
+            segs[i] = segs[i].reversed();
+        }
+        if segs[i].start().dist(previous) > 1e-5 {
+            return Err(DocError::Invalid("the path curves are not connected end to end".into()));
+        }
+    }
+    Ok(segs)
+}
+
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
     if ids.is_empty() || ids.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
@@ -5797,6 +5825,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::SurfaceRuled { .. }
         | FeatureKind::SurfaceUntrim { .. } => surface::eval(doc, vals, f, st, warning),
         FeatureKind::Emboss { .. }
+        | FeatureKind::CamGroove { .. }
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }

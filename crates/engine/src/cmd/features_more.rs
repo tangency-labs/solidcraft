@@ -34,6 +34,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("emboss")
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+    CommandSpec::new("solid.cam_groove", "Cam Groove", cam_groove)
+        .at("SOLID", "CREATE")
+        .icon("cam_groove")
+        .params("sketch: the path sketch, on a plane tangent to the wall; path: [curve ids in order] (the groove's line); depth; width; tool?: rectangular (the default: a square-cornered slot with a flat floor); face?: world point [x,y,z] on the cylindrical wall (inferred when exactly one of the target bodies has a wall the sketch's plane stands tangent to); targets?; name?"),
     CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
@@ -246,6 +250,164 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Emboss { sketch: SketchId(sketch), profiles, depth, deboss, targets: targets.into_iter().map(BodyName).collect(), face },
     )
+}
+
+/// Cuts a groove along a path wrapped onto a cylindrical wall.
+///
+/// The path is drawn in a sketch on a plane tangent to the wall; the groove is cut into the
+/// wall along it, `depth` deep and `width` wide. The wall may be interrupted by relief
+/// grooves or shoulders: the path has to stay on the piece of wall it is cut into.
+fn cam_groove(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.cam_groove";
+    let sketch = feature_sketch(s, p, cmd)?;
+    let path = string_list(p, "path");
+    if path.is_empty() || path.len() > 1000 {
+        return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
+    }
+    {
+        let st = s.model.state();
+        let ss = st.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch is not evaluated"))?;
+        if let Some(c) = path.iter().find(|c| ss.sketch.curve_index(c).is_none()) {
+            return Err(bad(cmd, format!("no curve `{c}` in the sketch")));
+        }
+    }
+    let depth = req_expr(cmd, p, "depth")?;
+    check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+    let width = req_expr(cmd, p, "width")?;
+    check_expr(s, &width, Kind::Length, cmd, "width")?;
+    let tool = match str_(p, "tool").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("rectangular" | "rectangle" | "flat" | "flat_end") => solidcraft_doc::GrooveTool::Rectangular,
+        Some(o) => return Err(bad(cmd, format!("unknown tool `{o}` (rectangular)"))),
+    };
+    let mut targets = string_list(p, "targets");
+    let face = if let Some(value) = p.get("face") {
+        let face = picked_wall(s, value, &mut targets, sketch, cmd)?;
+        Some(face)
+    } else {
+        let inferred = infer_wall(s, sketch, &targets, cmd)?;
+        if let Some(face) = &inferred {
+            targets = vec![face.body.0.clone()];
+        }
+        inferred
+    };
+    let face = face.ok_or_else(|| bad(cmd, "the sketch's plane does not stand tangent to a cylindrical wall: pick the wall to cut"))?;
+    add_feature(
+        s,
+        p,
+        FeatureKind::CamGroove {
+            sketch: SketchId(sketch),
+            path,
+            depth,
+            width,
+            tool,
+            targets: targets.into_iter().map(BodyName).collect(),
+            face: Some(face),
+        },
+    )
+}
+
+/// The cylindrical wall a picked point stands on, saved for the feature to find again.
+fn picked_wall(s: &Session, value: &Value, targets: &mut Vec<String>, sketch: u64, cmd: &str) -> Result<solidcraft_doc::EmbossFace> {
+    let local = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a finite point [x,y,z]"))?;
+    let at = solidcraft_doc::apply_point(&s.active_component_frame(), local);
+    let state = s.world_state();
+    let mut candidates = Vec::new();
+    // The nearest face off the point: (distance, body), for the error when none holds it.
+    let mut nearest: Option<(f64, &str)> = None;
+    for body in &state.bodies {
+        let definition = body.definition_name();
+        if !targets.is_empty() && !targets.iter().any(|n| n == definition || n == &body.name) {
+            continue;
+        }
+        let mesh = body.mesh();
+        let closest = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter_map(|(tri, face)| {
+                let [a, b, c] = mesh.tri(tri)?;
+                let n = (b - a).cross(c - a).normalized()?;
+                let q = at - n * (at - a).dot(n);
+                let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
+                inside.then_some(((at - a).dot(n).abs(), *face as usize))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        match closest {
+            Some((distance, index)) if distance < (body.body.size() * 1e-3).max(1e-3) => candidates.push((body, index)),
+            Some((distance, _)) if nearest.is_none_or(|(d, _)| distance < d) => nearest = Some((distance, body.name.as_str())),
+            _ => {}
+        }
+    }
+    let point = format!("[{}, {}, {}]", local.x, local.y, local.z);
+    match (candidates.as_slice(), nearest) {
+        ([], Some((d, body))) => {
+            return Err(bad(cmd, format!("`face` {point} lies on no face: the nearest, on `{body}`, is {d:.3} mm away; give a point on the wall")));
+        }
+        ([], None) => return Err(bad(cmd, format!("`face` {point} lies on no face of the target bodies"))),
+        ([_], _) => {}
+        (more, _) => {
+            let names: Vec<&str> = more.iter().map(|(b, _)| b.name.as_str()).collect();
+            return Err(bad(cmd, format!("`face` {point} lies on faces of {} bodies ({}): name one in `targets`", names.len(), names.join(", "))));
+        }
+    }
+    let (selected, index) = candidates.first().copied().ok_or_else(|| bad(cmd, "no target face"))?;
+    let name = selected.definition_name();
+    let body = &selected.body;
+    if !matches!(solidcraft_kernel::face_surface(body, index), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })) {
+        return Err(bad(cmd, "a groove is cut into a cylindrical wall"));
+    }
+    if targets.len() > 1 {
+        return Err(bad(cmd, "a cam groove needs one selected target body"));
+    }
+    // The point lies on a tessellated chord: keep its axial and angular position, and certify
+    // its distance before storing an exact point on the wall.
+    let at = solidcraft_kernel::wall_anchor(body, index, at).map_err(|e| bad(cmd, e.to_string()))?;
+    let face = emboss_selection(s, selected, at)?;
+    check_emboss_positions(s, sketch, selected, &face)?;
+    *targets = vec![name.to_owned()];
+    Ok(face)
+}
+
+/// The wall the sketch's plane stands tangent to, when exactly one of the target bodies has
+/// one: the face is saved for the feature to find again.
+fn infer_wall(s: &Session, sketch: u64, targets: &[String], cmd: &str) -> Result<Option<solidcraft_doc::EmbossFace>> {
+    let original = s.model.state();
+    let world = s.world_state();
+    let placed = s.placed_document();
+    let mut chosen = None;
+    for selected in &world.bodies {
+        let name = selected.definition_name();
+        if !targets.is_empty() && !targets.iter().any(|n| n == name || n == &selected.name) {
+            continue;
+        }
+        let raw = original.body(name).ok_or_else(|| bad(cmd, "target definition no longer exists"))?;
+        let mut face = emboss_selection(s, selected, Vec3::ZERO)?;
+        let body_frame = face.body_frame(&placed, raw).map_err(|e| bad(cmd, e.to_string()))?;
+        let inverse = solidcraft_doc::mat_inverse(&body_frame).ok_or_else(|| bad(cmd, "invalid cylinder body frame"))?;
+        let displayed = world.sketch(sketch).ok_or_else(|| bad(cmd, "the path sketch is not displayed"))?;
+        let plane = solidcraft_geom::Plane::new(
+            solidcraft_doc::apply_point(&inverse, displayed.plane.origin),
+            solidcraft_doc::apply_vector(&inverse, displayed.plane.x),
+            solidcraft_doc::apply_vector(&inverse, displayed.plane.y),
+        )
+        .ok_or_else(|| bad(cmd, "invalid cylinder sketch frame"))?;
+        let Some((_, frame)) = solidcraft_kernel::tangent_wall(&raw.body, &plane).map_err(|e| bad(cmd, e.to_string()))? else {
+            continue;
+        };
+        // The point where the sketch's plane touches the wall.
+        let w = plane.origin - frame.origin;
+        let at = frame.point(w.dot(frame.tangent), w.dot(frame.axis), frame.radius);
+        face.sketch_frame(&placed, s.active_component, s.doc.feature(sketch).map(|f| f.component).unwrap_or(0), raw)
+            .map_err(|e| bad(cmd, e.to_string()))?;
+        check_emboss_positions(s, sketch, selected, &face)?;
+        let author_inverse = solidcraft_doc::mat_inverse(&s.active_component_frame()).ok_or_else(|| bad(cmd, "invalid author frame"))?;
+        face.at = FacePick(solidcraft_doc::apply_point(&solidcraft_doc::mat_mul(&author_inverse, &body_frame), at));
+        if chosen.is_some() {
+            return Err(bad(cmd, "more than one of the target bodies has a wall the sketch's plane stands tangent to; pick the wall"));
+        }
+        chosen = Some(face);
+    }
+    Ok(chosen)
 }
 
 fn emboss_selection(s: &Session, selected: &solidcraft_doc::ModelBody, at: Vec3) -> Result<solidcraft_doc::EmbossFace> {
