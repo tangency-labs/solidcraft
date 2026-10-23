@@ -1600,3 +1600,31 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
     }
     assert!(exercised, "exercise continuation after budget-limited progress");
 }
+
+/// A line tangent to a free circle, one end dragged off the line: the other end stays where it
+/// is and the circle takes the change (it moved the far end, by 0.4 mm towards the dragged one
+/// for a 5 mm pull, though nothing needed it to).
+#[test]
+fn dragging_an_end_of_a_tangent_line_leaves_its_other_end_still() {
+    let mut s = new_sketch();
+    let c = run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"][0].as_str().unwrap().to_string();
+    let l = run(&mut s, "sketch.line", json!({"points": [[-20, 10], [20, 10]], "infer": false, "connect": false}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.constraint.tangent", json!({"a": l, "b": c}));
+    let at = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap()
+    };
+    let start = at(&s, &format!("{l}.start"));
+    drag(&mut s, &format!("{l}.end"), [20.0, 10.0], [5.0, 12.0]);
+    assert!(at(&s, &format!("{l}.start")).dist(start) < 1e-7, "the far end moved: {:?}", at(&s, &format!("{l}.start")));
+    assert!(
+        at(&s, &format!("{l}.end")).dist(solidcraft_geom::Vec2::new(5.0, 12.0)) < 1e-6,
+        "the end went where dragged: {:?}",
+        at(&s, &format!("{l}.end"))
+    );
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    assert!(si["failing"].as_array().is_some_and(Vec::is_empty), "still tangent: {si}");
+}

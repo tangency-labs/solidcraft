@@ -155,6 +155,12 @@ pub(super) fn drag_entity(
     let Some((path, hold, n, short)) = prepare(sk, e, with, from, to) else {
         return (Dragged::default(), Left::Unsolved);
     };
+    // A point dragged alone that ends tangent lines: each step first tries with their other ends
+    // held too, and only when that can't be solved lets them move. Unheld, the solver spread its
+    // correction over every free point, so the line's far end moved (towards the dragged one)
+    // where the curve it is tangent to could have taken the change, as holding that end by hand
+    // showed.
+    let keep = keep_line_ends(sk, e, with, &hold);
     #[cfg(test)]
     let (n, short) = (n.min(step_cap::get()), short.min(step_cap::get()));
     let moving: Vec<_> = path.points().filter_map(|q| Some((q, sk.point(q)?))).collect();
@@ -172,7 +178,15 @@ pub(super) fn drag_entity(
         let mut own = Budget::full();
         let budget = frame.as_mut().unwrap_or(&mut own);
         let spent = budget.spent();
-        let ok = counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok();
+        let kept = keep.as_ref().is_some_and(|keep| {
+            let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok() && !last.sweep_wrapped(sk);
+            if !ok {
+                last.restore(sk);
+                path.apply(sk, t);
+            }
+            ok
+        });
+        let ok = kept || counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok();
         solves.count += 1;
         solves.work += budget.spent() - spent;
         solves.cut |= budget.exhausted();
@@ -477,6 +491,38 @@ pub(super) fn drag_steps(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> usize {
 
 /// A drag's path, what its solves hold and its number of steps (and of short steps, see
 /// `SHORT_STEP_FRACTION`), or `None` if it cannot move.
+/// `hold` plus the far ends of the tangent lines a lone dragged point ends (not locked ones, nor the
+/// point itself), or `None` when there are none.
+fn keep_line_ends(sk: &Sketch, e: Ent, with: &[Ent], hold: &Hold) -> Option<Hold> {
+    let Ent::Point(q) = e else { return None };
+    if !with.is_empty() {
+        return None;
+    }
+    let locked = sk.locked_points();
+    let mut keep = hold.clone();
+    // Only lines tangent to a curve: there the far end is what the solver chose to move, where a
+    // free curve could take the change. Other drags keep their one solve a frame.
+    let tangent = |line: usize| sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Tangent { a, b } if a == line || b == line));
+    for (i, c) in sk.curves.iter().enumerate() {
+        if let CurveKind::Line { a, b } = c.kind {
+            if !tangent(i) {
+                continue;
+            }
+            let far = if a == q {
+                b
+            } else if b == q {
+                a
+            } else {
+                continue;
+            };
+            if far != q && !locked.get(far).copied().unwrap_or(true) && !keep.points.contains(&far) {
+                keep.points.push(far);
+            }
+        }
+    }
+    (keep.points.len() > hold.points.len()).then_some(keep)
+}
+
 fn prepare(sk: &Sketch, e: Ent, with: &[Ent], from: Vec2, to: Vec2) -> Option<(Path, Hold, usize, usize)> {
     if !(from.is_finite() && to.is_finite()) {
         return None;
