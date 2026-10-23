@@ -839,9 +839,13 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         Mode::ModelRef if matches!(cmd, "canvas.insert" | "canvas.decal") => {
             let Some(path) = IMAGE.with(|i| i.borrow().clone()) else { return };
             let decal = cmd == "canvas.decal";
+            // A plane the view shows edge-on can't show the image: at the origin its square is
+            // under the cursor too, and the image went onto it out of sight (#4717).
+            let (_, ray) = proj.ray(pos);
+            let seen = |name: &str| crate::dialogs::plane_by_name(app, name).is_some_and(|pl| pl.normal().dot(ray).abs() > 0.2 * ray.len());
             let target = hits.iter().find_map(|h| match h {
                 Hit::Face { point, .. } => Some((json!({"face": [point.x, point.y, point.z]}), *point)),
-                Hit::Plane { name, point } if !decal => Some((json!(name), *point)),
+                Hit::Plane { name, point } if !decal && seen(name) => Some((json!(name), *point)),
                 _ => None,
             });
             // Empty space while sketching: the sketch plane.

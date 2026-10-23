@@ -365,4 +365,27 @@ mod tests {
         finish(&mut h.app, &answer, None);
         assert!(h.app.tool.is_none(), "cancelling does not resume the old placement");
     }
+
+    /// #4717: a canvas placed with a click on the origin of a sketch on XY, seen from the top,
+    /// lies on XY. The origin's XZ square is under the cursor there too, edge-on, and the image
+    /// went onto it, out of sight.
+    #[test]
+    fn a_canvas_clicked_at_the_sketch_origin_lies_where_it_can_be_seen() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        for step in [
+            json!({"make_image": "pic.png"}),
+            json!({"choose_file": "pic.png"}),
+            json!({"call": "ui.view", "params": {"view": "top"}}),
+            json!({"start": "canvas.insert"}),
+            json!({"click": {"world": [0, 0, 0]}}),
+        ] {
+            h.step(&step).unwrap();
+        }
+        let doc = &h.app.session.doc;
+        let canvas = doc.canvases.first().expect("the canvas is placed");
+        let (vals, _) = doc.param_values();
+        let n = doc.canvas_plane(&vals, canvas).unwrap().normal();
+        assert!(n.z.abs() > 0.99, "the canvas lies on {n:?}, not on XY");
+    }
 }

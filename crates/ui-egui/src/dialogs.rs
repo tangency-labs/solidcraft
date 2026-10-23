@@ -2842,7 +2842,7 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
 }
 
 /// The world plane of an origin plane or a construction plane by name.
-fn plane_by_name(app: &SolveApp, name: &str) -> Option<solidcraft_engine::geom::Plane> {
+pub(crate) fn plane_by_name(app: &SolveApp, name: &str) -> Option<solidcraft_engine::geom::Plane> {
     if let Some(p) = solidcraft_engine::geom::Plane::named(name) {
         // In an active component its origin planes are the component's.
         let m = app.session.active_component_frame();
