@@ -302,6 +302,7 @@ fn offscreen(
         back,
         size_px: [size as f32; 2],
         clip: [0.0; 4],
+        clip_second: [0.0; 4],
         cap: [0.0; 4],
         images: Vec::new(),
         analysis,

@@ -424,7 +424,7 @@ pub fn scene_with_palette(
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Scene {
-    build_scene(s, cam, section, Guides::default(), sampler, p)
+    scene_with_sections(s, cam, section, section.filter(|_| section == s.section).and(s.section_second), Guides::default(), sampler, p)
 }
 
 /// [`scene_with_palette`] with the ground grid and the origin's axes shown or left out.
@@ -436,13 +436,16 @@ pub fn scene_with_palette_and_guides(
     p: &Palette,
     guides: Guides,
 ) -> Scene {
-    build_scene(s, cam, section, guides, sampler, p)
+    scene_with_sections(s, cam, section, section.filter(|_| section == s.section).and(s.section_second), guides, sampler, p)
 }
 
-fn build_scene(
+/// A scene with an explicit half or quarter section, including preview cut outlines.
+#[allow(clippy::too_many_arguments)]
+pub fn scene_with_sections(
     s: &Session,
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
+    second: Option<(Vec3, Vec3)>,
     guides: Guides,
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
@@ -452,6 +455,7 @@ fn build_scene(
     let mut sc = Scene {
         background: Some(p.background),
         clip: section.map(|(o, n)| (n, n.dot(o))),
+        clip_second: section.and(second).map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
         ..Default::default()
@@ -523,9 +527,20 @@ fn build_scene(
             sc.lines.push(SceneLine { points: e.clone(), color: p.edge, width: 1.2, on_top: false });
         }
         // The outline of the body where the section cuts it.
-        if let Some((o, n)) = section {
+        let second = sc.clip_second.map(|(n, d)| (n * d, n));
+        for (plane, other) in [(section, second), (second, section)] {
+            let Some((o, n)) = plane else { continue };
+            if let Some(other) = other.filter(|_| opacity >= 0.999) {
+                let cap = quarter_cap_mesh(&mesh, o, n, other);
+                if !cap.triangles.is_empty() {
+                    sc.meshes.push(SceneMesh::solid(Arc::new(cap), color));
+                }
+            }
             for (a, b) in section_segments(&mesh, o, n) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, width: 1.6, on_top: false });
+                let clip = other.map(|(o, n)| (n, n.dot(o)));
+                for (a, b) in solidcraft_render::section_segments(a, b, clip, None) {
+                    sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, width: 1.6, on_top: false });
+                }
             }
         }
     }
@@ -550,6 +565,89 @@ pub fn section_segments(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec
         cut_triangle(m, t, o, n, eps, &mut out);
     }
     out
+}
+
+/// Filled quarter-section caps, independent of which original wall is visible behind them.
+/// Slice edges are paired by even-odd crossings, preserving holes and separate islands.
+pub fn quarter_cap_mesh(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3, other: (Vec3, Vec3)) -> solidcraft_geom::Mesh {
+    let mut mesh = solidcraft_geom::Mesh::default();
+    let Some(plane) = Plane::from_normal(o, n) else { return mesh };
+    let tol = (m.bounds().diagonal() * 1e-10).max(1e-9);
+    let mut edges: Vec<_> = section_segments(m, o, n)
+        .into_iter()
+        .filter_map(|(a, b)| {
+            let (a, b) = (plane.to_local(a), plane.to_local(b));
+            (a.x.is_finite() && a.y.is_finite() && b.x.is_finite() && b.y.is_finite() && (a.y - b.y).abs() > tol).then_some(if a.y < b.y {
+                (a, b)
+            } else {
+                (b, a)
+            })
+        })
+        .collect();
+    if edges.len() > 20_000 {
+        return mesh;
+    }
+    let mut ys: Vec<_> = edges.iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+    ys.sort_by(f64::total_cmp);
+    ys.dedup_by(|a, b| (*a - *b).abs() <= tol);
+    edges.sort_by(|a, b| a.0.y.total_cmp(&b.0.y));
+    let x_at =
+        |edge: &(solidcraft_geom::Vec2, solidcraft_geom::Vec2), y: f64| edge.0.x + (y - edge.0.y) * (edge.1.x - edge.0.x) / (edge.1.y - edge.0.y);
+    let (mut next, mut work) = (0, 0usize);
+    let mut active: Vec<usize> = Vec::new();
+    let eps = (m.bounds().diagonal() * 1e-6).max(1e-5);
+    for slab in ys.windows(2) {
+        let [lo, hi] = *slab else { continue };
+        let mid = (lo + hi) * 0.5;
+        while edges.get(next).is_some_and(|e| e.0.y <= mid) {
+            active.push(next);
+            next += 1;
+        }
+        active.retain(|i| edges.get(*i).is_some_and(|e| e.1.y > mid));
+        work = work.saturating_add(active.len());
+        if work > 2_000_000 {
+            return solidcraft_geom::Mesh::default();
+        }
+        let mut spans: Vec<_> = active.iter().filter_map(|i| edges.get(*i)).map(|e| (x_at(e, lo), x_at(e, hi))).collect();
+        spans.sort_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)));
+        for [left, right] in spans.as_chunks::<2>().0 {
+            let p = [
+                solidcraft_geom::Vec2::new(left.0, lo),
+                solidcraft_geom::Vec2::new(right.0, lo),
+                solidcraft_geom::Vec2::new(right.1, hi),
+                solidcraft_geom::Vec2::new(left.1, hi),
+            ];
+            for tri in [[p[0], p[1], p[2]], [p[0], p[2], p[3]]] {
+                let points = tri.map(|p| plane.to_world(p));
+                let mut clipped = Vec::new();
+                for (a, b) in [(points[2], points[0]), (points[0], points[1]), (points[1], points[2])] {
+                    let (da, db) = (other.1.dot(a - other.0), other.1.dot(b - other.0));
+                    if (da <= 0.0) != (db <= 0.0) {
+                        clipped.push(a + (b - a) * (da / (da - db)));
+                    }
+                    if db <= 0.0 {
+                        clipped.push(b);
+                    }
+                }
+                let Some(first) = clipped.first().copied() else { continue };
+                for side in clipped.get(1..).unwrap_or_default().windows(2) {
+                    let mut t = [first, side[0], side[1]];
+                    let area = (t[1] - t[0]).cross(t[2] - t[0]).dot(n);
+                    if area.abs() <= tol * tol {
+                        continue;
+                    }
+                    if area > 0.0 {
+                        t.swap(1, 2);
+                    }
+                    let Ok(base) = u32::try_from(mesh.positions.len()) else { return mesh };
+                    mesh.positions.extend(t.map(|p| p - (n + other.1) * eps));
+                    mesh.normals.extend([-n; 3]);
+                    mesh.triangles.push([base, base + 1, base + 2]);
+                }
+            }
+        }
+    }
+    mesh
 }
 
 /// How far [`section_segments`] nudges the cut to the kept side.

@@ -324,6 +324,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.viewport.mesh_lods.generation().hash(&mut h);
     // The section plane (its cut outlines are part of the model scene).
     section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
+    section_second(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
     app.cam.up.hash(&mut h);
     (app.cam.pitch > 0.0).hash(&mut h);
     app.ui.show_sketches.hash(&mut h);
@@ -889,25 +890,42 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
-    // Section: the outline of each body where the plane cuts it.
-    if let Some((o, n)) = section_plane(app) {
+    // Section: cache raw mesh/normal indexes across both planes, then clip current outlines.
+    let first = section_plane(app);
+    let second = section_second(app);
+    let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
+    let mut made = Vec::new();
+    for (plane, other) in [(first, second), (second, first)] {
+        let Some((o, n)) = plane else { continue };
         let col = c4(tk.text.gamma_multiply(0.9));
-        let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
-        let mut made = Vec::new();
         for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name)) {
             let mesh = b.mesh();
+            if let Some(other) = other.filter(|_| {
+                shaded && !body_faded(app, b, &active_bodies) && s.doc.model_body_opacity(b) >= 0.999 && !app.preview.replaced.contains(&b.name)
+            }) {
+                let cap = solidcraft_engine::view::quarter_cap_mesh(&mesh, o, n, other);
+                let cap_color = c4(body_color(&s.doc, b).unwrap_or(tk.body));
+                for tri in &cap.triangles {
+                    for point in cap.tri(tri).into_iter().flatten() {
+                        sc.tri(point.to_f32(), (-n).to_f32(), cap_color);
+                    }
+                }
+            }
             let index = match kept.iter().position(|(m, i)| std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n) {
                 Some(k) => kept.swap_remove(k).1,
                 None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
             };
             for (a, c) in index.segments(&mesh, o) {
-                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+                let clip = other.map(|(o, n)| (n, n.dot(o)));
+                for (a, c) in solidcraft_engine::render::section_segments(a, c, clip, None) {
+                    sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+                }
             }
             made.push((mesh, index));
         }
-        if let Ok(mut k) = app.viewport.section_index.lock() {
-            *k = made;
-        }
+    }
+    if let Ok(mut k) = app.viewport.section_index.lock() {
+        *k = made;
     }
     // Continuity analysis: each seam `inspect.continuity` measured, drawn over the model in the
     // colour of its worst verdict.
@@ -1443,6 +1461,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let bounds = body_bounds(app, &st);
     let mut hits = Vec::new();
     let (o, d) = proj.ray(pos);
+    let clip = section_plane(app).map(|(o, n)| (n, n.dot(o)));
+    let clip_second = section_second(app).map(|(o, n)| (n, n.dot(o)));
+    let kept = |p| !solidcraft_engine::render::section_clipped(p, clip, clip_second);
     // Sketch points of the active sketch (of every shown sketch while a command takes points,
     // while idle or projecting, and while 3D drawing snaps to points on other visible sketches).
     let wants_points = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::POINTS != 0);
@@ -1520,11 +1541,17 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 _ => {}
             }
         }
-        // A placed part is picked in its own frame, from its shared mesh and index: the ray is
-        // moved there (a rigid move keeps distances along it), so no moved copy is made.
+        // A placed part is picked from its shared mesh in its local frame. Section
+        // planes stay in world space, so filter each local hit at its placed position.
         let (m, place) = b.mesh_in_place();
         let Some((lo, ld)) = local_ray(&place, o, d) else { continue };
-        if let Some((t, ti)) = crate::pick_index::raycast(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld) {
+        if let Some((t, ti)) = if clip.is_none() {
+            crate::pick_index::raycast(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld)
+        } else {
+            crate::pick_index::raycast_filtered(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld, |p| {
+                kept(solidcraft_engine::doc::apply_point(&place, p))
+            })
+        } {
             let fi = m.tri_face.get(ti).copied().unwrap_or(0) as usize;
             let hit = Hit::Face { body: b.name.clone(), index: fi, point: o + d * t };
             if bestf.as_ref().is_none_or(|(bt, _)| t < *bt) {
@@ -1538,7 +1565,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let slack = scene_radius(app) * 0.02;
     // Wireframe draws no faces, so nothing hides an edge or a vertex.
     let wireframe = app.ui.visual_style == 2;
-    let visible = |p: Vec3| wireframe || bestf.as_ref().is_none_or(|(t, _)| (p - o).dot(d) <= *t + slack);
+    let visible = |p: Vec3| kept(p) && (wireframe || bestf.as_ref().is_none_or(|(t, _)| (p - o).dot(d) <= *t + slack));
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
     let mut bestv = Near::new(all);
@@ -1681,6 +1708,16 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
 pub fn active_view(app: &SolveApp) -> solidcraft_engine::sketch::SketchView {
     let st = crate::open_meshing::shown_world(app);
     app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
+}
+
+pub fn section_second(app: &SolveApp) -> Option<(Vec3, Vec3)> {
+    if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
+        let (_, p) = crate::dialogs::apply_commands(app, d).ok()?.into_iter().next()?;
+        let mut scratch = app.session.scratch();
+        scratch.execute("inspect.section", &p).ok()?;
+        return scratch.section_second;
+    }
+    app.session.section.and(app.session.section_second)
 }
 
 pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
@@ -2705,6 +2742,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             pv_slot: app.preview.slot.clone(),
             pv_hide: app.preview.rolled_back,
             clip: section_clip(app),
+            clip_second: section_second(app).map_or([0.0; 4], |(o, n)| [n.x as f32, n.y as f32, n.z as f32, n.dot(o) as f32]),
             cap: t.section_cap.to_normalized_gamma_f32(),
             view_proj: proj.vp.to_f32(),
             back: proj.cam.back().to_f32(),
@@ -5054,6 +5092,7 @@ mod tests {
                     back: proj.cam.back().to_f32(),
                     size_px: [w as f32, h as f32],
                     clip: [0.0; 4],
+                    clip_second: [0.0; 4],
                     cap: [0.0; 4],
                     images: Vec::new(),
                     analysis: [0.0; 8],
@@ -5331,6 +5370,53 @@ mod tests {
         assert!(
             st.bodies.iter().all(|b| b.cached_mesh().is_none() || b.mesh_in_place().1 == solidcraft_engine::doc::IDENTITY),
             "a moved copy was made to pick"
+        );
+    }
+
+    #[test]
+    fn quarter_section_picks_placed_parts_in_world_space_from_the_shared_mesh() {
+        let mut app = three_placed_parts(PARTS[0]);
+        app.ui.perspective = false;
+        app.ui.show_origin = false;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        app.fit_view();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let st = app.session.world_state();
+        let tops: Vec<_> = st
+            .bodies
+            .iter()
+            .map(|b| {
+                let (mesh, place) = b.mesh_in_place();
+                let bounds = mesh.bounds();
+                let local = Vec3::new((bounds.min.x + bounds.max.x) / 2.0, (bounds.min.y + bounds.max.y) / 2.0, bounds.max.z);
+                (b.name.clone(), solidcraft_engine::doc::apply_point(&place, local))
+            })
+            .collect();
+        for (name, top) in tops {
+            // Each plane must independently reject the placed hit, in world coordinates.
+            for (first, second) in [(false, false), (false, true), (true, false), (true, true)] {
+                app.run(
+                    "inspect.section",
+                    json!({"plane":"YZ", "at":top.x - 1.0, "flip":first,
+                    "second":{"plane":"XZ", "at":top.y - 1.0, "flip":second}}),
+                )
+                .unwrap();
+                let proj = projection(&app, rect);
+                let at = proj.to_screen(top).unwrap();
+                let hits = pick(&app, &proj, at);
+                let face = hits.iter().find_map(|hit| match hit {
+                    Hit::Face { body, point, .. } if body == &name => Some(*point),
+                    _ => None,
+                });
+                assert_eq!(face.is_some(), first && second, "{name}, flips={first}/{second}, top={top:?}: {hits:?}");
+                if let Some(point) = face {
+                    assert!(point.dist(top) < 0.05, "{name}: {point:?} vs {top:?}");
+                }
+            }
+        }
+        assert!(
+            st.bodies.iter().all(|b| b.cached_mesh().is_none() || b.mesh_in_place().1 == solidcraft_engine::doc::IDENTITY),
+            "section picking must not create moved copies of shared meshes"
         );
     }
 
@@ -7005,6 +7091,123 @@ mod tests {
                 assert_eq!(h.app.cam.pitch, before.pitch);
                 assert!(h.app.viewport.axis_drag.is_none(), "release clears the axis gesture");
                 assert!(h.app.viewport.boxsel.is_none());
+            }
+        }
+    }
+
+    fn quarter_outline_points(scene: &GpuScene) -> Vec<Vec3> {
+        let float = |bytes: &[u8]| f32::from_le_bytes(bytes.try_into().unwrap()) as f64;
+        scene
+            .lines
+            .chunks_exact(crate::gpu::LINE_SIZE as usize)
+            .filter(|line| (float(&line[28..32]) - 1.8).abs() < 1e-5)
+            .flat_map(|line| [0, 12].map(|at| Vec3::new(float(&line[at..at + 4]), float(&line[at + 4..at + 8]), float(&line[at + 8..at + 12]))))
+            .collect()
+    }
+
+    #[test]
+    fn quarter_section_cache_keeps_both_planes_and_refreshes_current_cuts() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.ui.visual_style = 2;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6,"second":{"plane":"XZ","at":7}})).unwrap();
+        let initial = build_scene(&h.app);
+        let cached = h.app.viewport.section_index.lock().unwrap().clone();
+        assert_eq!(cached.len(), 2);
+        let key = scene_key(&h.app);
+        let again = build_scene(&h.app);
+        let reused = h.app.viewport.section_index.lock().unwrap().clone();
+        assert_eq!(initial.lines, again.lines);
+        for ((mesh, index), (mesh_again, index_again)) in cached.iter().zip(&reused) {
+            assert!(std::sync::Arc::ptr_eq(mesh, mesh_again));
+            assert!(std::sync::Arc::ptr_eq(index, index_again), "both planes must survive the next scene build");
+            for at in [0.5, 3.0, 7.0, 9.5, 12.0] {
+                let origin = Vec3::new(at, at, at);
+                assert_eq!(index.segments(mesh, origin), solidcraft_engine::view::section_segments(mesh, origin, index.normal()));
+            }
+        }
+        let first = cached.iter().find(|(_, i)| i.normal() == Vec3::X).unwrap().1.clone();
+        let second = cached.iter().find(|(_, i)| i.normal() == Vec3::Y).unwrap().1.clone();
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6,"second":{"plane":"XZ","at":3}})).unwrap();
+        assert_ne!(key, scene_key(&h.app));
+        let moved = build_scene(&h.app);
+        assert_ne!(initial.lines, moved.lines);
+        let points = quarter_outline_points(&moved);
+        assert!(!points.is_empty());
+        assert!(points.iter().all(|p| p.x <= 6.01 && p.y <= 3.01), "{points:?}");
+        let moved_cache = h.app.viewport.section_index.lock().unwrap().clone();
+        assert!(moved_cache.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &first)));
+        assert!(moved_cache.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &second)), "offsets reuse raw indexes, not clipped segments");
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6,"second":{"plane":"XZ","at":3,"flip":true}})).unwrap();
+        let flipped = build_scene(&h.app);
+        let points = quarter_outline_points(&flipped);
+        assert!(!points.is_empty());
+        assert!(points.iter().all(|p| p.x <= 6.01 && p.y >= 2.99), "{points:?}");
+        let flipped_cache = h.app.viewport.section_index.lock().unwrap().clone();
+        assert!(flipped_cache.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &first)));
+        assert!(!flipped_cache.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &second)));
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6})).unwrap();
+        build_scene(&h.app);
+        let single = h.app.viewport.section_index.lock().unwrap().clone();
+        assert_eq!(single.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(&single[0].1, &first));
+        let single_key = scene_key(&h.app);
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6,"second":{"plane":"XZ","at":3,"flip":true}})).unwrap();
+        assert_ne!(single_key, scene_key(&h.app));
+        build_scene(&h.app);
+        let enabled = h.app.viewport.section_index.lock().unwrap().clone();
+        assert_eq!(enabled.len(), 2);
+        assert!(enabled.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &first)));
+        assert!(!enabled.iter().any(|(_, i)| std::sync::Arc::ptr_eq(i, &flipped_cache[1].1)), "disabled second-plane indexes are released");
+        // A replacement world must not reuse a mesh index even if it has the same plane.
+        h.app.session = solidcraft_engine::Session::default();
+        h.app.run("solid.box", json!({"length":12,"width":10,"height":10})).unwrap();
+        h.app.run("inspect.section", json!({"plane":"YZ","at":6})).unwrap();
+        build_scene(&h.app);
+        let changed = h.app.viewport.section_index.lock().unwrap().clone();
+        assert_eq!(changed.len(), 1);
+        assert!(!std::sync::Arc::ptr_eq(&changed[0].0, &single[0].0));
+        assert!(!std::sync::Arc::ptr_eq(&changed[0].1, &first));
+        h.app.run("inspect.section", json!({"clear":true})).unwrap();
+        build_scene(&h.app);
+        assert!(h.app.viewport.section_index.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn quarter_section_cache_preserves_caps_and_outlines_for_all_flip_pairs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.ui.visual_style = 1;
+        h.app.ui.ground_shadow = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let float = |bytes: &[u8]| f32::from_le_bytes(bytes.try_into().unwrap()) as f64;
+        for flip in [false, true] {
+            for second_flip in [false, true] {
+                h.app.run("inspect.section", json!({"plane":"YZ","at":6,"flip":flip,"second":{"plane":"XZ","at":7,"flip":second_flip}})).unwrap();
+                let scene = build_scene(&h.app);
+                let planes = [section_plane(&h.app).unwrap(), section_second(&h.app).unwrap()];
+                let points = quarter_outline_points(&scene);
+                assert!(!points.is_empty());
+                assert!(points.iter().all(|p| planes.iter().all(|(o, n)| n.dot(*p - *o) <= 0.01)), "{points:?}");
+                let mut areas = [0.0; 2];
+                let size = crate::gpu::TRI_SIZE as usize;
+                for tri in scene.tris.chunks_exact(3 * size) {
+                    let p =
+                        [0, size, 2 * size].map(|at| Vec3::new(float(&tri[at..at + 4]), float(&tri[at + 4..at + 8]), float(&tri[at + 8..at + 12])));
+                    let normal = Vec3::new(float(&tri[12..16]), float(&tri[16..20]), float(&tri[20..24]));
+                    for (i, (o, n)) in planes.iter().enumerate() {
+                        if normal.dot(-*n) > 0.999 && n.dot(p[0] - *o).abs() < 0.01 {
+                            assert!(p.iter().all(|p| planes.iter().all(|(o, n)| n.dot(*p - *o) <= 0.01)));
+                            let cross = (p[1] - p[0]).cross(p[2] - p[0]);
+                            assert!(cross.dot(normal) > 0.0, "cap winding must face the kept region");
+                            areas[i] += cross.len() * 0.5;
+                        }
+                    }
+                }
+                let expected = [if second_flip { 30.0 } else { 70.0 }, if flip { 40.0 } else { 60.0 }];
+                for (actual, expected) in areas.into_iter().zip(expected) {
+                    assert!((actual - expected).abs() < 0.1, "flip {flip}/{second_flip}: cap area {actual}, expected {expected}");
+                }
+                assert_eq!(h.app.viewport.section_index.lock().unwrap().len(), 2);
             }
         }
     }

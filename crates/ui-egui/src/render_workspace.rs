@@ -543,6 +543,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
             clip: [0.0; 4],
+            clip_second: [0.0; 4],
             cap: [0.0; 4],
             images: Vec::new(),
             analysis: [0.0; 8],

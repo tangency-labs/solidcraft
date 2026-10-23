@@ -236,3 +236,73 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
         }
     }
 }
+
+#[test]
+fn contribution_gpu_quarter_section_caps_both_planes_with_both_depth_formats() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    for (command, params) in [
+        ("sketch.create", json!({"plane":"XY","offset":10,"name":"Bore"})),
+        ("sketch.circle.center", json!({"center":[5,5],"diameter":2})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch":"Bore","profiles":"all","distance":10,"direction":"negative","operation":"cut"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let cam = Camera { target: Vec3::new(5.0, 5.0, 5.0), distance: 30.0, ..Default::default() };
+    for (mode, c) in capturers() {
+        for first in [false, true] {
+            for second in [false, true] {
+                s.execute("inspect.section", &json!({"plane":"YZ","at":5,"flip":first,"second":{"plane":"XZ","at":5,"flip":second}})).unwrap();
+                let scene = view::scene_with_guides(&s, &cam, s.section, Guides { grid: false, axes: false });
+                let vp = cam.view_proj(1.0, scene.radius);
+                let image = c.rgba(&scene, &cam, 200, 200).unwrap();
+                let cpu = solidcraft_render::render(&scene, &cam, 200, 200);
+                let caps = [
+                    (Vec3::new(5.0, if second { 7.5 } else { 2.5 }, 5.0), if first { -Vec3::X } else { Vec3::X }),
+                    (Vec3::new(if first { 7.5 } else { 2.5 }, 5.0, 5.0), if second { -Vec3::Y } else { Vec3::Y }),
+                ];
+                for (point, normal) in caps {
+                    if normal.dot(cam.back()) <= 0.0 {
+                        continue;
+                    }
+                    let q = vp.apply(point);
+                    let x = ((q[0] / q[3] + 1.0) * 100.0) as usize;
+                    let y = ((1.0 - q[1] / q[3]) * 100.0) as usize;
+                    let i = (y * 200 + x) * 4;
+                    let rgb = &image[i..i + 3];
+                    assert!(i16::from(rgb[0]) > i16::from(rgb[2]) + 10, "{mode}, flips {first}/{second}, {point:?}: {rgb:?}");
+                    let rgb = &cpu.rgba[i..i + 3];
+                    assert!(i16::from(rgb[0]) > i16::from(rgb[2]) + 10, "CPU, flips {first}/{second}, {point:?}: {rgb:?}");
+                }
+            }
+        }
+        s.execute("inspect.section", &json!({"plane":"YZ","at":5,"second":{"plane":"XZ","at":5,"flip":true}})).unwrap();
+        let scene = view::scene_with_guides(&s, &cam, s.section, Guides { grid: false, axes: false });
+        let vp = cam.view_proj(1.0, scene.radius);
+        let hole = vp.apply(Vec3::new(5.0, 5.5, 5.0));
+        let x = ((hole[0] / hole[3] + 1.0) * 100.0) as usize;
+        let y = ((1.0 - hole[1] / hole[3]) * 100.0) as usize;
+        let image = c.rgba(&scene, &cam, 200, 200).unwrap();
+        let rgb = &image[(y * 200 + x) * 4..][..3];
+        assert!(i16::from(rgb[0]) <= i16::from(rgb[2]) + 10, "{mode}: the bore must not be filled by a cap: {rgb:?}");
+        let cpu = solidcraft_render::render(&scene, &cam, 200, 200);
+        let rgb = &cpu.rgba[(y * 200 + x) * 4..][..3];
+        assert!(i16::from(rgb[0]) <= i16::from(rgb[2]) + 10, "CPU: the bore must not be filled by a cap: {rgb:?}");
+        for (at, flip) in [(-2.0, false), (12.0, true)] {
+            s.execute("inspect.section", &json!({"plane":"YZ","at":at,"flip":flip,"second":{"plane":"XZ","at":5,"flip":true}})).unwrap();
+            let scene = view::scene_with_guides(&s, &cam, s.section, Guides { grid: false, axes: false });
+            let empty = solidcraft_render::Scene { radius: scene.radius, background: scene.background, ..Default::default() };
+            assert_eq!(
+                c.rgba(&scene, &cam, 200, 200).unwrap(),
+                c.rgba(&empty, &cam, 200, 200).unwrap(),
+                "{mode}: an empty kept region must not acquire a phantom cap"
+            );
+            assert_eq!(
+                solidcraft_render::render(&scene, &cam, 200, 200).rgba,
+                solidcraft_render::render(&empty, &cam, 200, 200).rgba,
+                "CPU: an empty kept region must not acquire a phantom cap"
+            );
+        }
+    }
+}

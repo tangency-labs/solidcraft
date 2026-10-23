@@ -108,6 +108,14 @@ pub(crate) fn raycast(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3) 
     }
 }
 
+/// Filter clipped hits through the ready index, or scan while its worker is running.
+pub(crate) fn raycast_filtered(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3, accept: impl Fn(Vec3) -> bool) -> Option<(f64, usize)> {
+    match index.filter(|_| !scanning()) {
+        Some(index) => index.raycast_filtered(mesh, o, d, accept),
+        None => mesh.raycast_filtered(o, d, accept),
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Tests: pick by scanning every triangle and edge, as before the indexes, to compare.

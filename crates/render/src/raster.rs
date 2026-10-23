@@ -108,7 +108,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     // hides edges inside the body (holes, far corners) instead of showing them like a pane of
     // glass, while holes through the cut stay open (as the viewport does with its stencil).
     let cap_z = scene.clip.and_then(|(n, d)| cap_plane(cam, n, d, scene.radius.max(1.0), &project));
-    let mut cap_depth = if cap_z.is_some() { vec![f32::INFINITY; sw * sh] } else { Vec::new() };
+    let mut cap_depth = if scene.clip.is_some() { vec![f32::INFINITY; sw * sh] } else { Vec::new() };
     // The screen depth slope (per canvas pixel) of the surface each pixel shows, for the lines'
     // depth test.
     let mut slope = vec![0f32; sw * sh];
@@ -165,9 +165,8 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let (q0, q1, q2) = (w0 * iw[0], w1 * iw[1], w2 * iw[2]);
                         let qs = q0 + q1 + q2;
                         let (p0, p1, p2) = if qs > 1e-12 { (q0 / qs, q1 / qs, q2 / qs) } else { (w0, w1, w2) };
-                        if let Some((cn, cd)) = scene.clip
-                            && cn.dot(wp[0] * p0 + wp[1] * p1 + wp[2] * p2) > cd
-                        {
+                        let world = wp[0] * p0 + wp[1] * p1 + wp[2] * p2;
+                        if crate::section_clipped(world, scene.clip, scene.clip_second) {
                             continue;
                         }
                         let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
@@ -188,9 +187,33 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             // A see-through body has no cut face: the interior already shows.
                             let cut = !pass.glass() && scene.clip.is_some() && inside;
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
-                                *d = match cap_z {
-                                    Some([a, b, k]) if cut => ((a * px + b * py + k) as f32).min(z),
-                                    _ => f32::INFINITY,
+                                *d = if cut && scene.clip_second.is_some() {
+                                    let dir = if cam.fov > 0.0 { cam.eye() - world } else { cam.back() };
+                                    let planes = [scene.clip, scene.clip_second];
+                                    planes
+                                        .iter()
+                                        .enumerate()
+                                        .filter_map(|(i, plane)| {
+                                            let (n, at) = (*plane)?;
+                                            let den = n.dot(dir);
+                                            if den.abs() < 1e-12 {
+                                                return None;
+                                            }
+                                            let t = (at - n.dot(world)) / den;
+                                            let point = world + dir * t;
+                                            let (other, od) = planes.get(1 - i).copied().flatten()?;
+                                            if t < 0.0 || other.dot(point) > od + 1e-6 {
+                                                return None;
+                                            }
+                                            project(point).map(|p| (p[2] as f32).min(z))
+                                        })
+                                        .min_by(f32::total_cmp)
+                                        .unwrap_or(z)
+                                } else {
+                                    match cap_z {
+                                        Some([a, b, k]) if cut => ((a * px + b * py + k) as f32).min(z),
+                                        _ => f32::INFINITY,
+                                    }
                                 };
                             }
                             if cut {
@@ -230,36 +253,40 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
             // The section cuts the segment in 3D (screen space is not linear in depth in
             // perspective views).
-            let Some((p, q)) = clip_segment(p, q, scene.clip) else { continue };
-            let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
-            let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
-            let steps = (len.ceil() as usize).clamp(1, 20_000);
-            for k in 0..=steps {
-                let t = k as f64 / steps as f64;
-                let (x, y, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
-                let r = half.ceil() as i64;
-                for dy in -r..=r {
-                    for dx in -r..=r {
-                        let (ix, iy) = (x.floor() as i64 + dx, y.floor() as i64 + dy);
-                        if ix < 0 || iy < 0 || ix >= sw as i64 || iy >= sh as i64 {
-                            continue;
-                        }
-                        let d = ((ix as f64 + 0.5 - x).powi(2) + (iy as f64 + 0.5 - y).powi(2)).sqrt();
-                        let cov = (half + 0.5 - d).clamp(0.0, 1.0);
-                        if cov <= 0.0 {
-                            continue;
-                        }
-                        let i = iy as usize * sw + ix as usize;
-                        // A line on a face lies at the face's depth, but the pixel holds the
-                        // face's depth at its centre, `d` away: allow what the face's slope
-                        // spans over that distance, and the rounding. (A fixed allowance in
-                        // screen depth is a share of the scene's depth range, a millimetre or
-                        // more on a large design: close views showed the far side of thin
-                        // sheet, and parts just behind it, through it.)
-                        let visible = l.on_top
-                            || c.depth.get(i).zip(slope.get(i)).is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
-                        if visible {
-                            c.put(ix as usize, iy as usize, col, cov);
+            for (p, q) in crate::section_segments(p, q, scene.clip, scene.clip_second) {
+                let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
+                let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+                let steps = (len.ceil() as usize).clamp(1, 20_000);
+                for k in 0..=steps {
+                    let t = k as f64 / steps as f64;
+                    let (x, y, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+                    let r = half.ceil() as i64;
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            let (ix, iy) = (x.floor() as i64 + dx, y.floor() as i64 + dy);
+                            if ix < 0 || iy < 0 || ix >= sw as i64 || iy >= sh as i64 {
+                                continue;
+                            }
+                            let d = ((ix as f64 + 0.5 - x).powi(2) + (iy as f64 + 0.5 - y).powi(2)).sqrt();
+                            let cov = (half + 0.5 - d).clamp(0.0, 1.0);
+                            if cov <= 0.0 {
+                                continue;
+                            }
+                            let i = iy as usize * sw + ix as usize;
+                            // A line on a face lies at the face's depth, but the pixel holds the
+                            // face's depth at its centre, `d` away: allow what the face's slope
+                            // spans over that distance, and the rounding. (A fixed allowance in
+                            // screen depth is a share of the scene's depth range, a millimetre or
+                            // more on a large design: close views showed the far side of thin
+                            // sheet, and parts just behind it, through it.)
+                            let visible = l.on_top
+                                || c.depth
+                                    .get(i)
+                                    .zip(slope.get(i))
+                                    .is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
+                            if visible {
+                                c.put(ix as usize, iy as usize, col, cov);
+                            }
                         }
                     }
                 }
@@ -291,6 +318,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
 }
 
 /// The part of segment `p`–`q` the section keeps (where normal·x <= d).
+#[cfg(test)]
 fn clip_segment(p: Vec3, q: Vec3, clip: Option<(Vec3, f64)>) -> Option<(Vec3, Vec3)> {
     let Some((n, d)) = clip else { return Some((p, q)) };
     let (dp, dq) = (n.dot(p) - d - 1e-6, n.dot(q) - d - 1e-6);
@@ -464,6 +492,34 @@ mod tests {
         // picture changes all the way down.
         let faint = middle(0.0);
         assert!(faint[0] > 0 && faint[0] < glass[0], "opacity 0 is a trace, not nothing and not glass: {faint:?} vs {glass:?}");
+    }
+
+    #[test]
+    fn a_quarter_cut_keeps_one_quadrant_and_its_glass() {
+        let mut kept_colors = Vec::new();
+        for opacity in [1.0, 0.35] {
+            let (mut scene, cam) = two_panels(opacity);
+            let full = render(&scene, &cam, 64, 64);
+            let background = render(&Scene { radius: scene.radius, ..Default::default() }, &cam, 64, 64);
+            scene.clip = Some((Vec3::X, 0.0));
+            scene.clip_second = Some((Vec3::Z, 0.0));
+            let cut = render(&scene, &cam, 64, 64);
+            let (mut kept, mut removed) = (0, 0);
+            for (x, y) in [(24, 24), (40, 24), (24, 40), (40, 40)] {
+                let i = (y * 64 + x) * 4;
+                let pixel = &cut.rgba[i..i + 4];
+                if pixel == &full.rgba[i..i + 4] {
+                    kept += 1;
+                    kept_colors.push([opacity, f32::from(pixel[0]), f32::from(pixel[1])]);
+                } else {
+                    assert_eq!(pixel, &background.rgba[i..i + 4], "the removed quadrant shows the background");
+                    removed += 1;
+                }
+            }
+            assert_eq!((kept, removed), (1, 3), "a quarter section retains the intersection of both kept halfspaces");
+        }
+        let solid_green = kept_colors.iter().find(|c| c[0] == 1.0).unwrap()[2];
+        assert!(kept_colors.iter().filter(|c| c[0] < 1.0).all(|c| c[2] > solid_green + 60.0), "the rear panel still shows through the kept glass");
     }
 
     /// A sheet facing the front camera, turned back by `tilt` about X: the plane y = z·tan(tilt)

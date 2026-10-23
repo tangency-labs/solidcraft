@@ -11,7 +11,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel, ThinSide};
-use solidcraft_engine::geom::{Aabb3, Vec3};
+use solidcraft_engine::geom::{Aabb3, Plane, Vec3};
 
 use crate::SolveApp;
 use crate::selection::{
@@ -278,6 +278,9 @@ crate::dialog_descriptor::dialog_descriptors! {
             Section {
                 offset: String,
                 flip: bool,
+                quarter: bool,
+                second_offset: String,
+                second_flip: bool,
             },
             /// Measure one or two picked items (vertices, edges, faces): the result of the last
             /// measurement and the items it was for.
@@ -698,9 +701,10 @@ impl Dialog {
                 vec![SelInput::new("Cylindrical face", FACES, false)],
             ),
             "material.assign" => Dialog::new(Kind::Material { index: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
-            "inspect.section" => {
-                Dialog::new(Kind::Section { offset: "0 mm".into(), flip: false }, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)])
-            }
+            "inspect.section" => Dialog::new(
+                Kind::Section { offset: "0 mm".into(), flip: false, quarter: false, second_offset: "0 mm".into(), second_flip: false },
+                vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
+            ),
             "inspect.measure" => Dialog::new(
                 Kind::Measure { result: None, of: Vec::new(), show: None },
                 vec![SelInput::new("Items", FACES | EDGES | selection::VERTICES | selection::CURVES | PROFILES, true)],
@@ -973,6 +977,7 @@ impl Dialog {
 
     /// The main value (shown on the canvas too): label, kind and the expression.
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
+        let second_section = self.section_input_index() == Some(1);
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1004,6 +1009,7 @@ impl Dialog {
             },
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
+            Kind::Section { second_offset, .. } if second_section => ("Distance", ValueKind::Length, second_offset),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
             Kind::OffsetPlane { offset } => ("Distance", ValueKind::Length, offset),
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
@@ -1025,6 +1031,14 @@ impl Dialog {
 
     pub fn wants_picks(&self) -> bool {
         !self.inputs.is_empty()
+    }
+
+    /// The visible section manipulator edits the selected plane, including kept plane references.
+    pub(crate) fn section_input_index(&self) -> Option<usize> {
+        match &self.kind {
+            Kind::Section { quarter, .. } => Some(usize::from(*quarter && self.active == 1)),
+            _ => None,
+        }
     }
 
     pub fn active_input(&self) -> Option<&SelInput> {
@@ -1608,6 +1622,52 @@ thread_local! {
         const { std::cell::RefCell::new((None, Vec::new())) };
 }
 
+/// Both section inputs share the same plane/planar-face resolution and validation.
+fn section_reference(s: &Session, d: &Dialog, index: usize, stored: &str) -> Result<(Value, Plane), String> {
+    let value = match sels(d, index).first() {
+        Some(Sel::Plane { name }) if matches!(name.as_str(), "XY" | "XZ" | "YZ") => Ok::<Value, String>(json!(name)),
+        Some(Sel::Face { body, index, point }) => {
+            let (_, normal) = planar_face(s, body, *index).ok_or("the face must be planar")?;
+            Ok(json!({"origin":pt(*point),"normal":pt(normal)}))
+        }
+        Some(Sel::Plane { name }) => {
+            let plane = solidcraft_engine::view::construction_planes(s)
+                .into_iter()
+                .find(|(_, label, _)| label == name)
+                .map(|(_, _, plane)| plane)
+                .ok_or("unknown plane")?;
+            Ok(json!({"origin":pt(plane.origin),"normal":pt(plane.normal())}))
+        }
+        _ => d.extra.get(stored).cloned().ok_or_else(|| "pick a plane or a planar face".into()),
+    }?;
+    let plane = if let Some(name) = value.as_str() {
+        Plane::named(name).ok_or("unknown plane")?
+    } else {
+        let origin: Vec3 = serde_json::from_value(value.get("origin").cloned().ok_or("invalid plane origin")?).map_err(|_| "invalid plane origin")?;
+        let normal: Vec3 = serde_json::from_value(value.get("normal").cloned().ok_or("invalid plane normal")?).map_err(|_| "invalid plane normal")?;
+        if !origin.is_finite() || !normal.is_finite() {
+            return Err("invalid plane".into());
+        }
+        Plane::from_normal(origin, normal).ok_or("invalid plane normal")?
+    };
+    Ok((value, plane))
+}
+
+fn section_input_plane(s: &Session, d: &Dialog, index: usize, stored: &str) -> Result<Value, String> {
+    section_reference(s, d, index, stored).map(|(value, _)| value)
+}
+
+/// The same reference frame used by the section command's distance parameter.
+pub(crate) fn section_reference_frame(s: &Session, d: &Dialog, index: usize) -> Option<(Vec3, Vec3)> {
+    let key = match index {
+        0 => "section_plane",
+        1 => "section_second_plane",
+        _ => return None,
+    };
+    let (_, plane) = section_reference(s, d, index, key).ok()?;
+    Some((plane.origin, plane.normal()))
+}
+
 /// A plane input as a command parameter: an origin/construction plane name or a face plane.
 fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
     match sel? {
@@ -1902,8 +1962,69 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
     input_rows_range(d, ui, s, 0..d.inputs.len());
 }
 
+/// Keep each section plane beside its own values and activate the plane being edited.
+fn section_plane_fields(ui: &mut egui::Ui, d: &mut Dialog, index: usize) -> bool {
+    let Kind::Section { offset, flip, second_offset, second_flip, .. } = &mut d.kind else { return false };
+    let (offset, flip) = if index == 1 { (second_offset, second_flip) } else { (offset, flip) };
+    let distance_label = if index == 1 { "Second offset" } else { "Distance" };
+    let flip_label = if index == 1 { "Second flip" } else { "Flip" };
+    let before = offset.clone();
+    let focus = ui.memory(|m| m.focused());
+    let enter = form_row(ui, distance_label, |ui| field(ui, offset));
+    let clicked = crate::scenario::rect_of(&format!("dialog:control:{distance_label}"))
+        .is_some_and(|rect| ui.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))));
+    let response = form_row(ui, flip_label, |ui| crate::ui_kit::checkbox(ui, "", flip));
+    if *offset != before || clicked || focus != ui.memory(|m| m.focused()) || response.clicked() {
+        d.active = index;
+    }
+    enter
+}
+
+fn section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> (bool, bool) {
+    input_rows_range(d, ui, &app.session, 0..1);
+    let mut enter = section_plane_fields(ui, d, 0);
+    let Kind::Section { quarter, .. } = &mut d.kind else { return (enter, false) };
+    let changed = form_row(ui, "Quarter section", |ui| crate::ui_kit::checkbox(ui, "", quarter));
+    let enabled = *quarter;
+    if changed.changed() {
+        if enabled {
+            let mut input = SelInput::new("Second plane", PLANES | PLANAR_FACES, false);
+            input.items = d.extra.get("section_second_selection").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
+            d.inputs.truncate(1);
+            d.inputs.push(input);
+            d.active = 1;
+        } else {
+            if let Some(input) = d.inputs.get(1) {
+                d.extra.insert("section_second_selection".into(), json!(input.items));
+            }
+            d.inputs.truncate(1);
+            d.active = 0;
+        }
+    }
+    if enabled {
+        input_rows_range(d, ui, &app.session, 1..2);
+        enter |= section_plane_fields(ui, d, 1);
+    }
+    let remove = form_row(ui, "", |ui| crate::ui_kit::button(ui, tr("Remove Section"), crate::ui_kit::Button::Normal));
+    crate::scenario::publish_handle("dialog:Remove Section", remove.rect.center());
+    let removed = remove.clicked() && app.run("inspect.section", json!({"clear": true})).is_ok();
+    if removed {
+        app.tree.hidden_section = None;
+        app.tree.hidden_section_second = None;
+        app.tree.section_dialog = None;
+    }
+    (enter, removed)
+}
+
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn feature_pattern_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Section { .. }) {
+        return match index {
+            0 => Some("section_plane"),
+            1 => Some("section_second_plane"),
+            _ => None,
+        };
+    }
     if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
         return None;
     }
@@ -1942,7 +2063,7 @@ fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, range: std::
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
                 let text = if filled {
                     RichText::new(if custom_axis || stored_reference.is_some() {
-                        crate::i18n::tr("dialog.custom_axis").into()
+                        if matches!(d.kind, Kind::Section { .. }) { tr("Current plane").into() } else { crate::i18n::tr("dialog.custom_axis").into() }
                     } else if !inp.multi {
                         inp.items.first().map(|item| selection_label(s, item)).unwrap_or_default()
                     } else {
@@ -2410,7 +2531,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
-                enter |= dense::rows(app, ctx, &mut d, ui);
+                if matches!(d.kind, Kind::Section { .. }) {
+                    let (submitted, removed) = section_rows(app, &mut d, ui);
+                    enter |= submitted;
+                    cancel |= removed;
+                } else {
+                    enter |= dense::rows(app, ctx, &mut d, ui);
+                }
                 d.sync_fillet_chain(&app.session);
                 if cell_enter {
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -2948,10 +3075,16 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             }
         }
     }
-    if let Kind::Section { offset, flip } = &d.kind
+    if matches!(d.kind, Kind::Section { .. })
         && let Some(cut) = app.session.section
     {
-        app.tree.section_dialog = Some(SectionDraft { offset: offset.clone(), flip: *flip, plane: sels(d, 0).to_vec(), cut });
+        app.tree.section_dialog = Some(SectionDraft {
+            kind: d.kind.clone(),
+            inputs: d.inputs.clone(),
+            extra: d.extra.clone(),
+            cut,
+            second_cut: app.session.section_second,
+        });
     }
     Ok(())
 }
@@ -2962,23 +3095,44 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 pub fn edit_section(app: &mut SolveApp) {
     app.start("inspect.section");
     let cut = app.session.section.or(app.tree.hidden_section);
-    let Some(last) = app.tree.section_dialog.clone().filter(|last| cut.is_some_and(|c| same_cut(c, last.cut))) else { return };
+    let second = app.session.section_second.or(app.tree.hidden_section_second);
+    let last = app.tree.section_dialog.clone().filter(|last| {
+        cut.is_some_and(|c| same_cut(c, last.cut))
+            && match (second, last.second_cut) {
+                (Some(a), Some(b)) => same_cut(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    });
     if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Section { .. })) {
-        d.kind = Kind::Section { offset: last.offset, flip: last.flip };
-        if let Some(plane) = d.inputs.first_mut() {
-            plane.items = last.plane;
+        if let Some(last) = last {
+            d.kind = last.kind;
+            d.inputs = last.inputs;
+            d.extra = last.extra;
+        } else if let (Some((o, n)), Some((o2, n2))) = (cut, second) {
+            // A command-made quarter cut still edits from its two effective planes.
+            // Half sections keep main's fresh-dialog fallback.
+            if let Some(first) = d.inputs.first_mut() {
+                first.items.clear();
+            }
+            d.extra.insert("section_plane".into(), json!({"origin":o,"normal":n}));
+            d.extra.insert("section_second_plane".into(), json!({"origin":o2,"normal":n2}));
+            d.inputs.push(SelInput::new("Second plane", PLANES | PLANAR_FACES, false));
+            if let Kind::Section { quarter, .. } = &mut d.kind {
+                *quarter = true;
+            }
         }
     }
 }
 
-/// What the Section Analysis dialog's OK made: its distance, flip and plane pick, and the cut
-/// (origin, normal) they made, so Edit reopens the dialog where it was while that cut stands.
+/// The dialog's authored fields and references, bound to both effective cuts.
 #[derive(Clone, Debug)]
 pub struct SectionDraft {
-    pub offset: String,
-    pub flip: bool,
-    pub plane: Vec<Sel>,
-    pub cut: (Vec3, Vec3),
+    kind: Kind,
+    inputs: Vec<SelInput>,
+    extra: serde_json::Map<String, Value>,
+    cut: (Vec3, Vec3),
+    second_cut: Option<(Vec3, Vec3)>,
 }
 
 /// The same cut, up to rounding (hiding and showing a section runs it again from its plane).
@@ -3566,25 +3720,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let name = s.doc.material_names().get(*index).cloned().unwrap_or_else(|| "Default".into());
             ("material.assign", json!({"bodies": sels(d, 0).body_names(), "material": name}))
         }
-        Kind::Section { offset, flip } => {
-            need(0, "a plane or planar face")?;
-            let plane = match sels(d, 0).first() {
-                Some(Sel::Plane { name }) if matches!(name.as_str(), "XY" | "XZ" | "YZ") => json!(name),
-                Some(Sel::Face { body, index, point }) => {
-                    let (_, n) = planar_face(s, body, *index).ok_or("the face must be planar")?;
-                    json!({"origin": pt(*point), "normal": pt(n)})
+        Kind::Section { offset, flip, quarter, second_offset, second_flip } => {
+            let plane = section_input_plane(s, d, 0, "section_plane")?;
+            {
+                let mut p = json!({"plane": plane, "offset": offset, "flip": flip});
+                if *quarter {
+                    let plane = section_input_plane(s, d, 1, "section_second_plane")?;
+                    p["second"] = json!({"plane": plane, "offset": second_offset, "flip": second_flip});
                 }
-                Some(Sel::Plane { name }) => {
-                    let pl = solidcraft_engine::view::construction_planes(s)
-                        .into_iter()
-                        .find(|(_, n, _)| n == name)
-                        .map(|(_, _, pl)| pl)
-                        .ok_or("unknown plane")?;
-                    json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
-                }
-                _ => return Err("pick a plane or a planar face".into()),
-            };
-            ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip}))
+                ("inspect.section", p)
+            }
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {

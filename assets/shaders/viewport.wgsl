@@ -4,6 +4,7 @@ struct U {
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
     screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
+    clip_second: vec4<f32>, // quarter section: retain both non-positive half-spaces
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
     pull: vec4<f32>,   // draft pull direction
@@ -32,7 +33,8 @@ fn near_z(c: vec4<f32>) -> f32 {
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
 
 fn clipped(p: vec3<f32>) -> bool {
-    return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
+    return length(u.clip.xyz) > 0.5 && (dot(u.clip.xyz, p) > u.clip.w
+        || (length(u.clip_second.xyz) > 0.5 && dot(u.clip_second.xyz, p) > u.clip_second.w));
 }
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -235,13 +237,23 @@ fn pushed(z: f32) -> f32 {
 fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
     var dir = -u.back.xyz;
     if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
-    let dn = dot(u.clip.xyz, dir);
-    if (abs(dn) < 1e-9) { return z; }
-    let p = wp + dir * ((u.clip.w - dot(u.clip.xyz, wp)) / dn);
-    let c = u.vp * vec4<f32>(p, 1.0);
-    if (c.w <= 0.0) { return z; }
-    if (reversed()) { return clamp(c.z / c.w, z, 1.0); }
-    return clamp(c.z / c.w, 0.0, z);
+    var result = z;
+    let planes = array<vec4<f32>, 2>(u.clip, u.clip_second);
+    for (var i = 0u; i < 2u; i += 1u) {
+        let plane = planes[i];
+        let other = planes[1u - i];
+        let dn = dot(plane.xyz, dir);
+        if (length(plane.xyz) < 0.5 || abs(dn) < 1e-9) { continue; }
+        let t = (plane.w - dot(plane.xyz, wp)) / dn;
+        if (t > 0.0) { continue; }
+        let p = wp + dir * t;
+        if (length(u.clip_second.xyz) > 0.5 && dot(other.xyz, p) > other.w + 1e-5) { continue; }
+        let c = u.vp * vec4<f32>(p, 1.0);
+        if (c.w <= 0.0) { continue; }
+        if (reversed()) { result = max(result, clamp(c.z / c.w, z, 1.0)); }
+        else { result = min(result, clamp(c.z / c.w, 0.0, z)); }
+    }
+    return result;
 }
 
 fn solid(i: TOut, front: bool) -> vec4<f32> {

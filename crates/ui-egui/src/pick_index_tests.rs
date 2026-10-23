@@ -4,6 +4,33 @@ use serde_json::json;
 use crate::SolveApp;
 use crate::viewport::{Hit, pick, pick_all, projection};
 
+#[test]
+fn clipped_raycast_keeps_the_far_hit_while_the_index_is_pending() {
+    use solidcraft_engine::geom::{Mesh, MeshIndex, Vec3};
+    let mesh = Mesh {
+        positions: vec![
+            Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(0.0, 1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 2.0),
+            Vec3::new(1.0, -1.0, 2.0),
+            Vec3::new(0.0, 1.0, 2.0),
+        ],
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        ..Default::default()
+    };
+    let index = MeshIndex::new(&mesh);
+    for scan in [false, true] {
+        super::SCAN.with(|s| s.set(scan));
+        for ready in [None, Some(&index)] {
+            let hit = super::raycast_filtered(ready, &mesh, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), |p| p.z > 1.5);
+            assert_eq!(hit, Some((2.0, 1)), "scan={scan}, ready={}", ready.is_some());
+            assert_eq!(super::raycast_filtered(ready, &mesh, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), |_| false), None);
+        }
+        super::SCAN.with(|s| s.set(false));
+    }
+}
+
 /// Overlapping bodies with flat and curved faces, filleted edges and seams.
 fn assembly() -> SolveApp {
     let mut s = solidcraft_engine::Session::default();

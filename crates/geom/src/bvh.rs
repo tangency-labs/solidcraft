@@ -281,12 +281,17 @@ impl MeshIndex {
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.
     /// For a mesh other than the one indexed, the plain scan answers.
     pub fn raycast(&self, mesh: &Mesh, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        self.raycast_filtered(mesh, o, dir, |_| true)
+    }
+
+    /// Nearest hit accepted by a world-space visibility predicate.
+    pub fn raycast_filtered(&self, mesh: &Mesh, o: Vec3, dir: Vec3, accept: impl Fn(Vec3) -> bool) -> Option<(f64, usize)> {
         if mesh.triangles.len() != self.triangle_count {
-            return mesh.raycast(o, dir);
+            return mesh.raycast_filtered(o, dir, accept);
         }
         let frame = crate::mesh::RayFrame::new(o, dir)?;
         self.triangles
-            .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
+            .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)).filter(|t| accept(o + dir * *t)))
             .map(|(t, i)| (t, i as usize))
     }
 

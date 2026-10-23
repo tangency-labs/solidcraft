@@ -128,3 +128,27 @@ fn hostile_boxes_never_panic() {
     assert!(MeshIndex::new(&m).raycast(&m, Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0)).is_none());
     MeshIndex::new(&m).segments_near(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), f64::NAN, 0.0, |_, _| panic!("no segments"));
 }
+
+#[test]
+fn contribution_indexed_and_scanned_picking_skip_the_removed_front_surface() {
+    let m = Mesh {
+        positions: vec![
+            Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(1.0, -1.0, 1.0),
+            Vec3::new(0.0, 1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ],
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        tri_face: vec![0, 1],
+        ..Default::default()
+    };
+    let index = MeshIndex::new(&m);
+    let (o, d) = (Vec3::new(0.0, 0.0, 2.0), -Vec3::Z);
+    assert_eq!(m.raycast(o, d), Some((1.0, 0)));
+    let kept = |p: Vec3| p.z < 0.5;
+    assert_eq!(m.raycast_filtered(o, d, kept), Some((2.0, 1)));
+    assert_eq!(index.raycast_filtered(&m, o, d, kept), Some((2.0, 1)));
+    assert_eq!(index.raycast_filtered(&m, o, d, |_| false), None);
+}

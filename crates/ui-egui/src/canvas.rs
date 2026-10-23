@@ -19,6 +19,9 @@ use crate::viewport::{Proj, projected_polygon};
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    if let Some(index) = d.section_input_index() {
+        return crate::dialogs::section_reference_frame(&app.session, d, index).map(|(origin, normal)| (origin, Some(normal)));
+    }
     let st = app.session.world_state();
     let first = d.inputs.first()?.items.first()?;
     let (at, normal) = match first {
@@ -524,6 +527,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if radius_spline_handles(app, ui, painter, proj, d) {
         dir = None;
     }
+    let manipulator_id =
+        d.section_input_index().map_or_else(|| egui::Id::new("sc_manipulator"), |index| egui::Id::new(("sc_section_manipulator", index)));
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() { Some(0.0) } else { app.session.doc.eval(value, kind).ok().filter(|v| v.is_finite()) }
@@ -538,7 +543,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let mut shown_value = format_len(half + baseline);
         let original_shown = shown_value.clone();
         let dragged = if to_span.is_some() || symmetric_scale != 1.0 { &mut shown_value } else { &mut *value };
-        if let Some(ts) = drag_arrow(ui, painter, proj, base, bs, n, half + baseline, signed, egui::Id::new("sc_manipulator"), half_height, dragged) {
+        if let Some(ts) = drag_arrow(ui, painter, proj, base, bs, n, half + baseline, signed, manipulator_id, half_height, dragged) {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = app.session.doc.eval(&shown_value, ValueKind::Length)
@@ -660,7 +665,14 @@ fn drag_arrow(
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
     // Using the old distance here made both trail the drag by another frame.
-    crate::scenario::publish_handle(if id == egui::Id::new("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
+    crate::scenario::publish_handle(
+        if id == egui::Id::new("sc_manipulator") || (0..2).any(|index: usize| id == egui::Id::new(("sc_section_manipulator", index))) {
+            "arrow"
+        } else {
+            "arrow2"
+        },
+        ts,
+    );
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
     arrow(painter, bs, ts, col);

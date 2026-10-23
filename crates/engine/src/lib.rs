@@ -282,6 +282,8 @@ pub struct Session {
     pub sketch_clipboard: Option<cmd::sketch_clipboard::SketchClip>,
     /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
     pub section: Option<(Vec3, Vec3)>,
+    /// Second plane of a quarter section (the common positive wedge is hidden).
+    pub section_second: Option<(Vec3, Vec3)>,
     /// Surface analysis shading the model (zebra, draft, curvature map).
     pub analysis: Option<SurfaceAnalysis>,
     /// The seams `inspect.continuity` last measured, for the viewport to shade. View state: not
@@ -436,6 +438,7 @@ impl Session {
             clipboard: Vec::new(),
             sketch_clipboard: None,
             section: None,
+            section_second: None,
             analysis: None,
             continuity: Vec::new(),
             checkpoints: Vec::new(),
@@ -971,6 +974,7 @@ impl Session {
             clipboard: self.clipboard.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
             section: None,
+            section_second: None,
             analysis: None,
             continuity: Vec::new(),
             checkpoints: Vec::new(),
