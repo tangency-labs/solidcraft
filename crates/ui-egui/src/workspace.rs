@@ -261,6 +261,44 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
+    // The Manufacture workspace: New Setup opens the WCS/stock dialog on this PR.
+    Section { tab: "MANUFACTURE", panel: "SETUP", promoted: 1, ids: &["manufacture.setup.new"] },
+    Section { tab: "MANUFACTURE", panel: "MANAGE", promoted: 1, ids: &["manufacture.tools.library"] },
+    Section {
+        tab: "MANUFACTURE",
+        panel: "2D",
+        promoted: 4,
+        ids: &[
+            "manufacture.2d.contour",
+            "manufacture.2d.face",
+            "manufacture.2d.adaptive",
+            "manufacture.2d.pocket",
+            "manufacture.2d.slot",
+            "manufacture.2d.trace",
+            "manufacture.2d.thread",
+            "manufacture.2d.bore",
+            "manufacture.2d.circular",
+            "manufacture.2d.engrave",
+            "manufacture.2d.chamfer",
+        ],
+    },
+    Section {
+        tab: "MANUFACTURE",
+        panel: "INSPECT",
+        promoted: 2,
+        ids: &[
+            "inspect.measure",
+            "inspect.section",
+            "inspect.curvature_comb",
+            "inspect.zebra",
+            "inspect.draft",
+            "inspect.isocurve",
+            "inspect.accessibility",
+            "inspect.minimum_radius",
+            "inspect.sustainability",
+        ],
+    },
+    Section { tab: "MANUFACTURE", panel: "SELECT", promoted: 0, ids: &[] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
@@ -289,6 +327,19 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
     ("material.assign", "Material"),
+    ("manufacture.2d.adaptive", "Adaptive"),
+    ("manufacture.2d.bore", "Bore"),
+    ("manufacture.2d.chamfer", "Chamfer"),
+    ("manufacture.2d.circular", "Circular"),
+    ("manufacture.2d.contour", "Contour"),
+    ("manufacture.2d.engrave", "Engrave"),
+    ("manufacture.2d.face", "Face"),
+    ("manufacture.2d.pocket", "Pocket"),
+    ("manufacture.2d.slot", "Slot"),
+    ("manufacture.2d.thread", "Thread"),
+    ("manufacture.2d.trace", "Trace"),
+    ("manufacture.setup.new", "New Setup"),
+    ("manufacture.tools.library", "Tool Library"),
     ("parameters.change", "Parameters"),
     ("parameters.graph", "Param. Graph"),
     ("parts.fastener", "Fastener"),
@@ -447,6 +498,9 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
+    if crate::manufacture_workspace::active(app) {
+        return vec!["MANUFACTURE"];
+    }
     let mut tabs = TABS.to_vec();
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
@@ -460,7 +514,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
 /// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || crate::manufacture_workspace::active(app) {
         return;
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
