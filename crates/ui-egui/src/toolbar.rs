@@ -2250,10 +2250,12 @@ const GRID_HEADING: f32 = 24.0;
 const GROUP_COLUMNS: usize = 2;
 
 /// Where a grid drop-down puts things, relative to its top left: each command's icon with its
-/// (row, column) for the arrow keys, each group heading (where, how wide), and the whole size.
+/// (row, column) for the arrow keys, each group heading (where, how wide), the separators
+/// between groups side by side (their x), and the whole size.
 struct GridLayout {
     cells: Vec<(Rect, (usize, usize))>,
     headings: Vec<(egui::Pos2, f32, &'static str)>,
+    separators: Vec<f32>,
     size: egui::Vec2,
 }
 
@@ -2276,11 +2278,15 @@ fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::Com
     let side_by_side = headed >= 2 && (groups.len() * GROUP_COLUMNS) as f32 * GRID_CELL <= room;
     let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
     let mut headings = Vec::new();
+    let mut separators = Vec::new();
     let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(GRID_CELL, GRID_CELL));
     let size = if side_by_side {
         let width = GROUP_COLUMNS as f32 * GRID_CELL;
         for (g, (heading, items)) in groups.iter().enumerate() {
             let x = g as f32 * width;
+            if g > 0 {
+                separators.push(x);
+            }
             if let Some(h) = heading {
                 headings.push((pos2(x, 0.0), width, *h));
             }
@@ -2313,7 +2319,7 @@ fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::Com
         }
         vec2(columns as f32 * GRID_CELL, y)
     };
-    GridLayout { cells, headings, size }
+    GridLayout { cells, headings, separators, size }
 }
 
 /// An arrow key in a grid drop-down.
@@ -2419,6 +2425,11 @@ fn dropdown_grid(
                 crate::fonts::semibold(t.font_small),
                 t.text_dim,
             );
+        }
+        // A line between groups side by side, as between the ribbon's sections.
+        for x in &layout.separators {
+            let x = origin.x + x;
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
         }
         for ((_, c), (rect, _)) in grouped.iter().zip(&layout.cells) {
             let rect = rect.translate(origin.to_vec2());
@@ -3873,6 +3884,8 @@ mod dropdown_tests {
         let headings: Vec<_> = side.headings.iter().map(|(p, _, h)| (p.x, *h)).collect();
         assert_eq!(headings, [(0.0, "Primitives"), (2.0 * GRID_CELL, "Other")]);
         assert_eq!(side.size, vec2(4.0 * GRID_CELL, GRID_HEADING + 3.0 * GRID_CELL));
+        assert_eq!(side.separators, [2.0 * GRID_CELL], "a line between the two groups");
+        assert!(rows.separators.is_empty(), "rows have none");
         assert!(side.cells.iter().all(|(r, _)| r.top() >= GRID_HEADING), "icons below the headings");
         // A menu without groups keeps its rows of five.
         let plain: Vec<_> = grouped.iter().map(|(_, c)| (None, *c)).collect();
