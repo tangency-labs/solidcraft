@@ -10,6 +10,16 @@ ordinary `execute` tool: `render.preflight`, `render.start`, `render.status`,
 `render.cancel` and `render.export`. Keep the complete returned job ID; image bytes remain
 in the session until explicit PNG export. See [render jobs](render-jobs.md).
 
+Optional [requirements and manual reviews](requirements.md) use `execute` with
+`requirements.list`, `requirements.import`, `requirements.bind`, `requirements.review` and
+`requirements.report`. Requirements can be local or copied from any issue provider. Import
+never changes model parameters; linking and applying a numeric target are separate, explicit
+actions. Reports are local drafts. An agent can use a provider's MCP alongside SolidCraft's
+MCP to fetch requirements and, after approval, publish a report and a SolidCraft screenshot.
+The desktop requirements window also has an optional native hosted-MCP connection with browser
+OAuth, system-keychain credentials and automatic Linear refresh/review comments. It does not
+require an agent or editor. See [connection setup and limits](requirements.md#optional-desktop-connection).
+
 For how the same command surface should work in the browser (workers, tiered storage, in-tab
 agents), see [web-runtime.md](web-runtime.md). For sandboxed plugins and parametric timeline
 features that also use `run(command, args)`, see [plugins.md](plugins.md). Desktop MCP in this

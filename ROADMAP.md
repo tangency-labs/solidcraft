@@ -18,6 +18,14 @@ Optional GPU viewport ambient occlusion is available in View settings and Graphi
 with persistent settings, Performance/Quality graphics presets (Quality combines AO, Fine tessellation and adaptive 2× supersampling; manual combinations show Custom), and the
 `view.ambient_occlusion` and `view.graphics_preset` commands. See [display settings](docs/ambient-occlusion.md).
 
+Optional provider-neutral requirements now have a document checklist, explicit local-parameter
+links, manual review notes and exported model-image references, and a report draft through the
+UI and MCP. Import never changes parameters; external values remain entirely optional.
+The desktop's optional native MCP/OAuth connection refreshes directly linked Linear issue text
+and can publish saved manual-review comments automatically, independently of AI chat or VS Code.
+Structured requirement inference, attachment uploads, issue-status transitions and automated
+verification remain deferred. See [requirements](docs/requirements.md).
+
 ## Scope (owner decision, 2026-10-07)
 
 The issue batch adds preservation of blind pockets in through cuts, associative projected

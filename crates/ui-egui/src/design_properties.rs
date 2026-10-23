@@ -120,6 +120,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(error) = &d.error {
             ui_kit::text(ui, error, ui_kit::Text::Report("error", true));
         }
+        if ui_kit::button(ui, "Requirements", ui_kit::Button::Normal).clicked() {
+            app.start("requirements.list");
+        }
     });
     if closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && apply(app, &mut d)) {
         return;

@@ -48,6 +48,35 @@ fn tool(s: &mut Server, name: &str, args: Value) -> Value {
     if c["type"] == "text" { serde_json::from_str(c["text"].as_str().unwrap()).unwrap_or(Value::Null) } else { c.clone() }
 }
 
+#[test]
+fn requirements_work_through_the_existing_mcp_execute_tool_without_external_parameters() {
+    let mut s = server();
+    let imported = tool(
+        &mut s,
+        "execute",
+        json!({"command": "requirements.import", "params": {"spec": {
+            "schema": "solidcraft-requirements/1",
+            "source": {"provider": "linear", "workspace": "demo", "id": "LID-42", "revision": "3"},
+            "requirements": [{"id": "assembly", "title": "Lid fits"}]
+        }}}),
+    );
+    assert_eq!(imported["items"][0]["binding_state"], "unlinked", "{imported}");
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "requirements.review", "params": {
+            "id": "assembly", "status": "done", "note": "Checked assembly", "evidence": ["lid.png"],
+            "expected_spec_hash": imported["spec_hash"], "expected_design_hash": imported["design_hash"]
+        }}),
+    );
+    let report = tool(&mut s, "execute", json!({"command": "requirements.report"}));
+    assert_eq!(report["completed"], 1, "{report}");
+    assert_eq!(report["published"], false);
+    assert!(report["markdown"].as_str().unwrap().contains("lid.png"));
+    tool(&mut s, "undo", json!({}));
+    assert_eq!(tool(&mut s, "execute", json!({"command": "requirements.report"}))["completed"], 0);
+}
+
 /// A large whitespace prefix must not evade the raw 16 MiB JSON-RPC line limit.
 #[test]
 fn whitespace_does_not_bypass_mcp_request_limit() {

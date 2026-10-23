@@ -65,6 +65,7 @@ mod kernel_heal_tests;
 mod parameters;
 mod plastic;
 mod render;
+mod requirements;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -296,6 +297,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
+    v.extend(requirements::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());

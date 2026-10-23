@@ -169,7 +169,7 @@ pub const SECTIONS: &[Section] = &[
             "inspect.continuity",
         ],
     },
-    Section { tab: "INSPECT", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
+    Section { tab: "INSPECT", panel: "HISTORY", promoted: 3, ids: &["timeline.dependents", "document.inspect", "requirements.list"] },
     Section {
         tab: "MANAGE",
         panel: "PARAMETERS",
@@ -297,6 +297,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("plastic.assign_rule", "Assign Rule"),
     ("plastic.manage_rules", "Plastic Rules"),
     ("render.scene", "Scene"),
+    ("requirements.list", "Checklist"),
     ("sheet.export_bend_table", "Bend Table"),
     ("sheet.export_dxf", "Export DXF"),
     ("sheet.flat_pattern", "Flat Pattern"),

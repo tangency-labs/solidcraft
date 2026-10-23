@@ -40,6 +40,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # API keys of the agent chat's API agents (docs/agent-chat.md) live in the system keychain:
 # Keychain on macOS, Credential Manager on Windows, the Secret Service (pure-Rust D-Bus) elsewhere.
 keyring = { version = "3.6", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
+rmcp = { version = "3.7", default-features = false, features = ["client", "auth", "reqwest-tls-no-provider", "transport-streamable-http-client-reqwest"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
+async-trait = "0.1"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 quick-xml = { workspace = true }

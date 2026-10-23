@@ -78,6 +78,7 @@ pub mod icons;
 pub mod inference;
 pub mod install;
 pub mod issue_report;
+mod issue_sync;
 pub mod joint_drag;
 pub mod keymap;
 mod linked_source;
@@ -174,6 +175,7 @@ mod primitive_units_tests;
 pub mod recovery_ui;
 pub mod ref_images;
 pub mod render_workspace;
+pub mod requirements_panel;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -359,6 +361,8 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// Native authenticated issue-system MCP client; unavailable in browser builds.
+    pub issue_system: Option<requirements_panel::IssueService>,
 }
 
 pub struct SolveApp {
@@ -374,6 +378,8 @@ pub struct SolveApp {
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
     pub services: Services,
+    /// Optional native issue accounts and their background synchronization.
+    pub issue_sync: issue_sync::State,
     file_picker: Option<file_picker::Pending>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
@@ -385,6 +391,8 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
+    /// The optional Requirements window, when open.
+    pub requirements: Option<requirements_panel::RequirementsPanel>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -544,6 +552,7 @@ impl SolveApp {
             now: 0.0,
             pre_sketch_marker: None,
             services,
+            issue_sync: Default::default(),
             file_picker: None,
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -552,6 +561,7 @@ impl SolveApp {
             dialog: None,
             params: None,
             design_properties: None,
+            requirements: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -702,6 +712,7 @@ impl SolveApp {
             "ground_shadow": self.ui.ground_shadow,
             "agent_cursor": self.ui.agent_cursor,
             "preferences": self.preferences,
+            "issue_connections": self.issue_sync.prefs(),
         })
         .to_string()
     }
@@ -709,6 +720,7 @@ impl SolveApp {
     /// Restore preferences saved with [`SolveApp::prefs`].
     pub fn load_prefs(&mut self, prefs: &str) {
         let Ok(v) = serde_json::from_str::<Value>(prefs) else { return };
+        self.issue_sync.load(&v["issue_connections"]);
         let flag = |k: &str| v.get(k).and_then(Value::as_bool);
         self.home.opened_at = v.get("recent_opened_at").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
         if let Some(d) = flag("dark") {
@@ -1027,6 +1039,10 @@ impl SolveApp {
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {
             design_properties::open(self);
+            return;
+        }
+        if id.starts_with("requirements.") {
+            requirements_panel::open(self);
             return;
         }
         if id == "assembly.bom" {
@@ -1750,6 +1766,7 @@ impl SolveApp {
         self.resolve_fit(ui.ctx());
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
+        requirements_panel::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());

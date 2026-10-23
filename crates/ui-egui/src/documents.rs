@@ -26,6 +26,7 @@ pub struct DocSlot {
     pre_sketch_marker: Option<Option<usize>>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
+    requirements: Option<crate::requirements_panel::RequirementsPanel>,
 }
 
 /// The per-design part of the UI state (what is hidden, shown or locked).
@@ -47,6 +48,7 @@ impl DocSlot {
             pre_sketch_marker: None,
             view: DocView::default(),
             occurrence_move: None,
+            requirements: None,
         }
     }
 }
@@ -129,6 +131,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
         pre_sketch_marker: std::mem::replace(&mut app.pre_sketch_marker, slot.pre_sketch_marker),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
+        requirements: std::mem::replace(&mut app.requirements, slot.requirements),
     };
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
@@ -220,6 +223,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         app.menu.props = None;
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
+        app.requirements = None;
         crate::render_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
@@ -306,6 +310,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.session.replace_design(Session::default());
+        app.requirements = None;
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
         app.cam = Camera::default();

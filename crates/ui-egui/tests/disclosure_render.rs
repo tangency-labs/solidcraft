@@ -61,3 +61,54 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
     }
     theme::set_dark(previous);
 }
+
+#[test]
+fn requirements_window_renders_a_status_list_without_external_parameters() {
+    let previous = theme::is_dark();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/requirements-review");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (dark, width, height) in [(false, 1400, 1000), (true, 1100, 700)] {
+        let mut harness = Harness::new();
+        harness.app.home.open = false;
+        harness.call("ui.resize", json!({"width":width, "height":height}));
+        harness.call("ui.set", json!({"dark":dark, "tab":"INSPECT"}));
+        harness.app.services.issue_system = Some(std::sync::Arc::new(|_, _| panic!("Local requirements must not connect")));
+        harness
+            .app
+            .run(
+                "requirements.import",
+                json!({"spec":{
+                    "schema":"solidcraft-requirements/1",
+                    "requirements":[{"id":"fit", "title":"Lid fits the enclosure", "description":"Check the assembly clearance."},
+                        {"id":"edges", "title":"Exposed edges are smooth"}]
+                }}),
+            )
+            .unwrap();
+        harness.app.run("requirements.review", json!({"id":"fit", "status":"in_progress", "note":"Checking assembly clearance"})).unwrap();
+        harness.frames(3);
+        if width >= 1400 {
+            assert!(scenario::handle_at("button:requirements.list").is_some());
+            harness.step(&json!({"click":{"handle":"toolbar:requirements.list"}})).unwrap();
+        } else {
+            harness.app.start("requirements.list");
+        }
+        harness.frames(3);
+        assert!(harness.widget("In progress  |  Lid fits the enclosure").is_some());
+        assert!(harness.widget("Open  |  Exposed edges are smooth").is_some());
+        harness.ctx = egui::Context::default();
+        solidcraft_ui_egui::fonts::setup_fonts(&harness.ctx);
+        theme::apply(&harness.ctx);
+        let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
+        for _ in 0..8 {
+            raster::paint_sized(&mut harness, &mut textures, vec![], egui::vec2(width as f32, height as f32));
+        }
+        assert!(harness.app.session.doc.params.is_empty());
+        let output = raster::paint_sized(&mut harness, &mut textures, vec![], egui::vec2(width as f32, height as f32));
+        let screenshot = raster::raster(&mut harness, &textures, output);
+        assert_eq!((screenshot.width(), screenshot.height()), (width, height));
+        assert!(screenshot.pixels().filter(|pixel| pixel.0 != [255, 255, 255, 255]).count() > 10_000);
+        let mode = if dark { "dark-compact" } else { "light" };
+        screenshot.save(dir.join(format!("{mode}.png"))).unwrap();
+    }
+    theme::set_dark(previous);
+}

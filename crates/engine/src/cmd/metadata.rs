@@ -94,6 +94,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn requirements_import_is_readable_and_undoable() {
+        let mut s = Session::default();
+        let before = s.undo.len();
+        run(
+            &mut s,
+            "requirements.import",
+            json!({"spec": {
+                "schema": "solidcraft-requirements/1",
+                "source": {"provider": "linear", "workspace": "demo", "id": "LID-42", "revision": "3"},
+                "requirements": [{"id": "width", "title": "Overall width", "value": 400.0, "unit": "mm"}]
+            }}),
+        );
+        let result = run(&mut s, "requirements.list", json!({}));
+        assert_eq!(result["spec"]["requirements"][0]["id"], "width");
+        assert_eq!(s.undo.len(), before + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(run(&mut s, "requirements.list", json!({}))["spec"].is_null());
+    }
+
     /// A folder of its own for one test's files.
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("solidcraft-metadata-{}-{name}", std::process::id()));
