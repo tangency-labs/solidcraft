@@ -277,6 +277,51 @@ fn drawing_onto_a_curve_keeps_the_point_on_it() {
     assert!((st.dist(cc) - 8.0).abs() < 1e-7, "{st:?} {cc:?}");
 }
 
+#[test]
+fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 10}))["curves"])[0].clone();
+    let hi = [5.0, 5.0 * 3.0f64.sqrt()];
+    let r = run(&mut s, "sketch.line", json!({"points": [format!("x:{a}+{b}:{},{}", hi[0], hi[1]), [40, 10]], "infer": false, "connect": false}));
+    let n = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let st = sk.resolve_point(&format!("{n}.start")).and_then(|i| sk.point(i)).unwrap();
+    assert!(st.dist(Vec2::new(hi[0], hi[1])) < 1e-6, "{st:?}");
+    let start = sk.resolve_point(&format!("{n}.start")).unwrap();
+    let ia = sk.curve_index(&a).unwrap();
+    let ib = sk.curve_index(&b).unwrap();
+    let on = |c: usize| {
+        sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p, c: curve } if p == start && curve == c))
+    };
+    assert!(on(ia) && on(ib), "{:?}", sk.constraints);
+    run(&mut s, "sketch.dimension", json!({"entities": [a], "value": 12}));
+    let sk = sketch(&s);
+    let st = sk.resolve_point(&format!("{n}.start")).and_then(|i| sk.point(i)).unwrap();
+    assert!(sk.shape(ia).expect("circle a").dist(st) < 1e-5, "on the resized circle: {st:?}");
+    assert!(sk.shape(ib).expect("circle b").dist(st) < 1e-5, "still on the other circle: {st:?}");
+    assert!(st.y > 0.0, "the upper crossing: {st:?}");
+}
+
+#[test]
+fn drawing_at_a_curve_crossing_refuses_hostile_arguments() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 10], [10, 10]], "infer": false}))["curves"])[0].clone();
+    for p in [
+        json!({"points": ["x:", [1, 1]]}),
+        json!({"points": [format!("x:{a}:1,1"), [1, 1]]}),
+        json!({"points": [format!("x:{a}+{a}:5,0"), [1, 1]]}),
+        json!({"points": [format!("x:{a}+{b}:nan,0"), [1, 1]]}),
+        json!({"points": [format!("x:{a}+{b}:1,2,3"), [1, 1]]}),
+        json!({"points": ["x:missing+also:0,0", [1, 1]]}),
+        json!({"points": [format!("x:{a}+{b}:5,5"), [1, 1]]}),
+        json!({"points": [format!("x:{}+{b}:0,0", "z".repeat(200)), [1, 1]]}),
+    ] {
+        assert!(s.execute("sketch.line", &p).is_err(), "{p}");
+    }
+}
+
 /// A faucet spout path: a vertical riser, a horizontal top and an outlet sloping down, joined
 /// by fillets. The riser points up and the outlet down-left, so their directions are 150° apart
 /// while the lines meet at 30°.

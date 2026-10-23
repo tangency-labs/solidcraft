@@ -58,7 +58,7 @@ While drawing or dragging a sketch point:
 | Keys | Action |
 |---|---|
 | Ctrl/Cmd or Alt/Option (default) | suppress auto-snap for that gesture |
-| Shift | prefer a line midpoint when targeting |
+| Shift | prefer a line midpoint when targeting (skips a curve-curve crossing) |
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and
 Ctrl/Cmd to add or toggle (Preferences › Selection can make Shift add-only).

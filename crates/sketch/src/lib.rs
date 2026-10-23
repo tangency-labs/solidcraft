@@ -63,7 +63,7 @@ pub use profiles::{
     CurvePick, Profile, distinct_curves, find_drawn_profiles, find_profiles, merge_regions, profile_at_point, profile_by_curves,
     without_text_counters,
 };
-pub use shape::{Shape, intersections, intersections_within};
+pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, SolveReport, SolveStatus, constraint_residual, determined_by, measure_dimension, move_line_towards,

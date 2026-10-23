@@ -6,8 +6,8 @@
 use serde_json::{Value, json};
 use solidcraft_doc::project::resolve;
 use solidcraft_doc::{Document, FeatureKind};
-use solidcraft_geom::{Plane, Vec3};
-use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
+use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch, nearest_crossing};
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, vec3};
@@ -421,11 +421,38 @@ fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"auto_project": s.auto_project}))
 }
 
+/// `"x:<a>+<b>:x,y"` from interactive snapping: two distinct curve ids and a hint point.
+fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String, Vec2)>> {
+    let Some(raw) = v.as_str() else { return Ok(None) };
+    let Some(t) = raw.strip_prefix("x:") else { return Ok(None) };
+    if t.len() > 256 {
+        return Err(bad(cmd, "`x:` snap is too long"));
+    }
+    let Some((ids, xy)) = t.rsplit_once(':') else {
+        return Err(bad(cmd, "`x:` needs two curve ids and a point"));
+    };
+    if ids.bytes().filter(|b| *b == b'+').count() != 1 {
+        return Err(bad(cmd, "`x:` needs two distinct curve ids"));
+    }
+    let Some((a, b)) = ids.split_once('+') else {
+        return Err(bad(cmd, "`x:` needs two distinct curve ids"));
+    };
+    if a.is_empty() || b.is_empty() || a == b || a.len() > 128 || b.len() > 128 {
+        return Err(bad(cmd, "`x:` needs two distinct curve ids"));
+    }
+    let n: Vec<f64> = xy.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(|x| x.parse().ok()).collect();
+    match n.as_slice() {
+        [x, y] if x.is_finite() && y.is_finite() => Ok(Some((a.to_string(), b.to_string(), Vec2::new(*x, *y)))),
+        _ => Err(bad(cmd, "`x:` point must be two finite numbers")),
+    }
+}
+
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:
 /// `{"vertex": [x,y,z]}` projects the vertex (a linked point); `{"on_edge": [x,y,z]}` projects
 /// the edge and makes a free point on it (coincident with the projection); `"mid:<line>"`
-/// makes a point held at the line's midpoint (and `"vertex:x,y,z"` is the vertex form). Everything
-/// else is left as it is. The links are added to the active sketch in the session's document.
+/// makes a point held at the line's midpoint; `"x:<a>+<b>:x,y"` makes a point at the crossing of
+/// two lines, circles or arcs (and `"vertex:x,y,z"` is the vertex form). Everything else is left
+/// as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(id) = s.active_sketch else { return Ok(p.clone()) };
     let mut out = p.clone();
@@ -447,11 +474,12 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             let (c, xy) = t.rsplit_once(':')?;
             let n: Vec<f64> = xy.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             match n[..] {
-                [x, y] if x.is_finite() && y.is_finite() => Some((c.to_string(), solidcraft_geom::Vec2::new(x, y))),
+                [x, y] if x.is_finite() && y.is_finite() => Some((c.to_string(), Vec2::new(x, y))),
                 _ => None,
             }
         });
-        if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() {
+        let crossing = curve_intersection_arg(v, cmd)?;
+        if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() && crossing.is_none() {
             return Ok(());
         }
         if doc.is_none() {
@@ -470,6 +498,19 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             };
             let pi = sk.add_point(at, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c }, None)?;
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
+        } else if let Some((a, b, near)) = crossing {
+            let ci = sk.curve_index(&a).ok_or_else(|| bad(cmd, format!("unknown curve `{a}`")))?;
+            let cj = sk.curve_index(&b).ok_or_else(|| bad(cmd, format!("unknown curve `{b}`")))?;
+            if ci == cj {
+                return Err(bad(cmd, "`x:` needs two distinct curves"));
+            }
+            let sha = sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
+            let shb = sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
+            let at = nearest_crossing(&sha, &shb, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
+            let pi = sk.add_point(at, None)?;
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: cj }, None)?;
             sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some(line) = mid {
             // "mid:<line>": a new point at the line's midpoint, kept there.

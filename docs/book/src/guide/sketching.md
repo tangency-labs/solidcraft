@@ -154,6 +154,13 @@ ending the tool or losing picked points and inline values. The preview and hover
 keep construction dashes and centerline dash-dot patterns visible. With curves selected,
 Construction changes those curves as before.
 
+The pointer snaps to existing sketch points, to a line's midpoint, and to **where two
+curves cross** (two lines, a line and a circle or arc, or two circles or arcs). The snap
+hint shows **X**. The new point stays on both curves when either one moves. Hold **Shift**
+to prefer a line midpoint instead; hold Ctrl/Cmd or Alt/Option (the default suppress chord)
+to stop snapping for that gesture. Scripts pass `"x:<curve>+<curve>:x,y"` as a point
+argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
+
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
