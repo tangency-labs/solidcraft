@@ -19,16 +19,14 @@
 //!
 //! A state is `type is_cyl is_cone is_cylinder base semi inside swap planar make_nurb_gen
 //! bounded O[3] X[3] Y[3] D[4] bot_r top_r MAXD[4] apex_status apex_cyl apex[3]
-//! apex_param height_ok [height] have_polar angle_count [first last] polar_curve
+//! apex_param height have_polar angle_count [first last] polar_curve
 //! gen_curve has_nurb [p q nu nv cpts(4 nu nv, v fastest) nku KU nkv KV]`, a curve `has
 //! [type step0 step1 has_nurb [p n cpts(4 n) nk knots]]`.
 //!
 //! The op record is the single value `-1002` (`SC_ERR_ARG`) where the upstream code would
 //! read uninitialised values or crash (the shim tests this with the same upstream calls):
-//! `Offset` and `Trim` on a cone with NURB but no polar curve (`GetHeight`); `Offset`
-//! whose apex truncation cannot make its cone or gets a non-finite height; `Trim` whose
-//! domain conversion fails or whose seam line is parallel to the ellipse plane (or of zero
-//! length).
+//! `Offset` whose apex truncation cannot make its cone or gets a non-finite height; `Trim`
+//! whose seam line is parallel to the ellipse plane (or of zero length).
 //!
 //! The wrappers accept finite values only (as the `surface.cone_p1` wrappers; upstream
 //! answers statuses or degenerate geometry for any finite input) and, for `Trim`, ellipse

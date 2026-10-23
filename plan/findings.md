@@ -13991,6 +13991,13 @@ evidence only. See STATUS for the exact handoff, artifact paths and resume steps
   `sm_GetEllipseTrimIntervals` through `IntersectWithCone`, which has no such guard yet.
   Reproduced with main's unpatched `cone/p2.rs` too. Tracked in issue #276; the
   `surface.cone_p2` refusals that are now stricter than needed are issue #277.
+- **Issue #277 (2026-10-23).** The `surface.cone_p2` shim and runner no longer refuse a
+  cone without a polar curve (`height_defined`) or a trim whose domain conversion fails:
+  both are defined upstream (`GetHeight` keeps initialised points, UB-87; the domain stays
+  default-constructed or becomes the NURB domain). The state now always carries the
+  height. Only the UB-154 line/plane refusal remains. Fixture:
+  `surface.cone_p2/no_polar_curve.json` (cones with Y axis `(0, -1e-300, 0)`: offset,
+  trim, rebuild and recognize).
 
 
 ## PR #208 — current main review integration (2026-10-20)

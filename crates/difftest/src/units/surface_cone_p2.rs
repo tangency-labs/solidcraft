@@ -555,12 +555,6 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
     o.extend_from_slice(cur.knots());
 }
 
-/// `GetHeight` evaluates through the polar converter's curve: defined with one or
-/// without NURB.
-fn height_defined(s: &Cone) -> bool {
-    s.rev().base().gw_nurb().is_none() || s.rev().polar_curve().is_some()
-}
-
 /// The state (layout in the FFI module docs).
 fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
     let rev = s.rev();
@@ -591,11 +585,7 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &Cone) -> solidcore::Result<()> {
     o.push(flag(apex.is_cylinder));
     push_v(o, apex.point);
     o.push(apex.param);
-    let height_ok = height_defined(s);
-    o.push(flag(height_ok));
-    if height_ok {
-        o.push(s.height(k)?);
-    }
+    o.push(s.height(k)?);
     let pc = rev.polar_converter();
     o.push(flag(rev.have_polar_conversion()));
     let angles = pc.angles();
@@ -716,8 +706,7 @@ fn trim_domain(s: &Cone, f: [f64; 4]) -> Extent2d {
     Extent2d::from_points(nat.evaluate(f0, f1), nat.evaluate(f2, f3))
 }
 
-/// The shim's `trim_defined`: the domain conversion and the two seam line / ellipse
-/// plane intersections succeed.
+/// The shim's `trim_defined`: the two seam line / ellipse plane intersections succeed.
 fn trim_defined(
     k: &Kernel,
     s: &Cone,
@@ -727,18 +716,19 @@ fn trim_defined(
     dom: &Extent2d,
 ) -> bool {
     let z = x.cross(y);
-    let (Ok(a), Ok(b)) = (
+    // status ignored as upstream: a failed corner conversion leaves the default domain, a
+    // reversed result is replaced by the NURB domain
+    let mut anal = Extent2d::new();
+    if let (Ok(a), Ok(b)) = (
         s.convert_uv_from_nurbs_to_step(k, dom.min()),
         s.convert_uv_from_nurbs_to_step(k, dom.max()),
-    ) else {
-        return false;
-    };
-    let mut anal = Extent2d::new();
-    if anal
-        .set_min_max_coords(a.x, a.y.min(b.y), b.x, a.y.max(b.y))
-        .is_err()
-    {
-        anal = *dom;
+    ) {
+        if anal
+            .set_min_max_coords(a.x, a.y.min(b.y), b.x, a.y.max(b.y))
+            .is_err()
+        {
+            anal = *dom;
+        }
     }
     let corner = |u: f64, v: f64| {
         s.evaluate_step_point(anal.evaluate(u, v))
@@ -759,7 +749,7 @@ fn trim_defined(
 fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::Result<()> {
     match op {
         OpIn::Offset { distance, tol } => {
-            if !height_defined(s) || !offset_defined(k, s, *distance, *tol)? {
+            if !offset_defined(k, s, *distance, *tol)? {
                 o.push(SC_ERR_ARG);
                 return Ok(());
             }
@@ -814,7 +804,7 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
         } => {
             let dom = trim_domain(s, *dom);
             let (origin, x, y) = (v3(*origin), v3(*x), v3(*y));
-            if !height_defined(s) || !trim_defined(k, s, x, y, origin, &dom) {
+            if !trim_defined(k, s, x, y, origin, &dom) {
                 o.push(SC_ERR_ARG);
                 return Ok(());
             }

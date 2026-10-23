@@ -11,15 +11,12 @@
 //
 // Inputs the upstream code cannot handle without undefined behaviour are answered with a
 // record `SC_ERR_ARG` (-1002) instead of a call (the Rust side tests the same condition):
-//  * GetHeight (offset, trim and the state) evaluates through the polar converter's curve
-//    and reads uninitialised points when there is none: the offset and trim ops need it,
-//    the state leaves the height out without it;
 //  * CreateOffsetSurface dereferences the result of CreateCanonical unchecked in its apex
 //    truncation branch (a NULL cone crashes, a non-finite height recurses without bound):
 //    that construction is tried first with the same formulas;
 //  * sm_GetEllipseTrimIntervals reads the parameter of a failed smgu_LinePlaneIntersect
-//    (seam line parallel to the ellipse plane, or of zero length) and the domain of a failed
-//    ConvertDomainFromNURBSToSTEP: both are computed first with the same calls.
+//    (seam line parallel to the ellipse plane, or of zero length): it is computed first
+//    with the same calls.
 #include "sc_shim.h"
 
 #include "StdAfx.h"
@@ -595,18 +592,6 @@ void put_curve(std::vector<double>& o, const SmCurve* c)
         o.push_back(cur->knt->U[i]);
 }
 
-bool has_polar_curve(const SmCone* s)
-{
-    const SmPolarConversion& pc = s->*ConePeek::polar();
-    return pc.GetCurve() != NULL;
-}
-
-// GetHeight evaluates through the polar converter's curve: defined with one or without NURB.
-bool height_defined(const SmCone* s)
-{
-    return s->GetGwNurbPointer() == NULL || has_polar_curve(s);
-}
-
 // The cone state (the surface.cone_p1 shim's layout without the type strings).
 void put_state(std::vector<double>& o, const SmCone* s)
 {
@@ -645,10 +630,9 @@ void put_state(std::vector<double>& o, const SmCone* s)
     o.push_back(flg(cyl));
     put_vec(o, apex);
     o.push_back(apex_param);
-    bool height_ok = height_defined(s);
-    o.push_back(flg(height_ok));
-    if (height_ok)
-        o.push_back(s->GetHeight());
+    // defined without a polar curve too: the point evaluations fail (NER in
+    // ConvertToPolarParameter) and the ignored statuses leave initialised default points
+    o.push_back(s->GetHeight());
     const SmPolarConversion& pc = s->*ConePeek::polar();
     o.push_back(flg(s->HavePolarConversion()));
     ULONG cnt = pc.GetAngleCount();
@@ -783,22 +767,15 @@ bool offset_defined(const SmContext& ctx, const SmCone* s, double dist, double t
 }
 
 // The calls of sm_GetEllipseTrimIntervals whose failures it ignores before reading their
-// outputs (ConvertDomainFromNURBSToSTEP, smgu_LinePlaneIntersect): false when one fails.
+// outputs (smgu_LinePlaneIntersect): false when one fails.
 bool trim_defined(const SmCone* s, const SmVector3d& x, const SmVector3d& y,
                   const SmPoint3d& origin, const SmExtent2d& dom)
 {
     SmVector3d sEllipseZ = x * y;
+    // status ignored as upstream (defined): a failed corner conversion leaves the default
+    // domain, a reversed result is replaced by the NURB domain
     SmExtent2d sAnalUVDomain;
-    if (s->ConvertDomainFromNURBSToSTEP(dom, sAnalUVDomain) != SM_SUCCESS)
-    {
-        // a reversed result is replaced by the NURB domain (defined); a failed conversion
-        // leaves the default domain
-        SmPoint2d a, b;
-        if (s->ConvertUVFromNURBSToSTEP(dom.GetMin(), a) != SM_SUCCESS ||
-            s->ConvertUVFromNURBSToSTEP(dom.GetMax(), b) != SM_SUCCESS)
-            return false;
-        sAnalUVDomain = dom;
-    }
+    s->ConvertDomainFromNURBSToSTEP(dom, sAnalUVDomain);
     SmPoint3d c[4];
     s->EvaluateSTEPPoint(sAnalUVDomain.Evaluate(0.0, 0.0), c[0]);
     s->EvaluateSTEPPoint(sAnalUVDomain.Evaluate(0.0, 1.0), c[1]);
@@ -817,7 +794,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
     {
         double dist = rd.num();
         double tol = rd.num();
-        if (!height_defined(s) || !offset_defined(ctx, s, dist, tol))
+        if (!offset_defined(ctx, s, dist, tol))
         {
             o.push_back((double)SC_ERR_ARG);
             break;
@@ -876,7 +853,7 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         SmExtent2d nat = s->GetNaturalUVDomain();
         SmExtent2d dom(nat.Evaluate(f0, f1), nat.Evaluate(f2, f3));
         double tol = rd.num();
-        if (!height_defined(s) || !trim_defined(s, x, y, origin, dom))
+        if (!trim_defined(s, x, y, origin, dom))
         {
             o.push_back((double)SC_ERR_ARG);
             break;
