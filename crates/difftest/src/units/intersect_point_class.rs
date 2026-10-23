@@ -608,7 +608,13 @@ impl ClassGeometry<H> for Pool {
         self.topo.vertex_point(o.0)
     }
     fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
-        self.topo.zone_tol_3d(o.0)
+        self.topo.zone_tol_3d(o.0).or_else(|| {
+            if o.1 == ClassObjectKind::Edgeuse {
+                Some(solidcore::geom::tol::ZONE_TOL_3D)
+            } else {
+                None
+            }
+        })
     }
     fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
         self.topo.entity(o.0)
