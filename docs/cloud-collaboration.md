@@ -17,6 +17,18 @@ The present client opens designs only. It rejects a drawing schema rather than d
 
 ## Future collaboration
 
+Track [live co-editing research #5184](https://github.com/tangency-labs/solidcraft/issues/5184),
+including [the proposal to pull/render another branch before adding live visualization](https://github.com/tangency-labs/solidcraft/issues/5184#issuecomment-6355521914).
+The transport, ordering and hosting approach are still undecided. Cloud saves must
+not require editing locks, freeze a per-command commit policy, or introduce a
+second authoritative change model. Reuse the document-level text/diff/merge work
+(#626), collision-free ids (#1017) and id references (#1134) when available.
+Cloud captures remain snapshots rather than a command-replay protocol. A future
+shared working copy can publish through repository adapters while session state,
+presence and personal undo remain outside stored design snapshots. A later jj
+integration can use its Git interoperability without changing asset addressing
+or making the cloud package own the editor's history.
+
 The existing seams are sufficient preparation:
 
 | Existing seam | Later integration |
