@@ -957,7 +957,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.line_segment([ws.right_top(), ws.right_bottom()], Stroke::new(1.0, t.border));
         }
         let render = crate::render_workspace::active(app);
-        let workspace_icon = if render { "ws_render" } else { "ws_design" };
+        let manufacturing = crate::manufacture_workspace::active(app);
+        let workspace_icon = if render {
+            "ws_render"
+        } else if manufacturing {
+            "ws_manufacture"
+        } else {
+            "ws_design"
+        };
         icons::paint_icon(
             &painter,
             Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
@@ -967,7 +974,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ribbon_text(
             ui,
             pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
-            app.tr(if render { "ui.render" } else { "ui.design" }),
+            app.tr(if render {
+                "ui.render"
+            } else if manufacturing {
+                "ui.manufacture"
+            } else {
+                "ui.design"
+            }),
             t.font_button,
             t.text,
             true,
