@@ -1771,6 +1771,12 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             } else if cmds.is_empty() {
                                 ui.label(egui::RichText::new(crate::i18n::tr_label("Not available yet")).color(t.text_dim));
                             }
+                            if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
+                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds));
+                                grid_action(app, ui, action, &mut menu, &mut toggle);
+                                section_footer(ui, "ui.ribbon_grid_footer");
+                                return;
+                            }
                             if sketch_create {
                                 // One width for every row and the footer, as in the other panels.
                                 let row_w = dropdown_width(app, ui, &cmds);
@@ -1781,15 +1787,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
-                                match dropdown_grid(app, ui, &tab, &grouped) {
-                                    Some((id, RowAction::Menu(at))) => menu = Some((at, id)),
-                                    Some((id, RowAction::TogglePin)) => toggle = Some(id),
-                                    Some((id, RowAction::Start)) => {
-                                        app.start(id);
-                                        ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
-                                    }
-                                    Some((_, RowAction::None)) | None => {}
-                                }
+                                let action = dropdown_grid(app, ui, &tab, &grouped);
+                                grid_action(app, ui, action, &mut menu, &mut toggle);
                                 section_footer(ui, "ui.ribbon_grid_footer");
                                 return;
                             }
@@ -2193,6 +2192,45 @@ fn dropdown_row(
         return RowAction::Start(rect);
     }
     RowAction::None
+}
+
+/// Take up what was done in a grid drop-down, as for a list row: start the command (and close
+/// the drop-down), open its menu, or pin or unpin it.
+fn grid_action(
+    app: &mut SolveApp,
+    ui: &egui::Ui,
+    action: Option<(&'static str, RowAction)>,
+    menu: &mut Option<(egui::Pos2, &'static str)>,
+    toggle: &mut Option<&'static str>,
+) {
+    match action {
+        Some((id, RowAction::Menu(at))) => *menu = Some((at, id)),
+        Some((id, RowAction::TogglePin)) => *toggle = Some(id),
+        Some((id, RowAction::Start)) => {
+            app.start(id);
+            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
+        }
+        Some((_, RowAction::None)) | None => {}
+    }
+}
+
+/// Sketch › Create in the grid: each family of variants under its own heading (Line, Rectangle,
+/// Circle…), then the other tools under "More". The list keeps its family sub-menus.
+fn sketch_create_grouped(cmds: &[&'static solidcraft_engine::CommandSpec]) -> Vec<(Option<&'static str>, &'static solidcraft_engine::CommandSpec)> {
+    let mut out = Vec::new();
+    for f in crate::sketch_families::FAMILIES {
+        let mut heading = Some(f.label);
+        for id in f.commands {
+            if let Some(c) = cmds.iter().find(|c| c.id == *id) {
+                out.push((heading.take(), *c));
+            }
+        }
+    }
+    let mut heading = Some("More");
+    for c in cmds.iter().filter(|c| crate::sketch_families::family(c.id).is_none()) {
+        out.push((heading.take(), *c));
+    }
+    out
 }
 
 /// A drop-down's commands without those the ribbon shows as buttons (`ribbon_menus_skip_pinned`),
@@ -3937,6 +3975,34 @@ mod dropdown_tests {
         h.frames(4);
         assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.loft").is_none(), "removed: {:?}", h.app.toolbar_custom.panels);
         assert!(crate::scenario::handle_at("button:solid.loft").is_none(), "and gone from the ribbon");
+    }
+
+    /// Sketch › Create in the grid shows every variant of each family (Line, Rectangle, …) under
+    /// the family's heading, then the other tools, as large icons; a click starts the tool.
+    #[test]
+    fn sketch_create_in_the_grid_shows_every_variant() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.preferences.ribbon_icon_grid = true;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
+        h.frames(4);
+        let cells: Vec<String> = crate::scenario::handles("dropdown:").into_iter().map(|(id, _)| id).collect();
+        for id in ["sketch.line", "sketch.rectangle.center", "sketch.circle.three_point", "sketch.arc.tangent", "sketch.polygon.edge", "sketch.point"]
+        {
+            assert!(cells.iter().any(|c| *c == format!("dropdown:{id}")), "{id} is an icon of the grid: {cells:?}");
+        }
+        let grouped = sketch_create_grouped(
+            &solidcraft_engine::command_specs().into_iter().filter(|c| c.id.starts_with("sketch.rectangle")).collect::<Vec<_>>(),
+        );
+        assert_eq!(grouped.first().and_then(|(h, _)| *h), Some("Rectangle"));
+        assert!(grouped.iter().skip(1).all(|(h, _)| h.is_none()), "one heading per family");
+        h.step(&json!({"click":{"handle":"dropdown:sketch.rectangle.center"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("toolbar_dropdown").is_none(), "a click closes the drop-down");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.rectangle.center"), "and starts the tool");
     }
 
     /// With `ribbon_menus_skip_pinned`, a drop-down leaves out the commands the ribbon shows as
