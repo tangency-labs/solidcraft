@@ -13,11 +13,11 @@
 //! reports its first entry as the `status` (`0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for
 //! a Rust `InvalidInput`, `-1` for a Rust error upstream cannot produce) and the rest as `out`.
 //!
-//! Deferred cases: every face case (the Rust side cannot put the surface on a face:
-//! `SmBrep::CreateFaceFromSurface`, `topology.brep_p8`), and edge use implants that reach
-//! `SmSurface::GetSingularities` (cache domain at a natural boundary), `FindUVNodes` (no node
-//! given) or `SubdivideNode` (large nodes with subdivision on). Every run has at least
-//! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are redrawn.
+//! Face cases independently construct the same naturally trimmed B-spline face as
+//! the shim, then use the shared `BrepCacheFace` adapter for cache construction and
+//! classification. Missing downstream services remain explicit deferrals. Every
+//! run has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi
+//! wrapper rejects are redrawn.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -45,6 +45,9 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+
+#[path = "surface_trim_srf_cache/constructed_face.rs"]
+mod constructed_face;
 
 #[path = "surface_trim_srf_cache/native_face.rs"]
 mod native_face;
@@ -275,8 +278,14 @@ fn push_srf(o: &mut Vec<f64>, b: &BssIn) -> Result<(), HarnessError> {
     let s = srf(&b.srf)?;
     let (n, m) = shape(&s)?;
     o.extend([n as f64, m as f64, s.p as f64, s.q as f64]);
-    let ku = s.u.len().checked_sub(1).ok_or_else(|| harness("empty u knots"))?;
-    let kv = s.v.len().checked_sub(1).ok_or_else(|| harness("empty v knots"))?;
+    let ku =
+        s.u.len()
+            .checked_sub(1)
+            .ok_or_else(|| harness("empty u knots"))?;
+    let kv =
+        s.v.len()
+            .checked_sub(1)
+            .ok_or_else(|| harness("empty v knots"))?;
     o.extend([ku as f64, kv as f64]);
     for row in &s.net {
         for p in row {
@@ -544,7 +553,7 @@ type Run = Result<Vec<f64>, SolidError>;
 
 #[allow(clippy::too_many_lines)]
 fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let bss = bss_of(&i.srf)?;
     let mut o = vec![0.0];
     let run: Run = match &i.op {
@@ -647,15 +656,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Ok(o)
             }
         }
-        OpIn::Face { .. } => {
-            // the C++ side puts the surface on a face of a new brep: the Rust side has no
-            // face to give the cache, so the case defers on that construction
-            // UNPORTED(topology.brep_p8): SmBrep::CreateFaceFromSurface
-            Err(SolidError::unported(
-                "SmBrep::CreateFaceFromSurface",
-                "topology.brep_p8",
-            ))
-        }
+        OpIn::Face { build, points } => constructed_face::run(&mut k, bss, *build, points),
     };
     Ok(run)
 }
@@ -1103,9 +1104,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    /// The generators reach every op with successful outcomes on the Rust side (the
-    /// face cases are always deferred until `SmBrep::CreateFaceFromSurface` is
-    /// ported).
+    /// The generators reach every op with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
@@ -1161,7 +1160,7 @@ mod tests {
         for (k, v) in &tally {
             println!("{k:?}: {v}");
         }
-        for op in ["New", "PointTest", "ImplantEu"] {
+        for op in ["New", "PointTest", "ImplantEu", "Face"] {
             assert!(
                 tally.keys().any(|(n, k)| n == op && k == "status:0"),
                 "{op} never succeeds"
