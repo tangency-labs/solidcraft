@@ -15,18 +15,3 @@
 unit = "blend.fillet_intersector"
 case = "rv_next_clipped_step"
 why = "StepSolve clipped branch differs by a few ULP from C++; suspected p3 evaluating offset-surface copies vs the solver's own objects; pre-existing, newly reachable via #212 (plan/findings.md: blend.fillet_intersector rv_next_clipped_step)"
-
-[[mismatch]]
-unit = "topology.face_p3"
-case = "cyl_bspline_uv_trim_plain"
-why = "out[2] C++ 9.1e-17 vs Rust 0 on the B-spline cylinder UV trim, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.face_p3)"
-
-[[mismatch]]
-unit = "topology.face_p3"
-case = "cyl_bspline_uv_trim_own"
-why = "out[2] C++ 9.1e-17 vs Rust 0 on the B-spline cylinder UV trim, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.face_p3)"
-
-[[mismatch]]
-unit = "boolean.merge_p2"
-case = "make_faceuse_sphere"
-why = "merged topology len C++ 278 vs Rust 274, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, boolean.merge_p2)"

@@ -1085,6 +1085,33 @@ pub fn get_surface_cache_with_face<O: Copy + PartialEq>(
     }
 }
 
+/// `smsurf_GetSurfaceCache` of a surface without face (`GetFace()` is `NULL`): its
+/// trimmed surface cache built standalone ([`make_trim_srf_cache`]), else its surface
+/// cache wrapped as one, as [`get_surface_cache_with_face`] wraps it.
+///
+/// # Errors
+///
+/// As [`get_surface_cache_with_face`].
+pub fn get_trim_surface_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    surface: &Surface,
+    handle: Option<O>,
+) -> Result<TrimSrfCache<O>> {
+    // if possible - get or make TrimSrfCache
+    match make_trim_srf_cache(k, surface, handle) {
+        Ok(c) => Ok(c),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::NotFound { .. }),
+        ) => Err(e),
+        // else - get or make SurfaceCache
+        Err(_) => Ok(TrimSrfCache::from_base(make_surface_cache(
+            k, surface, handle,
+        )?)),
+    }
+}
+
 /// `smsurf_GetSurfaceCache`: the surface's trimmed surface cache, else its surface
 /// cache, built fresh.
 ///

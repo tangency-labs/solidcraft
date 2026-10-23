@@ -107,7 +107,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment};
-use crate::surface::surface::p1::get_surface_cache_with_face;
+use crate::surface::surface::p1::{get_surface_cache_with_face, get_trim_surface_cache};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCacheOptions};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
@@ -295,7 +295,10 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
 /// `smsurf_GetSurfaceCache(pFace->GetSurface())`: the trimmed surface cache of face
 /// `f`'s surface built with the face ([`get_surface_cache_with_face`]; this creates
 /// the face's UV trim curves), else its plain surface cache wrapped as one. `handle`
-/// is the surface's handle in the cache's object space.
+/// is the surface's handle in the cache's object space. While the surface's owner is
+/// cleared ([`Brep::is_surface_owner_cleared`], inside `CreateUVTrimCurve(s)`) the
+/// surface has no face upstream, so the cache is built standalone
+/// ([`get_trim_surface_cache`]) and makes no UV trim curves.
 ///
 /// # Errors
 ///
@@ -314,6 +317,12 @@ pub fn face_surface_cache(
         .as_ref()
         .ok_or(SolidError::null_pointer(OP_CACHE_FACE))?
         .clone_for_evaluation()?;
+    if b.is_surface_owner_cleared(f) {
+        // `GetFace()` is NULL while the owner is cleared
+        let mut surface = surface;
+        let _ = surface.set_owner(None::<crate::geom::object::ObjectRef>);
+        return get_trim_surface_cache(k, &surface, handle);
+    }
     get_surface_cache_with_face(k, &surface, handle, &mut BrepCacheFace { b, f })
 }
 

@@ -45,7 +45,11 @@
 //!   [`SolidError::InvalidInput`].
 //! - **`CreateUVTrimCurves`** takes the optional UV curves and their orientations as one
 //!   argument (upstream requires both or neither). The surface owner is cleared and
-//!   restored around the walk ([`face2::RescueSurfaceOwner`]), also on errors. A chosen
+//!   restored around the walk ([`face2::RescueSurfaceOwner`]), also on errors, and the
+//!   scope is recorded on the B-rep ([`Brep::begin_surface_owner_cleared`]): a nested
+//!   `smsurf_GetSurfaceCache` of the face's surface (an edge use's `EvaluateBinormal`)
+//!   then builds no face trim and does not create the face's UV trim curves itself,
+//!   as upstream, whose surface has no face meanwhile. A chosen
 //!   candidate curve is moved out of its slot; unused candidates stay with the caller
 //!   (upstream deletes them).
 //! - **`FaceIntersect`** returns its outputs in [`FaceIntersection`] (the optional ones
@@ -788,8 +792,12 @@ pub fn create_uv_trim_curves(
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
         s.set_owner(None);
     }
+    // (recorded on the B-rep: a nested `smsurf_GetSurfaceCache` of the face's surface
+    // then finds no face, so it does not build the face's UV trim curves itself)
+    b.begin_surface_owner_cleared(f);
     let result = create_uv_trim_curves_body(k, b, f, adjust_tolerances, opt_uv_curves, &pre);
     // SmRescueSurfaceOwner's destructor restores the owner on every return
+    b.end_surface_owner_cleared(f);
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
         rescue.restore(s);
     }

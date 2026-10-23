@@ -637,6 +637,13 @@ pub struct Brep {
     /// `m_pDeletedSurfaces` (unit `topology.brep_p1`): surfaces removed from the B-rep
     /// that are kept until the operation ends because they may still be referenced.
     deleted_surfaces: Vec<Surface>,
+    /// Faces whose surface's owner a running `SmFace::CreateUVTrimCurves` /
+    /// `SmEdgeuse::CreateUVTrimCurve` has temporarily cleared (`SmRescueSurfaceOwner`,
+    /// `SmTemporaryChangeValue` on `m_pOwner`), one entry per active clearing. While a
+    /// face is listed its surface has no face upstream (`GetFace()` is `NULL`), which
+    /// the port's surface owners (not set on every imported face surface) cannot
+    /// express on their own.
+    surface_owner_cleared: Vec<FaceId>,
     /// `m_pLockedBoundingBox` (unit `query.brep`): the box
     /// [`crate::query::brep::lock_bounding_box`] saved, which
     /// [`crate::query::brep::calculate_bounding_box`] returns while it is set. A clone
@@ -674,6 +681,7 @@ impl Default for Brep {
             model_size_estimate: USE_DEFAULT,
             large_small_size_ratio: USE_DEFAULT,
             deleted_surfaces: Vec::new(),
+            surface_owner_cleared: Vec::new(),
             locked_bounding_box: None,
             notify_identity: IdentitySlot::default(),
         }
@@ -737,6 +745,28 @@ impl Brep {
     /// Sets `m_bEditingEnabled`.
     pub fn set_editing_enabled(&mut self, enabled: bool) {
         self.editing_enabled = enabled;
+    }
+
+    /// Whether the owner of face `f`'s surface is temporarily cleared (see
+    /// [`Brep::begin_surface_owner_cleared`]): upstream's `GetFace()` of that surface
+    /// is then `NULL`.
+    #[must_use]
+    pub fn is_surface_owner_cleared(&self, f: FaceId) -> bool {
+        self.surface_owner_cleared.contains(&f)
+    }
+
+    /// Records that the owner of face `f`'s surface is temporarily cleared (the start
+    /// of an `SmTemporaryChangeValue<SmObject*>(pSurface->m_pOwner, NULL)` scope);
+    /// [`Brep::end_surface_owner_cleared`] ends it.
+    pub fn begin_surface_owner_cleared(&mut self, f: FaceId) {
+        self.surface_owner_cleared.push(f);
+    }
+
+    /// Ends the innermost [`Brep::begin_surface_owner_cleared`] scope of face `f`.
+    pub fn end_surface_owner_cleared(&mut self, f: FaceId) {
+        if let Some(i) = self.surface_owner_cleared.iter().rposition(|&g| g == f) {
+            self.surface_owner_cleared.remove(i);
+        }
     }
 
     /// `m_pLockedBoundingBox` (unit `query.brep`): the locked bounding box, if any.
@@ -1259,6 +1289,23 @@ impl Brep {
 mod tests {
     use super::*;
     use crate::math::Vec3;
+
+    #[test]
+    fn surface_owner_cleared_scopes_nest() {
+        let mut b = Brep::new();
+        let (f, g) = (FaceId::from_index(0), FaceId::from_index(1));
+        assert!(!b.is_surface_owner_cleared(f));
+        b.begin_surface_owner_cleared(f);
+        b.begin_surface_owner_cleared(f);
+        b.end_surface_owner_cleared(f);
+        assert!(b.is_surface_owner_cleared(f));
+        assert!(!b.is_surface_owner_cleared(g));
+        b.end_surface_owner_cleared(f);
+        assert!(!b.is_surface_owner_cleared(f));
+        // an unmatched end is a no-op
+        b.end_surface_owner_cleared(g);
+        assert!(!b.is_surface_owner_cleared(g));
+    }
 
     #[test]
     fn build_single_triangle_face() {
