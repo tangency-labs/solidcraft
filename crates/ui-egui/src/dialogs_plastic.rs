@@ -122,7 +122,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     // A tool with placement handles snaps its place to sketch points on the face as a Single
     // hole's does, so the marker can be dragged onto one; a bare sketch point is refused by OK as
     // before.
-    if crate::place_gizmo::snaps_to_points(id)
+    if crate::place_gizmo::snaps_to_points(app, id)
         && let Some(position) = inputs.first_mut()
     {
         position.accept |= crate::selection::POINTS;

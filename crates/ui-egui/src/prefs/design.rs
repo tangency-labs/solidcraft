@@ -75,4 +75,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::Text::Hint("hole_moves"),
         );
     });
+    ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
+        setting::placement_handles(app, ui);
+    });
 }

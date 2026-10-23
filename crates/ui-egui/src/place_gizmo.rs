@@ -13,6 +13,10 @@
 //! [`Spec`]: where the place is, how a pointer re-places it, the footprint, and the turn if any.
 //! [`spec`] picks the file by the dialog kind. The handles are published as `<name>:position` and
 //! `<name>:rotate` for `ui.handles`.
+//!
+//! The handles are behind the `placement_handles` preference (Preferences > Design > Placement), off by
+//! default: off, a feature is placed by its click only, as before, and its Position input takes faces
+//! only.
 
 mod boss;
 mod look;
@@ -81,18 +85,21 @@ thread_local! {
 
 /// Is `p` on a placement handle of the open dialog (as drawn last frame)?
 pub(crate) fn contains_pointer(app: &SolveApp, p: Pos2) -> bool {
-    app.dialog.as_ref().is_some_and(|d| spec(d).is_some()) && DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
+    app.dialog.as_ref().is_some_and(|d| spec(app, d).is_some()) && DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
 }
 
 /// The tool whose dialog this is, if it has handles.
-fn spec(d: &Dialog) -> Option<&'static Spec> {
+fn spec(app: &SolveApp, d: &Dialog) -> Option<&'static Spec> {
+    if !app.preferences.placement_handles {
+        return None;
+    }
     TOOLS.iter().copied().find(|s| (s.serves)(d))
 }
 
 /// Does this command's face place also snap to sketch points on the face, so its marker can be
 /// dragged onto one?
-pub(crate) fn snaps_to_points(id: &str) -> bool {
-    TOOLS.iter().any(|s| s.snap_commands.contains(&id))
+pub(crate) fn snaps_to_points(app: &SolveApp, id: &str) -> bool {
+    app.preferences.placement_handles && TOOLS.iter().any(|s| s.snap_commands.contains(&id))
 }
 
 /// Reach of a handle around its centre (pixels): wide, so a finger finds it.
@@ -164,7 +171,7 @@ fn on_plane(proj: &Proj, pos: Pos2, base: Vec3, n: Vec3) -> Option<Vec3> {
 /// the pointer near the base).
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     DRAWN.with(|h| h.borrow_mut().clear());
-    let Some(sp) = spec(d) else { return };
+    let Some(sp) = spec(app, d) else { return };
     let Some((base, _)) = (sp.frame)(app, d) else { return };
     let Some(bs) = proj.to_screen(base) else { return };
     let t = Tokens::get();

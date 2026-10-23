@@ -8,10 +8,11 @@ use solidcraft_engine::geom::Vec3;
 
 use crate::scenario::Harness;
 
-/// An 80 × 50 × 10 plate seen from the top,.
+/// An 80 × 50 × 10 plate seen from the top, with the handles on.
 fn plate() -> Harness {
     let mut h = Harness::new();
     h.app.ui.show_origin = false;
+    h.app.preferences.placement_handles = true;
     h.app.run("solid.box", json!({"length": 80, "width": 50, "height": 10})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
@@ -99,6 +100,7 @@ fn knob_turns_a_rectangular_rest_from_edit_feature() {
 fn ball_wins_the_press_over_the_height_arrow_at_the_base() {
     let mut h = Harness::new();
     h.app.ui.show_origin = false;
+    h.app.preferences.placement_handles = true;
     h.app.run("solid.box", json!({"length": 80, "width": 50, "height": 10})).unwrap();
     h.settle();
     h.step(&json!({"start": "plastic.rest"})).unwrap();
@@ -157,4 +159,20 @@ fn holding_the_marker_still_never_opens_select_other() {
     // Away from the marker the same hold still opens it.
     h.step(&json!({"hold": {"world": [40, 29, 10]}})).unwrap();
     assert!(crate::select_other::is_open(&h.app), "a held press on the circle opens Select Other");
+}
+
+/// With the preference off (the default) nothing changes: the Position input takes faces only, no
+/// handle is drawn, and the pad stays where it was clicked.
+#[test]
+fn with_the_preference_off_a_rest_is_placed_by_its_click_alone() {
+    let mut h = plate();
+    h.app.preferences.placement_handles = false;
+    h.step(&json!({"start": "plastic.rest"})).unwrap();
+    h.step(&json!({"click": {"world": [15, 12, 10]}})).unwrap();
+    h.settle();
+    let accept = h.app.dialog.as_ref().expect("a dialog").inputs.first().expect("a Position input").accept;
+    assert_eq!(accept & crate::selection::POINTS, 0, "the Position input takes faces only");
+    assert!(h.at(&json!({"handle": "rest:position"})).is_err(), "no marker is published");
+    assert!(h.at(&json!({"handle": "rest:rotate"})).is_err(), "no knob is published");
+    assert!(position(&h).dist(Vec3::new(15.0, 12.0, 10.0)) < 0.5, "placed where clicked: {:?}", position(&h));
 }
