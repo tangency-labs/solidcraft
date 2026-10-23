@@ -2154,6 +2154,7 @@ mod tests {
     struct Geo {
         curves: Vec<Curve>,
         edge_ivl: Vec<(usize, Extent1d, f64, usize)>,
+        points: Vec<Point3>,
     }
 
     impl ClassGeometry<H> for Geo {
@@ -2168,8 +2169,17 @@ mod tests {
         fn volume(&self, _o: H) -> Option<&Volume> {
             None
         }
-        fn point(&self, _o: H) -> Option<Point3> {
-            None
+        fn point(&self, o: H) -> Option<Point3> {
+            (o.1 == ClassObjectKind::Point)
+                .then(|| self.points.get(o.0))
+                .flatten()
+                .copied()
+        }
+        fn classification_vertex_point(&self, vertex: H) -> Option<Point3> {
+            (vertex.1 == ClassObjectKind::Vertex)
+                .then(|| self.points.get(vertex.0))
+                .flatten()
+                .copied()
         }
     }
 
@@ -2266,11 +2276,16 @@ mod tests {
             &mut self,
             _k: &Kernel,
             _brep: H,
-            _point: Point3,
-            _tolerance: f64,
+            point: Point3,
+            tolerance: f64,
             _boundary_intersections: bool,
         ) -> Result<PointClassification<H>> {
-            Err(SolidError::invalid_input("test geometry", "no B-reps"))
+            let idx = self.points.len();
+            self.points.push(point);
+            let v = H(idx, ClassObjectKind::Vertex);
+            let mut pc = PointClassification::new(tolerance);
+            pc.set_class_object(PointClassType::Vertex, Some(v));
+            Ok(pc)
         }
     }
 
@@ -2619,5 +2634,48 @@ mod tests {
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old, e_new], Some(calling))
             .unwrap();
         assert_eq!(m.vertex_def(moved).unwrap().src_topo(1), Some(e_new));
+    }
+
+    #[test]
+    fn edge_definition_split_starts_unowned() {
+        // tangency-labs/solidcore#518: SmEdgeDefinition::Split's new EdgeDefinition
+        // starts unowned, so adding it to the upper proto edge does not fail attempting
+        // to remove it from the original proto edge.
+        let k = Kernel::default();
+        let mut geo = Geo::default();
+        geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+        let c0 = H(0, ClassObjectKind::Curve);
+        let mut m = manager();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(v0);
+        m.add_proto_vertex(v1);
+
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(c0), false);
+        let ivl = geo.curves[0].natural_interval();
+        let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci1.mid = region_pc(R0);
+        let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+        ci2.mid = region_pc(R1);
+
+        let pe = m
+            .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
+            .unwrap();
+        assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
+
+        // Split the proto edge at its midpoint parameter
+        let (new_pv, new_pe) = m.proto_edge_split(&k, &mut geo, pe, ivl.mid()).unwrap();
+        let new_pe = new_pe.expect("proto edge was split");
+        assert!(new_pv.is_some());
+
+        // The lower proto edge retains its edge definition, and the upper proto edge
+        // receives the new split edge definition without error.
+        assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
+        assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
     }
 }

@@ -537,6 +537,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 return Err(e);
             }
         };
+        // The split's new EdgeDefinition starts unowned (tangency-labs/solidcore#518).
+        self.edge_def_mut(new_ed)
+            .ok_or(dangling("edge definition is deleted"))?
+            .set_proto_edge(None);
 
         // Get the parameterizations set correctly before calling AddEdgeDefinition().
         let mut this_ivl = self
