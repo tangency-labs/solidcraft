@@ -4087,12 +4087,17 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             pos2(bar.left() + 5.0 + (i % columns) as f32 * 30.0, bar.top() + 2.0 + (i / columns) as f32 * 30.0),
             vec2(26.0, 26.0),
         );
-        let resp = ui.interact(br, ui.id().with(("nav", *icon)), Sense::click());
+        let enabled = *icon != "perspective" || app.session.active_sketch.is_none();
+        let mut button_ui = ui.new_child(egui::UiBuilder::new().max_rect(br));
+        if !enabled {
+            button_ui.disable();
+        }
+        let resp = button_ui.interact(br, ui.id().with(("nav", *icon)), Sense::click());
         let active = match *icon {
             "orbit" => app.viewport.nav == Some(NavMode::Orbit),
             "pan" => app.viewport.nav == Some(NavMode::Pan),
             "zoom" => app.viewport.nav == Some(NavMode::Zoom),
-            "perspective" => app.ui.perspective,
+            "perspective" => app.perspective_view(),
             "settings" => menu_open,
             "spin" => app.viewport.spin,
             _ => false,
@@ -4100,8 +4105,14 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         if active || resp.hovered() {
             painter.rect_filled(br, t.radius_sm, if active { t.accent_soft } else { t.hover });
         }
-        icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
-        if resp.on_hover_text(*tip).clicked() {
+        let mut icon_painter = painter.clone();
+        if !enabled {
+            icon_painter.multiply_opacity(ui.visuals().disabled_alpha);
+        }
+        icons::paint_icon(&icon_painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
+        let resp = resp.on_hover_text(*tip);
+        let resp = if !enabled { resp.on_disabled_hover_text(app.tr("nav.perspective.sketch")) } else { resp };
+        if resp.clicked() {
             let toggle = |m: NavMode, cur: Option<NavMode>| if cur == Some(m) { None } else { Some(m) };
             match *icon {
                 "orbit" => app.viewport.nav = toggle(NavMode::Orbit, app.viewport.nav),
@@ -7674,6 +7685,30 @@ mod grid_plane_tests {
         app.finish_sketch();
         assert!(app.ui.perspective, "the preference is left alone");
         assert!(projection(&app, rect).cam.fov > 0.0);
+    }
+
+    #[test]
+    fn perspective_button_is_inert_while_editing_a_sketch() {
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            for perspective in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.call("ui.set", json!({"layout":mode,"perspective":perspective}));
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.settle();
+                let nav = crate::scenario::rect_of("nav:outer").unwrap();
+                let button = pos2(nav.left() + 5.0 + 7.0 * 30.0 + 13.0, nav.top() + 15.0);
+                h.call("ui.click", json!({"x":button.x,"y":button.y}));
+                assert_eq!(h.app.ui.perspective, perspective, "a sketch's disabled control must preserve the normal view preference");
+                let rect = h.app.viewport.rect.unwrap();
+                assert_eq!(projection(&h.app, rect).cam.fov, 0.0);
+
+                h.app.finish_sketch();
+                h.settle();
+                assert_eq!(h.app.perspective_view(), perspective, "finishing restores the original projection");
+                h.call("ui.click", json!({"x":button.x,"y":button.y}));
+                assert_eq!(h.app.perspective_view(), !perspective, "the toggle works again outside sketch editing");
+            }
+        }
     }
 
     /// Create Sketch shows the Origin even when the browser hides it, and draws its planes

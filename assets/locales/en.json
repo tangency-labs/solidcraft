@@ -1138,6 +1138,7 @@
   "nav.fusion.help": "Middle drag pans, Shift+middle orbits, right drag orbits",
   "nav.inventor.help": "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
   "nav.openscad.help": "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
+  "nav.perspective.sketch": "Sketch editing uses orthographic view. Finish the sketch to switch perspective.",
   "nav.solidworks.help": "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
   "nav.tinkercad.help": "Right drag orbits, middle or Shift+right drag pans",
   "nav.touchpad.help": "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",

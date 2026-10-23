@@ -969,6 +969,7 @@
   "motion.track_name": "트랙 {number}",
   "nav.free_orbit.help": "마우스와 3D 마우스로 롤을 유지하며 양 극점을 넘어 회전합니다. Shift 축 스냅은 비활성화됩니다.",
   "nav.free_orbit.label": "자유 회전",
+  "nav.perspective.sketch": "스케치 편집 중에는 직교 뷰를 사용합니다. 원근 뷰를 전환하려면 스케치를 마치세요.",
   "nav.touchpad.help": "Shift를 누른 채 포인터를 움직이면 화면이 이동하고, Alt/Option을 누른 채 움직이면 회전합니다. 마우스 버튼은 필요 없습니다. 세로 스크롤로 확대/축소합니다.",
   "nav.touchpad.label": "터치패드",
   "nav.touchpad.orbit": "회전 (Alt/Option을 누르고 이동, 마우스 버튼 불필요)",

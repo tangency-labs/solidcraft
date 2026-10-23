@@ -1084,6 +1084,7 @@
   "nav.fusion.help": "Mittlere Maustaste verschiebt, Umschalt+Mitte dreht, rechte Maustaste dreht",
   "nav.inventor.help": "Mittlere Maustaste verschiebt, Umschalt+Mitte dreht, Strg+Mitte zoomt, rechte Maustaste dreht",
   "nav.openscad.help": "Linksziehen auf leerem Hintergrund dreht, Umschalt+Linksziehen zieht ein Auswahlrechteck auf, Skizzengeometrie wird durch Ziehen bearbeitet; rechtes oder mittleres Ziehen verschiebt, Umschalt+rechtes oder Umschalt+mittleres Ziehen zoomt",
+  "nav.perspective.sketch": "Beim Bearbeiten einer Skizze wird die orthografische Ansicht verwendet. Beenden Sie die Skizze, um die Perspektive umzuschalten.",
   "nav.solidworks.help": "Mittlere Maustaste dreht, Strg+Mitte verschiebt, Umschalt+Mitte zoomt, rechte Maustaste dreht",
   "nav.tinkercad.help": "Rechte Maustaste dreht, mittlere oder Umschalt+rechte Maustaste verschiebt",
   "nav.touchpad.help": "Umschalt gedrückt halten und den Zeiger zum Verschieben bewegen; mit Alt/Option drehen. Keine Maustaste nötig. Vertikales Scrollen zoomt.",
