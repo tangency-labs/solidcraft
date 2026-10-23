@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use solidcraft_manufacture::{ManufactureSettings, MfgSetup, ToolpathModification};
+use solidcraft_manufacture::{ManufactureSettings, MfgSetup, NcProgram, ToolpathModification};
 
 use super::CommandSpec;
 use crate::params::bad;
@@ -342,6 +342,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("settings")
         .doc_only()
         .params("add: a toolpath modification object. Appends to manufacture.toolpath_modifications, validates atomically, one undo step."),
+    CommandSpec::new("manufacture.post.process", "Post", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "POST")
+        .params("Opens Post Process on the active Manufacture setup. NC programs persist through manufacture.nc_programs.set."),
+    CommandSpec::new("manufacture.post.time", "Cycle Time", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "POST")
+        .params("Opens Machining Time on the active Manufacture setup."),
+    CommandSpec::new("manufacture.post.sheet", "Setup Sheet", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "POST")
+        .params("Opens a Setup Sheet for the active Manufacture setup."),
+    CommandSpec::new("manufacture.nc_programs.set", "Save NC Program", set_nc_programs)
+        .icon("settings")
+        .doc_only()
+        .params("add: an NC program object. Appends to manufacture.nc_programs, validates atomically, one undo step."),
 ];
 
 // ── Settings get ───────────────────────────────────────────────────────────────
@@ -439,6 +461,23 @@ fn set_modifications(s: &mut Session, params: &Value) -> Result<Value> {
     new_manufacture.toolpath_modifications.push(req.add);
     new_manufacture.validate().map_err(|e| bad(cmd, e.to_string()))?;
     let count = new_manufacture.toolpath_modifications.len();
+    s.doc_mut().manufacture = new_manufacture;
+    Ok(json!({"count": count}))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetNcPrograms {
+    add: NcProgram,
+}
+
+fn set_nc_programs(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "manufacture.nc_programs.set";
+    let req: SetNcPrograms = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let mut new_manufacture = s.doc.manufacture.clone();
+    new_manufacture.nc_programs.push(req.add);
+    new_manufacture.validate().map_err(|e| bad(cmd, e.to_string()))?;
+    let count = new_manufacture.nc_programs.len();
     s.doc_mut().manufacture = new_manufacture;
     Ok(json!({"count": count}))
 }
@@ -670,6 +709,18 @@ mod tests {
             assert_eq!(r["opened"], true, "{id}");
             assert!(s.doc.manufacture.setups.is_empty(), "{id}");
             assert!(s.doc.manufacture.toolpath_modifications.is_empty(), "{id}");
+        }
+    }
+
+    #[test]
+    fn post_commands_are_display_only() {
+        const IDS: &[&str] = &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"];
+        for id in IDS {
+            let mut s = Session::default();
+            let r = s.execute(id, &json!({})).unwrap();
+            assert_eq!(r["opened"], true, "{id}");
+            assert!(s.doc.manufacture.setups.is_empty(), "{id}");
+            assert!(s.doc.manufacture.nc_programs.is_empty(), "{id}");
         }
     }
 }

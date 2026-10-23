@@ -4,7 +4,7 @@
 //! op inspectors. Session-only fields are not companion HTTP or GPL CAM runtimes.
 
 use crate::SolveApp;
-use solidcraft_manufacture::ValidationIssue;
+use solidcraft_manufacture::{PathSegment, ValidationIssue};
 
 /// Sub-panels of the Manufacture workspace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -24,6 +24,7 @@ pub enum MfgTab {
     Fabrication,
     Additive,
     Modify,
+    Post,
 }
 
 /// Manufacture process family for a new setup.
@@ -68,6 +69,10 @@ pub struct State {
     pub additive_dialog: Option<crate::manufacture_additive::AdditiveDialogState>,
     pub from_gcode_dialog: Option<crate::manufacture_additive::FromGcodeState>,
     pub modify_dialog: Option<crate::manufacture_modify::ModifyDialogState>,
+    pub post_dialog: Option<crate::manufacture_post::PostDialogState>,
+    pub machining_time_dialog: Option<crate::manufacture_post::MachiningTimeState>,
+    pub setup_sheet_dialog: Option<crate::manufacture_post::SetupSheetState>,
+    pub toolpath_segments: Vec<PathSegment>,
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -123,6 +128,9 @@ pub fn close_floating_dialogs(app: &mut SolveApp) {
     app.manufacture_workspace.additive_dialog = None;
     app.manufacture_workspace.from_gcode_dialog = None;
     app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
     app.ui.pick_bodies = false;
 }
 
@@ -176,6 +184,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
             crate::manufacture_hole_recognition::open_new(app);
             false
         }
+        id if id.starts_with("manufacture.post.") => crate::manufacture_post::open_from_command(app, id),
         id if id.starts_with("manufacture.modify.") => crate::manufacture_modify::open_from_command(app, id),
         id if id.starts_with("manufacture.additive.") => crate::manufacture_additive::open_from_command(app, id),
         id if id.starts_with("manufacture.fabrication.") => crate::manufacture_fabrication::open_from_command(app, id),
@@ -224,6 +233,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::manufacture_fabrication::show_dialogs(app, ui);
     crate::manufacture_additive::show_dialogs(app, ui);
     crate::manufacture_modify::show_dialogs(app, ui);
+    crate::manufacture_post::show_dialogs(app, ui);
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {

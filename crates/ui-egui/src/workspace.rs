@@ -367,6 +367,12 @@ pub const SECTIONS: &[Section] = &[
     },
     Section {
         tab: "MANUFACTURE",
+        panel: "POST",
+        promoted: 3,
+        ids: &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"],
+    },
+    Section {
+        tab: "MANUFACTURE",
         panel: "INSPECT",
         promoted: 2,
         ids: &[
@@ -455,6 +461,9 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("manufacture.part_handling.grab", "Grab"),
     ("manufacture.part_handling.return", "Return"),
     ("manufacture.part_handling.tool_call", "Tool Call"),
+    ("manufacture.post.process", "Post"),
+    ("manufacture.post.sheet", "Setup Sheet"),
+    ("manufacture.post.time", "Cycle Time"),
     ("manufacture.setup.new", "New Setup"),
     ("manufacture.tools.library", "Tool Library"),
     ("manufacture.turning.chamfer", "Chamfer"),

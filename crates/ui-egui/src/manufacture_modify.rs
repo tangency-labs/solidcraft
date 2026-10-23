@@ -95,6 +95,9 @@ fn clear_other(app: &mut SolveApp) {
     app.manufacture_workspace.additive_dialog = None;
     app.manufacture_workspace.from_gcode_dialog = None;
     app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
 }
 
 pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -133,10 +136,16 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
     let cancel = closed || action == crate::ui_kit::Action::Cancel;
     if cancel {
         app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
         return;
     }
     if commit && save(app, draft.clone()) {
         app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
         return;
     }
     if let Some(d) = &mut app.manufacture_workspace.modify_dialog {

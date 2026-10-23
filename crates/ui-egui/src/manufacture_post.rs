@@ -1,9 +1,13 @@
-//! Post Process / NC Program dialog (Settings + Operations) and
-//! ACTIONS helpers: Setup Sheet, Machining Time.
+//! Post Process / NC Program dialog and Setup Sheet / Machining Time helpers.
+//! Document writes go through manufacture.nc_programs.set and manufacture.settings.set;
+//! not companion HTTP or GPL CAM.
 
 use egui::RichText;
 use serde_json::json;
-use solidcraft_manufacture::{NcOpRef, NcProgram, NcUnit, Operation, Tool, build_setup_sheet_html, estimate_machining_time_s, format_cycle_time};
+use solidcraft_manufacture::{
+    LineEnding, NcOpRef, NcProgram, NcUnit, Operation, PathSegment, PostProfile, Tool, build_setup_sheet_html, estimate_machining_time_s,
+    format_cycle_time,
+};
 
 use crate::SolveApp;
 
@@ -43,7 +47,8 @@ pub struct SetupSheetState {
 }
 
 pub fn open_post_process(app: &mut SolveApp) {
-    let _ = app.run("manufacture.posts.ensure_presets", json!({}));
+    crate::manufacture_workspace::ensure_setup(app);
+    clear_other(app);
     let active = app.manufacture_workspace.active_setup.clone();
     let mut draft = NcProgram::default();
     let n = app.session.doc.manufacture.nc_programs.len() + 1;
@@ -66,25 +71,31 @@ pub fn open_post_process(app: &mut SolveApp) {
 }
 
 pub fn open_machining_time(app: &mut SolveApp) {
+    clear_other(app);
     let mut st = MachiningTimeState::default();
-    if let Some(setup_name) = non_empty(&app.manufacture_workspace.active_setup)
-        && let Some(setup) = app.session.doc.manufacture.setups.get(setup_name)
-        && let Some(mname) = &setup.machine
-        && let Some(m) = app.session.doc.manufacture.machines.get(mname)
-    {
-        if m.rapid_feedrate_mmpm > 0.0 {
-            st.rapid_mmpm = m.rapid_feedrate_mmpm;
-        }
-        if m.tool_changer.change_time_s > 0.0 {
-            st.tool_change_s = m.tool_changer.change_time_s;
+    if let Some(setup_name) = non_empty(&app.manufacture_workspace.active_setup) {
+        if let Some(setup) = app.session.doc.manufacture.setups.get(setup_name) {
+            if let Some(mname) = &setup.machine {
+                if let Some(m) = app.session.doc.manufacture.machines.get(mname) {
+                    if m.rapid_feedrate_mmpm > 0.0 {
+                        st.rapid_mmpm = m.rapid_feedrate_mmpm;
+                    }
+                    if m.tool_changer.change_time_s > 0.0 {
+                        st.tool_change_s = m.tool_changer.change_time_s;
+                    }
+                }
+            }
         }
     }
     st.estimated_s = Some(compute_cycle_time(app, &st));
     app.manufacture_workspace.machining_time_dialog = Some(st);
+    app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::Post;
 }
 
 pub fn open_setup_sheet(app: &mut SolveApp) {
-    let program = app.manufacture_workspace.post_dialog.as_ref().map(|d| d.draft.clone()).unwrap_or_else(|| {
+    let existing = app.manufacture_workspace.post_dialog.as_ref().map(|d| d.draft.clone());
+    clear_other(app);
+    let program = existing.unwrap_or_else(|| {
         let mut p = NcProgram::default();
         let active = app.manufacture_workspace.active_setup.clone();
         if !active.is_empty() {
@@ -98,11 +109,48 @@ pub fn open_setup_sheet(app: &mut SolveApp) {
     let title = if app.session.doc.name.trim().is_empty() { "SolidCraft".into() } else { app.session.doc.name.clone() };
     let html = build_setup_sheet_html(&title, &program, &rows, &format_cycle_time(secs));
     app.manufacture_workspace.setup_sheet_dialog = Some(SetupSheetState { html, title });
+    app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::Post;
 }
 
 fn non_empty(s: &str) -> Option<&str> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t) }
+}
+
+/// Return false when `id` is a post command this panel handles.
+pub fn open_from_command(app: &mut SolveApp, id: &str) -> bool {
+    match id {
+        "manufacture.post.process" => open_post_process(app),
+        "manufacture.post.time" => open_machining_time(app),
+        "manufacture.post.sheet" => open_setup_sheet(app),
+        _ => return true,
+    }
+    false
+}
+
+fn clear_other(app: &mut SolveApp) {
+    app.manufacture_workspace.tool_library_dialog = None;
+    app.manufacture_workspace.edit_tool_dialog = None;
+    app.manufacture_workspace.manage_stub_dialog = None;
+    app.manufacture_workspace.setup_dialog = None;
+    app.manufacture_workspace.drill_dialog = None;
+    app.manufacture_workspace.contour_dialog = None;
+    app.manufacture_workspace.twod_dialog = None;
+    app.manufacture_workspace.threed_dialog = None;
+    app.manufacture_workspace.hole_rec_dialog = None;
+    app.manufacture_workspace.multiaxis_dialog = None;
+    app.manufacture_workspace.turning_dialog = None;
+    app.manufacture_workspace.part_handling_dialog = None;
+    app.manufacture_workspace.inspection_dialog = None;
+    app.manufacture_workspace.manual_inspection_dialog = None;
+    app.manufacture_workspace.fabrication_dialog = None;
+    app.manufacture_workspace.nest_dialog = None;
+    app.manufacture_workspace.additive_dialog = None;
+    app.manufacture_workspace.from_gcode_dialog = None;
+    app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
 }
 
 fn compute_cycle_time(app: &SolveApp, st: &MachiningTimeState) -> f64 {
@@ -183,20 +231,11 @@ fn show_post_dialog(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let setup_names: Vec<String> = app.session.doc.manufacture.setups.keys().cloned().collect();
 
-    let mut open = true;
-    let mut do_post = false;
-    let mut cancel = false;
     let mut draft = state.draft.clone();
     let mut tab = state.tab;
     let title = format!("NC PROGRAM : {}", draft.name.to_uppercase());
-
-    crate::frame::window(ui.ctx(), title, crate::frame::Width::Normal)
-        .id(egui::Id::new("mfg_post_dialog"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(520.0)
-        .show(ui.ctx(), |ui| {
+    let (closed, action) =
+        crate::ui_kit::Window::new(egui::Id::new("mfg_post_dialog"), "settings", &title).fields().cards(1.5).show(ui.ctx(), true, |ui| {
             ui.horizontal(|ui| {
                 for (v, l) in [(PostDialogTab::Settings, "Settings"), (PostDialogTab::Operations, "Operations")] {
                     let sel = tab == v;
@@ -210,20 +249,10 @@ fn show_post_dialog(app: &mut SolveApp, ui: &mut egui::Ui) {
                 PostDialogTab::Settings => settings_tab(ui, &mut draft, &posts),
                 PostDialogTab::Operations => operations_tab(ui, app, &mut draft, &setup_names),
             });
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new("Post").strong())).clicked() {
-                        do_post = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                });
-            });
         });
-
-    if !open || cancel {
+    let do_post = action == crate::ui_kit::Action::Ok;
+    let cancel = closed || action == crate::ui_kit::Action::Cancel;
+    if cancel {
         app.manufacture_workspace.post_dialog = None;
         return;
     }
@@ -409,7 +438,7 @@ fn run_post(app: &mut SolveApp, draft: &NcProgram) -> bool {
     if draft.create_in_document {
         match serde_json::to_value(draft) {
             Ok(v) => {
-                if let Err(e) = app.run("manufacture.containers.add", json!({"nc_program": v})) {
+                if let Err(e) = app.run("manufacture.nc_programs.set", json!({"add": v})) {
                     app.set_status(e, true);
                     return false;
                 }
@@ -421,32 +450,15 @@ fn run_post(app: &mut SolveApp, draft: &NcProgram) -> bool {
         }
     }
 
-    // Assign post on active setup if missing so generate/post pipeline can use it.
     let active = app.manufacture_workspace.active_setup.clone();
-    if !active.is_empty()
-        && let Some(post) = &draft.post
-    {
-        let _ = app.run("manufacture.settings.set", json!({"name": active, "set": {"post": post}}));
+    if !active.is_empty() {
+        if let Some(post) = &draft.post {
+            let _ = app.run("manufacture.settings.set", json!({"name": active, "set": {"post": post}}));
+        }
     }
 
-    // Prefer local file post from toolpath segments (GRBL / Marlin / Repetier / Mach…).
-    // Companion job G-code is optional — many machines just need a file.
-    let code = if let Some(local) = local_post_gcode(app, draft) {
-        local
-    } else if let Some(job_wrap) = app.manufacture_workspace.cam_job_id.clone() {
-        let job = job_wrap.get("job").cloned().unwrap_or(job_wrap);
-        match app.run("manufacture.gcode", json!({"job": job})) {
-            Ok(v) => v.get("gcode").and_then(|g| g.as_str()).unwrap_or("").to_string(),
-            Err(e) => {
-                app.set_status(e, true);
-                return false;
-            }
-        }
-    } else {
-        app.set_status(
-            "No toolpath to post yet. Generate toolpaths (or run CAM), then Post writes an NC file - no companion endpoint required for GRBL/Marlin/Repetier/Mach.",
-            true,
-        );
+    let Some(code) = local_post_gcode(app, draft) else {
+        app.set_status(app.tr("manufacture.post.need_toolpath").to_string(), true);
         return false;
     };
 
@@ -455,7 +467,6 @@ fn run_post(app: &mut SolveApp, draft: &NcProgram) -> bool {
         return false;
     }
 
-    app.manufacture_workspace.generated_code = Some(code.clone());
     app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::Post;
 
     let file_name = draft.output_file_name();
@@ -493,37 +504,79 @@ fn local_post_gcode(app: &SolveApp, draft: &NcProgram) -> Option<String> {
     if segs.is_empty() {
         return None;
     }
-    let _ = app; // posts live on the document
     let post_id = draft.post.as_deref().or_else(|| {
         let active = app.manufacture_workspace.active_setup.as_str();
         app.session.doc.manufacture.setups.get(active).and_then(|s| s.post.as_deref())
-    })?;
-    let profile = app
-        .session
-        .doc
-        .manufacture
-        .posts
-        .get(post_id)
-        .cloned()
-        .or_else(|| solidcraft_manufacture::post::preset_posts().into_iter().find(|(id, _)| *id == post_id).map(|(_, p)| p))?;
-    let active = app.manufacture_workspace.active_setup.as_str();
-    let tool = app.session.doc.manufacture.setups.get(active).and_then(|s| s.tools.first().cloned()).unwrap_or_default();
-    solidcraft_manufacture::post::post_toolpath(segs, &profile, &tool).ok()
+    });
+    let profile = post_id.and_then(|id| app.session.doc.manufacture.posts.get(id)).cloned().unwrap_or_default();
+    Some(emit_nc(segs, &profile, draft))
+}
+
+fn emit_nc(segs: &[PathSegment], profile: &PostProfile, draft: &NcProgram) -> String {
+    let eol = match profile.line_ending {
+        LineEnding::Lf => "\n",
+        LineEnding::CrLf => "\r\n",
+    };
+    let mut out = String::new();
+    if profile.preamble.is_empty() {
+        out.push_str("G21");
+        out.push_str(eol);
+        out.push_str("G90");
+        out.push_str(eol);
+    } else {
+        for line in profile.preamble.lines() {
+            out.push_str(line);
+            out.push_str(eol);
+        }
+    }
+    let comment = draft.program_name.trim();
+    if !comment.is_empty() {
+        out.push_str(&format!("( {comment} )"));
+        out.push_str(eol);
+    }
+    let mut pos = [0.0_f64; 3];
+    for seg in segs {
+        match seg {
+            PathSegment::Rapid { to } => {
+                out.push_str(&format!("G0 X{:.4} Y{:.4} Z{:.4}", to[0], to[1], to[2]));
+                out.push_str(eol);
+                pos = *to;
+            }
+            PathSegment::Linear { to, feed } => {
+                out.push_str(&format!("G1 X{:.4} Y{:.4} Z{:.4} F{:.1}", to[0], to[1], to[2], feed));
+                out.push_str(eol);
+                pos = *to;
+            }
+            PathSegment::Arc { center, to, feed, clockwise } => {
+                let code = if *clockwise { "G2" } else { "G3" };
+                let i = center[0] - pos[0];
+                let j = center[1] - pos[1];
+                out.push_str(&format!("{code} X{:.4} Y{:.4} Z{:.4} I{:.4} J{:.4} F{:.1}", to[0], to[1], to[2], i, j, feed));
+                out.push_str(eol);
+                pos = *to;
+            }
+        }
+    }
+    if profile.postamble.is_empty() {
+        out.push_str("M30");
+        out.push_str(eol);
+    } else {
+        for line in profile.postamble.lines() {
+            out.push_str(line);
+            out.push_str(eol);
+        }
+    }
+    out
 }
 
 fn show_machining_time(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(mut st) = app.manufacture_workspace.machining_time_dialog.clone() else {
         return;
     };
-    let mut open = true;
-    let mut close = false;
-    crate::frame::window(ui.ctx(), "MACHINING TIME", crate::frame::Width::Normal)
-        .id(egui::Id::new("mfg_machining_time"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(320.0)
-        .show(ui.ctx(), |ui| {
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("mfg_machining_time"), "settings", "Machining Time").fields().cards(1.5).show(
+        ui.ctx(),
+        true,
+        |ui| {
             ui.heading("Estimate");
             ui.horizontal(|ui| {
                 ui.label("Feed Scale");
@@ -546,12 +599,9 @@ fn show_machining_time(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.manufacture_workspace.toolpath_segments.is_empty() {
                 ui.label(RichText::new("Generate a toolpath for a more accurate estimate.").weak());
             }
-            ui.separator();
-            if ui.button("Close").clicked() {
-                close = true;
-            }
-        });
-    if !open || close {
+        },
+    );
+    if closed || action == crate::ui_kit::Action::Cancel || action == crate::ui_kit::Action::Ok {
         app.manufacture_workspace.machining_time_dialog = None;
     } else {
         app.manufacture_workspace.machining_time_dialog = Some(st);
@@ -562,42 +612,25 @@ fn show_setup_sheet(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(st) = app.manufacture_workspace.setup_sheet_dialog.clone() else {
         return;
     };
-    let mut open = true;
-    let mut close = false;
-    let mut save = false;
-    crate::frame::window(ui.ctx(), "SETUP SHEET", crate::frame::Width::Normal)
-        .id(egui::Id::new("mfg_setup_sheet"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(480.0)
-        .show(ui.ctx(), |ui| {
+    let (closed, action) =
+        crate::ui_kit::Window::new(egui::Id::new("mfg_setup_sheet"), "settings", "Setup Sheet").fields().cards(1.5).show(ui.ctx(), true, |ui| {
             ui.label(RichText::new(&st.title).strong());
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 ui.code(&st.html);
             });
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("Save HTML…").clicked() {
-                    save = true;
-                }
-                if ui.button("Close").clicked() {
-                    close = true;
-                }
-            });
-        });
-    if save {
-        let html = st.html.clone();
-        app.pick_save("setup_sheet.html", &["html", "htm"], move |app, path| {
-            let Some(path) = path else { return };
-            if let Err(e) = std::fs::write(&path, html.as_bytes()) {
-                app.set_status(format!("{}: {e}", app.tr("manufacture.post.save_error")), true);
-            } else {
-                app.set_status(app.tr("manufacture.setup_sheet.saved").to_string(), false);
+            if ui.button("Save HTML").clicked() {
+                let html = st.html.clone();
+                app.pick_save("setup_sheet.html", &["html", "htm"], move |app, path| {
+                    let Some(path) = path else { return };
+                    if let Err(e) = std::fs::write(&path, html.as_bytes()) {
+                        app.set_status(format!("{}: {e}", app.tr("manufacture.post.save_error")), true);
+                    } else {
+                        app.set_status(app.tr("manufacture.setup_sheet.saved").to_string(), false);
+                    }
+                });
             }
         });
-    }
-    if !open || close {
+    if closed || action == crate::ui_kit::Action::Cancel || action == crate::ui_kit::Action::Ok {
         app.manufacture_workspace.setup_sheet_dialog = None;
     }
 }
