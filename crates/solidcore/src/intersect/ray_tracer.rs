@@ -20,7 +20,7 @@
 //! | [`RayRenderer::do_render`], [`RayRenderer::render_pixel`], [`RayRenderer::render_ray`] | `SmRayRenderer::DoRender`, `RenderPixel`, `RenderRay` |
 //! | [`RayRenderer::set_sample_rate`], [`RayRenderer::add_light_source`], [`RayRenderer::pixels_shaded`] | `SetSampleRate`, `AddLightSource`, `GetPixelsShaded` |
 //! | [`RayObject`]                                   | the `SmObject*` of `SmSolution::m_apObjects` |
-//! | [`surface_leaf`]                                  | `SmSurfaceGridElement::Init` (the part after the Bezier patch data) |
+//! | [`SurfaceGridElement::from_leaf_data`], [`SurfaceGridElement::init`] | `SmSurfaceGridElement::Init` (ported in `geom::grid`) |
 //! | `line_plane_intersect` (private)                  | `sm_LinePlaneIntersect`                   |
 //! | `is_point_valid` (private)                        | `sm_IsPointValid`                         |
 //! | `convert_to_parameter_delta` (private)            | `sm_ConvertToParameterDelta`              |
@@ -48,21 +48,17 @@
 //! - **Grid elements of other types.** `FireRay` asserts (debug builds only) that a
 //!   non-polygon element is a surface element and casts it regardless; an element
 //!   of another type (user data, hierarchy) is [`SolidError::InvalidInput`] here.
-//! - **Surface leaf data.** `SmSurfaceGridElement::Init` is [`surface_leaf`] (the part
-//!   after the Bezier patch data), so surface leaves enter the grid through
-//!   [`Grid::add_surface_element`] with their data filled in
-//!   ([`SurfaceGridElement`] is co-ported by this unit).
-//!   [`RayTracer::add_surface_to_grid`] makes them as `ExpandHierarchy` does
-//!   ([`Grid::expand_hierarchy_with`] over the surface cache's tree, with the patch
-//!   data and polar box of each leaf node read from the cache). The cache's nodes hold
-//!   the surface by its index in the tracer's list, and the tree is cloned before the
-//!   expansion so the closure can ask the cache for the polar box (`GetPolarBox`
-//!   builds it on first use).
+//! - **Surface leaf data.** `SmSurfaceGridElement::Init` lives in `geom::grid`
+//!   ([`SurfaceGridElement::init`], and [`SurfaceGridElement::from_leaf_data`] for the
+//!   part after the Bezier patch data). [`RayTracer::add_surface_to_grid`] makes the
+//!   leaves as `ExpandHierarchy` does ([`Grid::expand_hierarchy`] over the surface's
+//!   cache, which holds the surface by its index in the tracer's list); the
+//!   `AddLeaf` test op fills a leaf in itself and adds it with
+//!   [`Grid::add_surface_element`].
 //! - **`SE` in `SmSurfaceGridElement::Init`.** Upstream signals an error and carries
-//!   on. [`surface_leaf`] retries a failed `Evaluate` without `non_zero_tangents`
-//!   (the failure comes after the plain NLib derivatives are in `sEval`, before the
-//!   fixed-up tangents are written back) and keeps the cross product when
-//!   `EvaluateNormal` fails; [`SolidError::Unported`] is always propagated.
+//!   on; see the status deviation of `geom::grid` (a failed `Evaluate` is retried
+//!   without `non_zero_tangents`, a failed `EvaluateNormal` keeps the cross product,
+//!   [`SolidError::Unported`] is always propagated).
 //! - **Polygon elements.** `sm_FindPolyHit` walks the `SmBrepCache` tree of a
 //!   polygon grid element and tests `SmPolyFace`s: neither exists yet, so a polygon
 //!   element in the ray's path is [`SolidError::Unported`], as is
@@ -99,15 +95,12 @@ use crate::geom::grid::{
     ElementId, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
 };
 use crate::geom::object::ObjectRef;
-use crate::geom::polar_box::PolarBox;
-use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use crate::geom::tree::NodeId;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
-use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p1::evaluate_1st_derivatives;
 use crate::surface::surface::p2::surface_cache;
@@ -187,76 +180,6 @@ fn surface_evaluate_normal_section(
 /// `SmSurface::GetFace`: the face owning the surface, if any.
 fn surface_face(surface: &Surface) -> Result<Option<ObjectRef>> {
     surface.face()
-}
-
-/// The leaf data `SmSurfaceGridElement::Init` derives from the surface once it has the
-/// Bezier patch data (domain, box, pseudo box and polar box): the surface point,
-/// derivatives and unit normal at the middle of the domain. `surface_index` is the
-/// surface's index in the tracer's surface list.
-///
-/// # Errors
-///
-/// Only [`SolidError::Unported`], or an `Evaluate` that also fails without
-/// `non_zero_tangents`: upstream signals those with `SE` and carries on.
-pub fn surface_leaf(
-    k: &Kernel,
-    surface_index: usize,
-    surface: &Surface,
-    uv_domain: &Extent2d,
-    bbox: &Extent3d,
-    pseudo_box: &PseudoBox,
-    polar_box: &PolarBox,
-) -> Result<SurfaceGridElement<usize>> {
-    // Precomputation of derivative information for this little patch
-    let uv_mid = uv_domain.evaluate(0.5, 0.5);
-    let eval_flags = |non_zero_tangents: bool| EvaluateFlags {
-        u_side: Side::Left,
-        v_side: Side::Left,
-        only_upper_half: true,
-        non_zero_tangents,
-    };
-    // `SE(Evaluate)` signals the error and carries on. Asking for (1,1) derivatives
-    // makes `SmBSplineSurface::Evaluate` take its "not enough derivatives" branch,
-    // `SER(Evaluate(crUV, 2, 2, ...))` (SmBSplineSurfaceNLib.cpp:8335), which returns
-    // before the fixed-up tangents are written back: `sEval` keeps the plain NLib
-    // derivatives, which is what `non_zero_tangents: false` gives.
-    let eval = match surface.evaluate(k, uv_mid, 1, 1, eval_flags(true)) {
-        Ok(eval) => eval,
-        Err(e) if e.is_unported() => return Err(e),
-        Err(_) => surface.evaluate(k, uv_mid, 1, 1, eval_flags(false))?,
-    };
-    let at = |i: usize, j: usize| -> Result<Vec3> {
-        eval.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| SolidError::sm_err("intersect::ray_tracer::surface_leaf"))
-    };
-    let mid_point = at(0, 0)?;
-    let mid_du = at(1, 0)?;
-    let mid_dv = at(0, 1)?;
-    let mut mid_normal = mid_du.cross(mid_dv);
-    if mid_normal.length_squared() > EFF_ZERO {
-        mid_normal = mid_normal.unitize()?;
-    } else {
-        // `SE(EvaluateNormal)`: on failure keep the cross product (the unit's
-        // `m_sMidNormal` is whatever the call left in it; see findings.md)
-        mid_normal = match surface.evaluate_normal(k, uv_mid, Side::Left, Side::Left) {
-            Ok(n) => n,
-            Err(e) if e.is_unported() => return Err(e),
-            Err(_) => mid_normal,
-        };
-    }
-    Ok(SurfaceGridElement {
-        surface: surface_index,
-        uv_domain: *uv_domain,
-        bbox: *bbox,
-        pseudo_box: *pseudo_box,
-        polar_box: *polar_box,
-        mid_point,
-        mid_du,
-        mid_dv,
-        mid_normal,
-    })
 }
 
 /// `sm_LinePlaneIntersect`: the line against the plane `plane_point + u * plane_u +
@@ -1130,40 +1053,23 @@ impl<'s> RayTracer<'s> {
     ///
     /// `SM_ERR` when the surface cache or its tree is missing (or has no top node),
     /// and those of the cache and tree builds, of
-    /// [`RayTracer::add_surface_with_bbox`], of [`surface_leaf`] and of the patch and
-    /// polar box lookups of the cache.
+    /// [`RayTracer::add_surface_with_bbox`] and of [`Grid::expand_hierarchy`].
     pub fn add_surface_to_grid(&mut self, k: &Kernel, surface: &'s Surface) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_to_grid";
         // build the surface spatial decomposition by building the surface cache; its
         // nodes refer to the surface (`mBA_pSurface`) by the index the tracer lists it
         // under below
         let mut cache = surface_cache::<usize>(k, surface, Some(self.surfaces.len()))?;
-        // Upstream's `ExpandHierarchy` reads the tree and calls `GetPolarBox` on the
-        // cache at once; the clone lets the closure below borrow the cache mutably.
-        let tree = cache.get_tree(k)?.clone();
-        let top = tree.top_node().ok_or(SolidError::sm_err(OP))?;
-        let bbox = tree.node(top)?.bbox;
+        let top = cache
+            .get_tree(k)?
+            .top_node()
+            .ok_or(SolidError::sm_err(OP))?;
+        let bbox = cache.get_tree(k)?.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
 
         // Expand the hierarchy element to avoid recomputing the surface cache a 2nd
         // time: every lowest Bezier leaf becomes `SmSurfaceGridElement::Init`
-        self.grid
-            .expand_hierarchy_with(id, &tree, |surface_index, node| {
-                let (uv_domain, pseudo_box) = {
-                    let patch = cache.patch(node)?;
-                    (patch.aux.uv_domain, *patch.pseudo_box())
-                };
-                let polar_box = cache.polar_box(k, node)?;
-                surface_leaf(
-                    k,
-                    surface_index,
-                    surface,
-                    &uv_domain,
-                    &tree.node(node)?.bbox,
-                    &pseudo_box,
-                    &polar_box,
-                )
-            })
+        self.grid.expand_hierarchy(k, id, &mut cache)
     }
 
     /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`).
@@ -1185,7 +1091,7 @@ impl<'s> RayTracer<'s> {
     /// the surface cache's tree is known: `top_node_bbox` is that node's box. Lists
     /// the surface and adds a surface hierarchy element for it over the box grown by
     /// a twentieth of its bounding sphere radius. The element is still to be expanded
-    /// ([`Grid::expand_hierarchy_with`] over the cache's tree).
+    /// ([`Grid::expand_hierarchy`] over the surface's cache).
     ///
     /// # Errors
     ///

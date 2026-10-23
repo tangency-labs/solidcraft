@@ -9,19 +9,21 @@
 //! (`FindVoxelsInBox`), `address` (`GetVoxelAddress`), `voxel_box`
 //! (`GetVoxelBBox`), `setup` (`Setup3DDDA`), `step` (`Step3DDDA`), `dump` (every
 //! voxel's element and hierarchy lists, `GetType`, `GetElement`, bounding spheres
-//! and boxes of the elements, voxel size, voxel tolerance, current mark), `expand`
-//! (`ExpandHierarchy`) and `add_surface` (`AddElement` with `SM_GE_SURFACE`).
+//! and boxes of the elements, voxel size, voxel tolerance, current mark) and `expand`
+//! (`ExpandHierarchy` of a base-class element).
 //!
 //! Outputs: `ints` (statuses, flags, voxel addresses, element type codes and
 //! object ids, hierarchy indices, 3DDDA steps) and `floats` (boxes, spheres, ray
-//! parameters and the 3DDDA state after every setup and step). `expand` of a
-//! surface hierarchy element and `add_surface` need surface subdivision caches:
-//! the shim does not run them and the Rust side is deferred (they appear only in
-//! fixtures). Every run has at least [`MIN_GENERATED`] generated cases.
+//! parameters and the 3DDDA state after every setup and step). Every run has at
+//! least [`MIN_GENERATED`] generated cases.
 //!
-//! New `define_surface` / `add_cached_hier` / `expand_cached` /
-//! `add_cached_leaf` / `observe_cached` fixtures opt into real, explicitly defined
-//! surface caches. They do not resolve the legacy opaque object/node labels.
+//! Surface elements need a real surface and its cache, so they come only from the
+//! `define_surface` / `add_cached_hier` / `expand_cached` / `add_cached_leaf` /
+//! `observe_cached` ops, which opt into real, explicitly defined surface caches
+//! (`SurfaceGridElement::init`, `Grid::expand_hierarchy` and `Grid::add_surface_node`
+//! run on the node of the actual cache). They do not resolve the opaque object labels
+//! of `add_hier { surface: true }`, which can be dumped but not expanded (the shim
+//! would dereference the fake pointer, so `expand` of one is an invalid program).
 //! The observer records cache leaf order, surface identities, pool order, voxel
 //! memberships and all surface-leaf fields, in addition to the original dumps.
 
@@ -40,6 +42,7 @@ use solidcore::geom::grid::{
     ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
 };
 use solidcore::geom::tree::NodeId;
+use solidcore::kernel::Kernel;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::SolidError;
 use solidcore_ffi::units::geom_grid as ffi;
@@ -103,9 +106,6 @@ enum Op {
     Dump,
     Expand {
         h: i64,
-    },
-    AddSurface {
-        bbox: E6,
     },
     DefineSurface {
         id: i64,
@@ -208,10 +208,6 @@ fn prog(i: &Inputs) -> Vec<f64> {
             Op::Step { t } => v.extend([7.0, *t]),
             Op::Dump => v.push(8.0),
             Op::Expand { h } => v.extend([9.0, *h as f64]),
-            Op::AddSurface { bbox } => {
-                v.push(10.0);
-                v.extend(bbox);
-            }
             Op::DefineSurface {
                 id,
                 origin,
@@ -405,14 +401,21 @@ fn run_rust_controlled(
                 }
             }
             Op::Dump => dump(&g, &mut oi, &mut of)?,
-            Op::Expand { h } => match g.expand_hierarchy(HierarchyId(*h as usize)) {
-                Ok(()) => oi.push(0),
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
-                Err(e) => oi.push(status_of(&e)),
-            },
-            Op::AddSurface { bbox } => {
-                g.add_element(ElementSource::Surface(NodeId(0)), &ext(*bbox))?;
-                oi.push(0);
+            Op::Expand { h } => {
+                let id = HierarchyId(*h as usize);
+                // The shim would dereference the fake surface of `add_hier { surface }`;
+                // real surfaces are expanded with `expand_cached`.
+                if g.hierarchy_element(id).is_ok_and(|e| e.surface().is_some()) {
+                    return Err(native::invalid("expand of an opaque surface label"));
+                }
+                // A base-class element fails before it reads the cache.
+                let kernel = Kernel::default();
+                let mut cache = native::placeholder_cache(&kernel)?;
+                match g.expand_hierarchy(&kernel, id, &mut cache) {
+                    Ok(()) => oi.push(0),
+                    Err(e @ SolidError::Unported { .. }) => return Err(e),
+                    Err(e) => oi.push(status_of(&e)),
+                }
             }
             Op::DefineSurface {
                 id,

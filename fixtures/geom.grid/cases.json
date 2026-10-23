@@ -1139,10 +1139,38 @@
     },
     "ops": [
      {
-      "op": "add_hier",
-      "surface": true,
-      "obj": 7,
-      "tol": 1e-06,
+      "op": "define_surface",
+      "id": 7,
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "u": [
+       2,
+       0,
+       0
+      ],
+      "v": [
+       0,
+       1,
+       0.1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "spans": [
+       3,
+       3
+      ]
+     },
+     {
+      "op": "add_cached_hier",
+      "surface": 7,
+      "tol": 0.000001,
       "bbox": [
        -0.05595757321399848,
        -0.05595757321399848,
@@ -1156,11 +1184,17 @@
       "op": "dump"
      },
      {
-      "op": "expand",
+      "op": "observe_cached"
+     },
+     {
+      "op": "expand_cached",
       "h": 0
      },
      {
       "op": "dump"
+     },
+     {
+      "op": "observe_cached"
      }
     ]
    }
@@ -1186,18 +1220,97 @@
     },
     "ops": [
      {
-      "op": "add_surface",
+      "op": "define_surface",
+      "id": 3,
+      "origin": [
+       0.1,
+       0.1,
+       0.3
+      ],
+      "u": [
+       0.8,
+       0,
+       0
+      ],
+      "v": [
+       0,
+       0.8,
+       0.1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "spans": [
+       2,
+       2
+      ]
+     },
+     {
+      "op": "add_cached_leaf",
+      "surface": 3,
+      "leaf": 0,
       "bbox": [
        0.1,
        0.1,
-       0.1,
+       0.29,
+       0.5,
+       0.5,
+       0.4
+      ]
+     },
+     {
+      "op": "add_cached_leaf",
+      "surface": 3,
+      "leaf": 3,
+      "bbox": [
+       0.5,
+       0.5,
        0.3,
-       0.3,
-       0.3
+       0.9,
+       0.9,
+       0.4
       ]
      },
      {
       "op": "dump"
+     },
+     {
+      "op": "setup",
+      "p": [
+       0.3,
+       0.3,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ]
+     },
+     {
+      "op": "step",
+      "t": 1e+20
+     },
+     {
+      "op": "step",
+      "t": 1e+20
+     },
+     {
+      "op": "step",
+      "t": 1e+20
+     },
+     {
+      "op": "step",
+      "t": 1e+20
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "observe_cached"
      }
     ]
    }

@@ -67,37 +67,51 @@ fn corpus_keeps_615_legacy_inputs_and_adds_six_explicit_cases() {
     }
 }
 
+/// The two legacy fixtures that used to wait for `smsurf_GetSurfaceCache` and
+/// `SmBezierPatch::GetPseudoBox` now define a real surface: both sides build its
+/// cache, expand it or add its nodes, and the observation compares the leaf records.
 #[test]
-fn original_missing_geometry_is_still_deferred() {
-    for (name, symbol) in [
-        (
-            "raytracer_surface_hierarchy_expand",
-            "smsurf_GetSurfaceCache",
-        ),
-        ("surface_leaf_element", "SmBezierPatch::GetPseudoBox"),
+fn the_formerly_deferred_fixtures_run_real_surface_caches() {
+    for name in [
+        "raytracer_surface_hierarchy_expand",
+        "surface_leaf_element",
     ] {
         let case = fixture(LEGACY_FIXTURES, name);
         let i: Inputs = case.parse().unwrap();
-        let error = run_rust(&i, &mut Stats::default()).unwrap_err();
-        assert!(matches!(error, SolidError::Unported { upstream, .. } if upstream == symbol));
+        assert!(i
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::DefineSurface { .. })));
+        let cpp = Runner.run_cpp(&case).unwrap();
+        let rust = output(run_rust(&i, &mut Stats::default()).unwrap());
+        let r = compare(&cpp, &rust, &[]);
+        assert!(r.pass(), "{name}: {r:?}");
+        // at least one 51-value leaf record, and an element in the pool
+        assert!(r.values_compared > 51, "{name}: {r:?}");
     }
 }
 
+/// An opaque surface label (`add_hier { surface: true }`) can be dumped but not
+/// expanded, even next to an explicit surface of the same numeric label.
 #[test]
-fn explicit_definition_does_not_resolve_a_legacy_opaque_label() {
-    let mut legacy: Inputs = fixture(LEGACY_FIXTURES, "raytracer_surface_hierarchy_expand")
-        .parse()
-        .unwrap();
+fn explicit_definition_does_not_resolve_an_opaque_label() {
     let explicit: Inputs = fixture(NEW_FIXTURES, "native_affine_hierarchy_single")
         .parse()
         .unwrap();
-    legacy.ops.insert(0, explicit.ops[0].clone()); // same numeric label 7, different input path
+    let mut i = explicit.clone();
+    i.ops = vec![
+        explicit.ops[0].clone(), // defines surface 7
+        Op::AddHier {
+            surface: true,
+            obj: 7, // the same numeric label, the opaque input path
+            tol: 0.0,
+            bbox: [0.0, 0.0, 0.0, 1.0, 1.0, 0.1],
+        },
+        Op::Expand { h: 0 },
+    ];
     assert!(matches!(
-        run_rust(&legacy, &mut Stats::default()),
-        Err(SolidError::Unported {
-            upstream: "smsurf_GetSurfaceCache",
-            ..
-        })
+        run_rust(&i, &mut Stats::default()),
+        Err(SolidError::InvalidInput { .. })
     ));
 }
 

@@ -34,7 +34,7 @@ use solidcore::geom::vector2d::Vec2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::intersect::ray_tracer::{
-    surface_leaf, LightSource, Lsi3LocalSolver, RayObject, RayRenderer, RayTracer,
+    LightSource, Lsi3LocalSolver, RayObject, RayRenderer, RayTracer,
 };
 use solidcore::kernel::Kernel;
 use solidcore::math::BIG_DOUBLE;
@@ -484,7 +484,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 for v in polar.iter().skip(1) {
                     polar_box.add_vector(v3(*v), None);
                 }
-                let leaf = surface_leaf(
+                let leaf = SurfaceGridElement::from_leaf_data(
                     k, *surface,
                     surf,
                     &ext2(*uv),

@@ -5,13 +5,15 @@
 //! and uniform span counts. Leaf ordinals refer only to eligible nodes of that
 //! surface's actual cache, in `GetAllTreeNodes` order; they are not arena ids.
 
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::polar_box::PolarBoxState;
 use solidcore::geom::tree::{AuxDataType, NodeClass, NodeData};
-use solidcore::intersect::ray_tracer::surface_leaf;
+use solidcore::geom::vector2d::Vec2;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::surface_cache;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::surface_cache::p1::SurfaceCache;
@@ -28,7 +30,6 @@ pub(super) fn invalid(reason: &'static str) -> SolidError {
 
 struct CachedSurface {
     id: i64,
-    surface: Surface,
     cache: SurfaceCache<i64>,
     leaves: Vec<NodeId>,
 }
@@ -39,6 +40,19 @@ pub(super) struct Caches {
     kernel: Kernel,
     surfaces: Vec<CachedSurface>,
     hierarchies: Vec<(HierarchyId, i64)>,
+}
+
+/// A cache for `Grid::expand_hierarchy` on a base-class element, which fails with
+/// `SM_ERR` before it reads the cache.
+pub(super) fn placeholder_cache(kernel: &Kernel) -> solidcore::Result<SurfaceCache<i64>> {
+    let plane = Surface::from(Plane::new(
+        Vec3::ZERO,
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec2::new(1.0, 1.0),
+        &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+    ));
+    surface_cache(kernel, &plane, None)
 }
 
 fn leaf_nodes(cache: &SurfaceCache<i64>) -> solidcore::Result<Vec<NodeId>> {
@@ -76,37 +90,10 @@ fn init_leaf(
     s: &mut CachedSurface,
     node: NodeId,
 ) -> solidcore::Result<SurfaceGridElement<i64>> {
-    let patch = s.cache.patch(node)?;
-    let domain = patch.aux.uv_domain;
-    let pseudo = *patch.pseudo_box();
-    let polar = s.cache.polar_box(kernel, node)?;
-    let bbox = s
-        .cache
-        .tree()
-        .ok_or_else(|| invalid("cache has no tree"))?
-        .node(node)?
-        .bbox;
-    // Reuse the existing Init evaluator, without changing any ray-tracer path.
-    let leaf = surface_leaf(
-        kernel,
-        s.id as usize,
-        &s.surface,
-        &domain,
-        &bbox,
-        &pseudo,
-        &polar,
-    )?;
-    Ok(SurfaceGridElement {
-        surface: s.id,
-        uv_domain: leaf.uv_domain,
-        bbox: leaf.bbox,
-        pseudo_box: leaf.pseudo_box,
-        polar_box: leaf.polar_box,
-        mid_point: leaf.mid_point,
-        mid_du: leaf.mid_du,
-        mid_dv: leaf.mid_dv,
-        mid_normal: leaf.mid_normal,
-    })
+    // `SmSurfaceGridElement::Init` of the actual cache node: the library's own port, so
+    // this harness runs the code `Grid::expand_hierarchy` and `Grid::add_surface_node`
+    // run (the leaf's surface is the node's owner object, here the surface's id).
+    SurfaceGridElement::init(kernel, &mut s.cache, node)
 }
 
 impl Caches {
@@ -155,12 +142,7 @@ impl Caches {
             return Err(invalid("surface cache identity was not retained"));
         }
         let leaves = leaf_nodes(&cache)?;
-        self.surfaces.push(CachedSurface {
-            id,
-            surface,
-            cache,
-            leaves,
-        });
+        self.surfaces.push(CachedSurface { id, cache, leaves });
         Ok(())
     }
 
@@ -338,7 +320,7 @@ impl Caches {
     }
 }
 
-fn put_domain(out: &mut Vec<f64>, d: &solidcore::geom::extent2d::Extent2d) {
+fn put_domain(out: &mut Vec<f64>, d: &Extent2d) {
     out.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
 }
 
