@@ -195,3 +195,29 @@ pub fn on_frame(c: &Curve, [t0, t1]: [f64; 2], frame: &Frame, tol: f64) -> Optio
     let relabel = Frame { origin: [o.x, o.y, o.z], x_axis: [nx.x, nx.y, nx.z], y_axis: [ny.x, ny.y, ny.z] };
     Some((Curve::Circle { frame: relabel, radius: *radius }, [t0 + shift, t1 + shift]))
 }
+
+/// The frame of a cylinder, cone, sphere or torus (`None` for another surface).
+pub fn frame_of(s: &Surface) -> Option<&Frame> {
+    match s {
+        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => Some(frame),
+        _ => None,
+    }
+}
+
+/// An edge's label and NURBS form: a circle about the axis of one of `frames` (the cylinder,
+/// cone, sphere and torus faces it bounds) is labelled on that frame ([`on_frame`]), so its form
+/// lies on that face's quarter grid; a circle or ellipse then has its form ([`curve`]). The label
+/// with its interval, and the form with its own; `None` for an arc of more than one turn.
+pub fn edge<'a>(
+    c: &Curve,
+    interval: [f64; 2],
+    frames: impl IntoIterator<Item = &'a Frame>,
+    tol: f64,
+) -> Option<(Curve, [f64; 2], Option<(Curve, [f64; 2])>)> {
+    let (label, iv) = frames.into_iter().find_map(|f| on_frame(c, interval, f, tol)).unwrap_or_else(|| (c.clone(), interval));
+    let form = match label {
+        Curve::Circle { .. } | Curve::Ellipse { .. } => Some(curve(&label, iv)?),
+        _ => None,
+    };
+    Some((label, iv, form))
+}

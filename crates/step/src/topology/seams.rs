@@ -311,7 +311,7 @@ impl Builder<'_, '_> {
             }
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
         Ok((i, along))
     }
 
@@ -546,7 +546,7 @@ impl Builder<'_, '_> {
             x.interval = [lo, t];
             x.vertices = [a, v];
         }
-        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance });
+        self.edges.push(EdgeB { curve, interval: [t, hi], vertices: [v, b], tolerance, form: None });
         for f in &mut self.faces {
             for l in &mut f.loops {
                 let LoopB::Edges(es) = l else { continue };

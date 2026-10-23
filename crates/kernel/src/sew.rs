@@ -1362,38 +1362,31 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         }
         g
     };
-    // A circle on a cylinder, cone, sphere or torus about its axis is labelled on that face's
-    // frame, so its form lies on the face's quarter grid and its pcurve there is a straight line.
-    let mut frame_of: Vec<Option<&b::Frame>> = vec![None; edges.len()];
+    // Each edge's label and NURBS form (`form::edge`): a circle about a revolved face's axis on
+    // that face's frame, so its form lies on the face's quarter grid; an edge the caller gave a
+    // pcurve for keeps the parameter that pcurve is on.
+    let mut frames_of: Vec<Vec<&b::Frame>> = vec![Vec::new(); edges.len()];
     for f in &faces {
-        let (b::Surface::Cylinder { frame, .. }
-        | b::Surface::Cone { frame, .. }
-        | b::Surface::Sphere { frame, .. }
-        | b::Surface::Torus { frame, .. }) = &f.surface
-        else {
-            continue;
-        };
+        let Some(frame) = b::form::frame_of(&f.surface) else { continue };
         for u in f.loops.iter().flatten() {
-            if let Some(slot) = frame_of.get_mut(u.edge as usize).filter(|s| s.is_none()) {
-                *slot = Some(frame);
+            if let Some(slot) = frames_of.get_mut(u.edge as usize) {
+                slot.push(frame);
             }
         }
     }
-    let labels: Vec<(b::Curve, [f64; 2])> = edges
-        .iter()
-        .zip(&frame_of)
-        .map(|(e, frame)| frame.and_then(|f| b::form::on_frame(&e.curve, e.interval, f, tol)).unwrap_or_else(|| (e.curve.clone(), e.interval)))
-        .collect();
-    let forms: Vec<Option<(b::Curve, [f64; 2])>> = labels
-        .iter()
-        .zip(&given_on)
-        .map(|((curve, interval), given)| match curve {
-            b::Curve::Circle { .. } | b::Curve::Ellipse { .. } if !given => {
-                b::form::curve(curve, *interval).ok_or_else(|| fail("an arc of more than one turn".into())).map(Some)
-            }
-            _ => Ok(None),
-        })
-        .collect::<Result<_>>()?;
+    let mut labels: Vec<(b::Curve, [f64; 2])> = Vec::with_capacity(edges.len());
+    let mut forms: Vec<Option<(b::Curve, [f64; 2])>> = Vec::with_capacity(edges.len());
+    for ((e, frames), given) in edges.iter().zip(&frames_of).zip(&given_on) {
+        if *given {
+            labels.push((e.curve.clone(), e.interval));
+            forms.push(None);
+            continue;
+        }
+        let (label, interval, form) =
+            b::form::edge(&e.curve, e.interval, frames.iter().copied(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
+        labels.push((label, interval));
+        forms.push(form);
+    }
     // Each face on its NURBS form: a cylinder, cone, sphere or torus over the extent its label's
     // pcurves give, then every pcurve again on the forms, exactly.
     let mut pcs: Vec<Vec<Vec<Curve2>>> = Vec::with_capacity(nf);
