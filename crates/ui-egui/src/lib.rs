@@ -631,6 +631,9 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Play Macro prompt, when a loaded macro asks for values.
     pub macro_run: Option<macro_run::MacroRun>,
+    /// The values macros last ran with, keyed by [`macro_run::macro_key`]; remembered between
+    /// plays and restarts (docs/macros.md), cleared per macro by the Play prompt's reset.
+    pub macro_values: std::collections::BTreeMap<String, serde_json::Value>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
@@ -932,6 +935,7 @@ impl SolveApp {
             remembered_commands: Vec::new(),
             params: None,
             macro_run: None,
+            macro_values: std::collections::BTreeMap::new(),
             design_properties: None,
             sketch_report: None,
             bom: None,
@@ -1214,6 +1218,7 @@ impl SolveApp {
             "preferences": self.preferences,
             "view_gizmo": self.view_gizmo.stored(),
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
+            "macro_values": self.macro_values,
         });
         if let Some(layout) = panel_layout
             && let Some(obj) = v.as_object_mut()
@@ -1336,6 +1341,9 @@ impl SolveApp {
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
         panel_runtime::load_preferences(self, &v);
+        if let Some(m) = v.get("macro_values") {
+            self.macro_values = macro_run::clean_macro_values(m);
+        }
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {

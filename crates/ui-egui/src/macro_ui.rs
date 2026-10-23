@@ -6,8 +6,8 @@ use egui::{Align2, FontId, Sense, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 pub(crate) fn toolbar(app: &mut SolveApp, id: &str) {
     match id {
@@ -19,7 +19,7 @@ pub(crate) fn toolbar(app: &mut SolveApp, id: &str) {
         "macro.pause" => {
             if app.run(id, json!({})).is_ok() {
                 let steps = app.session.macros.steps();
-                app.set_status(crate::i18n::format("macro.paused", &[("steps", &steps.to_string())]), false);
+                app.set_status(solidcraft_ui_text::format("macro.paused", &[("steps", &steps.to_string())]), false);
             }
         }
         "macro.resume" => {
@@ -30,10 +30,12 @@ pub(crate) fn toolbar(app: &mut SolveApp, id: &str) {
         "macro.stop" => {
             if let Ok(r) = app.run(id, json!({})) {
                 let steps = r.get("steps").and_then(Value::as_u64).unwrap_or(0);
-                if steps == 0 {
+                if r.get("capped").and_then(Value::as_bool).unwrap_or(false) {
+                    app.set_status(app.tr("macro.stopped_capped").to_string(), false);
+                } else if steps == 0 {
                     app.set_status(app.tr("macro.stopped_empty").to_string(), false);
                 } else {
-                    app.set_status(crate::i18n::format("macro.stopped", &[("steps", &steps.to_string())]), false);
+                    app.set_status(solidcraft_ui_text::format("macro.stopped", &[("steps", &steps.to_string())]), false);
                 }
             }
         }
@@ -52,7 +54,7 @@ pub(crate) fn toolbar(app: &mut SolveApp, id: &str) {
                     Ok(r) => {
                         let steps = r.get("steps").and_then(Value::as_u64).unwrap_or(0);
                         let saved = r.get("path").and_then(Value::as_str).unwrap_or(&path);
-                        app.set_status(crate::i18n::format("macro.saved", &[("steps", &steps.to_string()), ("path", saved)]), false);
+                        app.set_status(solidcraft_ui_text::format("macro.saved", &[("steps", &steps.to_string()), ("path", saved)]), false);
                     }
                     Err(e) => app.set_status(format!("{}: {e}", app.tr("cmd.macro_save")), true),
                 }
@@ -92,7 +94,7 @@ fn open_picked(app: &mut SolveApp, path: String, play_after: bool) {
     match app.run("macro.open", json!({"path": path})) {
         Ok(r) => {
             let steps = r.get("steps").and_then(Value::as_u64).unwrap_or(0);
-            app.set_status(crate::i18n::format("macro.opened", &[("steps", &steps.to_string())]), false);
+            app.set_status(solidcraft_ui_text::format("macro.opened", &[("steps", &steps.to_string())]), false);
             if play_after {
                 if app.session.macros.loaded.as_ref().is_some_and(|m| !m.params.is_empty()) {
                     crate::macro_run::open(app);
@@ -109,9 +111,9 @@ pub(crate) fn play(app: &mut SolveApp, params: Value) {
     match app.run("macro.play", params) {
         Ok(r) => {
             let ran = r.get("steps").and_then(Value::as_u64).unwrap_or(0);
-            app.set_status(crate::i18n::format("macro.played", &[("steps", &ran.to_string())]), false);
+            app.set_status(solidcraft_ui_text::format("macro.played", &[("steps", &ran.to_string())]), false);
         }
-        Err(e) => app.set_status(crate::i18n::format("macro.failed", &[("error", &e)]), true),
+        Err(e) => app.set_status(solidcraft_ui_text::format("macro.failed", &[("error", &e)]), true),
     }
 }
 
@@ -122,10 +124,10 @@ pub(crate) fn chip(app: &SolveApp, ctx: &egui::Context) {
     let steps = app.session.macros.steps();
     let paused = app.session.macros.paused;
     let id = if paused { "macro.chip_paused" } else { "macro.chip_recording" };
-    let text = crate::i18n::format(id, &[("steps", &steps.to_string())]);
+    let text = solidcraft_ui_text::format(id, &[("steps", &steps.to_string())]);
     let t = Tokens::get();
     ui_kit::Container::new(ctx, ui_kit::Surface::Toast)
-        .area(egui::Id::new("sc_macro_recording"))
+        .area(egui::Id::unique("sc_macro_recording"))
         .anchor(Align2::CENTER_TOP, vec2(0.0, 36.0))
         .interactable(false)
         .show(ctx, |ui| {
