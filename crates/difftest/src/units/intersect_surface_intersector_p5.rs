@@ -1124,3 +1124,126 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::curve::curve_cache::{BezierAux1d, BezierSpan};
+    use solidcore::geom::polar_box::PolarBoxState;
+    use solidcore::geom::tree::CurveSpanRef;
+    use solidcore::surface::surface::p2::cs_are_perpen_disjoint_in;
+
+    #[test]
+    fn csi_polar_cones_keep_and_reject_with_stored_and_lazy_boxes() {
+        let k = Kernel::default();
+        let surface =
+            rust_surface(&plane_at([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0)).unwrap();
+        let node = NodeIn {
+            parent: -1,
+            c1: -1,
+            c2: -1,
+            aux: 3,
+            bbox: [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+            dom: [0.0, 0.0, 1.0, 1.0],
+            polar: vec![],
+            pseudo: Some((
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                [[0.0, 1.0], [0.0, 1.0], [0.0, 0.0]],
+            )),
+        };
+        // The lazy path must evaluate the real owning surface, not substitute an
+        // empty cone. The read-only helper must leave that cache uninitialised.
+        for stored in [false, true] {
+            let mut node = node.clone();
+            if stored {
+                node.polar.push([0.0, 0.0, 1.0]);
+            }
+            let cache = rust_cache(surface.clone(), &[node], H(0)).unwrap();
+            let id = NodeId(0);
+            let before = cache.aux(id).unwrap().polar_box;
+            assert_eq!(before.state() == PolarBoxState::Uninitialized, !stored);
+            let mut normal = PolarBox::new();
+            normal.add_vector(Vec3::new(0.0, 0.0, 1.0), None);
+            assert_eq!(cache.polar_box_unstored(&k, id).unwrap(), normal);
+
+            for (name, ends, rejected) in [
+                // Displacement is outside the surface-normal cone. The chord
+                // is perpendicular to it, so the chord test cannot mask this.
+                ("polar_reject", [[10.0, 0.0, 0.0], [10.0, 1.0, 0.0]], true),
+                // Normal cone overlaps, but no chord direction is perpendicular
+                // to the displacement cone (ConesAreDisjointPerpen).
+                ("chord_reject", [[0.5, 0.5, 10.0], [0.5, 0.5, 11.0]], true),
+                // Normal cone overlaps and the chord can be perpendicular to
+                // the displacement: the cone tests cannot reject this branch.
+                ("keep", [[0.0, 0.5, 10.0], [1.0, 0.5, 10.0]], false),
+                // Overlapping boxes give a wide cone and must not reject.
+                ("wide_keep", [[0.5, 0.5, -1.0], [0.5, 0.5, 1.0]], false),
+            ] {
+                let ends = ends.map(v3);
+                let [start, end] = ends;
+                let mut curve_tree = Tree::<H>::new(Some(TreeOwner::CurveCache));
+                curve_tree.set_curve_data(
+                    vec![BezierSpan {
+                        aux: BezierAux1d {
+                            ends,
+                            ..BezierAux1d::default()
+                        },
+                        ..BezierSpan::default()
+                    }],
+                    vec![],
+                    None,
+                );
+                let curve_node = TreeNode {
+                    bbox: Extent3d::from_points(start, end),
+                    aux_type: AuxDataType::BezierCurve,
+                    data: NodeData::Curve(CurveSpanRef::Span(0)),
+                    ..TreeNode::new()
+                };
+                let surface_node = cache.tree().unwrap().node(id).unwrap();
+                assert_eq!(
+                    cs_are_perpen_disjoint_in(
+                        &k,
+                        &curve_tree,
+                        &curve_node,
+                        surface_node,
+                        &cache,
+                        id,
+                    )
+                    .unwrap(),
+                    rejected,
+                    "{name}, stored={stored}"
+                );
+                assert_eq!(cache.aux(id).unwrap().polar_box, before);
+            }
+        }
+    }
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn csi_former_polar_deferrals_compare_native_values() {
+        // Exact original seeds from main CI 39940775733; no generator changes or
+        // replacement inputs. Reverting the CSI call must restore the deferrals.
+        for index in [393, 1277] {
+            let seed = CaseContext::seed_for(Runner.id(), index);
+            let inputs = Runner.generate(&mut Rng::new(seed)).unwrap();
+            let case = Case {
+                unit: Runner.id().into(),
+                name: format!("gen{index:04}"),
+                source: CaseSource::Generated { seed },
+                inputs,
+            };
+            let cpp = Runner.run_cpp(&case).unwrap();
+            let rust = Runner.run_rust(&case).unwrap();
+            assert!(
+                cpp.deferred.is_none() && rust.deferred.is_none(),
+                "{case:?}"
+            );
+            assert!(cpp.error.is_none() && rust.error.is_none(), "{case:?}");
+            assert_eq!(cpp.values.get("rec").and_then(|v| v.first()), Some(&0.0));
+            let diff = crate::compare::compare(&cpp, &rust, &[]);
+            assert!(diff.pass(), "{}: {diff:?}", case.name);
+            assert!(diff.values_compared > 15, "{}: {diff:?}", case.name);
+            assert!(diff.nonzero_compared > 0, "{}: {diff:?}", case.name);
+        }
+    }
+}

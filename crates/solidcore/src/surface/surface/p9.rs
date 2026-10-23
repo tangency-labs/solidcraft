@@ -977,7 +977,14 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                 )? {
                     self.add_sorted_solution(&solution, SortKey::ByAllParameters, true)?;
                 }
-                if super::p2::cs_are_perpen_disjoint(curve_tree, &curve_node, &surface_node)? {
+                if super::p2::cs_are_perpen_disjoint_in(
+                    k,
+                    curve_tree,
+                    &curve_node,
+                    &surface_node,
+                    self.surface_cache.ok_or(SolidError::null_pointer(OP))?,
+                    surface_id,
+                )? {
                     return Ok(false);
                 }
                 if index < 1 {
