@@ -3786,7 +3786,6 @@
   "ui.revolutions": "Windungen",
   "ui.revolve": "Drehen",
   "ui.ribbon_exit": "Beenden",
-  "ui.ribbon_grid_footer": "Angeheftete Befehle erscheinen im Menüband und tragen eine Nadel. Klicken Sie auf die Nadel in der Ecke eines Symbols oder mit der rechten Maustaste auf das Symbol, um es anzuheften oder zu lösen.",
   "ui.ribbon_labels": "Text unter den Symbolen im Menüband anzeigen",
   "ui.ribbon_menus_skip_pinned": "Angeheftete Befehle nicht in den Aufklappmenüs wiederholen",
   "ui.ribbon_pin_footer": "Angeheftete Befehle erscheinen im Menüband. Fahren Sie über eine Zeile, um sie anzuheften oder zu lösen.",

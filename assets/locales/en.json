@@ -4475,7 +4475,6 @@
   "ui.revolutions": "Revolutions",
   "ui.revolve": "Revolve",
   "ui.ribbon_exit": "Exit",
-  "ui.ribbon_grid_footer": "Pinned commands show on the ribbon and carry a pin. Click the pin in an icon's corner, or right-click the icon, to pin or unpin it.",
   "ui.ribbon_labels": "Show text under ribbon icons",
   "ui.ribbon_menus_skip_pinned": "Leave pinned commands out of the drop-down menus",
   "ui.ribbon_pin_footer": "Pinned commands show on the ribbon. Hover a row to pin or unpin it.",

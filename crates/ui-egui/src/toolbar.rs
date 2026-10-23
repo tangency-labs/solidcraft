@@ -1774,7 +1774,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
                                 let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds));
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
-                                section_footer(ui, "ui.ribbon_grid_footer");
                                 return;
                             }
                             if sketch_create {
@@ -1789,7 +1788,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
                                 let action = dropdown_grid(app, ui, &tab, &grouped);
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
-                                section_footer(ui, "ui.ribbon_grid_footer");
                                 return;
                             }
                             let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
@@ -2246,20 +2244,76 @@ const GRID_ICON: f32 = 32.0;
 /// Columns at most; a panel with fewer commands is as wide as it needs.
 const GRID_COLUMNS: usize = 5;
 
-/// Where each command of a grid drop-down sits, as (row, column): rows fill left to right, and
-/// a group heading starts a new row.
-fn grid_cells(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], columns: usize) -> Vec<(usize, usize)> {
-    let mut cells = Vec::with_capacity(grouped.len());
-    let (mut row, mut column) = (0, 0);
+/// The height of a group's heading in a grid drop-down.
+const GRID_HEADING: f32 = 24.0;
+/// Icons side by side in a group's column, when groups stand side by side.
+const GROUP_COLUMNS: usize = 2;
+
+/// Where a grid drop-down puts things, relative to its top left: each command's icon with its
+/// (row, column) for the arrow keys, each group heading (where, how wide), and the whole size.
+struct GridLayout {
+    cells: Vec<(Rect, (usize, usize))>,
+    headings: Vec<(egui::Pos2, f32, &'static str)>,
+    size: egui::Vec2,
+}
+
+/// Lay out a grid drop-down. A menu of two or more headed groups (Sketch › Create's families,
+/// Model › Modify's Edges, Faces…) puts the groups side by side, each heading over a column of
+/// its icons, at most [`GROUP_COLUMNS`] across, when that fits in `room` (wide); any other menu,
+/// or one too wide for the window, fills rows of up to [`GRID_COLUMNS`] icons, a heading starting
+/// a new row.
+fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], room: f32) -> GridLayout {
+    let mut groups: Vec<(Option<&'static str>, Vec<usize>)> = Vec::new();
     for (i, (heading, _)) in grouped.iter().enumerate() {
-        if i > 0 && (heading.is_some() || column >= columns) {
-            row += 1;
-            column = 0;
+        if heading.is_some() || groups.is_empty() {
+            groups.push((*heading, Vec::new()));
         }
-        cells.push((row, column));
-        column += 1;
+        if let Some((_, items)) = groups.last_mut() {
+            items.push(i);
+        }
     }
-    cells
+    let headed = groups.iter().filter(|(h, _)| h.is_some()).count();
+    let side_by_side = headed >= 2 && (groups.len() * GROUP_COLUMNS) as f32 * GRID_CELL <= room;
+    let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
+    let mut headings = Vec::new();
+    let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(GRID_CELL, GRID_CELL));
+    let size = if side_by_side {
+        let width = GROUP_COLUMNS as f32 * GRID_CELL;
+        for (g, (heading, items)) in groups.iter().enumerate() {
+            let x = g as f32 * width;
+            if let Some(h) = heading {
+                headings.push((pos2(x, 0.0), width, *h));
+            }
+            for (k, i) in items.iter().enumerate() {
+                let (row, column) = (k / GROUP_COLUMNS, k % GROUP_COLUMNS);
+                if let Some(slot) = cells.get_mut(*i) {
+                    *slot = (cell(x + column as f32 * GRID_CELL, GRID_HEADING + row as f32 * GRID_CELL), (row, g * GROUP_COLUMNS + column));
+                }
+            }
+        }
+        let rows = groups.iter().map(|(_, items)| items.len().div_ceil(GROUP_COLUMNS)).max().unwrap_or(0);
+        vec2(groups.len() as f32 * width, GRID_HEADING + rows as f32 * GRID_CELL)
+    } else {
+        let columns = grouped.len().clamp(1, GRID_COLUMNS);
+        let (mut y, mut first_row) = (0.0, 0);
+        for (heading, items) in &groups {
+            if let Some(h) = heading {
+                headings.push((pos2(0.0, y), columns as f32 * GRID_CELL, *h));
+                y += GRID_HEADING;
+            }
+            for (k, i) in items.iter().enumerate() {
+                let (row, column) = (k / columns, k % columns);
+                if let Some(slot) = cells.get_mut(*i) {
+                    *slot = (cell(column as f32 * GRID_CELL, y + row as f32 * GRID_CELL), (first_row + row, column));
+                }
+            }
+            let rows = items.len().div_ceil(columns);
+            y += rows as f32 * GRID_CELL;
+            first_row += rows;
+        }
+        vec2(columns as f32 * GRID_CELL, y)
+    };
+    GridLayout { cells, headings, size }
 }
 
 /// An arrow key in a grid drop-down.
@@ -2337,32 +2391,37 @@ fn dropdown_grid(
     tab: &str,
     grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
 ) -> Option<(&'static str, RowAction)> {
-    let columns = grouped.len().clamp(1, GRID_COLUMNS);
-    let cells = grid_cells(grouped, columns);
-    let width = (columns as f32 * GRID_CELL).max(200.0);
+    // Wide enough for groups side by side, short of the window's edge.
+    let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
+    let layout = grid_layout(grouped, room);
+    let width = layout.size.x.max(200.0);
     // A narrow grid sits in the middle of the drop-down's least width.
-    let inset = (width - columns as f32 * GRID_CELL) / 2.0;
+    let inset = ((width - layout.size.x) / 2.0).max(0.0);
     ui.set_width(width);
     let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
-    grid_keys(app, ui, &cmds, &cells);
+    let keys: Vec<(usize, usize)> = layout.cells.iter().map(|(_, at)| *at).collect();
+    grid_keys(app, ui, &cmds, &keys);
     // Like the list, the grid scrolls when it would run past the window's bottom (#874).
-    let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
+    let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(GRID_CELL * 2.0);
     let mut action = None;
-    egui::ScrollArea::vertical().id_salt("panel_menu_grid").max_height(room).min_scrolled_height(room).show(ui, |ui| {
-        let mut strip: Option<(usize, Rect)> = None;
-        for ((heading, c), (row, column)) in grouped.iter().zip(&cells) {
-            if let Some(heading) = heading {
-                section_heading(ui, heading, width);
-            }
-            let top_left = match strip {
-                Some((at, rect)) if at == *row => rect.left_top(),
-                _ => {
-                    let (rect, _) = ui.allocate_exact_size(vec2(width, GRID_CELL), Sense::hover());
-                    strip = Some((*row, rect));
-                    rect.left_top()
-                }
-            };
-            let rect = Rect::from_min_size(top_left + vec2(inset + *column as f32 * GRID_CELL, 0.0), vec2(GRID_CELL, GRID_CELL));
+    egui::ScrollArea::vertical().id_salt("panel_menu_grid").max_height(height).min_scrolled_height(height).show(ui, |ui| {
+        let (area, _) = ui.allocate_exact_size(vec2(width, layout.size.y), Sense::hover());
+        let origin = area.left_top() + vec2(inset, 0.0);
+        let t = Tokens::get();
+        for (at, w, heading) in &layout.headings {
+            let text = crate::i18n::tr_label(heading).to_uppercase();
+            let clip = ui.clip_rect().intersect(Rect::from_min_size(origin + at.to_vec2(), vec2(*w, GRID_HEADING)));
+            let painter = ui.painter().with_clip_rect(clip);
+            painter.text(
+                origin + at.to_vec2() + vec2(6.0, GRID_HEADING / 2.0),
+                Align2::LEFT_CENTER,
+                text,
+                crate::fonts::semibold(t.font_small),
+                t.text_dim,
+            );
+        }
+        for ((_, c), (rect, _)) in grouped.iter().zip(&layout.cells) {
+            let rect = rect.translate(origin.to_vec2());
             let pinned = crate::toolbar_custom::pinned_on(app, tab, c.id).is_some();
             match dropdown_cell(app, ui, c, rect, pinned) {
                 RowAction::None => {}
@@ -3803,8 +3862,22 @@ mod dropdown_tests {
             (Some("Other"), c("solid.extrude")),
             (None, c("solid.revolve")),
         ];
-        let cells = grid_cells(&grouped, 3);
-        assert_eq!(cells, [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (2, 0), (2, 1)]);
+        // Too narrow for the groups side by side: rows of up to five, a heading starting a row.
+        let rows = grid_layout(&grouped, 100.0);
+        let at = |l: &GridLayout| l.cells.iter().map(|(_, at)| *at).collect::<Vec<_>>();
+        assert_eq!(at(&rows), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
+        assert_eq!(rows.headings.len(), 2);
+        // Room enough: each group a column of two under its heading, the groups side by side.
+        let side = grid_layout(&grouped, 1000.0);
+        assert_eq!(at(&side), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (0, 2), (0, 3)]);
+        let headings: Vec<_> = side.headings.iter().map(|(p, _, h)| (p.x, *h)).collect();
+        assert_eq!(headings, [(0.0, "Primitives"), (2.0 * GRID_CELL, "Other")]);
+        assert_eq!(side.size, vec2(4.0 * GRID_CELL, GRID_HEADING + 3.0 * GRID_CELL));
+        assert!(side.cells.iter().all(|(r, _)| r.top() >= GRID_HEADING), "icons below the headings");
+        // A menu without groups keeps its rows of five.
+        let plain: Vec<_> = grouped.iter().map(|(_, c)| (None, *c)).collect();
+        assert_eq!(at(&grid_layout(&plain, 1000.0)), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
+        let cells = at(&side);
         // `solid.pipe` (index 4) is disabled: `enabled` holds the others.
         let enabled = [0, 1, 2, 3, 5, 6];
         let step = |at, key| grid_step(&cells, &enabled, at, key).map(|k: usize| enabled[k]);
@@ -3812,11 +3885,11 @@ mod dropdown_tests {
         assert_eq!((step(None, GridKey::Left), step(None, GridKey::Up)), (Some(6), Some(6)));
         assert_eq!(step(Some(2), GridKey::Right), Some(3), "Right runs on into the next row");
         assert_eq!(step(Some(0), GridKey::Left), Some(6), "and wraps");
-        assert_eq!(step(Some(2), GridKey::Down), Some(3), "Down goes to the nearest enabled icon below");
-        assert_eq!(step(Some(1), GridKey::Down), Some(3));
-        assert_eq!(step(Some(4), GridKey::Down), Some(0), "from the last row Down wraps to the first");
-        assert_eq!(step(Some(5), GridKey::Up), Some(3));
-        assert_eq!(step(Some(1), GridKey::Up), Some(6), "from the first row Up wraps to the last");
+        assert_eq!(step(Some(1), GridKey::Down), Some(3), "Down goes to the nearest enabled icon below");
+        assert_eq!(step(Some(4), GridKey::Down), Some(3), "from the next group's column too");
+        assert_eq!(step(Some(2), GridKey::Down), Some(0), "from the last enabled row Down wraps to the first");
+        assert_eq!(step(Some(5), GridKey::Up), Some(3), "from the first row Up wraps to the last, nearest column");
+        assert_eq!(step(Some(1), GridKey::Up), Some(3));
         assert_eq!(grid_step(&cells, &[], None, GridKey::Down), None);
     }
 
