@@ -254,7 +254,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui_kit::slider(
                         ui,
                         &mut app.preferences.space_mouse_speed,
-                        0.25..=3.0,
+                        0.25..=5.0,
                         ui_kit::Slider { step: Some(0.05), format: |value| format!("{value:.2}×"), ..Default::default() },
                     );
                 });
