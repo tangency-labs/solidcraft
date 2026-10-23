@@ -1204,10 +1204,10 @@ void tt_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         SmFace* f = g.faces.at((size_t)rd.idx());
         if (kind == 0)
         {
-            o.push_back(TT_NOT_RUN);
-            break;
+            SmTArray<SmFace*> new_faces;
+            o.push_back(st(SmTrimmingTools::SplitAtSeams(the_context(), f, new_faces)));
         }
-        if (kind == 1)
+        else if (kind == 1)
         {
             SmTrimmingTools::ClearUVTrimCurves(f);
             o.push_back(0.0);

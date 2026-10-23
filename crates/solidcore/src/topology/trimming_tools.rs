@@ -365,64 +365,22 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
     crate::topology::face::p4::edges(b, f, None, false, None)
 }
 
-/// The classification object of the seam classifications `SplitAtSeams` passes on: the
-/// loop or vertex a point classification names (other objects are not resolved here).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SeamObject {
-    /// An `SmLoop`.
-    Loop(LoopId),
-    /// An `SmVertex` (what `sm_RemoveSuspectSplitAtSeamUVTrimCurves` resolves).
-    #[expect(
-        dead_code,
-        reason = "made by SmFace::HasSeamProblem once topology.face_p4 is wired"
-    )]
-    Vertex(crate::topology::VertexId),
-}
+use crate::topology::brep::p1::HealLoopHandle;
 
-impl crate::intersect::point_class::ClassObject for SeamObject {
-    fn class_kind(&self) -> crate::intersect::point_class::ClassObjectKind {
-        match self {
-            Self::Loop(_) => crate::intersect::point_class::ClassObjectKind::Loop,
-            Self::Vertex(_) => crate::intersect::point_class::ClassObjectKind::Vertex,
-        }
-    }
-}
-
-impl crate::heal::face_props::LoopObject for SeamObject {
-    fn from_loop(l: LoopId) -> Self {
-        Self::Loop(l)
-    }
-
-    fn as_loop(&self) -> Option<LoopId> {
-        match self {
-            Self::Loop(l) => Some(*l),
-            Self::Vertex(_) => None,
-        }
-    }
-
-    fn as_vertex(&self) -> Option<crate::topology::VertexId> {
-        match self {
-            Self::Vertex(v) => Some(*v),
-            Self::Loop(_) => None,
-        }
-    }
-}
-
-/// Classification geometry for [`SeamObject`]s: loops and vertices name no curve,
-/// surface, volume or point here (their zone tolerances come from the topology).
+/// Classification geometry for [`HealLoopHandle`]s in seam splits: resolves nothing.
 struct SeamGeometry;
 
-impl crate::intersect::point_class::ClassGeometry<SeamObject> for SeamGeometry {
-    fn curve(&self, _: SeamObject) -> Option<&Curve> {
+impl crate::intersect::point_class::ClassGeometry<HealLoopHandle> for SeamGeometry {
+    fn curve(&self, _: HealLoopHandle) -> Option<&Curve> {
         None
     }
-    fn surface(&self, _: SeamObject) -> Option<&Surface> {
+    fn surface(&self, _: HealLoopHandle) -> Option<&Surface> {
         None
     }
-    fn volume(&self, _: SeamObject) -> Option<&crate::surface::volume::Volume> {
+    fn volume(&self, _: HealLoopHandle) -> Option<&crate::surface::volume::Volume> {
         None
     }
-    fn point(&self, _: SeamObject) -> Option<Point3> {
+    fn point(&self, _: HealLoopHandle) -> Option<Point3> {
         None
     }
 }
@@ -430,19 +388,26 @@ impl crate::intersect::point_class::ClassGeometry<SeamObject> for SeamGeometry {
 /// `SmFace::HasSeamProblem(rCrvClassU, rCrvClassV, eCrossed, eMissing, eNearMiss)` (unit
 /// `topology.face_p4`).
 fn face_has_seam_problem(
-    _k: &Kernel,
-    _b: &mut Brep,
-    _f: FaceId,
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
 ) -> Result<(
     bool,
-    crate::intersect::curve_class::p1::CurveClassification<SeamObject>,
-    crate::intersect::curve_class::p1::CurveClassification<SeamObject>,
+    crate::intersect::curve_class::p1::CurveClassification<HealLoopHandle>,
+    crate::intersect::curve_class::p1::CurveClassification<HealLoopHandle>,
     crate::topology::face::p1::SeamProblem,
 )> {
-    // UNPORTED(topology.face_p4): SmFace::HasSeamProblem
-    Err(SolidError::unported(
-        "SmFace::HasSeamProblem",
-        "topology.face_p4",
+    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+        k,
+        b,
+        f,
+        crate::topology::face::p4::HasSeamProblemOptions::default(),
+    )?;
+    Ok((
+        check.has_problem,
+        check.class_u,
+        check.class_v,
+        check.problem,
     ))
 }
 
@@ -462,9 +427,9 @@ fn face_split_at_seam_problem(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec
         problem,
         None,
         &SeamGeometry,
-        &|o: SeamObject| match o {
-            SeamObject::Vertex(v) => Some(EntityRef::Vertex(v)),
-            SeamObject::Loop(_) => None,
+        &|o: HealLoopHandle| match o {
+            HealLoopHandle::Topo(EntityRef::Vertex(v)) => Some(EntityRef::Vertex(v)),
+            _ => None,
         },
     )?;
     Ok(split.faces)
