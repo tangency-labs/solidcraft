@@ -847,14 +847,19 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // This fixture reaches HCR's separate, still-unavailable transform adapter.
+        // HCR's scene transform is wired (topology::brep::p5::transform_with_notifications):
+        // the scene is built, then this fixture has no service to retain it in.
         let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
-        assert!(matches!(
-            hcr,
-            Err(SolidError::Unported {
-                upstream: "SmBrep::Transform", unit: "topology.brep_p5"
-            })
-        ), "{hcr:?}");
+        assert!(
+            matches!(
+                hcr,
+                Err(SolidError::InvalidInput {
+                    reason: "fixture has no retained HCR service",
+                    ..
+                })
+            ),
+            "{hcr:?}"
+        );
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
         // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,

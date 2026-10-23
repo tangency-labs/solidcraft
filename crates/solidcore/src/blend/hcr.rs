@@ -29,10 +29,9 @@
 //!   `topology::brep::p3::copy_brep`) notifies through the caller's notification
 //!   environment, naming the copy's objects by its `key_of` and `brep`'s by `source_key`
 //!   (upstream objects are known by address), so [`Hcr::new`] and [`Hcr::with_transform`]
-//!   take the kernel mutably with both. The scene's transformation (`Transform`) and
-//!   its bounding box
-//!   (`SmBrep::CalculateBoundingBox`) belong to unported units, so [`Hcr::with_transform`]
-//!   stops there; [`Hcr::from_scene`] is the rest of `ConstructorInit` for a caller that
+//!   take the kernel mutably with both. The scene's transformation (`SmBrep::Transform`,
+//!   `topology::brep::p5::transform_with_notifications`) notifies through the same
+//!   environment. [`Hcr::from_scene`] is the rest of `ConstructorInit` for a caller that
 //!   already holds the transformed scene and its box.
 //! - The pointer maps `m_pSilVertices`, `m_pSilEdges` and `m_pBackFacingEdges` are id
 //!   sets; [`Hcr::silhouette_edges`] returns the ids in ascending order (upstream
@@ -224,16 +223,22 @@ fn copy_brep(
     crate::topology::brep::p3::copy_brep(k, env, brep, source_key, None, None, true, true)
 }
 
-// ---- unported callees ---------------------------------------------------------------------
-
-/// `SmBrep::Transform` (unit `topology.brep_p5`).
-fn transform_brep(brep: &mut Brep, transform: &Axis2Placement) -> Result<()> {
-    let _ = (brep, transform);
-    // UNPORTED(topology.brep_p5): SmBrep::Transform
-    Err(SolidError::unported(
-        "SmBrep::Transform",
-        "topology.brep_p5",
-    ))
+/// `SmBrep::Transform(crRotateNMove)` with its defaults (no scale, `bScaleTol` `TRUE`),
+/// notifying through the scene copy's environment `env`.
+fn transform_brep(
+    k: &mut Kernel,
+    env: &mut edge::NotifyEnv<'_>,
+    brep: &mut Brep,
+    transform: &Axis2Placement,
+) -> Result<()> {
+    crate::topology::brep::p5::transform_with_notifications(
+        k,
+        brep,
+        transform,
+        None,
+        true,
+        Some(env),
+    )
 }
 
 /// `SmBrep::FindAndSetInfiniteRegion()` with upstream's default arguments (no shell to
@@ -529,8 +534,9 @@ impl Hcr {
     ///
     /// # Errors
     ///
-    /// Those of the scene copy (`topology::brep::p3::copy_brep`); [`SolidError::Unported`]
-    /// from the transform and box (units `topology.brep_p5`, `query.brep`).
+    /// Those of the scene copy (`topology::brep::p3::copy_brep`); the transform's and
+    /// `FindAndSetInfiniteRegion`'s failures are ignored as upstream, apart from
+    /// [`SolidError::Unported`] from their callees.
     pub fn with_transform(
         k: &mut Kernel,
         env: &mut edge::NotifyEnv<'_>,
@@ -544,7 +550,7 @@ impl Hcr {
         let mut scene = copy_brep(k, env, brep, source_key)?;
         scene.set_editing_enabled(true);
         // transform the copied Brep to place the eye looking up the Z axis
-        ignore_status(transform_brep(&mut scene, &vt))?;
+        ignore_status(transform_brep(k, env, &mut scene, &vt))?;
         ignore_status(find_and_set_infinite_region(k, &mut scene))?; // [B23]
                                                                      // its status is ignored upstream (the box then stays empty)
         let scene_box = ignored(qbrep::calculate_bounding_box(
