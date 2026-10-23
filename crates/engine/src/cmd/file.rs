@@ -818,8 +818,7 @@ fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
     }
     if let Some(v) = p.get("representation").or(p.get("mode")).filter(|v| !v.is_null()) {
         let name = v.as_str().ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
-        options.representation =
-            solidcraft_io::KicadRepresentation::parse(name).ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
+        options.representation = solidcraft_io::KicadRepresentation::parse(name).ok_or_else(|| bad(cmd, "`representation` must be \"mesh\""))?;
         if options.representation == solidcraft_io::KicadRepresentation::Brep {
             return Err(EngineError::Other("not supported yet: B-rep KiCad imports (choose mesh)".into()));
         }
@@ -878,10 +877,36 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let component_name = import::component_name(path, name);
     let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
     let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &component_name, tree)?;
-    let bodies = created_bodies(s, id);
+    // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
+    // coordinates KiCad stores, which put a board anywhere on the project sheet.
+    if let Some(corner) = imported.corner {
+        at_origin(s, &placed, corner);
+    }
+    // A solid board is a STEP import of its own, in the board's component: the mesh feature holds
+    // the copper, silkscreen and models, this holds the substrate.
+    let mut features = vec![id];
+    if let Some(step) = imported.board_step {
+        features.push(import::add_step_in_component(s, placed.component, "board.step", step, &feature_name)?);
+    }
+    let bodies: Vec<String> = features.iter().flat_map(|feature| created_bodies(s, *feature)).collect();
     let mut out = json!({"path": path, "board_path": board_path, "feature": id, "name": feature_name, "bodies": bodies, "created_bodies": bodies, "warnings": feature.warnings});
     placed.report(&mut out);
+    if features.len() > 1 {
+        out["board_solid"] = json!(true);
+    }
     Ok(out)
+}
+
+/// Move an import's component so that the board's lower-left corner `corner` sits at the origin,
+/// contents and all: the occurrence takes the shift, so the design's Z = 0 stays the board's top.
+fn at_origin(s: &mut Session, placed: &import::Placed, corner: [f64; 2]) {
+    let Some(occurrence) = placed.occurrence else { return };
+    let shift =
+        solidcraft_doc::rigid(solidcraft_geom::Vec3::new(-corner[0], -corner[1], 0.0), solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 0.0);
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
+        o.transform = shift;
+    }
+    s.refresh();
 }
 
 /// What a KiCad model reference's `${…}`/`%…%`/`$…` variables can resolve to on this machine.

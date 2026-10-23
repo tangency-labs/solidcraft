@@ -54,6 +54,38 @@ fn the_options_choose_the_parts_and_override_the_thickness() {
 }
 
 #[test]
+fn the_board_stands_with_its_lower_left_corner_at_the_origin() {
+    // Drawn far from KiCad's origin, as a board on a project sheet usually is.
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-origin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 100 50) (end 120 60) (layer "Edge.Cuts")))"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["board_solid"], json!(true), "{r}");
+    let world = s.world_state();
+    let bbox = world
+        .bodies
+        .iter()
+        .find(|b| b.name == "board")
+        .map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.bbox))
+        .expect("no board body")
+        .expect("the board would not measure");
+    // KiCad's Y is negated, so the board covers Y -60..-50 and is moved up to -10..0.
+    assert!(bbox.min.x.abs() < 1e-6 && bbox.min.y.abs() < 1e-6, "{bbox:?}");
+    assert!((bbox.max.x - 20.0).abs() < 1e-6 && (bbox.max.y - 10.0).abs() < 1e-6, "{bbox:?}");
+    // The shift is flat: the board keeps its thickness and stands at the same height.
+    assert!((bbox.max.z - bbox.min.z - 2.0).abs() < 1e-6, "{bbox:?}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn a_bad_option_is_refused_before_the_board_is_read() {
     let path = board_file("bad", 2.0);
     let mut s = Session::default();
