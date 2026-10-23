@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Circular pattern: one hole repeated on a circle</title>
+  <path d="M2 32.7L2 35.11A13.65 11.02 -25.47 0 0 13.03 44.76L13.03 42.35Z" fill="#b8c3cf"/>
+  <path d="M13.03 42.35L13.03 44.76A13.65 11.02 -25.47 0 0 28.4 31.3L28.4 28.89Z" fill="#8e9faf"/>
+  <path d="M2 32.7L2 35.11A13.65 11.02 -25.47 0 0 28.4 31.3L28.4 28.89" fill="none" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M2.88 36.66A13.65 11.02 -25.47 1 0 27.52 24.93A13.65 11.02 -25.47 1 0 2.88 36.66Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.44 35.21A2.41 1.95 -25.47 1 0 23.8 33.13A2.41 1.95 -25.47 1 0 19.44 35.21Z" fill="#8e9faf" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.27 35.47A1.5 1.21 -25.47 1 0 22.97 34.19A1.5 1.21 -25.47 1 0 20.27 35.47Z" fill="#34465b"/>
+  <path d="M15.2 30.8 L21.62 34.17" fill="none" stroke="#6f879c" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <circle cx="15.2" cy="30.8" r="1" fill="#6f879c"/>
+  <path d="M35.6 32.7L35.6 35.11A13.65 11.02 -25.47 0 0 46.63 44.76L46.63 42.35Z" fill="#b8c3cf"/>
+  <path d="M46.63 42.35L46.63 44.76A13.65 11.02 -25.47 0 0 62 31.3L62 28.89Z" fill="#8e9faf"/>
+  <path d="M35.6 32.7L35.6 35.11A13.65 11.02 -25.47 0 0 62 31.3L62 28.89" fill="none" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M36.48 36.66A13.65 11.02 -25.47 1 0 61.12 24.93A13.65 11.02 -25.47 1 0 36.48 36.66Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.22 34.41A8.4 6.78 -25.47 1 0 56.38 27.19A8.4 6.78 -25.47 1 0 41.22 34.41Z" fill="none" stroke="#6f879c" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="1 2"/>
+  <path d="M45.52 38.94A2.41 1.95 -25.47 1 0 49.88 36.86A2.41 1.95 -25.47 1 0 45.52 38.94Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.35 39.21A1.5 1.21 -25.47 1 0 49.05 37.92A1.5 1.21 -25.47 1 0 46.35 39.21Z" fill="#34465b"/>
+  <path d="M39.1 35.57A2.41 1.95 -25.47 1 0 43.46 33.49A2.41 1.95 -25.47 1 0 39.1 35.57Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.93 35.84A1.5 1.21 -25.47 1 0 42.63 34.55A1.5 1.21 -25.47 1 0 39.93 35.84Z" fill="#34465b"/>
+  <path d="M40.2 28.46A2.41 1.95 -25.47 1 0 44.56 26.39A2.41 1.95 -25.47 1 0 40.2 28.46Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.03 28.73A1.5 1.21 -25.47 1 0 43.73 27.44A1.5 1.21 -25.47 1 0 41.03 28.73Z" fill="#34465b"/>
+  <path d="M47.72 24.73A2.41 1.95 -25.47 1 0 52.08 22.65A2.41 1.95 -25.47 1 0 47.72 24.73Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.55 25A1.5 1.21 -25.47 1 0 51.25 23.71A1.5 1.21 -25.47 1 0 48.55 25Z" fill="#34465b"/>
+  <path d="M54.14 28.1A2.41 1.95 -25.47 1 0 58.5 26.02A2.41 1.95 -25.47 1 0 54.14 28.1Z" fill="#b9ddf8" stroke="#328bd3" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M54.97 28.37A1.5 1.21 -25.47 1 0 57.67 27.08A1.5 1.21 -25.47 1 0 54.97 28.37Z" fill="#34465b"/>
+  <path d="M53.04 35.21A2.41 1.95 -25.47 1 0 57.4 33.13A2.41 1.95 -25.47 1 0 53.04 35.21Z" fill="#8e9faf" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M53.87 35.47A1.5 1.21 -25.47 1 0 56.57 34.19A1.5 1.21 -25.47 1 0 53.87 35.47Z" fill="#34465b"/>
+  <circle cx="48.8" cy="30.8" r="1" fill="#6f879c"/>
+  <path d="M28.9 29.9 L31.8 29.9 L31.8 27.6 L35.4 32 L31.8 36.4 L31.8 34.1 L28.9 34.1 Z" fill="#236ead" stroke="#236ead" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
