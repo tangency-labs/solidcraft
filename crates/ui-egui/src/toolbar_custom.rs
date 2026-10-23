@@ -265,13 +265,22 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
 
 /// Shortcut keys, S box favourites and the toolbar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
-    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs() })
+    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(),
+        "preview_reselect_modifier": app.preferences.preview_reselect_modifier })
 }
 
 pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     // "solvecraft-shortcuts/1": files exported before the rename (compatibility shim).
     if !matches!(v.get("format").and_then(Value::as_str), Some("solidcraft-shortcuts/1" | "solvecraft-shortcuts/1")) {
         return Err("not a SolidCraft shortcuts file".into());
+    }
+    let preview_modifier = v
+        .get("preview_reselect_modifier")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| format!("preview modifier: {error}"))?;
+    if let Some(binding) = preview_modifier {
+        app.preferences.preview_reselect_modifier = binding;
     }
     if let Some(s) = v.get("shortcuts") {
         app.keymap.load(s);
