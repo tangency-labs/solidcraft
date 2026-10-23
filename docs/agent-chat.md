@@ -1,11 +1,12 @@
 # Agent chat
 
 Agent chat is a side panel where you talk to a coding agent you already use (Claude Code,
-Codex, Google Antigravity, OpenCode, Grok Build and others), or to a model behind an OpenAI-compatible endpoint you
-choose (Ollama or LM Studio on your computer, OpenAI, any other URL), and have it work on the
-design that's open. A coding agent runs on your computer under **your own account** with that
-agent: SolidCraft doesn't sell or proxy a model and needs no key for it. An endpoint's key, if
-it needs one, goes into your system keychain, never into SolidCraft's settings.
+Codex, Google Antigravity, OpenCode, Grok Build and others), or to a model behind an
+OpenAI-compatible or Anthropic-compatible endpoint you choose (Ollama or LM Studio on your
+computer, OpenAI, Anthropic, any other URL), and have it work on the design that's open. A
+coding agent runs on your computer under **your own account** with that agent: SolidCraft
+doesn't sell or proxy a model and needs no key for it. An endpoint's key, if it needs one, goes
+into your system keychain, never into SolidCraft's settings.
 
 Desktop app only.
 
@@ -174,12 +175,19 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI) or a custom URL, the model name, and an optional key.
-  The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
-  Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks the
-  endpoint for its models. For these agents SolidCraft runs the conversation itself, with the
-  same tools, limits and questions as for a coding agent, and at most 24 model requests per
-  message.
+  `http://localhost:1234/v1`, OpenAI, DeepSeek `https://api.deepseek.com`, Qwen
+  `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`) or a custom URL, the model name, and
+  an optional key.
+- **Anthropic-compatible API:** a preset (Anthropic, DeepSeek `https://api.deepseek.com/anthropic`,
+  Qwen `https://dashscope-intl.aliyuncs.com/apps/anthropic`) or a custom URL, for an endpoint that
+  speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
+  providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
+- The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
+  Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
+  OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,
+  because not every such endpoint lists models (Qwen's has no model list). For these agents
+  SolidCraft runs the conversation itself, with the same tools, limits and questions as for a
+  coding agent, and at most 24 model requests per message.
 
 ## Signing in
 

@@ -92,7 +92,7 @@ Code: `crates/ui-egui/src/agent_chat/`.
 |---|---|
 | `backend.rs` | The `ChatBackend` trait and its `Event`s: the only thing the panel talks to. |
 | `acp.rs`, `acp_client.rs` | The protocol messages, and `AcpBackend`, the first backend. |
-| `api_client.rs` | `ApiBackend`: an OpenAI-compatible endpoint, with SolidCraft running the tool loop. |
+| `api_client.rs` | `ApiBackend`: an OpenAI-compatible or Anthropic-compatible endpoint, with SolidCraft running the tool loop. |
 | `agents.rs` | The agents (found and added), permission modes, "always allow" answers. |
 | `settings.rs` | Preferences → AI and the Add agent dialog. |
 | `process.rs` | The agent as a child process in a process group of its own; stopping it ends the group. |
@@ -112,13 +112,17 @@ requests, for a backend that runs tools in process). Two backends exist:
 - `AcpBackend` drives a coding agent the user already has (the default, and the point of the
   feature: the user's own account, no keys).
 - `ApiBackend` talks to an OpenAI-compatible chat completions endpoint (Ollama, LM Studio,
-  OpenAI, a custom URL) and runs the tool loop itself: it starts the same `solidcraft-cli mcp
-  --connect` server an ACP agent would get and is its MCP client (`tools/list` becomes the
-  function tools, `crash_reports` left out), so its calls pass the same gate, limits, questions
-  and undo as an ACP agent's. At most 24 model requests per message. The HTTP request is the
-  desktop host's (`Services::agent_http`, ureq with no redirects); the key comes from the system
-  keychain (`Services::secrets`, the keyring crate) for the connection only and is refused over
-  plain HTTP to another computer.
+  OpenAI, a custom URL) or an Anthropic-compatible Messages endpoint (Anthropic, or a provider
+  that speaks the Messages API), and runs the tool loop itself: it starts the same
+  `solidcraft-cli mcp --connect` server an ACP agent would get and is its MCP client
+  (`tools/list` becomes the endpoint's tools, `crash_reports` left out), so its calls pass the
+  same gate, limits, questions and undo as an ACP agent's. At most 24 model requests per
+  message. The HTTP request is the desktop host's (`Services::agent_http`, ureq with no
+  redirects); the key comes from the system keychain (`Services::secrets`, the keyring crate)
+  for the connection only and is refused over plain HTTP to another computer. The two protocols
+  differ only in their wire shape: OpenAI sends the system note as a message, function tools
+  and one `tool` message per result; Anthropic sends it as `system`, `input_schema` tools and
+  all of a round's `tool_result` blocks in one user message.
 
 Another kind of backend slots in the same way without reshaping the panel.
 

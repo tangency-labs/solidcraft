@@ -1,9 +1,9 @@
 //! Settings → AI: the master switch, the agents (found and added, each with Test, Default and,
 //! for added ones, Remove), permissions (global and per agent, and the "always allow" answers),
 //! and the panel. Plus the Add agent dialog: an installed ACP agent, a custom command, or an
-//! OpenAI-compatible endpoint (whose key goes to the system keychain).
+//! endpoint (OpenAI-compatible or Anthropic-compatible, whose key goes to the system keychain).
 
-use super::agents::{self, AgentConfig, Kind, Mode};
+use super::agents::{self, AgentConfig, Kind, Mode, Protocol};
 use super::*;
 use crate::ui_kit;
 
@@ -23,6 +23,7 @@ pub struct AddState {
     pub command: String,
     pub installed: usize,
     pub preset: usize,
+    pub protocol: Protocol,
     pub base_url: String,
     pub model: String,
     pub key: String,
@@ -55,12 +56,26 @@ pub struct State {
 
 /// Open the Add agent dialog.
 pub fn open_add(app: &mut SolveApp) {
-    let preset = agents::API_PRESETS.first();
+    let preset = agents::OPENAI_PRESETS.first();
     app.agent_chat.settings.add = Some(AddState {
-        base_url: preset.map(|p| p.1.to_string()).unwrap_or_default(),
-        name: preset.map(|p| p.0.to_string()).unwrap_or_default(),
+        base_url: preset.map(|p| p.base_url.to_string()).unwrap_or_default(),
+        name: preset.map(|p| p.name.to_string()).unwrap_or_default(),
         ..Default::default()
     });
+}
+
+/// Take `index` from the protocol's presets, or make the URL empty for a custom endpoint.
+pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) {
+    s.protocol = protocol;
+    s.preset = index;
+    if let Some(preset) = agents::presets(protocol).get(index) {
+        s.base_url = preset.base_url.to_string();
+        s.name = preset.name.to_string();
+    } else {
+        s.base_url.clear();
+    }
+    s.error = None;
+    s.test = None;
 }
 
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
@@ -80,6 +95,13 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
             let (url, model) = (e.base_url.clone(), e.model.clone());
             std::thread::spawn(move || {
                 let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model));
+            });
+        }
+        Kind::Anthropic => {
+            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(tr("ui.ai_no_http").to_string())) };
+            let (url, model) = (e.base_url.clone(), e.model.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(super::api_client::test_anthropic_endpoint(&http, &url, key.as_deref(), &model));
             });
         }
     }
@@ -278,8 +300,12 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                         let test_button = ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Small);
                         crate::scenario::publish_handle(&format!("prefs:ai_test:{}", entry.id), test_button.rect.center());
-                        if test_button.on_hover_text(tr(if entry.kind == Kind::Acp { "ui.ai_test_acp_tip" } else { "ui.ai_test_api_tip" })).clicked()
-                        {
+                        let tip = match entry.kind {
+                            Kind::Acp => "ui.ai_test_acp_tip",
+                            Kind::Api => "ui.ai_test_api_tip",
+                            Kind::Anthropic => "ui.ai_test_anthropic_tip",
+                        };
+                        if test_button.on_hover_text(tr(tip)).clicked() {
                             test = Some(entry.clone());
                         }
                         if !entry.found && ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost).clicked() {
@@ -384,8 +410,8 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             if let Some(test) = s.test.as_mut() {
                 test.poll();
             }
-            let kinds = [(AddKind::Installed, "ui.ai_add_installed"), (AddKind::Custom, "ui.ai_add_custom"), (AddKind::Api, "ui.ai_add_api")];
-            ui_kit::row(ui, tr("ui.ai_preset"), |ui| {
+            let kinds = [(AddKind::Installed, "ui.ai_add_installed"), (AddKind::Custom, "ui.ai_add_custom"), (AddKind::Api, "ui.ai_add_endpoint")];
+            ui_kit::row(ui, tr("ui.ai_kind"), |ui| {
                 let mut selected = kinds.iter().position(|(k, _)| *k == s.kind).unwrap_or(0);
                 let labels = kinds.map(|(_, key)| tr(key));
                 if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
@@ -396,7 +422,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     s.test = None;
                 }
                 for (_, key) in kinds {
-                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", tr("ui.ai_preset"), tr(key))) {
+                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", tr("ui.ai_kind"), tr(key))) {
                         crate::scenario::publish_handle(&format!("ai_add:{key}"), at);
                     }
                 }
@@ -443,21 +469,33 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, tr("ui.agent_chat_custom_hint"), ui_kit::Text::Note("custom"));
                 }
                 AddKind::Api => {
-                    let presets: Vec<_> = agents::API_PRESETS.iter().map(|p| p.0).chain(std::iter::once(tr("ui.ai_custom_url"))).collect();
+                    ui_kit::row(ui, tr("ui.ai_protocol"), |ui| {
+                        let mut selected = if s.protocol == Protocol::Anthropic { 1 } else { 0 };
+                        let labels = [tr("ui.ai_add_api"), tr("ui.ai_add_anthropic")];
+                        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
+                            && let Some(protocol) = [Protocol::OpenAi, Protocol::Anthropic].get(selected)
+                        {
+                            choose_preset(s, *protocol, 0);
+                        }
+                        for (name, key) in [("openai", "ui.ai_add_api"), ("anthropic", "ui.ai_add_anthropic")] {
+                            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", tr("ui.ai_protocol"), tr(key))) {
+                                crate::scenario::publish_handle(&format!("ai_add:protocol:{name}"), at);
+                            }
+                        }
+                    });
+                    let choices: Vec<&str> =
+                        agents::presets(s.protocol).iter().map(|p| p.name).chain(std::iter::once(tr("ui.ai_custom_url"))).collect();
                     ui_kit::row(ui, tr("ui.ai_preset"), |ui| {
-                        ui_kit::dropdown_menu(ui, "sc_ai_add_preset", presets.get(s.preset).copied().unwrap_or_default(), |ui| {
-                            for (index, preset) in presets.iter().enumerate() {
-                                if ui_kit::list_picker(ui, preset, preset, s.preset == index).clicked() {
-                                    s.preset = index;
-                                    if let Some((name, url, _)) = agents::API_PRESETS.get(index) {
-                                        s.base_url = url.to_string();
-                                        s.name = name.to_string();
-                                    } else {
-                                        s.base_url.clear();
-                                    }
+                        let picker = ui_kit::dropdown_menu(ui, "sc_ai_add_preset", choices.get(s.preset).copied().unwrap_or_default(), |ui| {
+                            for (index, preset) in choices.iter().enumerate() {
+                                let response = ui_kit::list_picker(ui, preset, preset, s.preset == index);
+                                crate::scenario::publish_handle(&format!("ai_add:preset:{preset}"), response.rect.center());
+                                if response.clicked() {
+                                    choose_preset(s, s.protocol, index);
                                 }
                             }
                         });
+                        crate::scenario::publish_handle("ai_add:preset", picker.rect.center());
                     });
                     ui_kit::row(ui, tr("ui.ai_name"), |ui| {
                         ui_kit::text_field(ui, &mut s.name, "");
@@ -497,7 +535,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             let e = agents::Entry {
                 id: String::new(),
                 name: s.name.clone(),
-                kind: Kind::Api,
+                kind: s.protocol.kind(),
                 argv: Vec::new(),
                 version: None,
                 login: "",
@@ -551,7 +589,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.id = agents::new_id(&app.preferences, "custom");
         }
         AddKind::Api => {
-            c.kind = Kind::Api;
+            c.kind = s.protocol.kind();
             c.base_url = agents::normalize_url(&s.base_url)?;
             c.model = s.model.trim().to_string();
             if c.model.is_empty() {
@@ -561,7 +599,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             if key.is_some() && !agents::key_safe_for(&c.base_url) {
                 return Err(tr("ui.ai_key_needs_https").to_string());
             }
-            c.id = agents::new_id(&app.preferences, "api");
+            c.id = agents::new_id(&app.preferences, c.kind.id());
         }
     }
     if c.name.is_empty() {
@@ -603,10 +641,23 @@ mod card_tests {
         assert!(h.app.preferences.agents.iter().any(|e| e.name == "Local fixture"));
         open_add(&mut h.app);
         h.frames(3);
-        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_api"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
         assert!(scenario::handle_at("ai_add:key").is_some());
         assert!(h.app.services.secrets.is_none(), "this fixture has no keychain");
-        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:protocol:anthropic"}})).unwrap();
+        {
+            let add = h.app.agent_chat.settings.add.as_ref().unwrap();
+            assert_eq!(add.protocol, Protocol::Anthropic);
+            assert_eq!(add.base_url, "https://api.anthropic.com/v1");
+            assert_eq!(add.name, "Anthropic");
+        }
+        h.app.agent_chat.settings.add.as_mut().unwrap().model = "claude-opus-5-5".into();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
         assert!(h.app.agent_chat.settings.add.is_none());
+        let saved = h.app.preferences.agents.last().unwrap();
+        assert_eq!(saved.kind, Kind::Anthropic);
+        assert_eq!(saved.base_url, "https://api.anthropic.com/v1");
+        assert_eq!(saved.model, "claude-opus-5-5");
     }
 }
