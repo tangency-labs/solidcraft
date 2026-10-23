@@ -99,3 +99,47 @@ fn point_to_point_takes_the_origin_point() {
     let p = params(&h.app, &d).unwrap();
     assert_eq!(p["translate"], json!([mm(-hi.x), mm(-hi.y), mm(-hi.z)]), "the corner goes onto the origin");
 }
+
+/// A locked axis keeps its value through a triad drag; the free axes follow (a viewport
+/// constraint only, the command parameters stay the same).
+#[test]
+fn a_locked_axis_ignores_the_triad_drag() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let mut d = move_dialog(FREE);
+    assert!(has_locks(&d.kind));
+    assert!(!has_locks(&kind(ROTATE)), "Rotate has no dragged translation to lock");
+    d.extra.insert("lock_y".into(), json!(true));
+    d.extra.insert("lock_z".into(), json!(true));
+    let step = |d: &mut Dialog, started: bool, done: bool| {
+        let g = Drag { handle: gizmo::Handle::Plane(2), change: Change::Translate(Vec3::new(5.0, 7.0, 9.0)), started, done };
+        drag(&app, d, g);
+    };
+    step(&mut d, true, false);
+    step(&mut d, false, true);
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("5 mm", "0 mm", "0 mm"), "only X follows the drag");
+    assert_eq!(params(&app, &d).unwrap()["translate"], json!(["5 mm", "0 mm", "0 mm"]));
+}
+
+/// Each distance row ends in a lock toggle; clicking it flips that axis's lock.
+#[test]
+fn the_lock_toggle_at_the_end_of_a_distance_row_flips_its_axis() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": "Block"}]})).unwrap();
+    h.app.start("solid.move");
+    h.frames(4);
+    let locked =
+        |h: &crate::scenario::Harness, key: &str| h.app.dialog.as_ref().and_then(|d| d.extra.get(key)).and_then(Value::as_bool).unwrap_or(false);
+    for axis in ["x", "y", "z"] {
+        let at = crate::scenario::handle_at(&format!("move:lock:{axis}")).expect("each distance row has a lock toggle");
+        assert!(!locked(&h, &format!("lock_{axis}")));
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        assert!(locked(&h, &format!("lock_{axis}")), "{axis} locked after a click");
+        let at = crate::scenario::handle_at(&format!("move:lock:{axis}")).unwrap();
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        assert!(!locked(&h, &format!("lock_{axis}")), "{axis} free after a second click");
+    }
+}

@@ -747,7 +747,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
         }
         k @ Kind::Move { .. } => {
-            enter |= crate::dialogs_move::rows(ui, k);
+            enter |= crate::dialogs_move::rows(ui, k, &mut d.extra);
             extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
         }
         Kind::Primitive { fields, operation, at, .. } => {
