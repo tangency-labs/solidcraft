@@ -54,13 +54,19 @@ impl CamSettings {
     }
 }
 
-/// One machining setup: work offset, optional stock box, and operations.
+/// One machining setup: work offset, optional tool axis / origin, optional stock, and operations.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CamSetup {
     pub name: String,
     /// Work offset 1…6 (`G54`…`G59`).
     #[serde(default = "one")]
     pub work_offset: u8,
+    /// Tool axis in work coordinates. Default `[0, 0, 1]` (from +Z). Reserved for later 3+2 work.
+    #[serde(default = "tool_axis_z", skip_serializing_if = "is_tool_axis_z")]
+    pub tool_axis: [f64; 3],
+    /// Work origin in model coordinates (mm). Default origin. Reserved for later WCS mapping.
+    #[serde(default, skip_serializing_if = "is_origin")]
+    pub work_origin: [f64; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock: Option<StockBox>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -71,9 +77,28 @@ fn one() -> u8 {
     1
 }
 
+fn tool_axis_z() -> [f64; 3] {
+    [0.0, 0.0, 1.0]
+}
+
+fn is_tool_axis_z(v: &[f64; 3]) -> bool {
+    *v == [0.0, 0.0, 1.0]
+}
+
+fn is_origin(v: &[f64; 3]) -> bool {
+    *v == [0.0, 0.0, 0.0]
+}
+
 impl CamSetup {
     pub fn new(name: impl Into<String>) -> CamSetup {
-        CamSetup { name: name.into(), work_offset: 1, stock: None, operations: Vec::new() }
+        CamSetup {
+            name: name.into(),
+            work_offset: 1,
+            tool_axis: [0.0, 0.0, 1.0],
+            work_origin: [0.0, 0.0, 0.0],
+            stock: None,
+            operations: Vec::new(),
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -82,6 +107,12 @@ impl CamSetup {
         }
         if !(1..=6).contains(&self.work_offset) {
             return Err(DocError::Invalid("the work offset must be 1 to 6 (G54 to G59)".into()));
+        }
+        if self.tool_axis.iter().any(|x| !x.is_finite()) || self.tool_axis == [0.0, 0.0, 0.0] {
+            return Err(DocError::Invalid("the tool axis must be a finite non-zero vector".into()));
+        }
+        if self.work_origin.iter().any(|x| !x.is_finite() || x.abs() > 1.0e6) {
+            return Err(DocError::Invalid("the work origin must be finite and within 1e6 mm".into()));
         }
         if self.operations.len() > MAX_OPS {
             return Err(DocError::Invalid(format!("a CAM setup has at most {MAX_OPS} operations")));
