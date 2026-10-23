@@ -909,7 +909,8 @@ mod tests {
         }
         // partial solids sweep a profile (topology sweep) past SmBrep::DeleteEdge and
         // the axis' SmFace::CurveOnClassify, until SmFace::FindVertexSector (sphere,
-        // cylinder) or the torus' SmFace::Point3DClassify
+        // cylinder) or, for the torus (whose point classification now runs), the
+        // face-bound trimmed surface cache of a later ray fire
         for (r, unit) in [
             (
                 create_partial_sphere(k, o(), 5.0, 0.0, 90.0),
@@ -921,7 +922,7 @@ mod tests {
             ),
             (
                 create_partial_torus(k, o(), 10.0, 2.0, 0.0, 90.0),
-                "query.face_p1",
+                "surface.trim_srf_cache",
             ),
         ] {
             assert_eq!(deferred_at(&r), Some(unit));

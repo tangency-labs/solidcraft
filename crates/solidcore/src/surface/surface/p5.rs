@@ -371,8 +371,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of `EvaluateNormal` and of unitizing the sum; [`SolidError::Unported`] from
-    /// the singularity test.
+    /// Those of `EvaluateNormal`; `SM_ERR_INVALID_INPUT` when the normals sum to zero
+    /// (`SER(Unitize())`); [`SolidError::Unported`] from the singularity test.
     pub fn evaluate_normal_at_singularity(
         &self,
         k: &Kernel,
@@ -427,7 +427,12 @@ impl Surface {
             }
         }
 
-        norm_sum.unitize()
+        // SER(sNormSum.Unitize()): a zero sum is the SM_ERR_INVALID_INPUT status
+        norm_sum.unitize().map_err(|_| SolidError::Upstream {
+            operation: "surface::surface::p5::evaluate_normal_at_singularity",
+            code: crate::error::SM_ERR_INVALID_INPUT,
+            entity: None,
+        })
     }
 }
 

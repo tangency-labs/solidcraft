@@ -45,6 +45,7 @@ use solidcore::intersect::curve_class::{
     self as cc_mod, CurveClassification, CurveInterval, PartialCoincidence,
 };
 use solidcore::geom::vector3d::Vec3;
+use solidcore::intersect::curve_class::p5::ClassGeometryMut;
 use solidcore::intersect::point_class::{ClassGeometry, ClassObjectKind, PointClassType};
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::Volume;
@@ -259,9 +260,12 @@ fn shim_accepts(s: &Script) -> bool {
 /// shim builds them the same way with or without the face), so they resolve to their
 /// [`BareTopology`](super::intersect_curve_class_p1::BareTopology) records, a B-rep of their
 /// own (connected to nothing in the face's).
-struct Geo<'a>(&'a Pool);
+/// (`P` is `&Pool`, or `&mut Pool` for [`ClassGeometryMut`]: `ClassifyFaceInterval`'s
+/// face queries then run on the pool's B-rep, which keeps their UV trim curves for the
+/// later operations, as the shim's one B-rep does.)
+struct Geo<P>(P);
 
-impl Geo<'_> {
+impl<P: core::ops::Deref<Target = Pool>> Geo<P> {
     /// The bare record of a script object when the pool also has a real B-rep.
     fn bare_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
         self.0.topo.as_ref()?;
@@ -269,7 +273,7 @@ impl Geo<'_> {
     }
 }
 
-impl ClassGeometry<H> for Geo<'_> {
+impl<P: core::ops::Deref<Target = Pool>> ClassGeometry<H> for Geo<P> {
     fn curve(&self, o: H) -> Option<&Curve> {
         self.0.curve(o)
     }
@@ -305,6 +309,24 @@ impl ClassGeometry<H> for Geo<'_> {
             return self.0.handles.get(self.0.bare.index_of(e)?).copied();
         }
         self.0.topology_handle(e)
+    }
+}
+
+impl ClassGeometryMut<H> for Geo<&mut Pool> {
+    fn curve_mut(&mut self, _o: H) -> Option<&mut Curve> {
+        None
+    }
+    fn topology_entity_mut(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        // as `topology_entity`: the real B-rep's entity, else the bare stand-in
+        let pool = &mut *self.0;
+        if let Some(t) = pool.topo.as_mut() {
+            let real = o.0.checked_sub(t.first).and_then(|i| t.entities.get(i)).copied();
+            if let Some(e) = real {
+                return Some((&mut t.brep, e));
+            }
+        }
+        let (_, e) = pool.bare.entity(o.0)?;
+        Some((&mut pool.bare.brep, e))
     }
 }
 
@@ -363,9 +385,9 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
         add_face(&k, &mut pool, face)?;
     }
     let mut ccs = [build_cc(&k, &pool, &s.cc[0])?, build_cc(&k, &pool, &s.cc[1])?];
-    let geo = Geo(&pool);
     let mut o: Vec<f64> = Vec::new();
     for x in &s.ops {
+        let geo = Geo(&pool);
         let (code, t) = x.code_t();
         if t > 1 {
             return Err(harness("bad target").into());
@@ -450,7 +472,8 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 j, do_point, face, old, uv_ok, ..
             } => {
                 let f = pool.handle(*face)?.ok_or_else(|| harness("no face"))?;
-                let r = cc.classify_face_interval(&k, &geo, *j, *do_point, f, pool.handle(*old)?, *uv_ok, None);
+                let old = pool.handle(*old)?;
+                let r = cc.classify_face_interval_mut(&k, &mut Geo(&mut pool), *j, *do_point, f, old, *uv_ok, None);
                 o.push(st(r)?.err().unwrap_or(0.0));
             }
             OpIn::Partial { own, .. } => {

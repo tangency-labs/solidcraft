@@ -434,10 +434,13 @@ impl TopologySweep {
         // pStrutC is always NULL: its only assignment is in the upstream #if 0.
         self.set_higher(Some(e(original)), Some(f(built.face)));
         let owner = |index: usize| required(built.curve_edges.get(index).copied().flatten());
+        // `s3DCurves.FindElement(curve)`: MakeFaceWithCurves deleted (and nulled the
+        // slot of) a degenerate curve or one coincident with an earlier edge: stale
+        let live = |index: usize| built.curve_edges.get(index).copied().flatten().is_some();
         if let Some(index) = swept.start_curve {
             set_edge_tolerance(a, owner(index)?, swept.start_curve_tol)?;
         }
-        if let Some(index) = swept.far_end_curve.filter(|&i| i < curve_count) {
+        if let Some(index) = swept.far_end_curve.filter(|&i| i < curve_count && live(i)) {
             let new = owner(index)?;
             set_edge_tolerance(a, new, swept.edge_tol)?;
             self.set_same(Some(e(original)), Some(e(new)));
@@ -445,7 +448,10 @@ impl TopologySweep {
         } else {
             self.set_same(Some(e(original)), Some(e(original)));
         }
-        if let Some(index) = swept.start_vert_curve.filter(|&i| i < curve_count) {
+        if let Some(index) = swept
+            .start_vert_curve
+            .filter(|&i| i < curve_count && live(i))
+        {
             let new = owner(index)?;
             set_edge_tolerance(a, new, swept.start_vert_edge_tol)?;
             let (s, t) = endpoints(a, new)?;
@@ -466,7 +472,7 @@ impl TopologySweep {
         } else {
             self.set_same(Some(v(start)), Some(v(start)));
         }
-        if let Some(index) = swept.end_vert_curve.filter(|&i| i < curve_count) {
+        if let Some(index) = swept.end_vert_curve.filter(|&i| i < curve_count && live(i)) {
             let new = owner(index)?;
             set_edge_tolerance(a, new, swept.end_vert_edge_tol)?;
             let (s, t) = endpoints(a, new)?;

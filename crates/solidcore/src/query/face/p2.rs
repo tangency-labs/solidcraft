@@ -90,6 +90,13 @@
 //!   the private `WithMadeTrimCurves` geometry. The gap caches and these trim curves
 //!   share one snapshot per call, as upstream mutates the one B-rep. The healer shares
 //!   that snapshot across both seam directions before applying its gap-cache values.
+//!   `WithMadeTrimCurves` forwards the topology hooks (`topology_entity`,
+//!   `topology_handle(_in)`, `brep_id`, `owner_entity`, the intersector mate) to the
+//!   caller's geometry with the face's B-rep resolved in the snapshot, and is the
+//!   [`ClassGeometryMut`] of `ClassifyFaceInterval`
+//!   ([`CurveClassification::classify_face_interval_mut`]): its face queries edit the
+//!   snapshot, so their UV trims and tolerance changes stay for the rest of the
+//!   classification (not for the caller's B-rep).
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
@@ -99,6 +106,7 @@ use crate::geom::point_set::PointContainment;
 use crate::geom::tree::{NodeClass, NodeData};
 use crate::intersect::curve_class::p1::{src_zone_tol_3d_of, CurveClassification};
 use crate::intersect::curve_class::p2::ResetOptions;
+use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::curve_class::p9::{
     BoundaryEdge, BoundaryEdgeuse, BoundaryFace, BoundaryLoop, BoundaryVertex,
     IntersectEdgesOptions,
@@ -995,8 +1003,9 @@ fn boundary_edge<O: ClassObject>(
     })
 }
 
-/// The caller's classification geometry plus the UV trim curves the classification
-/// made on its private B-rep snapshot (`trims`: their handles and curves).
+/// The caller's classification geometry over the classification's private B-rep
+/// `snapshot` of the face's B-rep `brep`, plus the UV trim curves the classification
+/// made on it (`trims`: their handles and curves).
 ///
 /// `IntersectTSBound`'s `pVertexuse->ComputeUVPoint(sUV)` (SmCurveClass.cpp:15964,
 /// `bOKToMakeUVTrimCurve = TRUE`) makes the missing UV trim curves of the vertex use's
@@ -1005,9 +1014,40 @@ fn boundary_edge<O: ClassObject>(
 /// (`pEU->GetUVTrimCurve(); NER(..)`, SmCurveClass.cpp:16092) and the interval
 /// classification see them. The port makes them on the snapshot; their handles
 /// resolve here, the others through the caller's geometry.
+///
+/// The topology hooks forward to the caller's geometry, with `brep`'s entities
+/// resolved in the snapshot (and the snapshot's handles and B-rep id looked up as
+/// `brep`'s), so the topology members the classification calls read the B-rep as
+/// upstream's calls leave it. Through [`ClassGeometryMut`] the face queries of
+/// `ClassifyFaceInterval` edit the snapshot, as upstream's `const` members edit the
+/// face's B-rep. Entities of another B-rep resolve as the caller's geometry resolves
+/// them (read-only).
 struct WithMadeTrimCurves<'g, O, G> {
     inner: &'g G,
     trims: &'g [(O, Curve)],
+    brep: &'g Brep,
+    snapshot: &'g mut Brep,
+}
+
+impl<O, G> WithMadeTrimCurves<'_, O, G> {
+    /// `b` as the caller's geometry knows it: the snapshot stands for `brep`.
+    fn caller_brep<'a>(&'a self, b: &'a Brep) -> &'a Brep {
+        if core::ptr::eq(b, &raw const *self.snapshot) {
+            self.brep
+        } else {
+            b
+        }
+    }
+    /// An entity the caller's geometry resolved, with `brep`'s moved to the snapshot.
+    fn in_snapshot<'a>(
+        &'a self,
+        r: Option<(&'a Brep, EntityRef)>,
+    ) -> Option<(&'a Brep, EntityRef)> {
+        match r {
+            Some((b, e)) if core::ptr::eq(b, self.brep) => Some((&*self.snapshot, e)),
+            other => other,
+        }
+    }
 }
 
 impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometry<O> for WithMadeTrimCurves<'_, O, G> {
@@ -1035,11 +1075,44 @@ impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometry<O> for WithMadeTrimCurve
     fn vertex_face_gap(&self, vertex: O, surface: &Surface, face: Option<O>) -> Option<f64> {
         self.inner.vertex_face_gap(vertex, surface, face)
     }
+    fn topology_entity(&self, object: O) -> Option<(&Brep, EntityRef)> {
+        self.in_snapshot(self.inner.topology_entity(object))
+    }
+    fn topology_handle(&self, entity: EntityRef) -> Option<O> {
+        self.inner.topology_handle(entity)
+    }
+    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<O> {
+        self.inner
+            .topology_handle_in(self.caller_brep(brep), entity)
+    }
+    fn topology_intersector_mate(&self, ti: O, entity: O) -> Option<Option<O>> {
+        self.inner.topology_intersector_mate(ti, entity)
+    }
+    fn brep_id(&self, brep: &Brep) -> Option<crate::topology::BrepId> {
+        self.inner.brep_id(self.caller_brep(brep))
+    }
+    fn owner_entity(&self, owner: crate::geom::object::ObjectRef) -> Option<(&Brep, EntityRef)> {
+        self.in_snapshot(self.inner.owner_entity(owner))
+    }
     fn owner_of(
         &self,
         owner: crate::geom::object::ObjectRef,
     ) -> Option<crate::geom::object::ObjectRef> {
         self.inner.owner_of(owner)
+    }
+}
+
+impl<O: ClassObject, G: ClassGeometry<O>> ClassGeometryMut<O> for WithMadeTrimCurves<'_, O, G> {
+    fn curve_mut(&mut self, _o: O) -> Option<&mut Curve> {
+        // the classification curve is the caller's (read-only); ClassifyFaceInterval
+        // does not edit it
+        None
+    }
+    fn topology_entity_mut(&mut self, o: O) -> Option<(&mut Brep, EntityRef)> {
+        match self.inner.topology_entity(o) {
+            Some((b, e)) if core::ptr::eq(b, self.brep) => Some((&mut *self.snapshot, e)),
+            _ => None,
+        }
     }
 }
 
@@ -1292,11 +1365,13 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
 
         // classify the interval - avoiding point classification if possible
         if ivl.mid.point_class() == PointClassType::Unknown {
-            cc.classify_face_interval(
+            cc.classify_face_interval_mut(
                 k,
-                &WithMadeTrimCurves {
+                &mut WithMadeTrimCurves {
                     inner: objects,
                     trims: made_trims.as_slice(),
+                    brep: b,
+                    snapshot: snapshot.get_or_insert_with(|| b.clone()),
                 },
                 ii,
                 do_point_classify,
@@ -1356,6 +1431,8 @@ fn intersect_ts_bound<O: ClassObject>(
         &WithMadeTrimCurves {
             inner: objects,
             trims: made_trims.as_slice(),
+            brep: b,
+            snapshot,
         },
         &BoundaryFace {
             surface,
