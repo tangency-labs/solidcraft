@@ -240,3 +240,57 @@ fn bounded_name_editor_keeps_unicode_character_cap() {
     frame(&ctx, vec![egui::Event::Text("åβ界d".into())], &mut draw);
     assert_eq!(value, "åβ界");
 }
+
+#[test]
+fn selection_field_has_three_distinct_looks_in_every_theme() {
+    type Look = (Vec<(egui::Color32, egui::Color32)>, Option<egui::Color32>);
+    let look = |active: bool, filled: bool| -> Look {
+        let ctx = crate::fonts::test_context();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(280.0);
+            scope(ui, |ui| {
+                row(ui, "Profiles", |ui| {
+                    selection_field(ui, "1 selected", Selection { active, filled });
+                });
+            });
+        });
+        output.textures_delta.clear();
+        let field = scenario::rect_of("dialog:field:Profiles").unwrap();
+        let rects = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if field.contains_rect(r.rect) => Some((r.fill, r.stroke.color)),
+                _ => None,
+            })
+            .collect();
+        let ink = output.shapes.iter().find_map(|s| match &s.shape {
+            egui::Shape::Text(text) if text.galley.job.text == "1 selected" => Some(text.fallback_color),
+            _ => None,
+        });
+        (rects, ink)
+    };
+    let mut palettes: Vec<(String, Option<crate::theme::Custom>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
+    for theme in crate::theme_files::builtin() {
+        let dark = theme.base.is_dark();
+        palettes.push((theme.id.clone(), Some(crate::theme::Custom { dark, tokens: crate::theme_files::resolve(theme) }), dark));
+    }
+    let previous = crate::theme::is_dark();
+    for (name, custom, dark) in palettes {
+        crate::theme::set_dark(dark);
+        crate::theme::set_custom(custom);
+        let t = crate::theme::Tokens::get();
+        let [active_filled, active_empty, filled, empty] = [(true, true), (true, false), (false, true), (false, false)].map(|(a, f)| look(a, f));
+        let accented = |l: &Look| l.0.iter().any(|&(fill, stroke)| stroke == t.form_primary || fill == t.selected_bg);
+        assert!(accented(&active_filled) && accented(&active_empty), "{name}: the active input is accented");
+        assert!(!accented(&filled), "{name}: a filled inactive input is not accented: {filled:?}");
+        assert!(!accented(&empty), "{name}: an empty inactive input is not accented: {empty:?}");
+        let outline = |l: &Look| l.0.last().copied().unwrap();
+        assert_ne!(outline(&filled).0, outline(&empty).0, "{name}: filled and empty fills differ");
+        assert_ne!(outline(&filled).1, outline(&empty).1, "{name}: filled and empty borders differ");
+        assert_eq!(filled.1, Some(t.form_ink), "{name}: a filled input's count is in text colour");
+        assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
+    }
+    crate::theme::set_custom(None);
+    crate::theme::set_dark(previous);
+}

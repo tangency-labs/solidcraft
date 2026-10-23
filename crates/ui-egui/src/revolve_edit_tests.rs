@@ -241,3 +241,45 @@ fn sketch_axis_cancel_restores_original_document_and_history() {
     assert_eq!(h.app.session.undo.len(), undo);
     assert!(matches!(&h.app.session.doc.find_feature("Turn").unwrap().kind,FeatureKind::Revolve{axis:AxisRef::SketchAxis{axis},..} if axis=="y"));
 }
+
+#[test]
+fn only_the_active_selection_field_looks_active() {
+    let mut h = make(Harness::new(), json!("Y"));
+    open(&mut h);
+    let t = crate::theme::Tokens::get();
+    let border = |h: &Harness, label: &str| {
+        let field = crate::scenario::rect_of(&format!("dialog:field:{label}")).unwrap();
+        h.shapes
+            .iter()
+            .rev()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.rect == field || r.rect == field.shrink(t.space_2) => Some(r.stroke.color),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let click = |h: &mut Harness, handle: &str| {
+        let at = crate::scenario::rect_of(handle).map(|r| r.center()).or_else(|| crate::scenario::handle_at(handle)).unwrap();
+        h.step(&json!({"click":[at.x, at.y]})).unwrap();
+        h.frames(2);
+    };
+    for label in ["Profile", "Axis"] {
+        assert_eq!(crate::scenario::count_of(&format!("dialog:selection:{label}:filled")), Some(1.0), "{label} holds its item");
+    }
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    assert_eq!((border(&h, "Profile") == t.form_primary, border(&h, "Axis") == t.form_primary), (true, false));
+    click(&mut h, "dialog:field:Axis");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    assert_eq!((border(&h, "Profile") == t.form_primary, border(&h, "Axis") == t.form_primary), (false, true));
+    let filled = border(&h, "Profile");
+    click(&mut h, "dialog:Angle");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "picks still go to Axis while Angle is typed into");
+    assert_eq!(border(&h, "Axis"), t.form_primary);
+    click(&mut h, "dialog:clear:Axis");
+    click(&mut h, "dialog:field:Profile");
+    assert_eq!(crate::scenario::count_of("dialog:selection:Axis:filled"), Some(0.0));
+    assert_eq!((border(&h, "Profile"), border(&h, "Axis")), (t.form_primary, t.control_border));
+    click(&mut h, "dialog:field:Axis");
+    assert_eq!(border(&h, "Profile"), filled, "filled inactive");
+    assert_ne!(filled, t.control_border, "filled inactive differs from empty inactive");
+}
