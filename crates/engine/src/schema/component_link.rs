@@ -20,6 +20,7 @@ use solidcraft_geom::Vec3Geom as _;
 
 use super::check::{located, whole};
 use super::types::{not_blank_pattern, present};
+use crate::cmd::LinkState;
 use crate::params;
 
 /// The most components `component.update_links` and `component.replace_with_link` read from a
@@ -415,8 +416,9 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
-/// One linked component. A file that is looked for has `found` and `changed`; a refused one is
-/// not looked for and has `found` null and a `reason`.
+/// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
+/// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
+/// `state` and a `reason`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum LinkInfo {
@@ -434,6 +436,13 @@ pub enum LinkInfo {
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
         changed: Option<bool>,
+        /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
+        /// when it can be read.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<LinkState>,
+        /// What to show about it. Left out with `state`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// The file is on a network location that is not allowed.
     Network {
@@ -445,6 +454,8 @@ pub enum LinkInfo {
         found: Option<bool>,
         /// The network location.
         host: String,
+        /// Always `not_allowed`.
+        state: LinkState,
         reason: String,
     },
     /// The path names a device.
@@ -455,6 +466,8 @@ pub enum LinkInfo {
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
+        /// Always `unreadable`.
+        state: LinkState,
         reason: String,
     },
 }

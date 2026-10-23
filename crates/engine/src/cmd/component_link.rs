@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{absolute, resolve, stored};
+use super::design_link::{LinkState, absolute, link_presence, read_linked_file, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
@@ -112,7 +112,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "→ linked components: component, name, path, file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
-         reads it again; null when not found or the link is older than this record), and then host (the network location) and reason",
+         reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
+         unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
+         can't be reached",
     ),
 ];
 
@@ -211,16 +213,12 @@ fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, 
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
+    if own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
-    let design = solidcraft_io::limits::Kind::Design;
-    solidcraft_io::vfs::read_design_path(&shown, own, solidcraft_io::limits::max_design_bytes()).map_err(|e| {
-        let e = solidcraft_io::limits::explain(design, e).to_string();
-        EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
-    })
+    read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
 }
 
 /// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature, with the digest of
@@ -557,7 +555,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
-    if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
@@ -797,11 +795,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // A network or device path is judged from its text before the disk is asked anything.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
-    // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
-    // hosts, reject an alias of this assembly too (a symlink or a path with different case).
-    if let (Ok(candidate), Some(Ok(own))) = (file.canonicalize(), s.path.as_deref().map(std::fs::canonicalize))
-        && candidate == own
-    {
+    // The same path, or on native hosts an alias of this assembly (a symlink or a path with
+    // different case): the one self-link rule Insert Design and Update Links use too.
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
@@ -879,33 +875,45 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             let file = resolve(s.path.as_deref(), &l.path);
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
             let path = stored(s.path.as_deref(), &file);
-            let file = file.to_string_lossy();
+            let shown = file.to_string_lossy().into_owned();
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
                 None => {
-                    let found = solidcraft_io::vfs::design_path_is_file(&file, s.path.as_deref());
+                    let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
                     let changed = l
                         .file_sha256
                         .as_ref()
                         .filter(|_| found == Some(true))
-                        .and_then(|kept| file_sha256(Path::new(file.as_ref()), s.path.as_deref()).map(|now| now != *kept));
-                    LinkInfo::Looked { component: *c, name, path, file: file.into_owned(), found, changed }
+                        .and_then(|kept| file_sha256(Path::new(&shown), s.path.as_deref()).map(|now| now != *kept));
+                    // Why a file that can't be reached can't be: `None` when it can be read.
+                    let (state, reason) = match link_presence(&file, s.path.as_deref()) {
+                        Some(why) => (Some(why.state), Some(why.reason)),
+                        None => (None, None),
+                    };
+                    LinkInfo::Looked { component: *c, name, path, file: shown, found, changed, state, reason }
                 }
                 Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
                     component: *c,
                     name,
                     path,
-                    file: file.into_owned(),
+                    file: shown,
                     found: None,
+                    state: LinkState::NotAllowed,
                     reason: format!("on the network location \\\\{host}, which is not allowed"),
                     host,
                 },
-                Some(solidcraft_io::vfs::Remote::Device) => {
-                    LinkInfo::Device { component: *c, name, path, file: file.into_owned(), found: None, reason: "names a device, not a file".into() }
-                }
+                Some(solidcraft_io::vfs::Remote::Device) => LinkInfo::Device {
+                    component: *c,
+                    name,
+                    path,
+                    file: shown,
+                    found: None,
+                    state: LinkState::Unreadable,
+                    reason: "names a device, not a file".into(),
+                },
             }
         })
         .collect();
@@ -1050,6 +1058,8 @@ mod tests {
         std::fs::remove_file(&part).unwrap();
         let err = b.execute("component.update_links", &json!({})).unwrap_err().to_string();
         assert!(err.contains("plate"), "{err}");
+        let links = run(&mut b, "component.links", json!({}));
+        assert_eq!((&links["links"][0]["found"], &links["links"][0]["state"]), (&json!(false), &json!("missing")), "{links}");
         assert!((volume(&mut b) - 9000.0).abs() < 1e-6);
         // Break Link keeps the bodies and forgets the file.
         run(&mut b, "component.break_link", json!({"component": "plate"}));

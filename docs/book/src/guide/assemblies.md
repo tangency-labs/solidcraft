@@ -460,7 +460,8 @@ To edit the source, right-click a linked component or occurrence in the Browser 
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
 `component.links` lists the links, whether their files are found, and whether they changed since
-the assembly last read them (`changed`). A linked component holds
+the assembly last read them (`changed`). When a file can't be reached it also gives a
+`state` (`missing`, `unreadable` or `not_allowed`) and a `reason`. A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 

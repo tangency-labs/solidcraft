@@ -194,6 +194,11 @@ fn link_replies_match_the_output_schema() {
     // The design B links changed, and C's file is gone: B updates, C is named in `failed`.
     save_box(&b, 25);
     std::fs::remove_file(&c).unwrap_or_else(|e| panic!("{e}"));
+    // A file that is gone says why: its state and reason, in a reply that matches.
+    let gone = run("component.links", json!({}));
+    let missing = gone["links"].as_array().and_then(|l| l.iter().find(|e| e["component"] == third["component"])).cloned().unwrap_or_default();
+    assert!(missing["found"] == false && missing["state"] == "missing" && missing["reason"].is_string(), "{gone}");
+    matches(output_schema_for::<LinksResult>(), "component.links", &gone);
     let update = run("component.update_links", json!({"components": ["B", "C", "A"]}));
     assert!(update["updated"] == json!(["B"]) && update["unchanged"] == json!(["A"]), "{update}");
     assert!(update["failed"][0]["name"] == "C" && update["failed"][0]["component"] == third["component"], "{update}");
