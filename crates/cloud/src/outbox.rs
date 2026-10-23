@@ -150,9 +150,18 @@ impl PendingSave {
     }
 
     /// Verify a recovered save without consulting mutable editor state.
-    pub fn recover(&self, mut read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Snapshot> {
+    pub fn recover(&self, read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Snapshot> {
+        self.recover_checked(read, |_| Ok(()))
+    }
+
+    /// Schema checks precede reading or decoding any heavy payload on resumed operations.
+    pub fn recover_checked(&self, mut read: impl FnMut(&str) -> Result<Vec<u8>>, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
         Self::read(&serde_json::to_vec(self).map_err(|e| Error::Invalid(e.to_string()))?)?;
         let document = read(&format!("documents/{}", self.manifest.document_hash))?;
+        if document.len() > crate::MAX_MANIFEST_BYTES || digest(&document) != self.manifest.document_hash {
+            return Err(Error::Invalid("captured document hash or size mismatch".into()));
+        }
+        check_document(&document)?;
         let mut objects = BTreeMap::new();
         Snapshot::hydrate(&self.manifest, &document, |path| {
             let bytes = read(path)?;
@@ -166,6 +175,19 @@ impl PendingSave {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resumed_schema_preflight_happens_before_any_asset_read() {
+        let snapshot = Snapshot::prepare(b"future document schema".to_vec(), BTreeMap::from([("blob".into(), vec![42; 100])])).unwrap();
+        let save = PendingSave::stage(&Default::default(), "project", "part", None, snapshot).unwrap();
+        let result = save.record.recover_checked(
+            |path| {
+                assert!(path.starts_with("documents/"), "future schemas must not read assets");
+                Ok(save.objects[path].clone())
+            },
+            |_| Err(Error::UpgradeRequired("future document schema".into())),
+        );
+        assert!(matches!(result, Err(Error::UpgradeRequired(_))));
+    }
     #[test]
     fn staged_save_rejects_unreferenced_files() {
         let snapshot = Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap();

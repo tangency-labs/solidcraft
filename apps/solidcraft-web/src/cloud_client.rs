@@ -49,10 +49,27 @@ async fn fetch(request: Request<OctoBody>) -> Result<Response<Full<Bytes>>, BoxE
 }
 
 pub fn client(token: Option<&str>) -> Result<Octocrab, BoxError> {
-    let service = service_fn(|request: Request<OctoBody>| {
+    client_for_job(token, None)
+}
+
+pub fn client_for_job(token: Option<&str>, job: Option<solidcraft_cloud::jobs::Job>) -> Result<Octocrab, BoxError> {
+    let service = service_fn(move |request: Request<OctoBody>| {
         let (sender, receiver) = oneshot::channel();
+        let job = job.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            let _ = sender.send(fetch(request).await);
+            let (handle, registration) = futures::future::AbortHandle::new_pair();
+            if let Some(job) = job
+                && let Err(error) = job.set_cancel_handler(move || handle.abort())
+            {
+                let _ = sender.send(Err(BoxError::from(error.to_string())));
+                return;
+            }
+            // Dropping reqwest's Fetch future aborts its browser request. Durable OPFS/IDB
+            // operations are outside this scope and always finish their acknowledgement.
+            let result = futures::future::Abortable::new(fetch(request), registration)
+                .await
+                .unwrap_or_else(|_| Err(BoxError::from("browser request cancelled")));
+            let _ = sender.send(result);
         });
         async move { receiver.await.map_err(|_| BoxError::from("browser request cancelled"))? }
     });

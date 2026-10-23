@@ -20,6 +20,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+mod cloud;
 mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]
@@ -489,7 +490,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
-    Services {
+    let mut services = Services {
+        cloud_host: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
             #[cfg(target_os = "linux")]
@@ -590,7 +592,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let _ = command.spawn();
         })),
-    }
+    };
+    cloud::install(&mut services);
+    services
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a

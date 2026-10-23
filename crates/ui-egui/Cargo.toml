@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcraft-cloud = { workspace = true }
 solidcraft-engine = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
