@@ -26,7 +26,7 @@ use crate::curve::composite_curve::{
 use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
-use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -75,23 +75,14 @@ fn current_curve(
     }
 }
 
-/// Write the edited B-spline generators back into the composite's segments.
-/// (A B-spline cannot nest, so the checked replacement never refuses one.)
-fn sync_generators(composite: &mut CompositeCurve, generators: &[BSplineCurve]) -> Result<()> {
+/// Write the edited B-spline generators back into the composite's segments, in
+/// place (the segment curves keep their owners).
+fn sync_generators(composite: &mut CompositeCurve, generators: &[BSplineCurve]) {
     for (index, generator) in generators.iter().enumerate() {
-        let Some(segment) = composite.segment(index) else {
-            break;
-        };
-        if !matches!(segment.curve.kind(), CurveKind::BSpline(_)) {
-            continue;
-        }
-        let mut segment = segment.clone();
-        if let CurveKind::BSpline(curve) = segment.curve.kind_mut() {
+        if let Some(curve) = composite.segment_b_spline_mut(index) {
             *curve = generator.clone();
         }
-        composite.set_segment(index, segment)?;
     }
-    Ok(())
 }
 
 /// One ruled surface between an offset curve and its generating curve
@@ -505,7 +496,7 @@ fn surface_intersection_method(
     a.set_brep_tolerance(intersections, brep_tol)?;
 
     // offset the composite curve without trimming
-    sync_generators(composite, &state.generators)?;
+    sync_generators(composite, &state.generators);
     let untrimmed = ignored(composite.create_trimmed_offsets(
         a.kernel(brep)?,
         direction,

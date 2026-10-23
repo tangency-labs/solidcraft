@@ -405,7 +405,7 @@ pub struct GlobalSolver<'t, O> {
     pub opt_vectors: Vec<Vec3>,
     /// `*m_pSolutions`: the sorted solutions.
     pub solutions: SolutionArray<O>,
-    /// (port) Current nesting of the base [`solve_branch`], bounded by
+    /// Current nesting of the base [`solve_branch`] (not upstream): bounded by
     /// `MAX_SOLVE_DEPTH + 1`.
     pub solve_depth: usize,
     /// Branches [`solve_branch`] visited since the solve started (not upstream;

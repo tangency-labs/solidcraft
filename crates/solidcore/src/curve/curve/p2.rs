@@ -65,8 +65,9 @@
 //!
 //! Deviations:
 //! - Temporary evaluation copies retain owners and exact NURBS data throughout
-//!   owned curve, surface and volume branches, rejecting nesting of 64 or more
-//!   links before any recursive copy.
+//!   owned curve, surface and volume branches, rejecting nesting deeper than
+//!   [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+//!   before any recursive copy.
 //! - **Object model.** `SmCurve` is abstract; its derived classes become the
 //!   [`CurveKind`] variants. The ported kinds are [`BSplineCurve`],
 //!   [`HermiteCurve`], [`Conic`], [`IsoCurve`], [`ProjectedCurve`], [`OffsetCurve`],

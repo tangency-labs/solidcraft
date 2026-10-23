@@ -25,7 +25,7 @@
 //! | [`OffsetCurve::is_kind_of`]                  | `IsKindOf`                                       |
 //!
 //! Deviations:
-//! - **Nesting.** `new` return `InvalidInput` when the base curve would nest
+//! - **Nesting.** `new` returns `InvalidInput` when the base curve would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).

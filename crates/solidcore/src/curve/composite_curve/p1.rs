@@ -558,13 +558,13 @@ impl CompositeCurve {
         &self.segments
     }
 
-    /// Replaces one segment, preserving the owned geometry nesting bound.
+    /// Replaces segment `index` (the checked replacement for mutable segment access).
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an out-of-range index or when adding this composite
-    /// would exceed
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    /// `InvalidInput` for an out-of-range index or when the segment's curve nests
+    /// deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
     /// The composite is left unchanged on error.
     pub fn set_segment(&mut self, index: usize, segment: CompositeCurveSegment) -> Result<()> {
         const OP_SET: &str = "curve::composite_curve::p1::CompositeCurve::set_segment";
@@ -575,6 +575,16 @@ impl CompositeCurve {
         check_geometry_nesting(NestedGeometry::Curve(&segment.curve), 1, OP_SET)?;
         *slot = segment;
         Ok(())
+    }
+
+    /// The B-spline curve of segment `index`, mutable in place; `None` out of range
+    /// or for another curve kind. A B-spline owns no nested geometry, so editing it
+    /// cannot break the nesting bound, and the segment curve keeps its owner.
+    pub(crate) fn segment_b_spline_mut(&mut self, index: usize) -> Option<&mut BSplineCurve> {
+        match self.segments.get_mut(index)?.curve.kind_mut() {
+            CurveKind::BSpline(curve) => Some(curve),
+            _ => None,
+        }
     }
 
     /// `GetNumSegments`.
@@ -2071,6 +2081,26 @@ mod tests {
         assert!(composite.set_segment(1, segment.clone()).is_err());
         composite.set_segment(0, segment).unwrap();
         assert!(!composite.segment(0).unwrap().same_sense);
+    }
+
+    #[test]
+    fn segment_b_spline_edits_in_place_and_keeps_the_owner() {
+        let owner = ObjectRef {
+            type_code: 7,
+            key: attribute::ObjectKey(3),
+        };
+        let mut owned = line([0.0; 3], [1.0, 0.0, 0.0]);
+        let _ = owned.set_owner(Some(owner), None);
+        let mut composite = CompositeCurve::with_curves(3, vec![owned], false, None, None).unwrap();
+        *composite.segment_b_spline_mut(0).unwrap() =
+            BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Y).unwrap();
+        let curve = &composite.segment(0).unwrap().curve;
+        assert_eq!(curve.owner(), Some(owner));
+        let CurveKind::BSpline(b) = curve.kind() else {
+            panic!("segment kind changed");
+        };
+        assert_eq!(b.evaluate_point(1.0).unwrap(), Vec3::Y);
+        assert!(composite.segment_b_spline_mut(1).is_none());
     }
 
     #[test]

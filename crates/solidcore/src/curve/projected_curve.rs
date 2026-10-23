@@ -312,8 +312,8 @@ impl ProjectedCurve {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` when adding this wrapper would exceed
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
+    /// `InvalidInput` when `curve` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1
     /// (all fields are left unchanged); `SM_ERR` from [`Self::make_ortho_normal`]
     /// (the fields are set anyway).
     pub fn set_canonical(

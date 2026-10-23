@@ -7,7 +7,8 @@
 //! few standalone helpers (`smsurf_EvaluateNormalSection`, `sm_CrossedSeamOrPole`, the
 //! tree node validity tests).
 //!
-//! Deviations: compound evaluation copies carry a depth counter capped at 64 by Surface. The caches
+//! Deviations: compound evaluation copies carry a depth counter checked by Surface against
+//! [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING). The caches
 //! hold an exact copy of their surface (`clone_for_evaluation`) where upstream holds a
 //! pointer to it: `Clone` is the copy constructor, whose second knot fixup changed a
 //! knot vector the first fixup had left non-monotone (PR #147 round 4). Unlike `Clone`
@@ -55,7 +56,7 @@
 //! | [`CsIntersectEnfo`], [`CsNormalizeEnfo`], [`FindPsNormalEnfo`], [`SspIntersectEnfo`], [`SsiNormalizeEnfo`], [`SsNormalizeEnfo`], [`SssIntersectEnfo`] | the constructors of `SmCSIntersectENFO`, `SmCSNormalizeENFO`, `SmFindPSNormalENFO`, `SmSSPIntersectENFO`, `SmSSINormalizeENFO`, `SmSSNormalizeENFO`, `SmSSSIntersectENFO` |
 //!
 //! Deviations:
-//! - **Nesting.** `StepSurface::new` return `InvalidInput` when the base surface would nest
+//! - **Nesting.** `StepSurface::new` returns `InvalidInput` when the base surface would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).

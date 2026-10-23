@@ -27,11 +27,11 @@
 //! | [`CurveBoundedSurface::read_from_db`]                 | `ReadFromDB`                                   |
 //!
 //! Deviations:
-//! - **Nesting.** `new` return `InvalidInput` when the basis and every boundary curve would nest
+//! - **Nesting.** `new` returns `InvalidInput` when the basis or a boundary curve would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
-//! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
+//! - Compound evaluation copies carry a depth counter checked by `Surface` against the same bound.
 //! - **Ownership.** The surface owns its basis surface and boundary curves, as
 //!   upstream (whose destructor deletes them): they are moved into
 //!   [`CurveBoundedSurface::new`] (a missing upstream array is an empty `Vec`), and the

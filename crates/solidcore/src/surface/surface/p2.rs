@@ -5701,7 +5701,7 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
 
-        // a chain of 64 maps fits below a wrapper, 65 only on its own
+        // MAX_GEOMETRY_NESTING maps fit below a wrapper, one more only on its own
         let mut volume = Volume::new(VolumeKind::Base);
         for _ in 0..MAX_GEOMETRY_NESTING - 1 {
             volume = Volume::with_maps(VolumeKind::Base, None, Some(volume)).unwrap();
@@ -5795,7 +5795,7 @@ mod tests {
         while let Ok(o) = OffsetSurface::new(&k, 0.0, deep.clone(), true, 0) {
             deep = Surface::from(o);
             levels += 1;
-            assert!(levels <= 64);
+            assert!(levels <= MAX_GEOMETRY_NESTING);
         }
         assert!(levels >= 10);
         let _ = deep.clone_for_evaluation();

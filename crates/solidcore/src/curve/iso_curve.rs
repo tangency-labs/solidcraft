@@ -131,8 +131,8 @@ impl IsoCurve {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` when owned geometry nesting exceeds
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) levels.
+    /// `InvalidInput` when `surface` nests deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
     pub fn from_surface(
         surface: Surface,
         surf_param: SurfParamType,

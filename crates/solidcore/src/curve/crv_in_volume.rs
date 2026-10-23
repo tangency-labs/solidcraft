@@ -30,7 +30,7 @@
 //! | `SetContext` (dropped)                         | `SetContext`                                      |
 //!
 //! Deviations:
-//! - **Nesting.** `new` return `InvalidInput` when the curve and the volume would nest
+//! - **Nesting.** `new` returns `InvalidInput` when the curve or the volume would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).

@@ -34,11 +34,11 @@
 //! | [`SrfInVolume::read_from_db`]                  | `ReadFromDB`                                      |
 //!
 //! Deviations:
-//! - **Nesting.** `new`, `set_base_surface` and `set_volume` return `InvalidInput` when the surface and the volume would nest
+//! - **Nesting.** `new`, `set_base_surface` and `set_volume` return `InvalidInput` when the surface or the volume would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
 //!   cloning and dropping of nested geometry (no limit upstream).
-//! - Compound evaluation copies carry a depth counter capped at 64 by `Surface`.
+//! - Compound evaluation copies carry a depth counter checked by `Surface` against the same bound.
 //! - **Volumes.** The volume is a [`Volume`] (unit `surface.volume_p1`).
 //!   `InvEvaluatePoint`, `InvMapPoint` and `ReadFromDB` are wired to
 //!   `surface.volume_p2`. `SmVolume::Mirror` is in no unit in `units.json`: co-ported

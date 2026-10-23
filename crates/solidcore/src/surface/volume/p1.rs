@@ -367,8 +367,8 @@ impl Volume {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` when the chain would be longer than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    /// `InvalidInput` when the volume would hold more than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) next maps.
     pub fn with_maps(
         kind: VolumeKind,
         orient: Option<Transform>,
@@ -669,8 +669,8 @@ impl Volume {
     /// # Errors
     ///
     /// The failed `Copy` of `next` when it is added here; `InvalidInput` (nothing
-    /// is added) when the chain would be longer than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    /// is added) when the chain would hold more than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) next maps.
     pub fn add_next_map(&mut self, next: Self, owner_flag: u64) -> Result<()> {
         // (port) bound the chain: `next` lands below every map already in it
         let mut depth = 1;
