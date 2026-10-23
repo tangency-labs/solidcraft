@@ -13,7 +13,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("measure")
         .key("I")
         .noundo()
-        .params("bodies?: [names] (default all); or items: [1-2 selections] → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).icon("inspect").noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),

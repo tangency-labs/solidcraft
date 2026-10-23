@@ -75,6 +75,43 @@ fn measure(s: &mut Session, items: Vec<Value>) -> Value {
 }
 
 #[test]
+fn box_faces_measure_by_point_only() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 20, "body_name": "Box"}));
+    for (point, area) in [([5.0, 5.0, 20.0], 100.0), ([10.0, 5.0, 10.0], 200.0)] {
+        let pick = json!({"type": "face", "body": "Box", "point": point});
+        let r = measure(&mut s, vec![pick.clone()]);
+        assert!(close(&r["items"][0]["area_mm2"], area, 1e-9), "{r}");
+        let index = solidcraft_doc::appearance::face_index_at(s.model.state().body("Box").unwrap(), Vec3::from(point)).unwrap();
+        let mut indexed = pick.clone();
+        indexed["index"] = json!(index);
+        assert_eq!(measure(&mut s, vec![indexed.clone()]), r);
+        assert_eq!(measure(&mut s, vec![pick, indexed]), r);
+    }
+    for pick in [
+        json!({"type": "face", "body": "Missing", "point": [5, 5, 20]}),
+        json!({"type": "face", "body": "Box", "point": [100, 100, 100]}),
+        json!({"type": "face", "body": "Box"}),
+    ] {
+        assert!(s.execute("inspect.measure", &json!({"items": [pick]})).is_err());
+    }
+}
+
+#[test]
+fn box_edges_measure_by_point_only() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 15, "height": 20, "body_name": "Box"}));
+    for (point, length) in [([5, 0, 0], 10.0), ([10, 15, 10], 20.0)] {
+        let pick = json!({"type": "edge", "body": "Box", "point": point});
+        let r = measure(&mut s, vec![pick]);
+        assert!(close(&r["items"][0]["length_mm"], length, 1e-9), "{r}");
+    }
+    for pick in [json!({"type": "edge", "body": "Missing", "point": [5, 0, 0]}), json!({"type": "edge", "body": "Box", "point": [100, 100, 100]})] {
+        assert!(s.execute("inspect.measure", &json!({"items": [pick]})).is_err());
+    }
+}
+
+#[test]
 fn two_holes_measure_centre_to_centre_with_min_and_max() {
     let mut s = Session::default();
     plate(&mut s);

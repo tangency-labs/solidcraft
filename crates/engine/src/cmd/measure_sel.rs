@@ -56,15 +56,19 @@ fn densify(pts: &[Vec3]) -> Vec<Vec3> {
     out
 }
 
+/// How far `point` lies from the polyline `e`.
+fn polyline_dist(e: &[Vec3], point: Vec3) -> f64 {
+    e.windows(2).map(|w| point.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min)
+}
+
 /// The mesh edge a selection means: by index if it still passes through the point, otherwise
-/// the nearest.
-fn edge_index(m: &Mesh, index: usize, point: Vec3) -> Option<usize> {
-    let near = |e: &Vec<Vec3>| e.windows(2).map(|w| point.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+/// (or with no index) the nearest.
+fn edge_index(m: &Mesh, index: Option<usize>, point: Vec3) -> Option<usize> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-6;
-    if m.edges.get(index).is_some_and(|e| near(e) < tol) {
+    if let Some(index) = index.filter(|&i| m.edges.get(i).is_some_and(|e| polyline_dist(e, point) < tol)) {
         return Some(index);
     }
-    m.edges.iter().enumerate().min_by(|(_, a), (_, b)| near(a).total_cmp(&near(b))).map(|(i, _)| i)
+    m.edges.iter().enumerate().min_by(|(_, a), (_, b)| polyline_dist(a, point).total_cmp(&polyline_dist(b, point))).map(|(i, _)| i)
 }
 
 fn face_tris(m: &Mesh, f: usize) -> Vec<[Vec3; 3]> {
@@ -279,7 +283,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
         Sel::Edge { body, index, point } => {
             let b = st.body(body)?;
             let m = b.mesh();
-            let index = edge_index(&m, *index, *point)?;
+            let index = edge_index(&m, Some(*index), *point)?;
             let pts = m.edges.get(index)?;
             let rim = m.circular_rim(index);
             if rim.len() > 1 {
@@ -410,6 +414,38 @@ fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     }
 }
 
+/// A face or edge as `inspect.measure` takes it: the body and a point on the item; `index` is
+/// optional (the point finds the item).
+#[derive(serde::Deserialize)]
+struct Pick {
+    body: String,
+    point: Vec3,
+    #[serde(default)]
+    index: Option<usize>,
+}
+
+/// Resolves a face or edge pick to the [`Sel`] it means, merging the two kernel halves of one
+/// visible item (a split cylinder's patches, a circle's two arcs) into one measurement target.
+fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> std::result::Result<Sel, String> {
+    let Pick { body, point, index } = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    let b = st.body(&body).ok_or_else(|| format!("no body named '{body}'"))?;
+    let m = b.mesh();
+    if face {
+        let index = match index {
+            Some(i) => i,
+            None => solidcraft_doc::appearance::face_index_at(b, point).ok_or_else(|| format!("no face of '{body}' at the picked point"))?,
+        };
+        let index = m.surface_patch(index).first().copied().unwrap_or(index);
+        return Ok(Sel::Face { body, index, point });
+    }
+    let resolved = edge_index(&m, index, point)
+        .filter(|&i| index.is_some() || m.edges.get(i).is_some_and(|e| polyline_dist(e, point) <= solidcraft_doc::appearance::pick_tolerance(b)))
+        .or(index)
+        .ok_or_else(|| format!("no edge of '{body}' at the picked point"))?;
+    let index = m.circular_rim(resolved).first().copied().unwrap_or(resolved);
+    Ok(Sel::Edge { body, index, point })
+}
+
 /// `inspect.measure` with `items` (one or two selections).
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
@@ -420,23 +456,10 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let st = s.world_state();
     let mut sels = Vec::new();
     for value in list {
-        let mut sel = serde_json::from_value::<Sel>(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
-        // Two kernel halves of one visible item are one measurement target.
-        match &mut sel {
-            Sel::Edge { body, index, point } => {
-                if let Some(b) = st.body(body) {
-                    let m = b.mesh();
-                    let resolved = edge_index(&m, *index, *point).unwrap_or(*index);
-                    *index = m.circular_rim(resolved).first().copied().unwrap_or(resolved);
-                }
-            }
-            Sel::Face { body, index, .. } => {
-                if let Some(b) = st.body(body) {
-                    *index = b.mesh().surface_patch(*index).first().copied().unwrap_or(*index);
-                }
-            }
-            _ => {}
-        }
+        let sel = match value.get("type").and_then(Value::as_str) {
+            Some(kind @ ("face" | "edge")) => resolve_pick(&st, kind == "face", value).map_err(|e| bad(cmd, e))?,
+            _ => serde_json::from_value::<Sel>(value.clone()).map_err(|e| bad(cmd, e.to_string()))?,
+        };
         let duplicate = sels.iter().any(|x| match (x, &sel) {
             (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
             | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
