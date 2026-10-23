@@ -1,0 +1,93 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Round"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 10
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Round",
+    "distance": 30,
+    "body_name": "Boss"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Skirt sketch"
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     11,
+     0
+    ],
+    "end": [
+     5.5,
+     9.526279441628825
+    ],
+    "through": [
+     9.526279441628825,
+     5.5
+    ],
+    "id": "arc"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Skirt sketch",
+    "curves": [
+     "arc"
+    ],
+    "distance": 30,
+    "body_name": "Skirt"
+   }
+  },
+  {
+   "command": "surface.match",
+   "params": {
+    "body": "Skirt",
+    "target": "Boss",
+    "edges": [
+     [
+      10,
+      0,
+      7.5
+     ],
+     [
+      10,
+      0,
+      22.5
+     ]
+    ],
+    "order": "g2"
+   }
+  }
+ ]
+}

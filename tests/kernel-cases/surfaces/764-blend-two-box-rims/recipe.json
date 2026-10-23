@@ -1,0 +1,62 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     20,
+     0
+    ],
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "surface.blend",
+   "params": {
+    "from": {
+     "body": "A",
+     "edges": [
+      [
+       20,
+       10,
+       10
+      ]
+     ]
+    },
+    "to": {
+     "body": "B",
+     "edges": [
+      [
+       20,
+       20,
+       10
+      ]
+     ]
+    },
+    "continuity": [
+     "g1",
+     "g1"
+    ],
+    "body_name": "Bridge"
+   }
+  }
+ ]
+}

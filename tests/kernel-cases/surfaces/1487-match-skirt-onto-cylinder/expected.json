@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1487",
+  "tangency-labs/solidcraft#1249"
+ ],
+ "what": "a 60 degree cylindrical skirt of radius 11 rebuilt so its near boundary meets a radius-10 boss's wall seam at g2",
+ "source": "invariants",
+ "method": "a match reshapes one surface body and leaves both bodies where they are: two bodies. The boss keeps its three faces (side, top, bottom) and the matched skirt its one, so four faces in all. The skirt is open, so not one closed solid; its area and the seam's gap, angle and order move with the match and are checked by the command's own engine test, not as a body value here.",
+ "body_count": 2,
+ "faces": 4,
+ "valid": false
+}

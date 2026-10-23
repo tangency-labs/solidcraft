@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#764",
+  "tangency-labs/solidcraft#1642"
+ ],
+ "what": "the same two boxes bridged by the sheet, stitched: one body holding both closed boxes and the open sheet",
+ "source": "analytic",
+ "method": "stitching moves no material and adds no area: area = 3600 + 400 = 4000 mm^2; bbox 0..40, 0..30, 0..10. One body, but it is not one closed solid (the sheet closes nothing), so valid is not asked. Counts of faces are not pinned: whether the coplanar top faces merge across the stitch is the kernel's business.",
+ "body_count": 1,
+ "area_mm2": 4000.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   10
+  ]
+ },
+ "valid": false
+}

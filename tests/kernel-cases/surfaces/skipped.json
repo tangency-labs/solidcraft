@@ -1,0 +1,10 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#759",
+  "why": "crowned patches and blends are open sheets shaped in the middle: the crown's rise is a measured mid-face value, which the rig (volume, area, counts) cannot grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#770",
+  "why": "inspect.continuity is a read-only analysis of gap, normal angle and curvature jump: it makes no body to grade"
+ }
+]

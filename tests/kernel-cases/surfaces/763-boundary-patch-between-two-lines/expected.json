@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#763",
+  "tangency-labs/solidcraft#1487"
+ ],
+ "what": "a boundary patch through two parallel 20 mm sketch lines 10 mm apart, each side leaving g1",
+ "source": "analytic",
+ "method": "the two lines lie in the XY sketch plane and g1 across either is that plane, so the patch is the 20*10 = 200 mm^2 plane at z = 0: one face, one open body.",
+ "body_count": 1,
+ "area_mm2": 200.0,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   10,
+   0
+  ]
+ },
+ "valid": false
+}

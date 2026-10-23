@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Walls"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      20,
+      0
+     ]
+    ],
+    "ids": [
+     "a"
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      10
+     ],
+     [
+      20,
+      10
+     ]
+    ],
+    "ids": [
+     "b"
+    ]
+   }
+  },
+  {
+   "command": "surface.boundary",
+   "params": {
+    "curves": [
+     "a",
+     "b"
+    ],
+    "continuity": "g1",
+    "body_name": "Sheet"
+   }
+  }
+ ]
+}

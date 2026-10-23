@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1642",
+  "tangency-labs/solidcraft#1249"
+ ],
+ "what": "a g1/g1 loft between the top edge chains of two 20x20x10 boxes and a straight section on the plane between them",
+ "source": "invariants",
+ "method": "the loft is a sheet between two unchanged boxes: three bodies. The boxes keep six faces each and the loft one, so thirteen faces. Not one closed solid (the loft is open), and the sheet's area depends on the blend; the end tangents and the sketch section it passes through are checked by the command's own engine test.",
+ "body_count": 3,
+ "faces": 13,
+ "valid": false
+}

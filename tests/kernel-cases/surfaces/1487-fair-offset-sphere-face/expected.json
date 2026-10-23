@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1487",
+  "tangency-labs/solidcraft#1249"
+ ],
+ "what": "the fitted B-spline sheet offset 2 mm from a radius-20 sphere, CV-faired with its boundary rows held",
+ "source": "invariants",
+ "method": "fairing moves only interior control vertices of a face, so the two bodies stay two and their faces stay one each (the ball's and the shell's): two faces. The shell is open, so not one closed solid; the shell's area and energy move with the fairing and are checked by the command's own engine test, not as a body value here.",
+ "body_count": 2,
+ "faces": 2,
+ "valid": false
+}

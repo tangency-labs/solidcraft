@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#764",
+  "tangency-labs/solidcraft#1642"
+ ],
+ "what": "two 40x10x10 boxes 10 mm apart bridged along their top rims by the 40x10 sheet between them",
+ "source": "analytic",
+ "method": "the bridge sheet is the 40x10 = 400 mm^2 plane at z = 10 between the two top rims; area = 2*(2*(40*10 + 40*10 + 10*10)) + 400 = 3600 + 400 = 4000 mm^2. Three bodies: the two closed boxes and the sheet (not one closed solid, so valid is not asked). No volume: the open sheet has no enclosed volume.",
+ "body_count": 3,
+ "area_mm2": 4000.0,
+ "faces": 13,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   10
+  ]
+ },
+ "valid": false
+}
