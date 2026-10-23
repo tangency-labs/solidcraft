@@ -638,3 +638,295 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Trim/Extend (frame.trim)
+
+/// A 45 × 45 bar: its volume is 2025 mm² × its length.
+fn bar45() -> Value {
+    json!({"kind": "bar", "width": 45, "height": 45})
+}
+
+const BAR45: f64 = 45.0 * 45.0;
+
+/// The member bodies a `frame.member` run made (not every body of the model), in line order.
+fn made(r: &Value) -> Vec<String> {
+    r["created_bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect()
+}
+
+/// A member of 45 × 45 bar per line, each line its own 3D sketch line (a separate feature per
+/// group, so each group's bodies are known by its `body_name`).
+fn members_3d(s: &mut Session, name: &str, lines: &[([f64; 3], [f64; 3])]) -> Vec<String> {
+    run(s, "sketch.create", json!({"plane": "XY", "name": name}));
+    run(s, "sketch.options", json!({"sketch_3d": true}));
+    for (a, b) in lines {
+        run(s, "sketch.line3d", json!({"points": [a, b]}));
+    }
+    run(s, "sketch.finish", json!({}));
+    made(&run(s, "frame.member", json!({"sketch": name, "profile": bar45(), "body_name": name})))
+}
+
+/// The T-slot tower of #4003 in 45 × 45 bar, footprint `w`: 4 uprights 1500 long at the corners,
+/// rings of 4 rails (bottoms at 0, 700 and 1455) flush with the outside, and 2 cross members in the
+/// middle ring at x = w / 2. Every line runs through its profile's centre, 22.5 in from the
+/// outside. Returns (uprights, rails, cross members).
+fn tower(s: &mut Session, w: f64) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (c, f) = (22.5, w - 22.5);
+    let uprights = members_3d(
+        s,
+        "Upright",
+        &[([c, c, 0.0], [c, c, 1500.0]), ([f, c, 0.0], [f, c, 1500.0]), ([f, f, 0.0], [f, f, 1500.0]), ([c, f, 0.0], [c, f, 1500.0])],
+    );
+    let mut lines = Vec::new();
+    for z in [22.5, 722.5, 1477.5] {
+        lines.extend([([c, c, z], [f, c, z]), ([c, f, z], [f, f, z]), ([c, c, z], [c, f, z]), ([f, c, z], [f, f, z])]);
+    }
+    let rails = members_3d(s, "Rail", &lines);
+    let cross = members_3d(s, "Cross", &[([w / 2.0, c, 722.5], [w / 2.0, f, 722.5]), ([w / 2.0 + 100.0, c, 722.5], [w / 2.0 + 100.0, f, 722.5])]);
+    (uprights, rails, cross)
+}
+
+/// Butt the rails against the uprights, then the cross members against the middle ring's rails
+/// along X (the 5th and 6th rails).
+fn butt_tower(s: &mut Session, uprights: &[String], rails: &[String], cross: &[String]) -> (Value, Value) {
+    let a = run(s, "frame.trim", json!({"members": rails, "to": uprights}));
+    let b = run(s, "frame.trim", json!({"members": cross, "to": [rails[4], rails[5]]}));
+    (a, b)
+}
+
+/// Each body's length along the axis its bounding box is longest on.
+fn lengths(s: &mut Session) -> std::collections::BTreeMap<String, f64> {
+    bodies(s).into_iter().map(|b| (b.0, (0..3).map(|k| b.3[k] - b.2[k]).fold(0.0, f64::max))).collect()
+}
+
+#[test]
+fn the_tower_butts_its_rails_between_the_uprights() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    let (a, b) = butt_tower(&mut s, &uprights, &rails, &cross);
+    assert_eq!(a["changed_bodies"].as_array().unwrap().len(), 12, "{a}");
+    assert_eq!(b["changed_bodies"].as_array().unwrap().len(), 2, "{b}");
+    let len = lengths(&mut s);
+    // 4 × 1500 uprights, untouched; 12 rails and 2 cross members of 600 − 2 × 45 = 510.
+    for u in &uprights {
+        assert!((len[u] - 1500.0).abs() < 1e-6, "{u}: {len:?}");
+    }
+    for m in rails.iter().chain(&cross) {
+        assert!((len[m] - 510.0).abs() < 1e-6, "{m}: {len:?}");
+    }
+    let v = total_volume(&mut s);
+    let want = BAR45 * (4.0 * 1500.0 + 14.0 * 510.0);
+    assert!(rel(v, want) < MEASURED, "{v} vs {want}");
+    // The first rail runs along X at the bottom, flush with the outside: x from 45 to 555.
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&rails[0]].0, [45.0, 0.0, 0.0]) && near3(bs[&rails[0]].1, [555.0, 45.0, 45.0]), "{:?}", bs[&rails[0]]);
+    // A cross member spans the inner faces of the two rails: y from 45 to 555.
+    assert!(near3(bs[&cross[0]].0, [277.5, 45.0, 700.0]) && near3(bs[&cross[0]].1, [322.5, 555.0, 745.0]), "{:?}", bs[&cross[0]]);
+}
+
+#[test]
+fn trimmed_rails_follow_a_wider_footprint() {
+    // A 2D frame on XY, its width a parameter: two posts along Y and a rail along X between them.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "600 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Posts"}));
+    run(&mut s, "sketch.line", json!({"points": [[22.5, 0], [22.5, 400]]}));
+    run(&mut s, "sketch.line", json!({"points": [["W - 22.5 mm", 0], ["W - 22.5 mm", 400]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+    run(&mut s, "sketch.line", json!({"points": [[22.5, 200], ["W - 22.5 mm", 200]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let posts = made(&run(&mut s, "frame.member", json!({"sketch": "Posts", "profile": bar45(), "body_name": "Post"})));
+    let rail = made(&run(&mut s, "frame.member", json!({"sketch": "Rail", "profile": bar45(), "body_name": "Rail"})));
+    run(&mut s, "frame.trim", json!({"members": rail, "to": posts}));
+    assert!((lengths(&mut s)["Rail"] - 510.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "800 mm"}));
+    // The rail follows: 800 − 2 × 45 = 710, still between the posts' inner faces.
+    let len = lengths(&mut s);
+    assert!((len["Rail"] - 710.0).abs() < 1e-6, "{len:?}");
+    let bs = boxes(&mut s);
+    assert!(near3(bs["Rail"].0, [45.0, 177.5, -22.5]) && near3(bs["Rail"].1, [755.0, 222.5, 22.5]), "{:?}", bs["Rail"]);
+}
+
+#[test]
+fn a_member_extends_to_a_plane_with_a_gap_and_cuts_at_a_slant() {
+    let mut s = Session::default();
+    let bar = json!({"kind": "bar", "width": 10, "height": 10});
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let m = made(&run(&mut s, "frame.member", json!({"sketch": "Line", "profile": bar, "body_name": "Bar"})));
+    // Extended to x = 150, 2 short of it: 148 long.
+    let f =
+        run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}, "gap": 2}))["feature"].clone();
+    let b = &bodies(&mut s)[0];
+    assert!(near3(b.2, [0.0, -5.0, -5.0]) && near3(b.3, [148.0, 5.0, 5.0]), "{b:?}");
+    assert!(rel(b.1, 100.0 * 148.0) < MEASURED, "{b:?}");
+    // A plane at 45° through (150, 0, 0): x + z = 150. The end runs from x = 145 (top) to 155
+    // (bottom); over the square section the length averages 150.
+    let slant = json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 1]}}});
+    run(&mut s, "timeline.redefine", json!({"feature": f, "command": "frame.trim", "params": slant}));
+    let b = &bodies(&mut s)[0];
+    assert!(near3(b.2, [0.0, -5.0, -5.0]) && near3(b.3, [155.0, 5.0, 5.0]), "{b:?}");
+    assert!(rel(b.1, 100.0 * 150.0) < MEASURED, "{b:?}");
+    // The start end, asked for, moves back to x = −20 (the plane's side away from the bar).
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [-20, 0, 0], "normal": [1, 0, 0]}}, "end": "start"}));
+    let b = &bodies(&mut s)[0];
+    assert!(near3(b.2, [-20.0, -5.0, -5.0]) && rel(b.1, 100.0 * 170.0) < MEASURED, "{b:?}");
+}
+
+#[test]
+fn a_side_given_must_face_the_member() {
+    let mut s = Session::default();
+    // A post along Y at x = 0 and a rail along X from x = 100 that falls short of it. The post's
+    // profile x is world −X (y × d with y up and d along +Y), so its left side faces +X.
+    let post = members_3d(&mut s, "Post", &[([0.0, -100.0, 0.0], [0.0, 100.0, 0.0])]);
+    let rail = members_3d(&mut s, "Rail", &[([100.0, 0.0, 0.0], [300.0, 0.0, 0.0])]);
+    // Its start extends to the post's side facing it (x = 22.5) by default, and so with that side.
+    let f = run(&mut s, "frame.trim", json!({"members": rail, "to": post}))["feature"].clone();
+    assert!(near3(boxes(&mut s)["Rail"].0, [22.5, -22.5, -22.5]), "{:?}", boxes(&mut s)["Rail"]);
+    let left = json!({"members": rail, "to": [{"member": post[0], "side": "left"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": f, "command": "frame.trim", "params": left}));
+    assert!(near3(boxes(&mut s)["Rail"].0, [22.5, -22.5, -22.5]));
+    // The far side faces away from the rail, and the top runs along it: both refused.
+    for side in ["right", "top"] {
+        let p = json!({"members": rail, "to": [{"member": post[0], "side": side}]});
+        let err = s.execute("timeline.redefine", &json!({"feature": f, "command": "frame.trim", "params": p})).unwrap_err().to_string();
+        assert!(err.contains("faces away"), "{side}: {err}");
+    }
+}
+
+#[test]
+fn bad_trims_are_refused_with_the_reason() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    for (p, why) in [
+        (json!({"to": uprights}), "`members`"),
+        (json!({"members": rails}), "`to`"),
+        (json!({"members": [], "to": uprights}), "`members`"),
+        (json!({"members": ["Block"], "to": uprights}), "not a frame member"),
+        (json!({"members": rails, "to": ["Block"]}), "not a frame member"),
+        (json!({"members": [rails[0], rails[0]], "to": uprights}), "twice"),
+        (json!({"members": rails, "to": uprights, "end": "middle"}), "`end`"),
+        (json!({"members": rails, "to": uprights, "gap": -1}), "`gap`"),
+        (json!({"members": rails, "to": uprights, "gap": "a lot"}), "gap"),
+        (json!({"members": rails, "to": [{"member": uprights[0], "side": "front"}]}), "`side`"),
+        // The uprights' feature is Member1; the sketch it runs along is named Upright.
+        (json!({"members": [{"feature": "Member1", "line": "nope"}], "to": rails}), "nope"),
+        (json!({"members": [{"feature": "Upright", "line": "l1"}], "to": rails}), "not a frame member feature"),
+        // A cross member meets no upright.
+        (json!({"members": cross, "to": uprights}), "meets none"),
+        (json!({"members": [rails[0]], "to": [rails[0]]}), "itself"),
+        // The first rail's start meets the upright, and YZ (x = 0) is nearer its start too.
+        (json!({"members": [rails[0]], "to": [uprights[0], {"plane": "YZ"}]}), "both trim"),
+    ] {
+        let err = s.execute("frame.trim", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+    }
+    // A member a later feature changed is not rebuilt (its change would be lost).
+    run(&mut s, "solid.move", json!({"bodies": [rails[0]], "translate": [0, 0, 5]}));
+    let err = s.execute("frame.trim", &json!({"members": [rails[0]], "to": uprights})).unwrap_err().to_string();
+    assert!(err.contains("changed after"), "{err}");
+    // As a target it still serves, a butt joint being worked out from the target's line and
+    // profile: the bottom ring's first rail along Y now starts at its inner side, y = 45.
+    run(&mut s, "frame.trim", json!({"members": [rails[2]], "to": [rails[0]]}));
+    assert!(near3(boxes(&mut s)[&rails[2]].0, [0.0, 45.0, 0.0]), "{:?}", boxes(&mut s)[&rails[2]]);
+    // Not while a sketch is open.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    assert!(s.execute("frame.trim", &json!({"members": [rails[1]], "to": uprights})).is_err());
+}
+
+#[test]
+fn trims_undo_reopen_and_keep_their_members_through_the_saved_model() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    let full = total_volume(&mut s);
+    butt_tower(&mut s, &uprights, &rails, &cross);
+    let before = bodies(&mut s);
+    // Reopened from its JSON (evaluated again) and from its saved model (adopted as saved).
+    let json = s.doc.to_json();
+    let saved = s.model.saved(&s.doc).expect("a saved model");
+    for adopted in [None, Some(&saved)] {
+        let mut r = Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), adopted);
+        let after = bodies(&mut r);
+        assert_eq!(before.len(), after.len());
+        for (b, a) in before.iter().zip(&after) {
+            assert_eq!(b.0, a.0);
+            assert!(rel(a.1, b.1) < 1e-9 && near3(a.2, b.2) && near3(a.3, b.3), "{b:?} vs {a:?}");
+        }
+        // The members are still known to a trim after reopening: the upright's top end moves
+        // down to z = 1499.
+        run(&mut r, "frame.trim", json!({"members": [uprights[0]], "to": [{"plane": {"origin": [0, 0, 1499], "normal": [0, 0, 1]}}]}));
+        assert!((lengths(&mut r)[&uprights[0]] - 1499.0).abs() < 1e-6);
+    }
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(total_volume(&mut s), full) < 1e-9, "both trims undone");
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    for (b, a) in before.iter().zip(&bodies(&mut s)) {
+        assert!(b.0 == a.0 && rel(a.1, b.1) < 1e-9 && near3(a.2, b.2) && near3(a.3, b.3), "{b:?} vs {a:?}");
+    }
+}
+
+#[test]
+fn a_renamed_trimmed_member_stays_trimmed() {
+    let mut s = Session::default();
+    let (uprights, rails, cross) = tower(&mut s, 600.0);
+    butt_tower(&mut s, &uprights, &rails, &cross);
+    run(&mut s, "body.rename", json!({"body": rails[0], "name": "Front rail"}));
+    let len = lengths(&mut s);
+    assert!((len["Front rail"] - 510.0).abs() < 1e-6, "{len:?}");
+    assert!((len[&cross[0]] - 510.0).abs() < 1e-6, "{len:?}");
+}
+
+/// Hostile values in every parameter of `frame.trim`, on a real tower so they get past the member
+/// lookups: refused, never a panic or an internal error.
+#[test]
+fn hostile_trims_are_refused_not_crashed() {
+    let mut s = Session::default();
+    let (uprights, rails, _) = tower(&mut s, 600.0);
+    let hostile = [
+        json!(null),
+        json!(1e308),
+        json!(-1e308),
+        json!(f64::MAX),
+        json!("1e400 mm"),
+        json!("-1e300 mm"),
+        json!(""),
+        json!([]),
+        json!({}),
+        json!([[]]),
+        json!([{"feature": 1e300, "line": []}]),
+        json!([{"member": {"feature": "Member1", "line": "l1"}, "side": 7}]),
+        json!([{"plane": {"origin": [1e308, 0, 0], "normal": [0, 0, 0]}}]),
+        json!([{"plane": {"origin": [0, 0, 0], "normal": [1e-300, 0, 0]}}]),
+        json!([{"plane": {"face": [1e308, 1e308, 1e308]}}]),
+        json!("x".repeat(100_000)),
+    ];
+    let good = json!({"members": [rails[0]], "to": uprights});
+    for key in ["members", "to", "end", "gap"] {
+        for v in &hostile {
+            let mut p = good.clone();
+            p[key] = v.clone();
+            if let Err(crate::EngineError::Internal(id, msg)) = s.execute("frame.trim", &p) {
+                panic!("{id} {p}: {msg}");
+            }
+        }
+    }
+    // Planes the members run along, through or far from: refused or built, never a panic.
+    for plane in [
+        json!({"origin": [0, 0, 0], "normal": [0, 1, 0]}),
+        json!({"origin": [0, 0, 1e6], "normal": [1, 0, 1e-7]}),
+        json!({"origin": [300, 0, 0], "normal": [1, 0, 0]}),
+    ] {
+        let p = json!({"members": [rails[0]], "to": {"plane": plane}, "gap": 1000});
+        match s.execute("frame.trim", &p) {
+            Err(crate::EngineError::Internal(id, msg)) => panic!("{id} {p}: {msg}"),
+            // Built: take it back, so the next plane trims the rail as the tower made it.
+            Ok(_) => run(&mut s, "edit.undo", json!({})),
+            Err(_) => json!(null),
+        };
+    }
+}
