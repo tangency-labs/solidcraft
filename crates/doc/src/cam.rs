@@ -91,14 +91,7 @@ fn is_origin(v: &[f64; 3]) -> bool {
 
 impl CamSetup {
     pub fn new(name: impl Into<String>) -> CamSetup {
-        CamSetup {
-            name: name.into(),
-            work_offset: 1,
-            tool_axis: [0.0, 0.0, 1.0],
-            work_origin: [0.0, 0.0, 0.0],
-            stock: None,
-            operations: Vec::new(),
-        }
+        CamSetup { name: name.into(), work_offset: 1, tool_axis: [0.0, 0.0, 1.0], work_origin: [0.0, 0.0, 0.0], stock: None, operations: Vec::new() }
     }
 
     pub fn validate(&self) -> Result<()> {
