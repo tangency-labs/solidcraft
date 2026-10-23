@@ -2,6 +2,9 @@
 //! phase (vertex and edge definitions, proto vertices, edges and faces, and their
 //! manager), their accessors and list management, evaluation, and the static helpers
 //! of `SmProtoTopology.cpp`.
+//!
+//! Deviation: deleting a proto edge removes every incident entry at its endpoints
+//! (#374), including the two entries of a closed edge. Upstream removes only one.
 
 use crate::curve::curve::p2::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
@@ -1988,7 +1991,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// `delete pPE` (`~SmProtoEdge`): deletes its edge definitions, unlists it from
-    /// its end proto vertices; the curves deleted.
+    /// its end proto vertices (all occurrences, including closed edges); the curves
+    /// deleted.
     fn delete_proto_edge(&mut self, pe: ProtoEdgeId) -> Vec<O> {
         let mut deleted = Vec::new();
         let Some(edge) = self.pe_store.get_mut(pe.0 as usize).and_then(Option::take) else {
@@ -2003,16 +2007,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 deleted.extend(d.destroy());
             }
         }
-        if let Some(s) = edge.start_pv {
-            if let Some(Some(v)) = self.pv_store.get_mut(s.0 as usize) {
-                let _ = v.remove_proto_edge(pe);
-            }
-        }
-        if let Some(e) = edge.end_pv {
-            if edge.end_pv != edge.start_pv {
-                if let Some(Some(v)) = self.pv_store.get_mut(e.0 as usize) {
-                    let _ = v.remove_proto_edge(pe);
-                }
+        for endpoint in [edge.start_pv, edge.end_pv].into_iter().flatten() {
+            if let Some(Some(vertex)) = self.pv_store.get_mut(endpoint.0 as usize) {
+                vertex.proto_edges.retain(|&incident| incident != pe);
             }
         }
         deleted
@@ -3389,6 +3386,50 @@ mod tests {
         let b = H(100, ClassObjectKind::Other);
         let e = Brep::new();
         ProtoTopologyManager::new(k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap()
+    }
+
+    #[test]
+    fn deleting_a_closed_proto_edge_unlinks_both_incident_entries() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let vertex = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let interval = Extent1d::from_raw(0.0, 1.0);
+        let gone = m
+            .new_proto_edge(&k, Some(vertex), Some(vertex), interval)
+            .unwrap();
+        let kept = m.new_proto_edge(&k, Some(vertex), None, interval).unwrap();
+        let incident = m.proto_vertex_mut(vertex).unwrap();
+        incident.add_proto_edge(gone);
+        incident.add_proto_edge(kept);
+        incident.add_proto_edge(gone);
+
+        assert!(m.delete_proto_edge_object(gone).is_empty());
+        assert!(m.proto_edge(gone).is_none());
+        assert_eq!(m.proto_vertex(vertex).unwrap().proto_edges(), &[kept]);
+        assert!(m.proto_edge(kept).is_some());
+        // Repeated cleanup cannot disturb the remaining live edge.
+        assert!(m.delete_proto_edge_object(gone).is_empty());
+        assert_eq!(m.proto_vertex(vertex).unwrap().proto_edges(), &[kept]);
+        m.delete_proto_vertex_object(vertex);
+        assert_eq!(m.proto_edge(kept).unwrap().start_proto_vertex(), None);
+    }
+
+    #[test]
+    fn deleting_a_proto_edge_after_vertex_combination_unlinks_every_entry() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let start = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let end = m.new_proto_vertex(Point3::X, 1e-5).unwrap();
+        let gone = m
+            .new_proto_edge(&k, Some(start), Some(end), Extent1d::from_raw(0.0, 1.0))
+            .unwrap();
+        m.proto_vertex_mut(start).unwrap().add_proto_edge(gone);
+        m.proto_vertex_mut(end).unwrap().add_proto_edge(gone);
+        m.combine_proto_vertex(start, end).unwrap();
+        assert_eq!(m.proto_vertex(start).unwrap().proto_edges(), &[gone, gone]);
+
+        m.delete_proto_edge_object(gone);
+        assert!(m.proto_vertex(start).unwrap().proto_edges().is_empty());
     }
 
     #[test]
