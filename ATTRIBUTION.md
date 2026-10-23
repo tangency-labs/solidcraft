@@ -464,6 +464,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/model/plane_perpendicular.svg | SolidCraft contributors | original construction icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/workspace/ws_design.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/workspace/ws_drawing.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/workspace/ws_manufacture.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/workspace/ws_render.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/references.toml | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |
 | assets/icons/ui/design/tools/author/bases.py | SolidCraft contributors | original icon authoring or review tool resource | MIT OR Apache-2.0 |

@@ -261,6 +261,26 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
+    // The Manufacture workspace: New Setup opens the WCS/stock dialog on this PR.
+    Section { tab: "MANUFACTURE", panel: "SETUP", promoted: 1, ids: &["manufacture.setup.new"] },
+    Section { tab: "MANUFACTURE", panel: "MANAGE", promoted: 1, ids: &["manufacture.tools.library"] },
+    Section {
+        tab: "MANUFACTURE",
+        panel: "INSPECT",
+        promoted: 2,
+        ids: &[
+            "inspect.measure",
+            "inspect.section",
+            "inspect.curvature_comb",
+            "inspect.zebra",
+            "inspect.draft",
+            "inspect.isocurve",
+            "inspect.accessibility",
+            "inspect.minimum_radius",
+            "inspect.sustainability",
+        ],
+    },
+    Section { tab: "MANUFACTURE", panel: "SELECT", promoted: 0, ids: &[] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
@@ -289,6 +309,8 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
     ("material.assign", "Material"),
+    ("manufacture.setup.new", "New Setup"),
+    ("manufacture.tools.library", "Tool Library"),
     ("parameters.change", "Parameters"),
     ("parameters.graph", "Param. Graph"),
     ("parts.fastener", "Fastener"),
@@ -447,6 +469,9 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
+    if crate::manufacture_workspace::active(app) {
+        return vec!["MANUFACTURE"];
+    }
     let mut tabs = TABS.to_vec();
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
@@ -460,7 +485,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
 /// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || crate::manufacture_workspace::active(app) {
         return;
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
