@@ -11,8 +11,8 @@
 //! `FindBestSubdivisionNode` / `IdenticalSolutions` queries. The base
 //! `LocalSolve` records the visited leaf combinations, so a solve's output is
 //! the culled, ordered list of node tuples. Solution objects are null, opaque
-//! stand-ins or (rarely) an upstream line; the line's parameter interval is
-//! unported on the Rust side, so cases that compare line solutions are deferred.
+//! stand-ins or an upstream line. Line handles expose the natural interval of
+//! the same segment constructor and endpoints used by the native shim.
 //!
 //! Outputs: `ints` (statuses, flags, categories, counts, solution types, object
 //! codes, node indices) and `floats` (best answer, tolerance, solution values and
@@ -60,6 +60,17 @@ impl SolutionObject for Obj {
         } else {
             ObjectKind::Other
         }
+    }
+
+    fn natural_interval(&self) -> Option<solidcore::geom::extent1d::Extent1d> {
+        (0..100).contains(&self.0).then(|| {
+            solidcore::curve::line::Line::from_points(
+                Vec3::ZERO,
+                Vec3::new(1.0, 2.0, 3.0),
+                3,
+            )
+            .natural_interval()
+        })
     }
 }
 
