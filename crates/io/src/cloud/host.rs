@@ -57,7 +57,7 @@ impl NativeHost {
                 outbox.stage(&save)?;
                 job.update(|status| {
                     status.saved_locally = true;
-                    status.phase = Phase::SavedLocally;
+                    status.phase = if synchronize { Phase::Syncing } else { Phase::SavedLocally };
                     status.destination = Some(save.record.destination.clone());
                     status.revision = Some(save.record.id.clone());
                 })?;

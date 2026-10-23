@@ -742,7 +742,7 @@ pub fn save(app: &mut SolveApp) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
     }
-    if app.session.path.is_some() {
+    if app.session.path.is_some() || app.session.cloud_binding().is_some() {
         crate::save_job::start(app, "file.save", json!({}));
     } else {
         save_as(app);

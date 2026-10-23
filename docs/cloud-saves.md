@@ -41,6 +41,17 @@ Browser integration must persist connection metadata and pending saves in Indexe
 
 `solidcraft_io::cloud::NativeHost` runs native operations on workers and retains the caller's allowed-folder scope. Give it the app's private cloud recovery directory. Each connection has its own outbox under the SHA-256 of its identifier, preventing case-insensitive filesystem aliases. Save persists its captured objects and queue record before starting Git. Listing combines queued destinations with the checkout; opening prefers the latest queued revision and needs neither connectivity nor a working Git executable for that revision. Competing local tips remain intact and return a conflict rather than opening an arbitrary version. Synchronization retries captured revisions in dependency order; a failed predecessor blocks its children but not unrelated captures. A Save operation reports only its requested capture's publication result. The local queue/process locks are implementation coordination, separate from the future advisory editing leases described in the collaboration plan.
 
+The desktop app installs this worker through `Services::cloud_host`, using its
+private `cloud` data directory. `SolveApp` loads settings through the registered
+command, polls active and background document tabs, and retries pending queues
+after startup and once a minute when enabled. New tabs inherit connections;
+existing bindings stay with their designs when the default changes. Confirmed
+publications from any tab update only matching captured revisions in other tabs.
+Normal cloud Save runs on the live session, bypassing the native scratch-session
+file writer. Close/Quit waits for local capture acknowledgement, independently
+of network publication. Platform workers expose `Syncing` while an acknowledged
+capture is still uploading, so idle windows continue polling.
+
 ### Browser recovery store
 
 `apps/solidcraft-web/src/cloud_storage.rs` implements the browser store, separately from its still-pending worker and settings integration. Each connection has an IndexedDB database containing `pending`, `cached`, and `receipts`, and an OPFS directory under `cloud/<SHA-256 of connection id>`. Stored object paths match those used by the outbox and repository snapshots. The shared OPFS adapter bounds reads before allocating buffers, writes owned browser bytes, and awaits stream close. It aborts failed writes; a retry can complete an empty file left by interrupted initial creation.
@@ -102,7 +113,7 @@ binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
 These foundations, commands, the native worker adapter, and browser recovery storage are implemented.
-Application installation of that adapter, browser workers and browser connection persistence,
+Browser workers and browser connection persistence,
 credential entry, guided setup, Home/Preferences
 integration, and end-to-end application evidence remain unfinished. User-facing
 documentation must remain marked unreleased until those paths have been

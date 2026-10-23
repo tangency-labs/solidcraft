@@ -5002,6 +5002,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcraft-cloud",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",

@@ -18,6 +18,12 @@ pub struct Saving {
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
 pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+    if command == "file.save" && params.get("path").is_none() && app.session.cloud_binding().is_some() {
+        // Cloud jobs already run asynchronously. Their capture must belong to the live
+        // session so only durable local acknowledgement can advance its saved baseline.
+        let _ = app.run(command, params);
+        return false;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
         let mut copy = app.session.scratch();

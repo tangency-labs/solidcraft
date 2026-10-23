@@ -20,6 +20,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+mod cloud;
 mod control_server;
 mod device_lost;
 #[cfg(target_os = "windows")]
@@ -237,7 +238,8 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
-    Services {
+    let mut services = Services {
+        cloud_host: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_parent.clone();
@@ -318,7 +320,9 @@ fn services(cc: &eframe::CreationContext<'_>) -> Services {
             }
             let _ = command.spawn();
         })),
-    }
+    };
+    cloud::install(&mut services);
+    services
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a

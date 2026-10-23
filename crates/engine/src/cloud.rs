@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use solidcraft_cloud::{
-    Destination, Settings,
+    Destination, Published, Settings,
     jobs::{Host, Job, JobStatus, Phase},
 };
 
@@ -67,6 +67,10 @@ impl Session {
     pub fn cloud_configuring(&self) -> bool {
         self.cloud.configuration.is_some()
     }
+
+    pub fn cloud_save_pending(&self) -> bool {
+        !self.cloud.captures.is_empty()
+    }
     pub fn cloud_binding(&self) -> Option<&Binding> {
         self.cloud.binding.as_ref()
     }
@@ -78,6 +82,12 @@ impl Session {
     /// A captured save may become the saved baseline after later edits. Adopting the captured
     /// Arc instead of calling mark_saved keeps those newer edits dirty.
     pub fn poll_cloud(&mut self) -> Result<()> {
+        self.poll_cloud_with_publications(&[])
+    }
+
+    /// Share confirmed host results across tabs without sharing undo, bindings or captures.
+    /// Only a matching connection and captured revision can follow a publication.
+    pub fn poll_cloud_with_publications(&mut self, confirmed: &[Published]) -> Result<()> {
         if let Some(id) = self.cloud.configuration.as_ref() {
             let status =
                 self.cloud.jobs.get(id).ok_or_else(|| EngineError::Other("cloud settings operation missing".into()))?.status().map_err(error)?;
@@ -118,12 +128,15 @@ impl Session {
                 if publication.destination.connection != status.connection {
                     return Err(EngineError::Other("publication belongs to another connection".into()));
                 }
-                let key = (&publication.destination.connection, &publication.revision);
-                if let Some(previous) = publications.insert(key, publication)
-                    && previous.destination != publication.destination
-                {
-                    return Err(EngineError::Other("conflicting publication destinations".into()));
-                }
+            }
+        }
+        for publication in statuses.iter().flat_map(|(_, status)| &status.publications).chain(confirmed) {
+            publication.destination.validate().map_err(error)?;
+            let key = (&publication.destination.connection, &publication.revision);
+            if let Some(previous) = publications.insert(key, publication)
+                && previous.destination != publication.destination
+            {
+                return Err(EngineError::Other("conflicting publication destinations".into()));
             }
         }
         for (id, status) in &statuses {

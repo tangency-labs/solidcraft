@@ -17,6 +17,7 @@ pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
+mod cloud;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -331,6 +332,8 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    /// Asynchronous repository storage, injected by the desktop or browser app.
+    pub cloud_host: Option<std::sync::Arc<dyn solidcraft_cloud::jobs::Host>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -382,6 +385,7 @@ pub struct SolveApp {
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
     pub services: Services,
+    pub(crate) cloud: cloud::State,
     file_picker: Option<file_picker::Pending>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
@@ -534,6 +538,12 @@ pub struct SolveApp {
 
 impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
+        if let Some(host) = &services.cloud_host {
+            session.set_cloud_host(Some(host.clone()));
+            if let Err(error) = session.execute("cloud.settings", &serde_json::json!({"reload":true})) {
+                log::error!("cloud settings: {error}");
+            }
+        }
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -552,6 +562,7 @@ impl SolveApp {
             now: 0.0,
             pre_sketch_marker: None,
             services,
+            cloud: Default::default(),
             file_picker: None,
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -802,6 +813,11 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
+        if (id == "cloud.configure" || (id == "cloud.settings" && params.get("reload").and_then(Value::as_bool) == Some(true)))
+            && self.docs.background_mut().any(|slot| slot.session.cloud_configuring())
+        {
+            return Err("connection settings are still being stored or loaded".into());
+        }
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
@@ -874,7 +890,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "cloud.open.finish") {
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.menu.props = None;
@@ -1563,6 +1579,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
+        cloud::tick(self, ctx);
         if self.saving.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
