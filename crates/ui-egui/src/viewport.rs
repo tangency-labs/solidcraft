@@ -61,6 +61,9 @@ pub struct ViewportState {
     /// Per-body boxes of one world state, held (not just its address, which a later state can
     /// reuse once the old one is freed, so stale boxes would come back).
     pick_bounds: std::sync::Mutex<Option<BodyBounds>>,
+    /// The sketches' box in the world of one world state (held, as `pick_bounds` is). Every
+    /// `projection` reads it, several times a frame, and each sketch's box samples its curves.
+    sketch_bounds: std::sync::Mutex<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, solidcraft_engine::geom::Aabb3)>>,
     /// The model scene's blocks of bodies by key, from the last scene built.
     pub(crate) blocks: std::sync::Mutex<std::collections::HashMap<u64, CachedBlock>>,
     /// The triangles of each mesh the last scene drew as instances, by the mesh's address (the
@@ -1268,7 +1271,24 @@ type BodyBounds = (std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync
 /// The model's extent: bodies (from the cached boxes) and sketches.
 pub fn model_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
     let st = crate::open_meshing::shown_world(app);
-    let mut b = body_bounds(app, &st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, x)| a.union(x));
+    let bodies = body_bounds(app, &st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, x)| a.union(x));
+    let mut b = bodies.union(&sketch_bounds(app, &st));
+    for point in crate::sketch_attachment_ui::guide_lines(app).into_iter().flatten() {
+        b.add(point);
+    }
+    b
+}
+
+/// The box of every sketch of `st` in the world, kept for that state: a design with hundreds of
+/// sketches spent most of each frame sampling their splines again for `projection`.
+fn sketch_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
+    if let Ok(g) = app.viewport.sketch_bounds.lock()
+        && let Some((k, b)) = g.as_ref()
+        && std::sync::Arc::ptr_eq(k, st)
+    {
+        return *b;
+    }
+    let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
     for ss in &st.sketches {
         if let Some((lo, hi)) = ss.sketch.bounds() {
             for p in [lo, hi] {
@@ -1276,8 +1296,8 @@ pub fn model_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
             }
         }
     }
-    for point in crate::sketch_attachment_ui::guide_lines(app).into_iter().flatten() {
-        b.add(point);
+    if let Ok(mut g) = app.viewport.sketch_bounds.lock() {
+        *g = Some((std::sync::Arc::clone(st), b));
     }
     b
 }
