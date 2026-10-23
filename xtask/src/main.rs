@@ -56,8 +56,9 @@ commands:
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales); --fix sorts them
   test [CARGO ARGS] [-- TEST ARGS]
-                  build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside)
+                  build the tests with the ci profile, then run every test binary, a pool of
+                  them at a time (SOLIDCRAFT_TEST_JOBS says how many), with the doc tests
+                  alongside
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by

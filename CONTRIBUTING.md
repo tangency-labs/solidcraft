@@ -184,8 +184,9 @@ Either include the fix in the same PR, or mark the test `#[ignore = "fails until
 **Use the `ci` profile.** CI runs the tests with `--profile ci`: light optimisation, line tables,
 no LTO, and debug assertions off (truck has debug-only assertions that reject valid geometry). It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
-in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
-(`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
+in the PR. `cargo xtask test` builds the tests with it and then runs every test binary, a pool of
+them at a time (`cargo test` runs them one after another); `SOLIDCRAFT_TEST_JOBS` says how many
+run at once; arguments after `--` go to each binary, e.g.
 `cargo xtask test -- shell`. Tests run beside each other on a busy machine, so a test must not
 depend on wall-clock timing.
 
