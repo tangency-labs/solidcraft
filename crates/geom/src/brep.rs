@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 mod curve2;
 pub mod envelope;
 pub mod eval;
+pub mod form;
 pub mod geometry;
 pub mod history;
 pub mod part;
