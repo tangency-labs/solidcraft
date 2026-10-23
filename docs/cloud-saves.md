@@ -54,11 +54,33 @@ capture is still uploading, so idle windows continue polling.
 
 ### Browser recovery store
 
-`apps/solidcraft-web/src/cloud_storage.rs` implements the browser store, separately from its still-pending worker and settings integration. Each connection has an IndexedDB database containing `pending`, `cached`, and `receipts`, and an OPFS directory under `cloud/<SHA-256 of connection id>`. Stored object paths match those used by the outbox and repository snapshots. The shared OPFS adapter bounds reads before allocating buffers, writes owned browser bytes, and awaits stream close. It aborts failed writes; a retry can complete an empty file left by interrupted initial creation.
+`apps/solidcraft-web/src/cloud_storage.rs` implements the browser store. Each connection has an IndexedDB database containing `pending`, `cached`, and `receipts`, and an OPFS directory under `cloud/<SHA-256 of connection id>`. Stored object paths match those used by the outbox and repository snapshots. The shared OPFS adapter bounds reads before allocating buffers, writes owned browser bytes, and awaits stream close. It aborts failed writes; a retry can complete an empty file left by interrupted initial creation.
 
 Local Web Locks serialize storage changes across tabs, with no network waits inside those locks or IndexedDB transactions. Queue and cache metadata are committed with strict durability after all object writes finish. Publication confirmation updates its receipt and cache location and removes the pending record in one transaction. Confirming a parent never replaces a newer queued child; a conflict copy is cached under its actual destination. Opening a newer local database, queue, cache, or receipt format requests an upgrade. Queue listing is bounded to 10,000 records and 128 MiB of metadata.
 
 A failed commit acknowledgement does not prove no record exists: a browser can finish committing while the caller receives an error. Do not report that capture as saved; retain and recognize its stable identity on retry. Persistent-storage denial is recorded in `Store::persistent` for the host to display; it does not masquerade as granted persistence.
+
+`cloud_host.rs` is installed through the same `Services::cloud_host` as desktop.
+It stages captures before requesting credentials or using the network, opens
+queued heads first, and otherwise reads GitHub with an offline cache fallback.
+Only connectivity/credential storage errors permit that fallback; unsupported
+remote formats still request an upgrade. Resumed reads and uploads validate the
+document schema before reading asset objects. Synchronization holds a separate
+local Web Lock from staging, confirms receipts before removing queue entries,
+and reports partial publication results to other tabs' engine sessions. Browser
+Fetch requests are abortable through the operation's cancellation hook; OPFS
+closes and IndexedDB commits finish independently so cancellation does not tear
+down the local durability boundary. Publication retries asynchronously reload
+the original captured snapshot rather than retaining a second full byte copy.
+
+`cloud_settings.rs` stores the versioned connection envelope and independent
+provider credentials in `solidcraft-cloud-settings` IndexedDB stores. Tokens do
+not enter engine command parameters, status, UI preferences, design catalogs,
+or repository metadata. The browser currently supports GitHub API access;
+arbitrary Git transports remain desktop-only. Setup calls credential storage
+directly and then configures opaque credential identifiers through commands.
+Guided setup and credential-entry UI remain unfinished. Storage persistence
+grants are exposed as `JobStatus.storage_persistent` for the pending UI.
 
 The `cloud-recovery` example exercises the actual store without starting the renderer. With a matching `wasm-bindgen` CLI installed, run:
 
@@ -69,7 +91,7 @@ wasm-bindgen --target web --out-dir /tmp/solidcraft-cloud-browser-site \
 cargo xtask cloud-storage-test --site /tmp/solidcraft-cloud-browser-site
 ```
 
-Set `CC_wasm32_unknown_unknown` to a WASM-capable Clang when required by Zstd. The test reuses the repository's Chrome/DevTools harness (`CHROME` overrides the browser path), creates an isolated profile and origin, and terminates/restarts Chrome with the same profile. It covers queued and confirmed recovery, simultaneous tabs, failed closes, uncertain/aborted commits, future formats, corrupt chunks, and a 101 MiB asset with deduplication. Publication acknowledgements in this fixture are stubs: it does not authenticate or upload to a host. Full browser worker, credential, and application checks remain necessary.
+Set `CC_wasm32_unknown_unknown` to a WASM-capable Clang when required by Zstd. The test reuses the repository's Chrome/DevTools harness (`CHROME` overrides the browser path), creates an isolated profile and origin, and terminates/restarts Chrome with the same profile. It covers queued and confirmed recovery, simultaneous tabs, failed closes, uncertain/aborted commits, future formats, corrupt chunks, and a 101 MiB asset with deduplication. It also runs the actual browser worker through durable settings, independent credentials, offline CAD opening/listing, failed synchronization, cancellation of a stalled Fetch, and confirmed cached opening after another restart. A future-schema capture with a missing asset must request an upgrade before asset access or any repository request. Publication acknowledgements in this fixture are stubs; Fetch is intercepted for failure/cancellation checks, and no real token or authenticated upload is used. Authenticated host publication and full Home/Settings evidence remain necessary.
 
 ## Engine command interface
 
@@ -112,9 +134,8 @@ Saving to an explicit native path or adopting a native Save As detaches that
 binding and prevents an old asynchronous capture from reattaching it.
 `file.export` remains available for an independent native copy.
 
-These foundations, commands, the native worker adapter, and browser recovery storage are implemented.
-Browser workers and browser connection persistence,
-credential entry, guided setup, Home/Preferences
+These foundations, commands, platform workers, connection persistence, and browser recovery storage are implemented.
+Credential entry, native credential integration, guided setup, Home/Preferences
 integration, and end-to-end application evidence remain unfinished. User-facing
 documentation must remain marked unreleased until those paths have been
 exercised in the app.

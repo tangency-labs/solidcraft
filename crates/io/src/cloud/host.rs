@@ -107,8 +107,7 @@ impl NativeHost {
                 }
                 let snapshot = if let Some(save) = tips.first() {
                     save.check_connection(&connection)?;
-                    let snapshot = outbox.recover(save)?;
-                    super::check_document(&snapshot.document)?;
+                    let snapshot = outbox.recover_document(save)?;
                     job.update(|status| status.revision = Some(save.id.clone()))?;
                     snapshot
                 } else {
@@ -157,7 +156,7 @@ impl NativeHost {
             }
             let result = save
                 .check_connection(&connection)
-                .and_then(|()| outbox.recover(&save))
+                .and_then(|()| outbox.recover_document(&save))
                 .and_then(|snapshot| repository.publish(&save, snapshot))
                 .and_then(|published| {
                     outbox.published(&save)?;

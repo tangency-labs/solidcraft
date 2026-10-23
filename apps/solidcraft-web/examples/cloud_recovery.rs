@@ -5,6 +5,15 @@
 #![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
+#[path = "../src/cloud_client.rs"]
+pub mod cloud_client;
+#[cfg(target_arch = "wasm32")]
+#[path = "../src/cloud_host.rs"]
+pub mod cloud_host;
+#[cfg(target_arch = "wasm32")]
+#[path = "../src/cloud_settings.rs"]
+pub mod cloud_settings;
+#[cfg(target_arch = "wasm32")]
 #[path = "../src/cloud_storage.rs"]
 pub mod cloud_storage;
 #[cfg(target_arch = "wasm32")]
@@ -13,6 +22,9 @@ pub mod disk;
 #[cfg(target_arch = "wasm32")]
 #[path = "../src/files.rs"]
 pub mod files;
+#[cfg(target_arch = "wasm32")]
+#[path = "cloud_recovery/worker.rs"]
+mod worker;
 
 #[cfg(target_arch = "wasm32")]
 mod fixture {
@@ -29,6 +41,9 @@ mod fixture {
     }
 
     async fn phase(phase: &str, identity: String) -> Result<Value> {
+        if phase.starts_with("worker-") {
+            return super::worker::phase(phase, identity).await;
+        }
         let connection = Connection { id: identity, repository: "fixture/offline".into(), ..Default::default() };
         let store = Store::open(connection.clone()).await?;
         let destination = Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/bracket".into() };

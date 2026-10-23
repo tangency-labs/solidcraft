@@ -265,11 +265,20 @@ impl Store {
     }
 
     pub async fn recover(&self, save: &PendingSave) -> Result<Snapshot> {
+        self.recover_checked(save, |_| Ok(())).await
+    }
+
+    pub async fn recover_checked(&self, save: &PendingSave, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
         PendingSave::read(&serde_json::to_vec(save).map_err(storage)?)?;
         save.check_connection(&self.connection)?;
         let mut bytes = BTreeMap::new();
         let path = format!("documents/{}", save.manifest.document_hash);
-        bytes.insert(path.clone(), self.read(&path).await?);
+        let document = self.read(&path).await?;
+        if solidcraft_cloud::digest(&document) != save.manifest.document_hash {
+            return Err(storage("captured document hash mismatch"));
+        }
+        check_document(&document)?;
+        bytes.insert(path, document);
         for asset in save.manifest.assets.values() {
             for chunk in &asset.chunks {
                 let path = chunk.path()?;

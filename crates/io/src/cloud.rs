@@ -48,7 +48,6 @@ pub fn check_document(bytes: &[u8]) -> Result<()> {
     }
     let pending = solidcraft_doc::format::pending_names();
     if version == solidcraft_doc::format::FORMAT
-        && !pending.is_empty()
         && let Some(unknown) = value
             .get("format_pending")
             .and_then(serde_json::Value::as_array)
@@ -130,6 +129,17 @@ mod document_tests {
     fn newer_document_schema_requires_upgrade_before_assets_are_read() {
         let snapshot = Snapshot::prepare(br#"{"format":"solidcraft/4294967295"}"#.to_vec(), BTreeMap::new()).unwrap();
         assert!(matches!(open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not fetch assets")), Err(Error::UpgradeRequired(_))));
+    }
+
+    #[test]
+    fn unknown_pending_capabilities_require_upgrade_before_assets_are_read() {
+        let mut document: serde_json::Value = serde_json::from_str(&Document::new("future capabilities").to_json()).unwrap();
+        document["format_pending"] = serde_json::json!(["future-cloud-document-capability"]);
+        let snapshot = Snapshot::prepare(serde_json::to_vec(&document).unwrap(), BTreeMap::from([("blob".into(), vec![42; 100])])).unwrap();
+        assert!(matches!(
+            open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not read unsupported payloads")),
+            Err(Error::UpgradeRequired(_))
+        ));
     }
 
     #[test]

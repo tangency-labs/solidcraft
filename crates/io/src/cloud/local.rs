@@ -104,6 +104,10 @@ impl LocalOutbox {
         save.recover(|p| self.read(p))
     }
 
+    pub(super) fn recover_document(&self, save: &PendingSave) -> Result<Snapshot> {
+        save.recover_checked(|p| self.read(p), super::check_document)
+    }
+
     /// Call only after the repository adapter confirms this captured save was published.
     pub fn published(&self, save: &PendingSave) -> Result<()> {
         PendingSave::read(&serde_json::to_vec(save).map_err(storage)?)?;

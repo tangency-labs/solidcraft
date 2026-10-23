@@ -54,6 +54,31 @@ pub fn run(site: &str) -> Result<(), String> {
     let browser = Chrome::launch(&executable, &profile)?;
     let mut cdp = open(&browser, &url)?;
 
+    phase(&mut cdp, "worker-write", "worker_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "worker-read", "worker_restart")?;
+    cdp.eval(HOLD_FETCH)?;
+    phase(&mut cdp, "worker-cancel-start", "worker_restart")?;
+    wait_for(&mut cdp, "window.fixtureRequestStarted === true", "the cancellable GitHub request started", |value| value == true)?;
+    phase(&mut cdp, "worker-cancel-finish", "worker_restart")?;
+    wait_for(&mut cdp, "window.fixtureRequestAborted === true", "Cancel aborts the browser Fetch request", |value| value == true)?;
+    phase(&mut cdp, "worker-confirm", "worker_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "worker-cached-read", "worker_restart")?;
+    cdp.eval(
+        "window.fixtureRequestCount=0; window.fetch=()=>{window.fixtureRequestCount++;return Promise.reject(new TypeError('test offline'))}; true",
+    )?;
+    phase(&mut cdp, "worker-future-document", "worker_future")?;
+    if cdp.eval("window.fixtureRequestCount === 0")? != true {
+        return Err("future document recovery contacted the repository".into());
+    }
+    cdp.eval(RESTORE_FETCH)?;
+    println!(
+        "cloud-storage-test: actual worker retains connections, isolated credentials and CAD captures across offline restarts; Cancel aborts Fetch"
+    );
+
     phase(&mut cdp, "write", "restart")?;
     let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
     phase(&mut cdp, "read", "restart")?;
@@ -113,8 +138,48 @@ pub fn run(site: &str) -> Result<(), String> {
         return Err(format!("large-asset recovery or deduplication failed: {large}"));
     }
     println!("cloud-storage-test: 101 MiB asset recovers after termination with two deduplicated objects");
+
+    cdp.eval(FUTURE_SETTINGS)?;
+    phase(&mut cdp, "worker-future-settings", "worker_restart")?;
+    if cdp.eval(SETTINGS_UNCHANGED)? != true {
+        return Err("future connection settings were overwritten".into());
+    }
+    println!("cloud-storage-test: worker refuses to load or overwrite future connection settings");
     Ok(())
 }
+
+const OFFLINE: &str = "window.savedFixtureFetch = window.fetch; window.fetch = () => Promise.reject(new TypeError('test offline')); true";
+const RESTORE_FETCH: &str = "window.fetch = window.savedFixtureFetch; true";
+const HOLD_FETCH: &str = r#"(() => {
+ window.fixtureRequestStarted = false; window.fixtureRequestAborted = false;
+ window.fetch = (input,init) => new Promise((resolve,reject) => {
+  window.fixtureRequestStarted = true;
+  const signal = init?.signal ?? input.signal;
+  const abort = () => {window.fixtureRequestAborted = true;reject(new DOMException('test abort','AbortError'))};
+  if(signal.aborted) abort(); else signal.addEventListener('abort',abort,{once:true});
+ });
+ return true;
+})()"#;
+const FUTURE_SETTINGS: &str = r#"new Promise((resolve,reject)=>{
+ const request = indexedDB.open('solidcraft-cloud-settings');
+ request.onerror = () => reject(request.error);
+ request.onsuccess = () => {
+  const db = request.result, tx = db.transaction('settings','readwrite'), store = tx.objectStore('settings');
+  const read = store.get('connections');
+  read.onsuccess = () => store.put(JSON.stringify({...JSON.parse(read.result),format:'solidcraft-connections/999'}),'connections');
+  tx.oncomplete = () => {db.close();resolve(true)};
+  tx.onerror = () => reject(tx.error);
+ };
+})"#;
+const SETTINGS_UNCHANGED: &str = r#"new Promise((resolve,reject)=>{
+ const request = indexedDB.open('solidcraft-cloud-settings');
+ request.onerror = () => reject(request.error);
+ request.onsuccess = () => {
+  const db=request.result, tx=db.transaction('settings'), read=tx.objectStore('settings').get('connections');
+  read.onsuccess = () => {const value=JSON.parse(read.result);resolve(value.format==='solidcraft-connections/999' && value.settings.connections.length===2)};
+  tx.oncomplete = () => db.close(); tx.onerror = () => reject(tx.error);
+ };
+})"#;
 
 const BOOTSTRAP: &str = r#"<!doctype html><html><title>SolidCraft cloud recovery test</title>
 <script type="module">

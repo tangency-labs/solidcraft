@@ -52,12 +52,16 @@ pub struct JobStatus {
     /// A connection synchronization job can publish several independent Save operations.
     #[serde(default)]
     pub publications: Vec<Published>,
+    /// Browser storage persistence was granted (false is a recoverability warning).
+    #[serde(default)]
+    pub storage_persistent: Option<bool>,
 }
 
 struct State {
     status: JobStatus,
     cancelled: bool,
     opened: Option<Snapshot>,
+    cancel_handler: Option<Box<dyn FnOnce() + Send>>,
 }
 
 #[derive(Clone)]
@@ -84,9 +88,11 @@ impl Job {
                 message: None,
                 result: None,
                 publications: Vec::new(),
+                storage_persistent: None,
             },
             cancelled: false,
             opened: None,
+            cancel_handler: None,
         }))))
     }
 
@@ -100,6 +106,9 @@ impl Job {
             return Ok(());
         }
         change(&mut state.status);
+        if matches!(state.status.phase, Phase::Synced | Phase::Ready | Phase::Failed) {
+            state.cancel_handler = None;
+        }
         if state.cancelled && state.status.phase != Phase::Synced {
             state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
         }
@@ -114,6 +123,28 @@ impl Job {
         state.cancelled = true;
         state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
         // A durable queued save is retained even when the user cancels its upload.
+        let handler = state.cancel_handler.take();
+        drop(state);
+        if let Some(handler) = handler {
+            handler();
+        }
+        Ok(())
+    }
+
+    /// Install the current worker's cancellation hook. Browser requests are sequential;
+    /// replace the completed request's hook before starting the next. Never run it under
+    /// the state mutex, since aborting can wake a future which reads this job immediately.
+    pub fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) -> Result<()> {
+        let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
+        if state.status.phase == Phase::Synced {
+            return Ok(());
+        }
+        if state.cancelled {
+            drop(state);
+            handler();
+        } else {
+            state.cancel_handler = Some(Box::new(handler));
+        }
         Ok(())
     }
 
@@ -133,6 +164,7 @@ impl Job {
         if !state.cancelled {
             state.opened = Some(snapshot);
             state.status.phase = Phase::Ready;
+            state.cancel_handler = None;
         }
         Ok(())
     }
@@ -143,5 +175,49 @@ impl Job {
             return Err(Error::Storage("opening cancelled".into()));
         }
         state.opened.take().ok_or_else(|| Error::Storage("opening has not completed".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn cancellation_wakes_only_the_current_request_outside_the_job_lock() {
+        let job = Job::new("connection".into()).unwrap();
+        let called = Arc::new(AtomicUsize::new(0));
+        let first = called.clone();
+        job.set_cancel_handler(move || {
+            first.fetch_add(100, Ordering::SeqCst);
+        })
+        .unwrap();
+        let current = called.clone();
+        let inspect = job.clone();
+        job.set_cancel_handler(move || {
+            assert_eq!(inspect.status().unwrap().phase, Phase::Cancelled);
+            current.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        job.cancel().unwrap();
+        assert_eq!(called.load(Ordering::SeqCst), 1);
+        job.cancel().unwrap();
+        assert_eq!(called.load(Ordering::SeqCst), 1);
+        let late = called.clone();
+        job.set_cancel_handler(move || {
+            late.fetch_add(1, Ordering::SeqCst);
+        })
+        .unwrap();
+        assert_eq!(called.load(Ordering::SeqCst), 2);
+        let synced = Job::new("other".into()).unwrap();
+        let completed = called.clone();
+        synced
+            .set_cancel_handler(move || {
+                completed.fetch_add(100, Ordering::SeqCst);
+            })
+            .unwrap();
+        synced.update(|status| status.phase = Phase::Synced).unwrap();
+        synced.cancel().unwrap();
+        assert_eq!(called.load(Ordering::SeqCst), 2, "confirmed publication cannot be cancelled");
     }
 }
