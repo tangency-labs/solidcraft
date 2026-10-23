@@ -551,8 +551,10 @@ enum Thing {
     Sketch(u64),
     /// An origin or construction plane, by name.
     Plane(String),
-    /// An origin axis.
+    /// An origin or construction axis.
     Axis(String),
+    /// A construction point.
+    Point(String),
 }
 
 /// What the tree lights for the selection and the 3D view's pointer: each lit item's row (in
@@ -589,6 +591,7 @@ impl Lit {
                 },
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
+                Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
                 Sel::Occurrence { .. } => continue,
             });
         }
@@ -597,6 +600,7 @@ impl Lit {
             Some(Hit::SketchPoint { sketch, .. } | Hit::SketchCurve { sketch, .. } | Hit::Profile { sketch, .. }) => Some(Thing::Sketch(*sketch)),
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
+            Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             None => None,
         };
         let doc = app.session.doc.clone();
@@ -611,10 +615,20 @@ impl Lit {
                 Thing::Sketch(id) => {
                     components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
                 }
-                Thing::Plane(name) => components.extend(
-                    doc.features.iter().find(|f| f.name == *name && matches!(f.kind, FeatureKind::ConstructionPlane { .. })).map(|f| f.component),
+                Thing::Plane(name) | Thing::Axis(name) | Thing::Point(name) => components.extend(
+                    doc.features
+                        .iter()
+                        .find(|f| {
+                            f.name == *name
+                                && matches!(
+                                    f.kind,
+                                    FeatureKind::ConstructionPlane { .. }
+                                        | FeatureKind::ConstructionAxis { .. }
+                                        | FeatureKind::ConstructionPoint { .. }
+                                )
+                        })
+                        .map(|f| f.component),
                 ),
-                Thing::Axis(_) => {}
             }
         }
         Lit { selected, hovered, paths, components }
@@ -634,7 +648,11 @@ impl Lit {
         match folder {
             "bodies" => e.bodies.iter().cloned().map(Thing::Body).collect(),
             "sketches" => e.key.parse().ok().map(Thing::Sketch).into_iter().collect(),
-            _ => vec![Thing::Plane(e.label.clone())],
+            _ => match &e.sel {
+                Some(Sel::Axis { name }) => vec![Thing::Axis(name.clone())],
+                Some(Sel::ConstructionPoint { name }) => vec![Thing::Point(name.clone())],
+                _ => vec![Thing::Plane(e.label.clone())],
+            },
         }
     }
 
@@ -907,8 +925,14 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
             .iter()
             .enumerate()
             .filter_map(|(i, f)| {
-                let kind =
-                    if sketches { matches!(f.kind, FeatureKind::Sketch { .. }) } else { matches!(f.kind, FeatureKind::ConstructionPlane { .. }) };
+                let kind = if sketches {
+                    matches!(f.kind, FeatureKind::Sketch { .. })
+                } else {
+                    matches!(
+                        f.kind,
+                        FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }
+                    )
+                };
                 (f.component == component && kind).then_some(i)
             })
             .collect(),
@@ -1570,12 +1594,13 @@ impl CanvasPanel {
     }
 }
 
-/// A browser click on a plane or axis: it goes to the open dialog's input if that takes it,
+/// A browser click on construction geometry: it goes to the open dialog's input if that takes it,
 /// otherwise it becomes the selection.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
     let hit = match &x {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcraft_engine::geom::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
+        Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
         // The origin point goes only into a dialog input that takes it.
         Sel::Vertex { body, point } if body.is_empty() && app.dialog.is_some() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
         _ => return,
@@ -1678,14 +1703,23 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 label: f.name.clone(),
                 icon: crate::timeline::icon_of(&f.kind),
                 visible: !app.session.visibility.hidden_origin.contains(&f.name),
-                selected: sel.iter().any(|x| matches!(x, Sel::Plane { name } if *name == f.name)),
+                selected: sel.iter().any(|x| *x == construction_sel(f)),
                 color: None,
                 locked: false,
-                sel: Some(Sel::Plane { name: f.name.clone() }),
+                sel: Some(construction_sel(f)),
                 target: Some(Target::Plane { id: f.id }),
                 bodies: Vec::new(),
             })
             .collect(),
+    }
+}
+
+fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
+    let name = f.name.clone();
+    match f.kind {
+        FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
+        FeatureKind::ConstructionAxis { .. } => Sel::Axis { name },
+        _ => Sel::Plane { name },
     }
 }
 

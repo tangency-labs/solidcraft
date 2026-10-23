@@ -40,7 +40,7 @@ impl Model {
             }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
-                FeatureKind::ConstructionPlane { .. } => &mut planes,
+                FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,
                 _ => continue,
             };
             index.entry(feature.component).or_default().push(i);

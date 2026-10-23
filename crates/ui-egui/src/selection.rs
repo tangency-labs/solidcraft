@@ -40,6 +40,8 @@ pub const FEATURES: Accept = 1024;
 pub const SKETCH_POINTS: Accept = 2048;
 /// The origin point, picked as a vertex of no body (in the viewport or the browser's Origin).
 pub const ORIGIN: Accept = 4096;
+/// Named construction points.
+pub const CONSTRUCTION_POINTS: Accept = 8192;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +79,7 @@ impl SelInput {
             Hit::Face { body, .. } if a & BODIES != 0 => Some(Sel::Body { name: body.clone() }),
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
+            Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
             Hit::SketchCurve { id, straight: true, .. } if a & AXES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
             Hit::SketchCurve { id, .. } if a & CURVES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),

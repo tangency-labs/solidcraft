@@ -193,7 +193,11 @@ pub enum Hit {
         name: String,
         point: Vec3,
     },
-    /// An origin axis (X, Y, Z).
+    /// A construction point (by feature name).
+    ConstructionPoint {
+        name: String,
+    },
+    /// An origin or construction axis.
     Axis {
         name: String,
     },
@@ -1396,7 +1400,9 @@ pub fn same_target(a: &Hit, b: &Hit) -> bool {
         (Hit::Edge { body: a, index: i, .. }, Hit::Edge { body: b, index: j, .. })
         | (Hit::Face { body: a, index: i, .. }, Hit::Face { body: b, index: j, .. }) => a == b && i == j,
         (Hit::Profile { sketch: s, index: i }, Hit::Profile { sketch: t, index: j }) => s == t && i == j,
-        (Hit::Plane { name: a, .. }, Hit::Plane { name: b, .. }) | (Hit::Axis { name: a }, Hit::Axis { name: b }) => a == b,
+        (Hit::Plane { name: a, .. }, Hit::Plane { name: b, .. })
+        | (Hit::Axis { name: a }, Hit::Axis { name: b })
+        | (Hit::ConstructionPoint { name: a }, Hit::ConstructionPoint { name: b }) => a == b,
         _ => false,
     }
 }
@@ -1466,6 +1472,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 if dd < 8.0 && best.wants(dd) {
                     best.offer(dd, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos });
                 }
+            }
+        }
+    }
+    for (name, point) in construction_points(app) {
+        if let Some(sp) = proj.to_screen(point) {
+            let dd = sp.distance(pos);
+            if dd < 8.0 && best.wants(dd) {
+                best.offer(dd, Hit::ConstructionPoint { name });
             }
         }
     }
@@ -1921,6 +1935,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::Face { body, index, point } => Sel::Face { body: body.clone(), index: *index, point: *point },
         Hit::Plane { name, .. } => Sel::Plane { name: name.clone() },
         Hit::Axis { name } => Sel::Axis { name: name.clone() },
+        Hit::ConstructionPoint { name } => Sel::ConstructionPoint { name: name.clone() },
     })
 }
 
@@ -1961,7 +1976,7 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies,
         Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies,
         Hit::Face { .. } => !off("faces") || app.ui.pick_bodies,
-        Hit::Plane { .. } | Hit::Axis { .. } => true,
+        Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
     }
 }
 
@@ -2251,10 +2266,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             s += dash * 1.6;
         }
     }
-    for (_, p) in construction_points(app) {
+    for (name, p) in construction_points(app) {
+        let on = sel.iter().any(|x| matches!(x, Sel::ConstructionPoint { name: n } if *n == name))
+            || matches!(hover, Some(Hit::ConstructionPoint { name: n }) if *n == name);
+        let col = c4(if on { t.sel_edge } else { t.construction_geom });
         let r = size * 0.04;
         for d in [Vec3::X, Vec3::Y, Vec3::Z] {
-            sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), c4(t.construction_geom), 2.0, true);
+            sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), col, 2.0, true);
         }
     }
     // Reference widgets follow zoom; the often much larger world-space feedback does not.
@@ -7279,6 +7297,31 @@ mod tests {
         assert!(h.app.viewport.axis_drag.is_none());
         assert!(h.app.viewport.orbit_free.is_none());
         assert!(h.app.viewport.boxsel.is_none());
+    }
+
+    #[test]
+    fn construction_point_is_pickable_only_while_visible() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("construct.point.vertex", &json!({"point":{"point":[20,15,10]},"name":"Point1"})).unwrap();
+        s.execute("construct.axis.two_points", &json!({"a":{"point":[-20,0,10]},"b":{"point":[-20,0,30]},"name":"Axis1"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0)));
+        let pos = proj.to_screen(Vec3::new(20.0, 15.0, 10.0)).unwrap();
+        let is_point =
+            |hit: &Hit| hit_sel(hit).is_some_and(|sel| serde_json::to_value(sel).unwrap() == json!({"type":"construction_point","name":"Point1"}));
+        assert!(pick(&app, &proj, pos).iter().any(is_point));
+        assert!(pick_all(&app, &proj, pos).iter().any(is_point));
+        let axis_pos = proj.to_screen(Vec3::new(-20.0, 0.0, 20.0)).unwrap();
+        let axis = Hit::Axis { name: "Axis1".into() };
+        assert!(pick(&app, &proj, axis_pos).contains(&axis));
+        assert_eq!(
+            crate::selection::SelInput::new("Axis", crate::selection::AXES, false).accepts(&axis, |_, _| false),
+            Some(Sel::Axis { name: "Axis1".into() })
+        );
+        app.session.visibility.hidden_origin.extend(["Point1".into(), "Axis1".into()]);
+        assert!(!pick(&app, &proj, axis_pos).contains(&axis));
+        assert!(!pick(&app, &proj, pos).iter().any(is_point));
+        assert!(!pick_all(&app, &proj, pos).iter().any(is_point));
     }
 
     #[test]

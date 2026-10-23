@@ -568,6 +568,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
         Sel::Body { .. } => a & BODIES != 0,
         Sel::Plane { .. } => a & PLANES != 0,
         Sel::Axis { .. } => a & AXES != 0,
+        Sel::ConstructionPoint { .. } => a & selection::CONSTRUCTION_POINTS != 0,
         Sel::SketchCurve { .. } => a & (AXES | CURVES) != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
         Sel::Feature { .. } => a & selection::FEATURES != 0,
@@ -1883,7 +1884,7 @@ fn selection_label(s: &Session, item: &Sel) -> String {
     match item {
         Sel::SketchCurve { id } => id.clone(),
         Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::Body { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } | Sel::Body { name } => name.clone(),
         Sel::Face { body, index, .. } => format!("{body} · face {index}"),
         Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
@@ -4013,7 +4014,7 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 /// Plane At Angle have dialogs of their own.
 fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
-    const POINT: Accept = selection::VERTICES | selection::POINTS;
+    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
@@ -4067,6 +4068,7 @@ fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
         Sel::Vertex { point, .. } => json!({"vertex": pt(*point)}),
         Sel::Plane { name } => json!({"plane": name}),
         Sel::Axis { name } => json!({"axis": name}),
+        Sel::ConstructionPoint { name } => json!({"construct_point": name}),
         // Picked across sketches as "<sketch id>:<point id>".
         Sel::SketchPoint { id } => match id.split_once(':').and_then(|(sk, p)| Some((sk.parse::<u64>().ok()?, p))) {
             Some((sketch, point)) => json!({"sketch": sketch, "point": point}),

@@ -81,3 +81,35 @@ fn body_index_and_placements_follow_geometry_undo_and_document_identity() {
     assert!(super::model_children(&h.app, 0).is_empty());
     assert!(super::entries(&h.app, component, "bodies").is_empty());
 }
+
+#[test]
+fn construction_rows_include_points_and_axes() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("construct.point.vertex", json!({"point":{"point":[20,15,10]},"name":"Point1"})).unwrap();
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,0,30]},"name":"Axis1"})).unwrap();
+    for cached in [false, true] {
+        if cached {
+            super::prepare_model(&mut h.app);
+        }
+        let rows = super::entries(&h.app, 0, "construction");
+        assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Point1", "Axis1"]);
+        for row in &rows {
+            assert!(row.visible && row.sel.is_some() && row.target.is_some());
+        }
+    }
+    let rows = super::entries(&h.app, 0, "construction");
+    for row in &rows {
+        super::pick_from_browser(&mut h.app, row.sel.clone().unwrap());
+        assert!(super::entries(&h.app, 0, "construction").iter().find(|r| r.label == row.label).unwrap().selected);
+        let items = crate::context_menu::items(&h.app, row.target.as_ref().unwrap());
+        for id in ["ui.rename", "ui.delete", "ui.editFeature", "ui.originPart"] {
+            assert!(items.iter().any(|i| i.id == id), "{} lacks {id}", row.label);
+        }
+        assert!(!items.iter().any(|i| i.id == "sketch.create"));
+    }
+    h.app.session.visibility.hidden_origin.push("Point1".into());
+    assert!(!super::entries(&h.app, 0, "construction")[0].visible);
+    h.app.run("selection.delete", json!({"items": rows.iter().map(|r| r.sel.clone().unwrap()).collect::<Vec<_>>()})).unwrap();
+    super::prepare_model(&mut h.app);
+    assert!(super::entries(&h.app, 0, "construction").is_empty());
+}

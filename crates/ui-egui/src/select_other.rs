@@ -152,7 +152,7 @@ fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
         Sel::SketchPoint { .. } | Sel::ExternalSketchPoint { .. } => 0,
         Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => 1,
         Sel::SketchConstraint { .. } => 2,
-        Sel::Vertex { .. } => 3,
+        Sel::Vertex { .. } | Sel::ConstructionPoint { .. } => 3,
         Sel::Edge { .. } => 4,
         Sel::Face { .. } | Sel::Feature { .. } => 5,
         Sel::Body { .. } | Sel::Occurrence { .. } => 6,
@@ -249,7 +249,7 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{name} Plane"),
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => format!("{name} Axis"),
-        Sel::Plane { name } | Sel::Axis { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => name.clone(),
     }
 }
 
@@ -267,7 +267,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         }
     };
     match sel {
-        Sel::SketchPoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::Vertex { .. } => "point",
+        Sel::SketchPoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::Vertex { .. } | Sel::ConstructionPoint { .. } => "point",
         Sel::SketchCurve { id } => curve(app.session.active_sketch, id),
         Sel::ExternalSketchCurve { sketch, id } => curve(Some(*sketch), id),
         Sel::SketchConstraint { .. } => "dimension",

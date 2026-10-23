@@ -2272,3 +2272,34 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
+
+#[test]
+fn construction_points_fill_three_point_plane_dialog() {
+    let mut h = crate::scenario::Harness::new();
+    let points = [[20, 15, 10], [40, 15, 10], [20, 35, 10]];
+    for (i, point) in points.iter().enumerate() {
+        h.app.run("construct.point.vertex", json!({"point":{"point":point},"name":format!("Point{}", i+1)})).unwrap();
+    }
+    h.app.start("construct.plane.three_points");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
+    let proj = crate::viewport::projection(&h.app, rect);
+    for point in points {
+        let pos = proj.to_screen(Vec3::new(point[0] as f64, point[1] as f64, point[2] as f64)).unwrap();
+        let hits = crate::viewport::pick(&h.app, &proj, pos);
+        let mut d = h.app.dialog.take().unwrap();
+        let sel = hits.iter().find_map(|hit| d.candidate(&h.app.session, hit)).expect("construction point accepted");
+        d.pick(&h.app.session, sel);
+        h.app.dialog = Some(d);
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["a"], json!({"construct_point":"Point1"}));
+    assert_eq!(commands[0].1["b"], json!({"construct_point":"Point2"}));
+    assert_eq!(commands[0].1["c"], json!({"construct_point":"Point3"}));
+    for (cmd, params) in commands {
+        h.app.run(&cmd, params).unwrap();
+    }
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    assert_eq!(planes.len(), 1);
+    assert!((planes[0].2.origin.z - 10.0).abs() < 1e-9);
+    assert!(planes[0].2.normal().dot(Vec3::Z).abs() > 1.0 - 1e-9);
+}

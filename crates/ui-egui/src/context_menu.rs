@@ -32,7 +32,7 @@ pub enum Target {
     Sketch {
         id: u64,
     },
-    /// A construction plane (its feature id).
+    /// Construction geometry (its feature id).
     Plane {
         id: u64,
     },
@@ -646,22 +646,26 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
-/// A construction plane's row in the browser: sketch on it, edit, delete, rename, show or hide.
+/// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
 fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let Some(f) = app.session.doc.feature(id) else { return Vec::new() };
     let visible = !app.session.visibility.hidden_origin.contains(&f.name);
-    vec![
-        cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": f.name })),
-        Item::sep(),
-        act("ui.editFeature", "Edit Feature", "plane").with(json!({ "feature": id })),
-        Item::sep(),
+    let mut items = Vec::new();
+    if matches!(f.kind, solidcraft_engine::doc::FeatureKind::ConstructionPlane { .. }) {
+        items.push(cmd(app, "sketch.create", "Create Sketch").with(json!({ "plane": f.name })));
+        items.push(Item::sep());
+    }
+    items.push(act("ui.editFeature", "Edit Feature", crate::timeline::icon_of(&f.kind)).with(json!({ "feature": id })));
+    items.push(Item::sep());
+    items.extend([
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
         Item::sep(),
         act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [f.name], "show": !visible })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
-    ]
+    ]);
+    items
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.
@@ -1345,7 +1349,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .selection
         .iter()
         .filter_map(|s| match s {
-            Sel::Plane { name } | Sel::Axis { name } => Some(name.clone()),
+            Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -1384,7 +1388,7 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
             Ok(p) => RenameWhat::Component(p.component),
             Err(_) => return false,
         },
-        ([Sel::Plane { name }], [], []) => match app.session.doc.find_feature(name) {
+        ([Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }], [], []) => match app.session.doc.find_feature(name) {
             Some(f) => RenameWhat::Feature(f.id),
             None => return false,
         },
