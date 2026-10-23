@@ -53,6 +53,7 @@ pub fn open(app: &mut SolveApp, setup_name: &str, op_index: usize) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
     app.manufacture_workspace.hole_rec_dialog =
         Some(HoleRecDialogState { setup_name: setup_name.to_string(), op_index, draft: op, tab: HoleRecTab::HoleGroups, selected_group: None });
     app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::HoleRecognition;

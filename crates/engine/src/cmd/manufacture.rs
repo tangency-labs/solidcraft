@@ -4,6 +4,7 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use solidcraft_manufacture::library::LibraryRemote;
 use solidcraft_manufacture::{ManufactureSettings, MfgSetup, NcProgram, ToolpathModification};
 
 use super::CommandSpec;
@@ -364,6 +365,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("settings")
         .doc_only()
         .params("add: an NC program object. Appends to manufacture.nc_programs, validates atomically, one undo step."),
+    CommandSpec::new("manufacture.manage.machine_library", "Machines", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "MANAGE")
+        .params("Opens the Machine Library browser. Linked remotes persist through manufacture.library_remotes.set."),
+    CommandSpec::new("manufacture.manage.post_library", "Posts", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "MANAGE")
+        .params("Opens the Post Library browser. Linked remotes persist through manufacture.library_remotes.set."),
+    CommandSpec::new("manufacture.manage.template_library", "Templates", twod_open)
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .at("MANUFACTURE", "MANAGE")
+        .params("Opens the Template Library browser. Linked remotes persist through manufacture.library_remotes.set."),
+    CommandSpec::new("manufacture.library_remotes.set", "Save Library Remotes", set_library_remotes)
+        .icon("settings")
+        .doc_only()
+        .params("add?: a library remote object to append, or remove?: remote id. Validates atomically, one undo step."),
 ];
 
 // ── Settings get ───────────────────────────────────────────────────────────────
@@ -478,6 +501,37 @@ fn set_nc_programs(s: &mut Session, params: &Value) -> Result<Value> {
     new_manufacture.nc_programs.push(req.add);
     new_manufacture.validate().map_err(|e| bad(cmd, e.to_string()))?;
     let count = new_manufacture.nc_programs.len();
+    s.doc_mut().manufacture = new_manufacture;
+    Ok(json!({"count": count}))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetLibraryRemotes {
+    #[serde(default)]
+    add: Option<LibraryRemote>,
+    #[serde(default)]
+    remove: Option<String>,
+}
+
+fn set_library_remotes(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "manufacture.library_remotes.set";
+    let req: SetLibraryRemotes = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if req.add.is_none() && req.remove.is_none() {
+        return Err(bad(cmd, "add or remove is required"));
+    }
+    let mut new_manufacture = s.doc.manufacture.clone();
+    if let Some(id) = req.remove {
+        new_manufacture.library_remotes.retain(|r| r.id != id);
+    }
+    if let Some(remote) = req.add {
+        if new_manufacture.library_remotes.iter().any(|r| r.id == remote.id) {
+            return Err(bad(cmd, format!("duplicate library remote id `{}`", remote.id)));
+        }
+        new_manufacture.library_remotes.push(remote);
+    }
+    new_manufacture.validate().map_err(|e| bad(cmd, e.to_string()))?;
+    let count = new_manufacture.library_remotes.len();
     s.doc_mut().manufacture = new_manufacture;
     Ok(json!({"count": count}))
 }
@@ -721,6 +775,17 @@ mod tests {
             assert_eq!(r["opened"], true, "{id}");
             assert!(s.doc.manufacture.setups.is_empty(), "{id}");
             assert!(s.doc.manufacture.nc_programs.is_empty(), "{id}");
+        }
+    }
+
+    #[test]
+    fn library_commands_are_display_only() {
+        const IDS: &[&str] = &["manufacture.manage.machine_library", "manufacture.manage.post_library", "manufacture.manage.template_library"];
+        for id in IDS {
+            let mut s = Session::default();
+            let r = s.execute(id, &json!({})).unwrap();
+            assert_eq!(r["opened"], true, "{id}");
+            assert!(s.doc.manufacture.library_remotes.is_empty(), "{id}");
         }
     }
 }

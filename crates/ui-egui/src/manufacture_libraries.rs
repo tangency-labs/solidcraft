@@ -1,8 +1,9 @@
-//! Machine / Post / Template Library browsers with linked git remotes.
+//! Machine / Post / Template Library browsers.
+//! Document remotes persist through manufacture.library_remotes.set; not companion HTTP, git sync, or GPL CAM.
 
 use egui::RichText;
 use serde_json::json;
-use solidcraft_manufacture::library::{CatalogEntry, DEFAULT_CAM_LIBRARY_REMOTE, LibraryLocation, LibraryRemote};
+use solidcraft_manufacture::library::{LibraryLocation, LibraryRemote};
 
 use crate::SolveApp;
 
@@ -21,22 +22,24 @@ impl LibraryDialogKind {
             LibraryDialogKind::Template => "Template Library",
         }
     }
-
-    fn api_kind(self) -> &'static str {
-        match self {
-            LibraryDialogKind::Machine => "machine",
-            LibraryDialogKind::Post => "post",
-            LibraryDialogKind::Template => "template",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarSel {
     Document,
-    Local,
-    LinkedAll,
     Remote(usize),
+}
+
+#[derive(Clone, Debug)]
+struct CatalogRow {
+    id: String,
+    name: String,
+    vendor: String,
+    description: String,
+    location: LibraryLocation,
+    source_id: String,
+    path: String,
+    capabilities: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -45,7 +48,7 @@ pub struct LibraryDialogState {
     pub search: String,
     pub sidebar: SidebarSel,
     pub remotes: Vec<LibraryRemote>,
-    pub entries: Vec<CatalogEntry>,
+    entries: Vec<CatalogRow>,
     pub selected: Option<usize>,
     pub remote_url: String,
     pub remote_name: String,
@@ -58,12 +61,12 @@ impl LibraryDialogState {
         Self {
             kind,
             search: String::new(),
-            sidebar: SidebarSel::Local,
+            sidebar: SidebarSel::Document,
             remotes: Vec::new(),
             entries: Vec::new(),
             selected: None,
-            remote_url: DEFAULT_CAM_LIBRARY_REMOTE.into(),
-            remote_name: "SolidCraft CAM Libraries".into(),
+            remote_url: String::new(),
+            remote_name: "CAM Library".into(),
             status: String::new(),
             filter_cap: String::new(),
         }
@@ -71,79 +74,151 @@ impl LibraryDialogState {
 }
 
 pub fn open(app: &mut SolveApp, kind: LibraryDialogKind) {
+    crate::manufacture_workspace::ensure_setup(app);
+    clear_other(app);
     let mut st = LibraryDialogState::new(kind);
     refresh(app, &mut st);
     app.manufacture_workspace.library_dialog = Some(st);
-    app.manufacture_workspace.manage_stub_dialog = None;
+    app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::Libraries;
 }
 
-fn refresh(app: &mut SolveApp, st: &mut LibraryDialogState) {
-    let _ = app.run("manufacture.library.ensure_default_remote", json!({}));
-    match app.run("manufacture.library.list", json!({"kind": st.kind.api_kind()})) {
-        Ok(v) => {
-            st.remotes = serde_json::from_value(v.get("remotes").cloned().unwrap_or(json!([]))).unwrap_or_default();
-            st.entries = serde_json::from_value(v.get("entries").cloned().unwrap_or(json!([]))).unwrap_or_default();
-            st.status.clear();
-        }
-        Err(e) => st.status = e,
+pub fn open_from_command(app: &mut SolveApp, id: &str) -> bool {
+    match id {
+        "manufacture.manage.machine_library" => open(app, LibraryDialogKind::Machine),
+        "manufacture.manage.post_library" => open(app, LibraryDialogKind::Post),
+        "manufacture.manage.template_library" => open(app, LibraryDialogKind::Template),
+        _ => return true,
     }
+    false
+}
+
+fn clear_other(app: &mut SolveApp) {
+    app.manufacture_workspace.tool_library_dialog = None;
+    app.manufacture_workspace.edit_tool_dialog = None;
+    app.manufacture_workspace.manage_stub_dialog = None;
+    app.manufacture_workspace.setup_dialog = None;
+    app.manufacture_workspace.drill_dialog = None;
+    app.manufacture_workspace.contour_dialog = None;
+    app.manufacture_workspace.twod_dialog = None;
+    app.manufacture_workspace.threed_dialog = None;
+    app.manufacture_workspace.hole_rec_dialog = None;
+    app.manufacture_workspace.multiaxis_dialog = None;
+    app.manufacture_workspace.turning_dialog = None;
+    app.manufacture_workspace.part_handling_dialog = None;
+    app.manufacture_workspace.inspection_dialog = None;
+    app.manufacture_workspace.manual_inspection_dialog = None;
+    app.manufacture_workspace.fabrication_dialog = None;
+    app.manufacture_workspace.nest_dialog = None;
+    app.manufacture_workspace.additive_dialog = None;
+    app.manufacture_workspace.from_gcode_dialog = None;
+    app.manufacture_workspace.modify_dialog = None;
+    app.manufacture_workspace.post_dialog = None;
+    app.manufacture_workspace.machining_time_dialog = None;
+    app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
+}
+
+fn refresh(app: &SolveApp, st: &mut LibraryDialogState) {
+    st.remotes = app.session.doc.manufacture.library_remotes.clone();
+    st.entries = document_entries(app, st.kind);
+    st.selected = None;
+}
+
+fn document_entries(app: &SolveApp, kind: LibraryDialogKind) -> Vec<CatalogRow> {
+    let m = &app.session.doc.manufacture;
+    let mut rows = Vec::new();
+    match kind {
+        LibraryDialogKind::Machine => {
+            for (id, machine) in &m.machines {
+                let name = if machine.name.trim().is_empty() { id.clone() } else { machine.name.clone() };
+                rows.push(CatalogRow {
+                    id: format!("document/machine/{id}"),
+                    name,
+                    vendor: machine.oem.clone(),
+                    description: machine.model.clone(),
+                    location: LibraryLocation::Document,
+                    source_id: String::new(),
+                    path: id.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        LibraryDialogKind::Post => {
+            for (id, post) in &m.posts {
+                let name = if post.name.trim().is_empty() { id.clone() } else { post.name.clone() };
+                rows.push(CatalogRow {
+                    id: format!("document/post/{id}"),
+                    name,
+                    vendor: String::new(),
+                    description: format!("{:?}", post.dialect),
+                    location: LibraryLocation::Document,
+                    source_id: String::new(),
+                    path: id.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        LibraryDialogKind::Template => {
+            for (id, template) in &m.templates {
+                rows.push(CatalogRow {
+                    id: format!("document/template/{id}"),
+                    name: template.name.clone(),
+                    vendor: String::new(),
+                    description: template.description.clone(),
+                    location: LibraryLocation::Document,
+                    source_id: String::new(),
+                    path: id.clone(),
+                    capabilities: if template.category.is_empty() { Vec::new() } else { vec![template.category.clone()] },
+                });
+            }
+        }
+    }
+    rows
+}
+
+fn remote_id(name: &str, existing: &[LibraryRemote]) -> String {
+    let base: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let base = base.trim_matches('-');
+    let base = if base.is_empty() { "remote" } else { base };
+    let mut id = base.to_string();
+    let mut n = 2;
+    while existing.iter().any(|r| r.id == id) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    id
 }
 
 pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(mut st) = app.manufacture_workspace.library_dialog.clone() else {
         return;
     };
-    let mut open = true;
-    let mut close = false;
     let mut do_refresh = false;
-    let mut do_sync: Option<Option<String>> = None;
     let mut do_add = false;
-    let mut do_install: Option<String> = None;
     let mut do_remove: Option<String> = None;
-
-    // Stay inside the harness screen (1000 px tall) and under WINDOW_WIDE_MAX_W: a centred
-    // 480-tall window still clipped the top once content grew, and the column mins pushed past 760.
-    let screen = ui.ctx().content_rect();
-    let max_h = (screen.height() - 96.0).max(200.0);
-    crate::frame::window(ui.ctx(), st.kind.title(), crate::frame::Width::Wide)
-        .id(egui::Id::new("mfg_library_dialog").with(st.kind.title()))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .constrain(true)
-        .default_size([700.0, 400.0])
-        .max_height(max_h)
-        .show(ui.ctx(), |ui| {
+    let title = st.kind.title();
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("mfg_library_dialog"), "settings", title)
+        .fields()
+        .cards(2.0)
+        .actions("", "Close", None)
+        .show(ui.ctx(), true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Search");
                 ui.add(egui::TextEdit::singleline(&mut st.search).desired_width(180.0));
                 if ui.button("Refresh").clicked() {
                     do_refresh = true;
                 }
-                if ui.button("Sync linked").clicked() {
-                    do_sync = Some(None);
-                }
             });
             ui.separator();
             ui.horizontal_top(|ui| {
-                // ── Left: sources ───────────────────────────────────────────
                 ui.vertical(|ui| {
-                    ui.set_min_width(120.0);
-                    ui.set_max_width(140.0);
+                    ui.set_min_width(140.0);
                     ui.label(RichText::new("Sources").strong());
                     if ui.selectable_label(st.sidebar == SidebarSel::Document, "Document").clicked() {
                         st.sidebar = SidebarSel::Document;
                         st.selected = None;
                     }
-                    if ui.selectable_label(st.sidebar == SidebarSel::Local, "Local").clicked() {
-                        st.sidebar = SidebarSel::Local;
-                        st.selected = None;
-                    }
                     ui.label(RichText::new("Linked").small().strong());
-                    if ui.selectable_label(st.sidebar == SidebarSel::LinkedAll, "All remotes").clicked() {
-                        st.sidebar = SidebarSel::LinkedAll;
-                        st.selected = None;
-                    }
                     for (i, r) in st.remotes.iter().enumerate() {
                         let label = if r.enabled { r.name.clone() } else { format!("{} (off)", r.name) };
                         if ui.selectable_label(st.sidebar == SidebarSel::Remote(i), label).clicked() {
@@ -160,21 +235,24 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if ui.button("Link repository").clicked() {
                         do_add = true;
                     }
-                    ui.label(RichText::new("Central catalog holds machine-specific posts, machines, and templates.").small().weak());
+                    if let SidebarSel::Remote(i) = st.sidebar {
+                        if let Some(r) = st.remotes.get(i) {
+                            if ui.button("Unlink").clicked() {
+                                do_remove = Some(r.id.clone());
+                            }
+                        }
+                    }
+                    ui.label(RichText::new("Linked git sync lands in a follow-up PR. Remotes are stored on the document.").small().weak());
                 });
                 ui.separator();
-                // ── Center: list ────────────────────────────────────────────
                 ui.vertical(|ui| {
                     ui.set_min_width(280.0);
-                    ui.set_max_width(360.0);
-                    let filtered: Vec<(usize, &CatalogEntry)> = st
+                    let filtered: Vec<(usize, &CatalogRow)> = st
                         .entries
                         .iter()
                         .enumerate()
                         .filter(|(_, e)| match st.sidebar {
                             SidebarSel::Document => e.location == LibraryLocation::Document,
-                            SidebarSel::Local => e.location == LibraryLocation::Local,
-                            SidebarSel::LinkedAll => e.location == LibraryLocation::Linked,
                             SidebarSel::Remote(i) => e.location == LibraryLocation::Linked && st.remotes.get(i).is_some_and(|r| r.id == e.source_id),
                         })
                         .filter(|(_, e)| {
@@ -197,7 +275,8 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
                     egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
                         for (idx, e) in filtered {
                             let sel = st.selected == Some(idx);
-                            let row = format!("{}  ·  {}  ·  {}", e.name, if e.vendor.is_empty() { "—" } else { &e.vendor }, e.location.label());
+                            let vendor = if e.vendor.is_empty() { "-" } else { e.vendor.as_str() };
+                            let row = format!("{}  ·  {}  ·  {}", e.name, vendor, e.location.label());
                             if ui.selectable_label(sel, row).clicked() {
                                 st.selected = Some(idx);
                             }
@@ -206,31 +285,10 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     });
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        if ui.button("Install into document").clicked()
-                            && let Some(i) = st.selected
-                            && let Some(e) = st.entries.get(i)
-                        {
-                            do_install = Some(e.id.clone());
-                        }
-                        if let SidebarSel::Remote(i) = st.sidebar
-                            && let Some(r) = st.remotes.get(i)
-                        {
-                            if ui.button("Sync this remote").clicked() {
-                                do_sync = Some(Some(r.id.clone()));
-                            }
-                            if ui.button("Unlink").clicked() {
-                                do_remove = Some(r.id.clone());
-                            }
-                        }
-                    });
                 });
                 ui.separator();
-                // ── Right: filters / info ───────────────────────────────────
                 ui.vertical(|ui| {
-                    ui.set_min_width(120.0);
-                    ui.set_max_width(140.0);
+                    ui.set_min_width(140.0);
                     ui.label(RichText::new("Filters").strong());
                     ui.label("Capability");
                     for cap in ["", "milling", "turning", "additive", "fabrication", "inspection", "holes"] {
@@ -248,6 +306,7 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 ui.label(format!("Vendor: {}", e.vendor));
                             }
                             ui.label(format!("Location: {}", e.location.label()));
+                            ui.small(&e.id);
                             if !e.source_id.is_empty() {
                                 ui.label(format!("Remote: {}", e.source_id));
                             }
@@ -262,70 +321,47 @@ pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else {
                         ui.label(RichText::new("Select an entry").weak());
                     }
-                    ui.separator();
-                    ui.label(RichText::new(format!("Default remote:\n{DEFAULT_CAM_LIBRARY_REMOTE}")).small().weak());
                 });
             });
             if !st.status.is_empty() {
                 ui.colored_label(egui::Color32::from_rgb(200, 80, 80), &st.status);
             }
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Close").clicked() {
-                        close = true;
-                    }
-                });
-            });
         });
-
-    if !open || close {
+    if closed || action == crate::ui_kit::Action::Cancel || action == crate::ui_kit::Action::Ok {
         app.manufacture_workspace.library_dialog = None;
         return;
     }
     if do_refresh {
         refresh(app, &mut st);
+        st.status.clear();
     }
     if do_add {
-        let mut params = json!({"url": st.remote_url.trim()});
-        if !st.remote_name.trim().is_empty() {
-            params["name"] = json!(st.remote_name.trim());
-        }
-        match app.run("manufacture.library.add_remote", params) {
-            Ok(_) => {
-                st.status = "Remote linked".into();
-                refresh(app, &mut st);
+        let url = st.remote_url.trim().to_string();
+        let name = st.remote_name.trim().to_string();
+        if url.is_empty() {
+            st.status = app.tr("manufacture.library.need_url").to_string();
+        } else {
+            let mut remote = LibraryRemote::default();
+            remote.id = remote_id(&name, &st.remotes);
+            remote.name = if name.is_empty() { remote.id.clone() } else { name };
+            remote.url = url;
+            match serde_json::to_value(&remote) {
+                Ok(v) => match app.run("manufacture.library_remotes.set", json!({"add": v})) {
+                    Ok(_) => {
+                        st.status = app.tr("manufacture.library.remote_linked").to_string();
+                        refresh(app, &mut st);
+                    }
+                    Err(e) => st.status = e,
+                },
+                Err(e) => st.status = e.to_string(),
             }
-            Err(e) => st.status = e,
-        }
-    }
-    if let Some(id_opt) = do_sync {
-        let params = match id_opt {
-            Some(id) => json!({"id": id}),
-            None => json!({}),
-        };
-        match app.run("manufacture.library.sync", params) {
-            Ok(v) => {
-                st.status = format!("Sync: {v}");
-                refresh(app, &mut st);
-            }
-            Err(e) => st.status = e,
         }
     }
     if let Some(id) = do_remove {
-        match app.run("manufacture.library.remove_remote", json!({"id": id})) {
+        match app.run("manufacture.library_remotes.set", json!({"remove": id})) {
             Ok(_) => {
-                st.sidebar = SidebarSel::LinkedAll;
-                refresh(app, &mut st);
-            }
-            Err(e) => st.status = e,
-        }
-    }
-    if let Some(entry_id) = do_install {
-        match app.run("manufacture.library.install", json!({"entry_id": entry_id})) {
-            Ok(_) => {
-                st.status = "Installed into document".into();
-                app.manufacture_workspace.revision = u64::MAX;
+                st.sidebar = SidebarSel::Document;
+                st.status = app.tr("manufacture.library.remote_unlinked").to_string();
                 refresh(app, &mut st);
             }
             Err(e) => st.status = e,

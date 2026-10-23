@@ -326,6 +326,7 @@ pub fn open(app: &mut SolveApp, setup_name: &str, op_index: usize) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
     app.manufacture_workspace.twod_dialog = Some(TwodDialogState { setup_name: setup_name.to_string(), op_index, draft, tab: TwodTab::Tool });
     app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::TwoD;
 }

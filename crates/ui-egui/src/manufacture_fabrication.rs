@@ -118,6 +118,7 @@ fn clear_other(app: &mut SolveApp) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
 }
 
 pub fn show_dialogs(app: &mut SolveApp, ui: &mut egui::Ui) {

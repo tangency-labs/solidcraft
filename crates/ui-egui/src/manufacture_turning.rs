@@ -54,6 +54,7 @@ pub fn open(app: &mut SolveApp, setup_name: &str, op_index: usize) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
     app.manufacture_workspace.turning_dialog =
         Some(TurningDialogState { setup_name: setup_name.to_string(), op_index, draft: op, tab: TurningTab::Tool });
     app.manufacture_workspace.tab = crate::manufacture_workspace::MfgTab::Turning;

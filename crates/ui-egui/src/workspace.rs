@@ -263,7 +263,17 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
     // The Manufacture workspace: New Setup opens the WCS/stock dialog on this PR.
     Section { tab: "MANUFACTURE", panel: "SETUP", promoted: 1, ids: &["manufacture.setup.new"] },
-    Section { tab: "MANUFACTURE", panel: "MANAGE", promoted: 1, ids: &["manufacture.tools.library"] },
+    Section {
+        tab: "MANUFACTURE",
+        panel: "MANAGE",
+        promoted: 4,
+        ids: &[
+            "manufacture.tools.library",
+            "manufacture.manage.machine_library",
+            "manufacture.manage.post_library",
+            "manufacture.manage.template_library",
+        ],
+    },
     Section {
         tab: "MANUFACTURE",
         panel: "2D",
@@ -441,6 +451,9 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("manufacture.inspection.record", "Record"),
     ("manufacture.inspection.surface", "Surface"),
     ("manufacture.inspection.wcs", "Probe WCS"),
+    ("manufacture.manage.machine_library", "Machines"),
+    ("manufacture.manage.post_library", "Posts"),
+    ("manufacture.manage.template_library", "Templates"),
     ("manufacture.modify.delete_passes", "Del Passes"),
     ("manufacture.modify.leads_links", "Leads/Links"),
     ("manufacture.modify.move_entry", "Move Entry"),

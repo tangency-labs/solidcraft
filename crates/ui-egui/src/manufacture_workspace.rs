@@ -25,6 +25,7 @@ pub enum MfgTab {
     Additive,
     Modify,
     Post,
+    Libraries,
 }
 
 /// Manufacture process family for a new setup.
@@ -73,6 +74,7 @@ pub struct State {
     pub machining_time_dialog: Option<crate::manufacture_post::MachiningTimeState>,
     pub setup_sheet_dialog: Option<crate::manufacture_post::SetupSheetState>,
     pub toolpath_segments: Vec<PathSegment>,
+    pub library_dialog: Option<crate::manufacture_libraries::LibraryDialogState>,
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -131,6 +133,7 @@ pub fn close_floating_dialogs(app: &mut SolveApp) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
     app.ui.pick_bodies = false;
 }
 
@@ -168,6 +171,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
             crate::manufacture_tools::open_tool_library(app);
             false
         }
+        id if id.starts_with("manufacture.manage.") => crate::manufacture_libraries::open_from_command(app, id),
         "manufacture.tools.new" => {
             crate::manufacture_tools::open_edit_tool(app, None);
             false
@@ -234,6 +238,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::manufacture_additive::show_dialogs(app, ui);
     crate::manufacture_modify::show_dialogs(app, ui);
     crate::manufacture_post::show_dialogs(app, ui);
+    crate::manufacture_libraries::show_dialogs(app, ui);
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {

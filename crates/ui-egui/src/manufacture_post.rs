@@ -151,6 +151,7 @@ fn clear_other(app: &mut SolveApp) {
     app.manufacture_workspace.post_dialog = None;
     app.manufacture_workspace.machining_time_dialog = None;
     app.manufacture_workspace.setup_sheet_dialog = None;
+    app.manufacture_workspace.library_dialog = None;
 }
 
 fn compute_cycle_time(app: &SolveApp, st: &MachiningTimeState) -> f64 {
