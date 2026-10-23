@@ -249,6 +249,7 @@ fn seam_handle(app: &mut SolveApp, ui: &mut egui::Ui, card: Rect) {
 
 /// Width alone chooses icons, names, horizontal transport and the optional title.
 pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::dialogs::versions_ui::soften_while_viewing(app, ui);
     let t = Tokens::get();
     let names = names_fit(ui.available_width());
     timeline_transport(app, ui, names);

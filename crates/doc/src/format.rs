@@ -680,6 +680,7 @@ pub fn read(s: &str) -> Result<Document> {
     d.next_id = d.next_item_id()?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
+    d.versions.validate()?;
     Ok(d)
 }
 

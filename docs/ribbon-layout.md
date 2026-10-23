@@ -37,6 +37,7 @@ Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW,
 | MANAGE | CONFIGURATIONS | **`config.table`**, **`config.configure`**, `config.rules`, `config.preview` |
 | MANAGE | MATERIALS | **`material.assign`**, **`appearance.assign`**, `material.properties.validate`, `library.inspect`, `library.export`, `library.apply` |
 | MANAGE | RULES | **`sheet.manage_rules`**, **`plastic.manage_rules`**, **`plastic.assign_rule`** |
+| MANAGE | VERSIONS | **`version.graph`** |
 | MANAGE | DESIGN | **`document.units`**, **`timeline.compute_all`**, `edit.checkpoint`, `edit.restore_checkpoint` |
 | VIEW | VIEWS | **`view.apply`**, **`view.save`**, `view.rename`, `view.delete`, `view.list`, `view.navigate` |
 | VIEW | SELECT | Selection-filter controls (existing UI, no command ids) |

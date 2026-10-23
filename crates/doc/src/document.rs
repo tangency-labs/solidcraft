@@ -2447,6 +2447,11 @@ pub struct DesignLink {
     pub path: String,
     /// The Import feature holding the linked design's bodies.
     pub feature: u64,
+    /// The version of the linked file this design was taken from (`v3`, or `ws:main` when that
+    /// file has no versions). Set on a version snapshot; the open design leaves it empty until
+    /// a version is restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// The document.
@@ -2501,6 +2506,10 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Named versions and branches. Absent on a design that has never been versioned: it opens
+    /// as the Main workspace.
+    #[serde(default, skip_serializing_if = "crate::versions::Versions::is_empty")]
+    pub versions: crate::versions::Versions,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -2735,6 +2744,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            versions: Default::default(),
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),

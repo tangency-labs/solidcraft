@@ -87,6 +87,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod versions;
 mod view_dxf;
 mod view_navigation;
 
@@ -210,7 +211,11 @@ impl CommandSpec {
         (self.run)(s, p)
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        let e = if s.version_view.is_some() && self.undoable {
+            Err("a version is on screen: go back to the workspace to edit".into())
+        } else {
+            (self.enabled)(s)
+        };
         CommandInfo {
             id: self.id,
             label: self.label,
@@ -288,6 +293,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(versions::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());

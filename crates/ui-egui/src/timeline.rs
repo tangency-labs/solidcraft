@@ -370,6 +370,7 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
 }
 
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
+    crate::dialogs::versions_ui::soften_while_viewing(app, ui);
     let t = Tokens::get();
     let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
     let r = ui.max_rect();
