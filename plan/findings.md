@@ -17738,6 +17738,73 @@ outside this change.
   boolean.merge_p2)` although the unit is ported (34 taper cases); `SweepStore` has the
   merge services.
 
+## blend.fillet_corner_p2: RecordFilletError call sites (2026-10-23)
+
+`SmFilletCorner::RecordFilletError` is ported (`FilletCorner::record_fillet_error`,
+PR #641): it takes the executive (`FilletExecutive::note_fillet_corner_error`) and the
+caller's identities of the filleted vertex, fillet surfaces and fillet vertices. Its two
+callers, `SmFilletEdge::CalcFilletIntFillet` (`blend/fillet_geom/p3.rs`) and the
+fillet-vertex calculator in `blend/fillet_geom/p5.rs`, hold the corner only as a
+`FilletCornerId` (`GetFilletCorner()`), with no store that resolves it to the corner record
+or to the executive; the other corner calls there (`GetCornerType`, `GetFilletedVertex`,
+... of `blend.fillet_corner_p1`) wait for the same store. Both stubs stay
+`UNPORTED(blend.fillet_corner_p2)` with this justification; wire them together with the
+corner_p1 ones when fillet geometry code reaches the corners. No disagreement.
+
+## blend.fillet_corner_p2: what the corner harness covers of the ported corner methods (PR #641)
+
+- **Compared with values:** `SmFilletNx2Corner::AdjustConcaveCornerTopology` and
+  `SmFilletNx2Corner::AdjustTopology` to the end (the new fillet vertices and edges, the
+  deleted corner edge, mates, the extended side surface's registration is not exported);
+  `MakeAnalyticCornerSurface` on sphere octants (the B-spline sphere of
+  `CreateSphereFromArcs`), chamfer corners (an `SmPlane` or a bilinear patch, and a
+  rail-rail arc recomputed as the corner plane's intersection with its original face),
+  four-sided rail-rail corners (the B-spline surface of revolution) and its early
+  `FALSE` / `TRUE` exits (WR-254), 120 built-in cases (half with real `SmLine` / `SmCircle`
+  edges): 97 pass with values, 23 defer on
+  `MakeConstantRadiusFillet` (unit `blend.fillet_corner_p1`, not ported).
+- **Not compared (refused or not reached):** the corner harness's pseudo-B-rep fillet
+  geometries have no fillet solver (`blend.fillet_geom_p1`'s model), and a solver is
+  dereferenced by `SmFilletConvexNxNCorner::AdjustTopology` past its first cross section
+  (`FindIndexOfRailOnFace`, `GetEdgeuse(0)`), by both tangent-corner splits
+  (`SplitFilletGeomAtSideEdge`, then `ReCalcFilletGeom`) and by
+  `MakeVariableRadiusFillet` past its first cross section (surface generator, centre
+  line, the temporary `SmVariableRadiusFS`). Those cases are refused (`-2`). Their
+  early exits run and match (the `NxN` loop's vertex-type `SER`, vertices off a face,
+  geometries missing on both edge uses; the closed Nx1 test's evaluations, corner points
+  and `LineClosestPoint`; the variable-radius fillet's count, type and `NER` returns).
+  Covering the rest needs corners with real fillet solvers (a fillet executive run), so it
+  waits for `blend.fillet_executive_p1`'s production adapter. The Nx2 tangent corner's code
+  after `CalcCornerVertGeom` is ported for the same reason without a comparison; in Rust
+  `CalcCornerVertGeom` itself still returns `Unported` (its
+  `SmFilletVertex::CalcCornerVertGeom` stub, unit `blend.fillet_geom_p3`, in
+  `blend/fillet_corner/p1.rs`).
+- **Harness changes:** the corner shim appends the fillet vertices an op makes to the
+  model's export in creation order (the Rust model lists every live vertex), exports the
+  corner under test (`this`, stored by new vertices and edges) as corner id 1000000 on both
+  sides, and appends the corner's surfaces to the record. To tell a default corner patch
+  that reaches `MakeFaceBrep` (deferred) from one that returns a status before it, the
+  pre-check runs `MakeAnalyticCornerSurface`'s fits (`sm_CreatePlanarSurface` and
+  `sm_CreateSrfOfRevolution` through C++ wrappers in `blend_fillet_corner_p2_static.inc`,
+  the translation unit that compiles `SmFilletCorner.cpp`; `CreateSphereFromArcs`; the
+  chamfer edges' `sm_SrfSrfIntersection`) and the Coons patch's `CreateCornerBlend` on the
+  same inputs, and deletes their results.
+
+## blend.fillet_corner_p1: sm_CreateSrfOfRevolution lost an SmLine generator (fixed in PR #641)
+
+- **What.** `create_srf_of_revolution` (`blend/fillet_corner/p1.rs`) passed only the
+  generating curve's B-spline part to `BSplineSurface::create_surf_of_revolution`.
+  Upstream's `SmBSplineSurface::CreateSurfOfRevolution` checks `pGenCurve->GetType() ==
+  SmLine_TYPE` and, for a line parallel to the axis (a cylinder), reparametrises the sweep
+  circle with arc length. With an `SmLine` generator the Rust surface's circular knots were
+  `[0, 0.5, 1]` where upstream's are `[0, L/2, L]` (`L` the arc length).
+- **How found.** `blend.fillet_corner_p2`'s new `analytic` cases with real `SmLine` /
+  `SmCircle` edges (four-sided rail-rail corners): 9 cases differed only in the corner
+  surface's knots; the same inputs through a no-op corner operation matched.
+- **Fix.** The line's `line_vector()` is passed as `gen_line_vector`
+  (`create_surf_of_revolution_with_line_vector`), as `rotational_sweep_geometry` and
+  `SurfOfRevolution` already do. `blend.fillet_corner_p1`'s difftest is unchanged (its
+  cases never revolve an `SmLine`).
 
 ## 2026-10-23: Newly reached spine closure exports (#613)
 

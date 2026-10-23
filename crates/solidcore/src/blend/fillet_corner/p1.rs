@@ -488,11 +488,25 @@ pub fn create_srf_of_revolution(
     let gen_index = (major + total - 1)
         .checked_rem(total)
         .ok_or_else(out_of_range)?;
-    let gen_curve = bspline_part(curves.get(gen_index).ok_or_else(out_of_range)?)?;
+    let gen = curves.get(gen_index).ok_or_else(out_of_range)?;
+    let gen_curve = bspline_part(gen)?;
+    // (an SmLine generator: CreateSurfOfRevolution reads its line vector, and gives a
+    // generator parallel to the axis an arc length sweep parameterisation)
+    let gen_line_vector = match gen.kind() {
+        CurveKind::Line(l) => Some(l.line_vector()),
+        _ => None,
+    };
 
     // Sweep GenCurve about MajorArcCurve AxisOfRevolution to make the fillet surface
-    let surface = Surface::from(BSplineSurface::create_surf_of_revolution(
-        k, gen_curve, origin, ref_z_axis, angle_span, false, None,
+    let surface = Surface::from(BSplineSurface::create_surf_of_revolution_with_line_vector(
+        k,
+        gen_curve,
+        gen_line_vector,
+        origin,
+        ref_z_axis,
+        angle_span,
+        false,
+        None,
     )?);
 
     // let OtherCurve = Curve opposite to GenCurve

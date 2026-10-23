@@ -477,14 +477,12 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
 
     /// Virtual `AdjustTopology` dispatch. The base, 4x3 and `NxN` implementations
     /// belong to `blend.fillet_corner_p1`, and `ConvexNxN` to `blend.fillet_corner_p2`.
-    /// Nx2 (and `ConvexNxN`) go to the already ported
-    /// `blend::fillet_corner::p3::FilletCorner::adjust_topology` (fillet corner p3),
-    /// which runs `SmFilletNx2Corner::AdjustTopology` and returns
-    /// `blend.fillet_corner_p2`'s `Unported` for `ConvexNxN`. Adapters must dispatch
-    /// by concrete corner type and return that owner's `Unported` while it is
-    /// missing, never substitute the base success default.
+    /// Nx2 and `ConvexNxN` (also `ConcaveNxN`) go to the ported
+    /// `blend::fillet_corner::p3::FilletCorner::adjust_topology`, which runs
+    /// `SmFilletNx2Corner::AdjustTopology` and `SmFilletConvexNxNCorner::AdjustTopology`.
+    /// Adapters must dispatch by concrete corner type and return that owner's
+    /// `Unported` while it is missing, never substitute the base success default.
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::AdjustTopology / SmFillet4x3Corner::AdjustTopology / SmFilletNxNCorner::AdjustTopology
-    // UNPORTED(blend.fillet_corner_p2): SmFilletConvexNxNCorner::AdjustTopology
     fn adjust_topology(
         &mut self,
         k: &mut Kernel,
@@ -493,15 +491,14 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     ) -> Result<()>;
 
     /// Virtual `AdjustTangentCorner` dispatch. The base belongs to
-    /// `blend.fillet_corner_p1`, and `Nx1Closed` to `blend.fillet_corner_p2`. Nx2 (and
-    /// `Nx1Closed`) go to the already ported
-    /// `blend::fillet_corner::p3::FilletCorner::adjust_tangent_corner` (fillet corner
-    /// p3), which runs `SmFilletNx2Corner::AdjustTangentCorner` and returns
-    /// `blend.fillet_corner_p2`'s `Unported` for `Nx1Closed`. Adapters must dispatch by
+    /// `blend.fillet_corner_p1`, and `Nx1Closed` to `blend.fillet_corner_p2`. Nx2 and
+    /// `Nx1Closed` go to the ported
+    /// `blend::fillet_corner::p3::FilletCorner::adjust_tangent_corner`, which runs
+    /// `SmFilletNx2Corner::AdjustTangentCorner` and
+    /// `SmFilletNx1ClosedCorner::AdjustTangentCorner`. Adapters must dispatch by
     /// concrete corner type and return that owner's `Unported` while it is missing,
     /// never substitute the base success default.
     // UNPORTED(blend.fillet_corner_p1): SmFilletCorner::AdjustTangentCorner
-    // UNPORTED(blend.fillet_corner_p2): SmFilletNx1ClosedCorner::AdjustTangentCorner
     fn adjust_tangent_corner(
         &mut self,
         k: &mut Kernel,

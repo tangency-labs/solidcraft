@@ -1404,7 +1404,7 @@ fn add_fillet_vertex(corner: FilletCornerId, v: VertexId) -> Result<()> {
 /// `pCorner->RecordFilletError(SM_FILERR_BAD_INT, pFilletSurface1, pFilletSurface2,
 /// pStartFV, pEndFV, ..)` (unit `blend.fillet_corner_p2`).
 fn record_fillet_error(corner: FilletCornerId, start_fv: VertexId, end_fv: VertexId) -> Result<()> {
-    // UNPORTED(blend.fillet_corner_p2): SmFilletCorner::RecordFilletError
+    // UNPORTED(blend.fillet_corner_p2): SmFilletCorner::RecordFilletError (justified: findings.md "blend.fillet_corner_p2: RecordFilletError call sites")
     unported_on(
         (corner, start_fv, end_fv),
         "SmFilletCorner::RecordFilletError",

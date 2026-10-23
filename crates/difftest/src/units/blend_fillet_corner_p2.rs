@@ -10,17 +10,32 @@
 //! (`gen_nx2_model` there) with a corner whose method is
 //! - `adjust_concave`: the virtual `AdjustTopology` of an Nx2 corner, which with three
 //!   corner edges is `AdjustConcaveCornerTopology` (also other kinds and edge counts,
-//!   which take the other branches). The shim's pre-check refuses where upstream
-//!   dereferences null and does not run past the gap test (the first
-//!   `SmFilletEdge::MakeFilletEdge`, `blend.fillet_geom_p5`: deferred);
+//!   which take the other branches: the `NxN` kinds `SmFilletConvexNxNCorner::
+//!   AdjustTopology`). It runs to the end; the shim's pre-check refuses where upstream
+//!   dereferences null (a side face or surface missing for the extension, an edge use
+//!   without edge or mate in the mates loop). The vertices an op makes are appended to
+//!   the model's export in creation order on both sides;
+//! - `analytic`: `MakeAnalyticCornerSurface` (its `SmBoolean`, a `SER` / `NER` status
+//!   read as `1`), on corners built for it (`gen_analytic`): a sphere octant of exact
+//!   rational quarter arcs (one arc may be its chord), chamfers of lines (a plane or a
+//!   bilinear patch; a rail-rail arc on a target face is recomputed as the
+//!   intersection), four-sided rail-rail corners of two coaxial arcs and two lines (the
+//!   surface of revolution, or the variable-radius fillet's early returns), and edge
+//!   counts, a missing curve or a cubic interpolation that return before a fit. The
+//!   corner's surfaces are compared value by value. The shim's pre-check runs the fits
+//!   (copies, deleted) to refuse exactly the inputs where upstream would dereference a
+//!   missing fillet solver (the model's fillet geometries have none) or vertex, and
+//!   does not run the sphere fit's fallback `MakeConstantRadiusFillet` (unit
+//!   `blend.fillet_corner_p1`, deferred);
 //! - `update_split_face`: `UpdateSplitFace(orig, split)` on target faces, some fillet
 //!   vertices classified on (or with their other face) a target face and some fillet
 //!   edges with an original face. A fillet edge on `orig` reaches
 //!   `SmFilletEdge::ShouldSwapFaces` (`blend.fillet_geom_p6`); the shim refuses the
 //!   edges it would dereference `NULL` on (no curve, or a corner without a vertex).
 //!
-//! Compared: the status, the corner's members and the model's whole export. 80 built-in
-//! corner cases (a fixed seed) plus generated ones.
+//! Compared: the status, the corner's members, the model's whole export and the
+//! corner's surfaces. 80 built-in corner cases and 120 `analytic` ones (fixed seeds) plus
+//! generated ones.
 //!
 //! **Tangent-solver cases** (`p1_corner`): unit `blend.fillet_corner_p1`'s `solvers`
 //! corner cases (its runner, model and shim, `sc_blend_fillet_corner_p1_corner`) on
@@ -71,9 +86,10 @@ use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
 use super::blend_fillet_corner_p1 as p1;
 use super::blend_fillet_corner_p3::{
-    corner_cpp_op, corner_rust_with, gen_nx2_model, CornerIn, EuSel,
+    corner_cpp_op, corner_rust_status, edge_in, gen_nx2_model, line, plane_srf, vin, CornerIn,
+    EuSel,
 };
-use super::blend_fillet_geom_p1::Model;
+use super::blend_fillet_geom_p1::{Crv, Model};
 
 use super::blend_fillet_corner_p1::{
     eu_vertex, gen_topo_brep, inexact, rust_err, Topo, CORNER_FILES,
@@ -91,6 +107,10 @@ const MAX_WALK: usize = 64;
 
 /// Built-in corner cases (from [`CORNER_SEED`]).
 const CORNER_CASES: usize = 80;
+/// Built-in `MakeAnalyticCornerSurface` cases (from [`ANALYTIC_SEED`]).
+const ANALYTIC_CASES: usize = 120;
+/// The seed of the built-in `MakeAnalyticCornerSurface` cases.
+const ANALYTIC_SEED: u64 = 0x00a7_a1c5;
 
 /// The seed of the built-in corner cases.
 const CORNER_SEED: u64 = 0x00c0_47e2;
@@ -240,6 +260,8 @@ enum CornerMethod {
     AdjustConcave,
     /// `SmFilletCorner::UpdateSplitFace(orig, split)`.
     UpdateSplitFace,
+    /// `SmFilletCorner::MakeAnalyticCornerSurface`.
+    Analytic,
 }
 
 /// One case.
@@ -377,6 +399,7 @@ fn corner_cpp(
             model,
             c,
         ),
+        CornerMethod::Analytic => corner_cpp_op(CornerOp::AnalyticSurface, &[], model, c),
     }
 }
 
@@ -387,14 +410,18 @@ fn corner_rust(
     c: &CornerIn,
     split: [usize; 2],
 ) -> Result<Output, HarnessError> {
-    corner_rust_with(k, model, c, |c, env, faces| match method {
-        CornerMethod::AdjustConcave => c.adjust_topology(k, env),
+    corner_rust_status(k, model, c, |c, env, faces| match method {
+        CornerMethod::AdjustConcave => c.adjust_topology(k, env).map(|()| 0.0),
         CornerMethod::UpdateSplitFace => {
             let (Some(&orig), Some(&new)) = (faces.get(split[0]), faces.get(split[1])) else {
                 return Err(SolidError::invalid_input("difftest", "split face index"));
             };
             c.update_split_face(env, orig, new, std::slice::from_ref(c))
+                .map(|()| 0.0)
         }
+        CornerMethod::Analytic => c
+            .make_analytic_corner_surface(env)
+            .map(|made| if made { 1.0 } else { 0.0 }),
     })
 }
 
@@ -567,7 +594,8 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
         CornerMethod::UpdateSplitFace
     };
     let (kind, edges, mut orig_faces, split) = match method {
-        CornerMethod::AdjustConcave => {
+        // (gen_analytic makes the analytic cases)
+        CornerMethod::AdjustConcave | CornerMethod::Analytic => {
             let kind = if rng.chance(0.9) {
                 7
             } else {
@@ -634,6 +662,244 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// A rational quadratic arc (exact circle) from `a` to `b` about `c`, at most a half turn
+/// short of `PI`: its middle control point is where the end tangents meet, with weight
+/// `cos(angle / 2)` (stored weighted, as the shim's `Pw`).
+fn arc(c: [f64; 3], a: [f64; 3], b: [f64; 3]) -> Crv {
+    let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+    let (u, v) = (sub(a, c), sub(b, c));
+    let dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let len = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+    let cos_full = (dot / (len * len)).clamp(-1.0, 1.0);
+    let w = ((1.0 + cos_full) / 2.0).sqrt(); // cos(angle / 2)
+    // the tangents meet at c + (u + v) / (1 + cos(angle))
+    let f = 1.0 / (1.0 + cos_full);
+    let m = [
+        c[0] + (u[0] + v[0]) * f,
+        c[1] + (u[1] + v[1]) * f,
+        c[2] + (u[2] + v[2]) * f,
+    ];
+    Crv {
+        dim: 3,
+        cpts: vec![
+            [a[0], a[1], a[2], 1.0],
+            [m[0] * w, m[1] * w, m[2] * w, w],
+            [b[0], b[1], b[2], 1.0],
+        ],
+        p: 2,
+        u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    }
+}
+
+/// The fillet edges of the closed loop through `p` (edge `i` from `p[i]` to the next
+/// point), with the type and curve `make` gives for edge `i` from `a` to `b`.
+fn ring_edges(
+    p: &[[f64; 3]],
+    mut make: impl FnMut(usize, [f64; 3], [f64; 3]) -> (i64, Option<Crv>),
+) -> Vec<super::blend_fillet_geom_p1::EdgeIn> {
+    let n = p.len();
+    p.iter()
+        .zip(p.iter().cycle().skip(1))
+        .enumerate()
+        .map(|(i, (&a, &b))| {
+            let (etype, crv) = make(i, a, b);
+            edge_in(i, (i + 1) % n, etype, crv, [-1, -1])
+        })
+        .collect()
+}
+
+/// A corner for `MakeAnalyticCornerSurface`: fillet edges without fillet geometries (the
+/// model's have no solver) whose curves admit (or almost admit) the analytic fits.
+/// - a sphere octant: three exact quarter arcs, cross sections or fillet-fillet edges (the
+///   sphere through the arcs); one arc may be replaced by its chord (no sphere: the
+///   constant-radius fillet, deferred);
+/// - a chamfer: three or four straight edges (a plane / a bilinear patch through their
+///   start points), or a triangle with a rail-rail interpolating arc on a target face (the
+///   arc is recomputed as the plane's intersection with the face);
+/// - a four-sided rail-rail corner: two arcs about a common axis and two lines (the
+///   surface of revolution, else the variable-radius fillet, which returns before it needs
+///   a solver);
+/// - degenerate counts (two or five edges), an edge without curve (`SER`: `TRUE`) and a
+///   cubic rail-rail interpolation (`FALSE`).
+fn gen_analytic(rng: &mut Rng) -> Inputs {
+    let scale = *rng.choose(&[1.0, 1e-3, 1e3, 0.1]).unwrap_or(&1.0);
+    let r = scale * rng.uniform(0.2, 2.0);
+    let c = [
+        rng.uniform(-1.0, 1.0) * scale,
+        rng.uniform(-1.0, 1.0) * scale,
+        rng.uniform(-1.0, 1.0) * scale,
+    ];
+    let at = |d: [f64; 3]| [c[0] + d[0] * r, c[1] + d[1] * r, c[2] + d[2] * r];
+    let tol = match rng.below(3) {
+        0 => 1e-3 * scale,
+        1 => 1e-6 * scale,
+        _ => scale * 10f64.powf(rng.uniform(-9.0, -2.0)),
+    };
+    let targets = vec![
+        line([0.0, 0.0, 0.0], [0.0, 0.0, scale]),
+        line([0.0, 0.0, 0.0], [scale, 0.0, 0.0]),
+    ];
+    let mut chamfer = false;
+    let mut orig_faces = Vec::new();
+    let shape = rng.below(6);
+    let (points, edges, faces): (Vec<[f64; 3]>, Vec<_>, Vec<_>) = match shape {
+        // sphere octant
+        0 | 1 => {
+            let p = [at([1.0, 0.0, 0.0]), at([0.0, 1.0, 0.0]), at([0.0, 0.0, 1.0])];
+            let etype = |rng: &mut Rng| *rng.choose(&[1i64, 4, 5]).unwrap_or(&1);
+            let chord = if shape == 1 { rng.below(3) as usize } else { 3 };
+            let mut edges = ring_edges(&p, |i, a, b| {
+                let crv = if i == chord { line(a, b) } else { arc(c, a, b) };
+                (etype(rng), Some(crv))
+            });
+            if rng.chance(0.2) {
+                edges.reverse();
+            }
+            (p.to_vec(), edges, vec![plane_srf(c, [r, 0.0, 0.0], [0.0, r, 0.0])])
+        }
+        // chamfer: a triangle or a quadrilateral of lines
+        2 => {
+            chamfer = true;
+            let n: u32 = if rng.chance(0.5) { 3 } else { 4 };
+            let mut p: Vec<[f64; 3]> = (0..n)
+                .map(|i| {
+                    let a = std::f64::consts::TAU * f64::from(i) / f64::from(n);
+                    at([a.cos(), a.sin(), rng.uniform(-0.3, 0.3)])
+                })
+                .collect();
+            if rng.chance(0.2) {
+                p.reverse();
+            }
+            let edges = ring_edges(&p, |_, a, b| (1, Some(line(a, b))));
+            (p, edges, vec![plane_srf(c, [r, 0.0, 0.0], [0.0, r, 0.0])])
+        }
+        // chamfer: a triangle whose first edge is a rail-rail interpolating arc on target
+        // face 0 (the plane z = c.z); the others lines
+        3 => {
+            chamfer = true;
+            let [p0, p1, p2] = [at([1.0, 0.0, 0.0]), at([0.0, 1.0, 0.0]), at([0.3, 0.3, 1.0])];
+            let edges = vec![
+                edge_in(0, 1, 11, Some(arc(c, p0, p1)), [-1, -1]),
+                edge_in(1, 2, 1, Some(line(p1, p2)), [-1, -1]),
+                edge_in(2, 0, 1, Some(line(p2, p0)), [-1, -1]),
+            ];
+            let p = vec![p0, p1, p2];
+            if rng.chance(0.85) {
+                orig_faces.push([0, 0]);
+            }
+            (p, edges, vec![plane_srf(c, [2.0 * r, 0.0, 0.0], [0.0, 2.0 * r, 0.0])])
+        }
+        // four-sided: arcs about the z axis through c at two heights, and two lines; the
+        // first arc is the rail-rail interpolation
+        4 => {
+            let h = r * rng.uniform(0.2, 2.0);
+            let r2 = if rng.chance(0.5) { 1.0 } else { rng.uniform(0.5, 1.5) };
+            let [c0, c1, c2] = c;
+            let [p0, p1, p2, p3] = [
+                at([1.0, 0.0, 0.0]),
+                at([0.0, 1.0, 0.0]),
+                [c0, c1 + r * r2, c2 + h],
+                [c0 + r * r2, c1, c2 + h],
+            ];
+            let top = [c0, c1, c2 + h];
+            let cross = *rng.choose(&[1i64, 1, 4]).unwrap_or(&1);
+            let edges = vec![
+                edge_in(0, 1, 11, Some(arc(c, p0, p1)), [-1, -1]),
+                edge_in(1, 2, cross, Some(line(p1, p2)), [-1, -1]),
+                edge_in(2, 3, 1, Some(arc(top, p2, p3)), [-1, -1]),
+                edge_in(3, 0, cross, Some(line(p3, p0)), [-1, -1]),
+            ];
+            let p = vec![p0, p1, p2, p3];
+            (p, edges, vec![plane_srf(c, [r, 0.0, 0.0], [0.0, r, 0.0])])
+        }
+        // degenerate: two or five edges, a missing curve, a cubic rail-rail interpolation
+        _ => {
+            let n = *rng.choose(&[2usize, 3, 5]).unwrap_or(&3);
+            let p: Vec<[f64; 3]> = (0..n)
+                .map(|i| {
+                    let a = std::f64::consts::TAU * (i as f64) / (n as f64);
+                    at([a.cos(), a.sin(), 0.0])
+                })
+                .collect();
+            let mut edges = ring_edges(&p, |_, a, b| (1, Some(line(a, b))));
+            if let Some(e) = edges.first_mut() {
+                match rng.below(3) {
+                    0 => e.curve = None,
+                    1 => {
+                        e.etype = 11;
+                        e.status = 6; // SM_FE_CUBIC_RAIL_RAIL_INTERPOLATE
+                    }
+                    _ => {}
+                }
+            }
+            (p, edges, vec![plane_srf(c, [r, 0.0, 0.0], [0.0, r, 0.0])])
+        }
+    };
+    let n_edges = edges.len();
+    // real SmLine / SmCircle curves where the edges are straight / arcs in the XY plane
+    // about c (the analytic code dispatches IsLine, IsArc on them): the circle is the
+    // quarter from the x to the y direction
+    let real = rng.chance(0.5);
+    let line_edges: Vec<usize> = if real {
+        edges
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.curve.as_ref().is_some_and(|c| c.p == 1))
+            .map(|(i, _)| i)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let arc_from_x = |e: &super::blend_fillet_geom_p1::EdgeIn| {
+        e.curve.as_ref().is_some_and(|c| c.p == 2) && e.vs == 0 && e.ve == 1 && (shape <= 1 || shape == 4)
+    };
+    let arc_edges: Vec<[f64; 7]> = if real {
+        edges
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| arc_from_x(e))
+            .map(|(i, _)| [i as f64, c[0], c[1], c[2], r, 0.0, 90.0])
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let model = Model {
+        targets,
+        faces,
+        fillet_brep: Vec::new(),
+        vertices: points.iter().map(|&p| vin(p, 8)).collect(),
+        geoms: Vec::new(),
+        edges,
+    };
+    Inputs::Corner {
+        method: CornerMethod::Analytic,
+        model: Box::new(model),
+        corner: CornerIn {
+            kind: rng.below(11) as usize,
+            v_edge: -1,
+            v_sub: 0,
+            solver: None,
+            all: None,
+            verts: (0..points.len()).collect(),
+            edges: (0..n_edges).collect(),
+            bevel: false,
+            blending: false,
+            chamfer,
+            degenerate: false,
+            ext: rng.chance(0.5),
+            adjusted: false,
+            setback: 0.0,
+            tol,
+            tan: rng.uniform(1e-4, 0.2),
+            tsects: Vec::new(),
+            orig_faces,
+            line_edges,
+            arc_edges,
+        },
+        split: [0, 0],
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "blend.fillet_corner_p2"
@@ -648,10 +914,10 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let i = if rng.chance(0.5) {
-            gen_find_concave(rng)
-        } else {
-            gen_corner(rng)
+        let i = match rng.below(3) {
+            0 => gen_find_concave(rng),
+            1 => gen_corner(rng),
+            _ => gen_analytic(rng),
         };
         serde_json::to_value(i).ok()
     }
@@ -716,6 +982,7 @@ impl UnitDiff for Runner {
             let name = match method {
                 CornerMethod::AdjustConcave => format!("corner_adjust_concave_{n:02}"),
                 CornerMethod::UpdateSplitFace => format!("corner_update_split_face_{n:02}"),
+                CornerMethod::Analytic => format!("corner_analytic_{n:02}"),
             };
             push(
                 &mut v,
@@ -723,6 +990,12 @@ impl UnitDiff for Runner {
                 "SmFilletCorner.cpp (Nx2-shaped corner model)",
                 i,
             )?;
+        }
+        let mut rng = Rng::new(ANALYTIC_SEED);
+        for n in 0..ANALYTIC_CASES {
+            let name = format!("corner_analytic_{n:02}");
+            let src = "SmFilletCorner.cpp:3379 (MakeAnalyticCornerSurface on arc/line corners)";
+            push(&mut v, name, src, gen_analytic(&mut rng))?;
         }
         let (drawn, base) = tangent_cases();
         for (n, inner) in drawn.into_iter().enumerate() {

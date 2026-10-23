@@ -12,6 +12,21 @@
 // (refused: a pair the loop reaches has an edge use without radial, vertex use or edge,
 // which sm_CheckFaceComplimentaryCornerConcavity dereferences) or `count eu*count`.
 
+// The file-static surface fits of SmFilletCorner.cpp for blend_fillet_corner_p3_static.inc's
+// pre-checks (another translation unit): sm_CreatePlanarSurface, sm_CreateSrfOfRevolution
+// (debug level 0).
+SmStatus sc_p2_create_planar_surface(const SmContext& ctx, const SmTArray<SmPoint3d>& pts, double tol,
+                                     SmSurface*& out)
+{
+    return sm_CreatePlanarSurface(ctx, pts, tol, out);
+}
+
+SmStatus sc_p2_create_srf_of_revolution(const SmContext& ctx, const SmTArray<SmBSplineCurve*>& curves,
+                                        ULONG major, double tol, SmSurface*& out)
+{
+    return sm_CreateSrfOfRevolution(ctx, curves, major, tol, out, 0);
+}
+
 namespace
 {
 void run_find_concave(Rd& rd, const char* path, std::vector<double>& o)

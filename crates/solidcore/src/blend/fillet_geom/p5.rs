@@ -414,7 +414,7 @@ fn corner_record_fillet_error(
     fv1: VertexId,
     fv2: VertexId,
 ) -> Result<()> {
-    // UNPORTED(blend.fillet_corner_p2): SmFilletCorner::RecordFilletError
+    // UNPORTED(blend.fillet_corner_p2): SmFilletCorner::RecordFilletError (justified: findings.md "blend.fillet_corner_p2: RecordFilletError call sites")
     unported_on(
         (corner, surface1, surface2, fv1, fv2),
         "SmFilletCorner::RecordFilletError",

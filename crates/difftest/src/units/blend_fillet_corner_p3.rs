@@ -19,18 +19,24 @@
 //!   sides), a corner of a given derived class on it (fillet vertices, fillet edges, edge
 //!   uses of the model's target wire edges, flags, tolerances, intersection points of
 //!   vertex uses with their user surfaces) and one operation. Compared: the status, the
-//!   corner's members and the model's whole export.
+//!   corner's members, the model's whole export (the vertices an operation makes are
+//!   appended in creation order; the corner itself, `this`, is corner id
+//!   `THIS_CORNER`) and the corner's surfaces (`put_corner_surfaces`).
 //!
 //! Deferred on the Rust side (unported callees, `Output::deferred`; `Create` itself runs:
 //! `sm_TestG1Continuity` and `CheckNx1Degeneracy` are `blend.fillet_corner_p1`'s,
 //! `sm_FindConcaveEdgeuses` `blend.fillet_corner_p2`'s, the geometry they evaluate
-//! pre-deferred like the convexity test's): the patch builders past their state checks (`MakeAnalyticCornerSurface`, `MakeFaceBrep` behind
-//! `CreateEndPatch`, `SmSurface::DropCurve`); the Nx2 adjustments where they change the
-//! topology (`MakeFilletEdge`, `GetRailIndexOfVertexuse`), the big-radius test of
-//! blending corners and the `NxN` / closed Nx1 overrides. The shim does not call upstream
-//! on those paths (`-3`; a Rust side that is not deferred there fails the case) and
-//! refuses (`-2`, a rejected case) the inputs that make upstream dereference null or free
-//! the harness's objects. A `create` case whose sector convexity test runs on geometry
+//! pre-deferred like the convexity test's): the patch builders where they reach
+//! `MakeFaceBrep` (unit `blend.fillet_corner_p1`; also behind `CreateEndPatch`) or the
+//! sphere fit's fallback `MakeConstantRadiusFillet`, and the big-radius test of blending
+//! corners. The shim does not call upstream on those paths (`-3`; a Rust side that is
+//! not deferred there fails the case) and refuses (`-2`, a rejected case) the inputs that
+//! make upstream dereference null or free the harness's objects. To tell a default patch
+//! that reaches `MakeFaceBrep` from one that returns a status before it, the shim runs
+//! `MakeAnalyticCornerSurface`'s fits and the Coons patch's `CreateCornerBlend` on
+//! copies first. The model's fillet geometries have no solver, so the paths that ask a
+//! geometry for its solver (the `NxN` candidate search past its first cross section,
+//! the closed Nx1 and Nx2 tangent splits) are refused. A `create` case whose sector convexity test runs on geometry
 //! the import holds only approximately (analytic surfaces and curves) is deferred like
 //! `topology.edgeuse_p2`'s (`inexact_geometry`).
 
@@ -42,12 +48,12 @@ use serde_json::Value;
 use solidcore::blend::fillet_corner::p3::{
     CornerEnv, FilletCorner, FilletCornerKind, FilletExecutiveData,
 };
-use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletSolverId};
+use solidcore::blend::fillet_geom::p1::{FilletCornerId, FilletCornerType, FilletSolverId};
 use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGenerator};
 use solidcore::intersect::surface_intersector::p1::SrfIndex;
 use solidcore::kernel::Kernel;
 use solidcore::math::EFF_ZERO_RAD;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeuseId, FaceId, VertexId, VertexuseId};
 use solidcore::SolidError;
@@ -72,6 +78,8 @@ pub const MIN_GENERATED: usize = 400;
 const REFUSED: f64 = -2.0;
 /// The shim did not run upstream (the Rust side defers).
 const NOT_RUN: f64 = -3.0;
+/// The corner id the shim exports the corner under test (`this`) as.
+const THIS_CORNER: u32 = 1_000_000;
 
 /// The runner.
 pub struct Runner;
@@ -691,6 +699,17 @@ pub(super) fn corner_rust_with(
     ci: &CornerIn,
     run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<()>,
 ) -> Result<Output, HarnessError> {
+    corner_rust_status(k, model, ci, |c, env, faces| run(c, env, faces).map(|()| 0.0))
+}
+
+/// [`corner_rust_with`] for an operation whose own result is the record's status (`run`
+/// returns it on success).
+pub(super) fn corner_rust_status(
+    k: &Kernel,
+    model: &Model,
+    ci: &CornerIn,
+    run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
+) -> Result<Output, HarnessError> {
     let h = |e: SolidError| harness(e.to_string());
     let mut rm = RustModel::build(model)?;
     let kind = *KINDS.get(ci.kind).ok_or_else(|| harness("kind"))?;
@@ -839,7 +858,8 @@ pub(super) fn corner_rust_with(
             target: &mut rm.target,
             pseudo: &mut rm.fb,
             exec: &mut exec,
-            corner: None,
+            // the shim exports `this` as this id
+            corner: Some(FilletCornerId(THIS_CORNER)),
             tsect_surfaces: &surfaces,
             // the model's geometries have no solver (as the shim's)
             solvers: &mut [],
@@ -847,7 +867,7 @@ pub(super) fn corner_rust_with(
         run(&mut c, &mut env, &faces)
     };
     let st = match r {
-        Ok(()) => 0.0,
+        Ok(v) => v,
         Err(e) if e.is_unported() => {
             return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
         }
@@ -873,7 +893,31 @@ pub(super) fn corner_rust_with(
     rec.push(c.set_back_dist);
     rec.push(c.surfaces.len() as f64);
     rm.put(&mut rec)?;
+    put_corner_surfaces(&mut rec, &c.surfaces)?;
     corner_output(&rec)
+}
+
+/// The corner's surfaces as the shim's `p3_put_surfaces` writes them: per surface its kind
+/// (`1` plane, `2` surface of revolution, cone, sphere or torus, `0` any other) and the
+/// B-spline record of the `SmBSplineSurface` it derives from upstream.
+fn put_corner_surfaces(o: &mut Vec<f64>, surfaces: &[Surface]) -> Result<(), HarnessError> {
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    o.push(surfaces.len() as f64);
+    for s in surfaces {
+        let (kind, bs): (f64, Option<BSplineSurface>) = match s.kind() {
+            SurfaceKind::Plane(p) => (1.0, Some(p.base().clone())),
+            SurfaceKind::SurfOfRevolution(r) => (2.0, Some(r.base().clone())),
+            SurfaceKind::Cone(c) => (2.0, Some(c.clone().base_mut().clone())),
+            SurfaceKind::Sphere(sp) => (2.0, Some(sp.base().base().clone())),
+            SurfaceKind::Torus(t) => (2.0, Some(t.base().base().clone())),
+            SurfaceKind::SurfOfExtrusion(e) => (0.0, Some(e.base().clone())),
+            SurfaceKind::BSpline(b) => (0.0, Some(b.clone())),
+            _ => (0.0, None),
+        };
+        o.push(kind);
+        super::blend_fillet_geom_p1::dump_bspline_surface(o, bs.as_ref())?;
+    }
+    Ok(())
 }
 
 // ---- generators --------------------------------------------------------------------------
@@ -949,7 +993,7 @@ fn gen_create(rng: &mut Rng) -> Inputs {
     }
 }
 
-fn vin(point: [f64; 3], vtype: i64) -> VertexIn {
+pub(super) fn vin(point: [f64; 3], vtype: i64) -> VertexIn {
     VertexIn {
         point,
         vtype,
@@ -974,7 +1018,7 @@ fn eu_in(geom: i64) -> EuIn {
     }
 }
 
-fn line(a: [f64; 3], b: [f64; 3]) -> Crv {
+pub(super) fn line(a: [f64; 3], b: [f64; 3]) -> Crv {
     Crv {
         dim: 3,
         cpts: vec![[a[0], a[1], a[2], 1.0], [b[0], b[1], b[2], 1.0]],
@@ -983,7 +1027,7 @@ fn line(a: [f64; 3], b: [f64; 3]) -> Crv {
     }
 }
 
-fn plane_srf(o: [f64; 3], du: [f64; 3], dv: [f64; 3]) -> Srf {
+pub(super) fn plane_srf(o: [f64; 3], du: [f64; 3], dv: [f64; 3]) -> Srf {
     let p = |a: f64, b: f64| {
         [
             o[0] + a * du[0] + b * dv[0],
@@ -1004,7 +1048,7 @@ fn plane_srf(o: [f64; 3], du: [f64; 3], dv: [f64; 3]) -> Srf {
     }
 }
 
-fn edge_in(vs: usize, ve: usize, etype: i64, curve: Option<Crv>, g: [i64; 2]) -> EdgeIn {
+pub(super) fn edge_in(vs: usize, ve: usize, etype: i64, curve: Option<Crv>, g: [i64; 2]) -> EdgeIn {
     EdgeIn {
         vs,
         ve,

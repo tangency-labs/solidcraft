@@ -41,8 +41,10 @@
 //!   model surface whose constructed v knots crash the cache (UB-166, as
 //!   `blend.fillet_geom_p1`'s `FbSplitFace`). Output: `-2` (refused), `-3` (not run), else
 //!   the op status, `n_verts verts.. n_edges edges.. bevel blending chamfer degenerate
-//!   const_rad adjusted ext_patch setback n_surfs` and the model export of
-//!   `blend.fillet_geom_p1`.
+//!   const_rad adjusted ext_patch setback n_surfs`, the model export of
+//!   `blend.fillet_geom_p1` and the corner's surfaces (`n (kind surface)..`: `kind` `1`
+//!   `SmPlane`, `2` `SmSurfOfRevolution`, `0` any other, then the B-spline record of
+//!   `blend.fillet_geom_p1`'s surface export).
 //!
 //! The shims refuse exactly the inputs that would make upstream dereference null, read
 //! past an array or free the harness's own objects on a path the Rust side does not
@@ -70,6 +72,9 @@ pub enum Op {
     AdjustTangent = 3,
     /// `SmFilletCorner::UpdateSplitFace(orig, split)` (unit `blend.fillet_corner_p2`).
     UpdateSplitFace = 4,
+    /// `SmFilletCorner::MakeAnalyticCornerSurface` (unit `blend.fillet_corner_p2`): its
+    /// `SmBoolean` is the status (`1` / `0`; a `SER` / `NER` status reads as `1`).
+    AnalyticSurface = 5,
 }
 
 mod sys {
