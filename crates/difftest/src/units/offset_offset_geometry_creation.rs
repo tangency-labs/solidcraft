@@ -4578,6 +4578,7 @@ fn zero_header_cases(unit: &str, cases: &[Case]) -> Result<Vec<Case>, HarnessErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compare::compare;
 
     fn import_input(name: &str) -> Inputs {
         Inputs {
@@ -4804,5 +4805,416 @@ mod tests {
             let cpp = run_cpp(&input).unwrap();
             assert_eq!(cpp.values["state"], [0.0, 7.0, -6.0]);
         }
+    }
+
+    /// `gen0730`'s op script, as the generated input serialises it.
+    fn gen0730_ops(inputs: &Inputs) -> String {
+        serde_json::to_value(&inputs.ops)
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .map_or_else(
+                || "<unserializable>".into(),
+                |ops| {
+                    ops.iter()
+                        .enumerate()
+                        .map(|(i, op)| {
+                            let name = op.get("op").and_then(Value::as_str).unwrap_or("?");
+                            format!("{i}:{name}")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+            )
+    }
+
+    /// The state arrays around `center`, plus the full record when it is short enough
+    /// to keep the failure log readable.
+    fn gen0730_state_context(cpp: &Output, rust: &Output, center: usize) -> String {
+        use std::fmt::Write as _;
+
+        let cpp_state: &[f64] = cpp.values.get("state").map_or(&[], Vec::as_slice);
+        let rust_state: &[f64] = rust.values.get("state").map_or(&[], Vec::as_slice);
+        let mut out = format!(
+            "state lengths: cpp={} rust={}; index {center}\n",
+            cpp_state.len(),
+            rust_state.len()
+        );
+        for (side, values) in [("cpp", cpp_state), ("rust", rust_state)] {
+            let lo = center.saturating_sub(6);
+            let hi = (center + 7).min(values.len());
+            writeln!(
+                out,
+                "{side}.state[{lo}..{hi}]={:?}",
+                values.get(lo..hi).unwrap_or(&[])
+            )
+            .expect("write state diagnostic to String");
+        }
+        if cpp_state.len() <= 512 && rust_state.len() <= 512 {
+            writeln!(out, "cpp.state={cpp_state:?}\nrust.state={rust_state:?}")
+                .expect("write full state diagnostic to String");
+        }
+        out
+    }
+
+    // These probes execute fresh build/import and original prefixes, followed by
+    // the existing EdgeState query. They observe READBACK, not mutation events or
+    // internal opcode-12 checkpoints. Analytic UV lines are never sliced for replay.
+    mod gen0730_probes {
+        use super::*;
+        use solidcore::curve::curve::p2::LINE_TYPE;
+
+        struct LineSnapshot {
+            point: [f64; 3],
+            direction: [f64; 3],
+            domain: [f64; 2],
+            scale: f64,
+            inside_out: f64,
+        }
+
+        struct CurveSnapshot {
+            kind: f64,
+            dim: u64,
+            base: Option<CrvIn>,
+            line: Option<LineSnapshot>,
+            raw: Vec<f64>,
+        }
+
+        fn take<'a>(rest: &mut &'a [f64], count: usize) -> &'a [f64] {
+            assert!(count <= rest.len(), "truncated gen0730 probe record");
+            let (head, tail) = (*rest).split_at(count);
+            *rest = tail;
+            head
+        }
+
+        fn count(rest: &mut &[f64]) -> usize {
+            let n = take(rest, 1)[0];
+            assert!(n.is_finite() && (0.0..=65_536.0).contains(&n) && n.fract() == 0.0);
+            n as usize
+        }
+
+        fn curve_data(rest: &mut &[f64], dim: u64) -> CrvIn {
+            let (n, p, m) = (count(rest), count(rest), count(rest));
+            assert_eq!(m, n + p + 1);
+            let values = take(rest, 4 * (n + 1));
+            let (cpts, remainder) = values.as_chunks::<4>();
+            assert!(remainder.is_empty(), "partial control point in readback");
+            assert_eq!(cpts.len(), n + 1);
+            CrvIn {
+                dim,
+                cpts: cpts.to_vec(),
+                p,
+                u: take(rest, m + 1).to_vec(),
+            }
+        }
+
+        fn fixture_curve(rest: &mut &[f64]) -> Option<CurveSnapshot> {
+            let start = *rest;
+            let kind = take(rest, 1)[0];
+            if kind == -1.0 {
+                return None;
+            }
+            assert!(kind >= 0.0, "unsupported curve in prefix snapshot: {kind}");
+            let dim = count(rest) as u64;
+            let has_nurb = take(rest, 1)[0];
+            assert!(has_nurb == 0.0 || has_nurb == 1.0);
+            let base = (has_nurb == 1.0).then(|| curve_data(rest, dim));
+            let line = if kind == LINE_TYPE as f64 {
+                let data = take(rest, 10);
+                Some(LineSnapshot {
+                    point: [data[0], data[1], data[2]],
+                    direction: [data[3], data[4], data[5]],
+                    domain: [data[6], data[7]],
+                    scale: data[8],
+                    inside_out: data[9],
+                })
+            } else {
+                None
+            };
+            Some(CurveSnapshot {
+                kind,
+                dim,
+                base,
+                line,
+                raw: start[..start.len() - rest.len()].to_vec(),
+            })
+        }
+
+        fn selected_uv(state: &[f64], slot: usize, expected_eus: usize) -> CurveSnapshot {
+            let mut rest = state;
+            let _ = fixture_curve(&mut rest); // Edge curve, not the selected UV curve.
+            take(&mut rest, 3); // Edge interval and tolerance.
+            if take(&mut rest, 1)[0] == 1.0 {
+                take(&mut rest, 3);
+                if take(&mut rest, 1)[0] == 1.0 {
+                    take(&mut rest, 3);
+                }
+            }
+            let n_eus = count(&mut rest);
+            assert_eq!(n_eus, expected_eus);
+            let mut selected = None;
+            for i in 0..n_eus {
+                let curve = fixture_curve(&mut rest);
+                if i == slot {
+                    selected = curve;
+                }
+            }
+            assert!(rest.is_empty(), "unconsumed prefix edge-state fields");
+            let curve = selected.expect("selected edgeuse has no UV curve");
+            assert_eq!(curve.dim, 2);
+            curve
+        }
+
+        fn clamped_interval(curve: &CrvIn) -> Extent1d {
+            assert!(curve.p < curve.cpts.len());
+            assert_eq!(curve.u.len(), curve.cpts.len() + curve.p + 1);
+            let lo = *curve.u.first().expect("UV curve has no knots");
+            let hi = *curve.u.last().expect("UV curve has no knots");
+            assert_eq!(curve.u.get(curve.p), Some(&lo));
+            assert_eq!(curve.u.get(curve.cpts.len()), Some(&hi));
+            assert!(curve.u.iter().take(curve.p + 1).all(|u| *u == lo));
+            assert!(curve.u.iter().rev().take(curve.p + 1).all(|u| *u == hi));
+            assert!(lo < hi);
+            Extent1d::from_min_max(lo, hi)
+        }
+
+        fn describe_curve(side: &str, curve: &CurveSnapshot) {
+            eprintln!(
+                "{side} selected UV kind={} dim={} base_nurb={:?}",
+                curve.kind, curve.dim, curve.base
+            );
+            if let Some(base) = &curve.base {
+                let interval = clamped_interval(base);
+                eprintln!(
+                    "{side} base NURB clamped interval=[{}, {}]",
+                    interval.min(),
+                    interval.max()
+                );
+            }
+            if let Some(line) = &curve.line {
+                eprintln!("{side} analytic LINE point={:?} direction={:?} domain={:?} scale={:?} inside_out={:?}",
+                    line.point, line.direction, line.domain, line.scale, line.inside_out);
+            }
+        }
+
+        fn compare_stage(stage: &str, cpp: &[f64], rust: &[f64]) -> bool {
+            let diff = compare(
+                &Output::new().values("raw", cpp.to_vec()),
+                &Output::new().values("raw", rust.to_vec()),
+                &[],
+            );
+            eprintln!("{stage}\ncpp={cpp:?}\nrust={rust:?}\nstrict_diff={diff:#?}");
+            diff.pass()
+        }
+
+        fn script_state(output: &Output) -> &[f64] {
+            assert!(
+                output.rejected.is_none() && output.deferred.is_none() && output.error.is_none()
+            );
+            output.values.get("state").expect("missing script state")
+        }
+
+        fn query_tail<'a>(queried: &'a Output, baseline: &Output) -> &'a [f64] {
+            let state = script_state(queried);
+            let before_query = script_state(baseline);
+            assert!(state.len() >= before_query.len() + 2);
+            let (prefix, query) = state.split_at(before_query.len());
+            assert!(
+                prefix
+                    .iter()
+                    .zip(before_query)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "query run's prefix differs from the matching no-query run"
+            );
+            assert_eq!(&query[..2], &[17.0, 0.0]);
+            &query[2..]
+        }
+
+        #[test]
+        fn fresh_import_and_original_prefix_line_readbacks() {
+            let seed = CaseContext::seed_for("offset.offset_geometry_creation", 730);
+            assert_eq!(seed, 9_515_163_603_058_763_486);
+            let generated = generate(&mut Rng::new(seed)).expect("gen0730 generator");
+            assert_eq!(generated["brep_a"]["file"], "cone.smb");
+            let input: Inputs = serde_json::from_value(generated.clone()).expect("gen0730 input");
+            assert_eq!(input.ops.len(), 7);
+            eprintln!("gen0730 seed={seed} original_input={generated}");
+            eprintln!("READBACK includes build/import, appended-query cache/executive preparation, getters and serialization; it is not a mutation-writer trace");
+            let prepared = prepare(&input).expect("prepare gen0730 handles");
+            let OpIn::ExtendTrimEdges {
+                eu, off, other_off, ..
+            } = prepared.ops[6].op
+            else {
+                panic!("gen0730 op 6 must be opcode 12");
+            };
+            assert!(
+                triple_to_h(other_off).is_none(),
+                "radial UV selection is not covered"
+            );
+            let eu = triple_to_h(eu).expect("base edgeuse");
+            let off = triple_to_h(off).expect("offset edgeuse");
+            let edge = prepared.two.edgeuse_edge(eu).unwrap().unwrap();
+            let eus = prepared.two.edge_edgeuses(edge).unwrap();
+            let slot = eus
+                .iter()
+                .position(|x| *x == eu)
+                .expect("selected edgeuse slot");
+            assert_eq!((eu.b, eu.kind, eu.i), (0, K_EDGEUSE, 5));
+            assert_eq!((edge.b, edge.kind, edge.i), (0, K_EDGE, 1));
+            assert_eq!(slot, 1);
+            let off_face = prepared.two.edgeuse_face(off).unwrap().unwrap();
+            let OpIn::UpdateFaceDomain { f, s } = prepared.ops[5].op else {
+                panic!("gen0730 op 5 must report the selected surface domain");
+            };
+            assert_eq!(triple_to_h(f), Some(off_face));
+            assert_eq!(triple_to_h(s), prepared.two.face_surface(off_face).unwrap());
+
+            eprintln!("Resolved eu={eu:?}, edge={edge:?}, serialized_uv_slot={slot}");
+            let mut all_readbacks_match = true;
+            let mut first_record_readback = None;
+            let mut first_selected_readback = None;
+            // Seven independent checkpoints: fresh import, then original ops 0..0
+            // through 0..5. No new op is inserted into the original full case.
+            for prefix_len in 0..input.ops.len() {
+                let mut baseline = input.clone();
+                baseline.ops.truncate(prefix_len);
+                let label = if prefix_len == 0 {
+                    "fresh import/cache preparation READBACK".to_owned()
+                } else {
+                    format!(
+                        "original prefix ops 0..={} READBACK ({})",
+                        prefix_len - 1,
+                        gen0730_ops(&baseline)
+                    )
+                };
+                eprintln!("CHECKPOINT {label}");
+                let cpp_baseline = run_cpp(&baseline).expect("native no-query prefix");
+                let rust_baseline = run_rust(&baseline).expect("Rust no-query prefix");
+                let baseline_matches = compare_stage(
+                    &format!("{label} complete no-query records"),
+                    script_state(&cpp_baseline),
+                    script_state(&rust_baseline),
+                );
+
+                let mut queried = baseline.clone();
+                queried.ops.push(OpIn::EdgeState {
+                    e: [i64::from(edge.b), i64::from(edge.kind), i64::from(edge.i)],
+                });
+                let cpp_query = run_cpp(&queried).expect("native EdgeState readback");
+                let rust_query = run_rust(&queried).expect("Rust EdgeState readback");
+                let records_match = compare_stage(
+                    &format!("{label} complete queried records"),
+                    script_state(&cpp_query),
+                    script_state(&rust_query),
+                );
+                let cpp_uv = selected_uv(query_tail(&cpp_query, &cpp_baseline), slot, eus.len());
+                let rust_uv = selected_uv(query_tail(&rust_query, &rust_baseline), slot, eus.len());
+                eprintln!(
+                    "Query tail offsets: cpp={} rust={}",
+                    script_state(&cpp_baseline).len(),
+                    script_state(&rust_baseline).len()
+                );
+                describe_curve("cpp", &cpp_uv);
+                describe_curve("rust", &rust_uv);
+                let selected_matches = compare_stage(
+                    &format!("{label} complete selected-UV record"),
+                    &cpp_uv.raw,
+                    &rust_uv.raw,
+                );
+                if (!baseline_matches || !records_match) && first_record_readback.is_none() {
+                    first_record_readback = Some(label.clone());
+                }
+                if !selected_matches && first_selected_readback.is_none() {
+                    first_selected_readback = Some(label);
+                }
+                all_readbacks_match &= baseline_matches && records_match && selected_matches;
+            }
+            eprintln!("Earliest differing complete-record READBACK={first_record_readback:?}; selected-UV READBACK={first_selected_readback:?}; neither identifies a mutation writer");
+            eprintln!("UNOBSERVED: UV extension/knot-removal/domain-selection/trim replays omitted for this Line-native diagnostic; no Line-to-BSpline slicing and no replay PASS count");
+            eprintln!("UNOBSERVED: opcode-12 internal checkpoints and final TrimExtendedEdge selected interval; no SmCircle slicing/replay");
+
+            // Also retain the original failure in this diagnostic test so Cargo's
+            // failure log exposes all prefix readbacks even when no replay runs.
+            // The separate durable full regression below is unchanged.
+            let cpp_full = run_cpp(&input).expect("original native run");
+            let rust_full = run_rust(&input).expect("original Rust run");
+            assert_eq!(script_state(&cpp_full).len(), 186);
+            assert_eq!(script_state(&rust_full).len(), 186);
+            let full_diff = compare(&cpp_full, &rust_full, &[]);
+            assert!(
+                all_readbacks_match && full_diff.pass(),
+                "original gen0730 remains subject to strict parity: {full_diff:#?}\n{}",
+                gen0730_state_context(&cpp_full, &rust_full, 87)
+            );
+        }
+    }
+
+    /// Durable replay of generated case 730 (seed `9515163603058763486`), the case
+    /// that first reaches the offset trim/extend mismatch once the face-tolerance
+    /// metadata is preserved. It compares the complete C++ and Rust output with the
+    /// runner's unchanged 1e-9 relative rule and, on failure, prints the exact
+    /// generated input, its op script and the state record around index 87.
+    #[test]
+    fn gen0730_replays_index_730_and_compares_cpp_rust_state() {
+        const UNIT: &str = "offset.offset_geometry_creation";
+        const INDEX: usize = 730;
+        const STATE_INDEX: usize = 87;
+
+        let seed = CaseContext::seed_for(UNIT, INDEX);
+        assert_eq!(
+            seed, 9_515_163_603_058_763_486,
+            "gen0730 seed/unit/index changed; the regression must replay the recorded case"
+        );
+        let mut rng = Rng::new(seed);
+        let generated = generate(&mut rng).expect("gen0730 generator returned None");
+        let inputs: Inputs =
+            serde_json::from_value(generated.clone()).expect("deserialize gen0730 input");
+        let input_json = serde_json::to_string(&generated).expect("serialize gen0730 input");
+        let case = Case {
+            unit: UNIT.into(),
+            name: format!("gen{INDEX:04}"),
+            source: CaseSource::Generated { seed },
+            inputs: generated,
+        };
+        assert_eq!(case.name, "gen0730");
+
+        let runner = Runner;
+        let cpp = runner
+            .run_cpp(&case)
+            .unwrap_or_else(|e| panic!("gen0730 C++ harness error: {e}\ninput={input_json}"));
+        let rust = runner
+            .run_rust(&case)
+            .unwrap_or_else(|e| panic!("gen0730 Rust harness error: {e}\ninput={input_json}"));
+        let context = || {
+            format!(
+                "gen0730 seed={seed} ops={}\ninput={}\n{}",
+                gen0730_ops(&inputs),
+                input_json,
+                gen0730_state_context(&cpp, &rust, STATE_INDEX)
+            )
+        };
+
+        assert!(cpp.rejected.is_none(), "C++ rejected gen0730\n{}", context());
+        assert!(rust.rejected.is_none(), "Rust rejected gen0730\n{}", context());
+        assert!(cpp.deferred.is_none(), "C++ deferred gen0730\n{}", context());
+        assert!(rust.deferred.is_none(), "Rust deferred gen0730\n{}", context());
+        assert!(cpp.error.is_none(), "C++ errored on gen0730\n{}", context());
+        assert!(rust.error.is_none(), "Rust errored on gen0730\n{}", context());
+
+        let diff = compare(&cpp, &rust, &[]);
+        assert!(
+            diff.pass(),
+            "gen0730 mismatch (strict 1e-9 relative rule)\n{diff:#?}\n{}",
+            context()
+        );
+        assert!(
+            diff.values_compared > 0,
+            "gen0730 compared no values\n{}",
+            context()
+        );
+        assert!(
+            diff.nonzero_compared > 0,
+            "gen0730 compared only zeros\n{}",
+            context()
+        );
     }
 }

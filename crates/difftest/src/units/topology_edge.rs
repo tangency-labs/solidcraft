@@ -17,10 +17,12 @@
 //!
 //! **Inexact geometry.** The export carries plain B-spline curves and `SmLine`s exactly;
 //! another `SmBSplineCurve` kind (an edge's ellipse in several upstream files) arrives as
-//! its B-spline part only. Planes and losslessly exported `SmSurfOfRevolution` faces
-//! retain their concrete kinds; other `SmBSplineSurface` subclasses arrive as their
-//! B-spline parts. Revolution records use the shared exact transport helpers, including
-//! the native round-trip/non-mutation checks and a bitwise check of the imported base.
+//! its B-spline part only. Planes and losslessly exported analytic surfaces
+//! (`SmSurfOfRevolution`, `SmCone`/`SmCylinder`, `SmSphere`, `SmTorus`,
+//! `SmSurfOfExtrusion`) retain their concrete kinds; other `SmBSplineSurface` subclasses
+//! arrive as their B-spline parts. Analytic records use the shared exact transport
+//! helpers, including the native round-trip/non-mutation checks and a bitwise check of the
+//! imported base.
 //! Operations that evaluate such an edge curve (`EndTangent`, `Trimmed`, `Reverse`, `Ode`,
 //! `RadialCurve`) or the surface of a face of the edge (`Seam`, `Topological`,
 //! `Tangent`, `Radial`, `RadialCurve`, `Blend`) are not compared: the C++ runner
@@ -2328,54 +2330,199 @@ mod tests {
         };
         let fixtures = ctx.fixture_cases(Runner.id()).unwrap();
         let mut selected = Vec::new();
-        for (name, deferred) in [
-            ("Mouse_e0_seam", true),
-            ("Mouse_e0_seam_f", true),
-            ("Mouse_e0_topological", true),
-            ("Mouse_e0_tangent", true),
-            ("Mouse_e0_blend", true),
-            ("Mouse_e0_radial", true),
-            ("line_join_fw_tangent_start", false),
-            ("line_join_fw_trimmed", false),
-            ("net_trimmed_e0", false),
-            ("plane_square_e0_tangent", false),
+        for name in [
+            "Mouse_e0_seam",
+            "Mouse_e0_seam_f",
+            "Mouse_e0_topological",
+            "Mouse_e0_tangent",
+            "Mouse_e0_blend",
+            "Mouse_e0_radial",
+            "line_join_fw_tangent_start",
+            "line_join_fw_trimmed",
+            "net_trimmed_e0",
+            "plane_square_e0_tangent",
             // The same imported Mouse B-rep still supports exact queries.
-            ("Mouse_e0_query", false),
+            "Mouse_e0_query",
         ] {
             let case = fixtures.iter().find(|case| case.name == name).unwrap();
             let cpp = Runner.run_cpp(case).unwrap();
             let rust = Runner.run_rust(case).unwrap();
             assert!(cpp.rejected.is_none() && rust.rejected.is_none(), "{name}");
             assert!(cpp.deferred.is_none(), "{name}");
-            assert!(rust.error.is_none(), "{name}: {rust:?}");
-            if deferred {
-                assert_eq!(cpp.error.as_deref(), Some("inexact_geometry"), "{name}");
-                let why = rust.deferred.as_ref().unwrap();
-                assert_eq!(why.unit, "topology.edge");
-                assert_eq!(
-                    why.symbol,
-                    "difftest: exact analytic geometry import for edge evaluation"
-                );
-                assert!(rust.values.is_empty() && rust.ints.is_empty());
-                assert!(rust.topology.is_none());
-            } else {
-                assert!(rust.deferred.is_none() && cpp.error.is_none(), "{name}");
-                let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
-                assert!(diff.pass(), "{name}: {diff:?}");
-                assert!(diff.values_compared > 0, "{name}");
-            }
+            assert!(cpp.error.is_none(), "{name}: {cpp:?}");
+            assert!(
+                rust.error.is_none() && rust.deferred.is_none(),
+                "{name}: {rust:?}"
+            );
+            let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+            assert!(diff.pass(), "{name}: {diff:?}");
+            assert!(diff.values_compared > 0, "{name}");
             selected.push(case.clone());
         }
         let result = crate::run_unit(&SelectedCases(selected), &ctx, &RunOptions::default());
-        assert_eq!((result.passed(), result.deferred(), result.failed()), (5, 6, 0));
+        assert_eq!((result.passed(), result.deferred(), result.failed()), (11, 0, 0));
         assert_eq!(result.rejected(), 0);
-        assert_eq!(result.deferred_by_unit().get("topology.edge"), Some(&6));
+        assert!(result.deferred_by_unit().is_empty());
         for case in &result.cases {
-            assert_eq!(case.is_deferred(), case.name.starts_with("Mouse_e0_")
-                && case.name != "Mouse_e0_query", "{}", case.name);
-            assert_eq!(case.compared_values(), case.pass(), "{}", case.name);
+            assert!(!case.is_deferred(), "{}", case.name);
+            assert!(case.pass(), "{}", case.name);
+            assert!(case.compared_values(), "{}", case.name);
         }
         check_revolution_cases(&fixtures);
+
+        // Hard regression: no former exact-geometry case may reach an unported
+        // dependency again. Run this before the per-geometry checks so a failure
+        // lists every remaining case and symbol, not just the first one.
+        let mut deferred = Vec::new();
+        for case in &fixtures {
+            let i: Inputs = case.parse().unwrap();
+            let former = matches!(&i.brep, BrepIn::File { file, .. }
+                if matches!(
+                    file.as_str(),
+                    "Mouse.smb" | "box_with_large_fillet.smb" | "cone.smb" | "sphere.smb"
+                ))
+                && matches!(
+                    i.op,
+                    OpIn::Seam { .. }
+                        | OpIn::Topological { .. }
+                        | OpIn::Tangent { .. }
+                        | OpIn::Blend { .. }
+                        | OpIn::Radial { .. }
+                );
+            if !former {
+                continue;
+            }
+            let rust = Runner.run_rust(case).unwrap();
+            if let Some(d) = rust.deferred {
+                deferred.push(format!("{}: {} / {}", case.name, d.unit, d.symbol));
+            } else if let Some(e) = rust.error {
+                deferred.push(format!("{}: error {e}", case.name));
+            }
+        }
+        assert!(
+            deferred.is_empty(),
+            "exact-surface cases must not defer or error; remaining: {deferred:?}"
+        );
+
+        check_analytic_surface_cases(&fixtures);
+        check_inexact_guard(&fixtures);
+    }
+
+    /// The analytic surfaces that the shared exact exporter now carries for this runner.
+    #[derive(Clone, Copy, Debug)]
+    enum AnalyticSurface {
+        Cone,
+        Sphere,
+    }
+
+    impl AnalyticSurface {
+        fn matches(self, kind: &SurfaceKind) -> bool {
+            match self {
+                Self::Cone => matches!(kind, SurfaceKind::Cone(_)),
+                Self::Sphere => matches!(kind, SurfaceKind::Sphere(_)),
+            }
+        }
+    }
+
+    /// Compare newly enabled `SmCone`/`SmCylinder`/`SmSphere` cases: the exact head must
+    /// restore the concrete kind, and the native and Rust operations must still agree
+    /// within the runner's usual tolerance.
+    fn check_analytic_surface_cases(fixtures: &[Case]) {
+        for (name, expected) in [
+            ("cone_e0_seam", Some(AnalyticSurface::Cone)),
+            ("cone_e0_seam_f", Some(AnalyticSurface::Cone)),
+            ("cone_e0_tangent", Some(AnalyticSurface::Cone)),
+            ("sphere_e0_seam", Some(AnalyticSurface::Sphere)),
+            ("sphere_e0_seam_f", Some(AnalyticSurface::Sphere)),
+            ("sphere_e0_tangent", Some(AnalyticSurface::Sphere)),
+            ("box_with_large_fillet_e11_seam", Some(AnalyticSurface::Cone)),
+            ("box_with_large_fillet_e11_seam_f", Some(AnalyticSurface::Cone)),
+            ("box_with_large_fillet_e11_tangent", Some(AnalyticSurface::Cone)),
+            // The rebuilt-UV e0 tangent need not touch the retained Cone; compare its
+            // exact faces natively without requiring a particular analytic kind.
+            ("box_with_large_fillet_rb_e0_tangent", None),
+        ] {
+            let case = fixtures.iter().find(|case| case.name == name).unwrap();
+            let i: Inputs = case.parse().unwrap();
+            let ex = export(&i).unwrap();
+            let counts = ffi::counts(&ex).unwrap();
+            let im = import(&ex).unwrap();
+            let op = resolve(&i.op, counts, &im.b).unwrap();
+            assert!(!inexact(&op, &im), "{name}");
+            let e = match &op {
+                OpIn::Seam { e, .. } | OpIn::Tangent { e, .. } => *e,
+                _ => unreachable!(),
+            };
+            let faces = ed::faces(&im.b, EdgeId::from_index(e as u32), None).unwrap();
+            assert!(!faces.is_empty(), "{name}");
+            let mut saw_expected = expected.is_none();
+            for id in faces {
+                let face = im.b.face(id).unwrap();
+                assert!(
+                    im.exact_faces.get(id.index() as usize).copied().unwrap_or(false),
+                    "{name}"
+                );
+                let surface = face.surface.as_ref().unwrap();
+                assert_eq!(
+                    surface.owner_zone_tol_3d(),
+                    Some(face.tolerance),
+                    "{name}"
+                );
+                if let Some(expected) = expected {
+                    saw_expected |= expected.matches(surface.kind());
+                }
+            }
+            if let Some(expected) = expected {
+                assert!(saw_expected, "{name}: expected {expected:?}");
+            }
+            let cpp = Runner.run_cpp(case).unwrap();
+            let rust = Runner.run_rust(case).unwrap();
+            assert!(
+                cpp.error.is_none() && cpp.rejected.is_none(),
+                "{name}: {cpp:?}"
+            );
+            assert!(
+                rust.error.is_none() && rust.deferred.is_none(),
+                "{name}: {rust:?}"
+            );
+            let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+            assert!(
+                diff.pass() && diff.values_compared > 0,
+                "{name}: {cpp:?} / {rust:?}: {diff:?}"
+            );
+            if name == "cone_e0_seam" || name == "sphere_e0_seam" {
+                check_damaged_surface_records(&ex);
+            }
+        }
+    }
+
+    /// No current fixture is inexact after the exact surface records landed, so flip the
+    /// imported flags on a real graph to keep the refusal semantics covered.
+    fn check_inexact_guard(fixtures: &[Case]) {
+        let case = fixtures
+            .iter()
+            .find(|case| case.name == "Mouse_e0_seam")
+            .unwrap();
+        let i: Inputs = case.parse().unwrap();
+        let ex = export(&i).unwrap();
+        let counts = ffi::counts(&ex).unwrap();
+        let mut im = import(&ex).unwrap();
+        let op = resolve(&i.op, counts, &im.b).unwrap();
+        assert!(!inexact(&op, &im), "{}", case.name);
+        let e = match &op {
+            OpIn::Seam { e, .. } => *e,
+            _ => unreachable!(),
+        };
+        let face = ed::faces(&im.b, EdgeId::from_index(e as u32), None)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        *im.exact_faces.get_mut(face.index() as usize).unwrap() = false;
+        assert!(inexact(&op, &im), "an inexact face must still defer");
+        *im.exact_faces.get_mut(face.index() as usize).unwrap() = true;
+        *im.exact_curves.get_mut(e as usize).unwrap() = false;
+        assert!(inexact(&op, &im), "an inexact curve must still defer");
     }
 
     /// Exercise every formerly deferred revolution case, including rebuilt UV trims.
@@ -2413,12 +2560,20 @@ mod tests {
             for id in faces {
                 let face = im.b.face(id).unwrap();
                 let surface = face.surface.as_ref().unwrap();
+                assert_eq!(
+                    surface.owner_zone_tol_3d(),
+                    Some(face.tolerance),
+                    "{}",
+                    case.name
+                );
                 assert!(
                     matches!(surface.kind(), SurfaceKind::SurfOfRevolution(_)),
                     "{}",
                     case.name
                 );
-                assert!(im.exact_faces[id.index() as usize]);
+                assert!(
+                    im.exact_faces.get(id.index() as usize).copied().unwrap_or(false)
+                );
                 assert_eq!(
                     surface.owner(),
                     Some(ObjectRef {
@@ -2471,32 +2626,35 @@ mod tests {
         assert!(matches!(
             surface.unwrap().kind(),
             SurfaceKind::SurfOfRevolution(_)
+                | SurfaceKind::Torus(_)
+                | SurfaceKind::Cone(_)
+                | SurfaceKind::Sphere(_)
         ));
         ex.get(start..rd.at).unwrap().to_vec()
     }
 
     fn check_damaged_surface_records(ex: &[f64]) {
         let block = first_surface_block(ex);
-        assert_eq!(block[0], 2.0);
-        let regular = 6 + block[5] as usize;
-        assert_eq!(block[regular], 0.0);
+        assert_eq!(block.first(), Some(&2.0));
+        let regular = 6 + block.get(5).copied().unwrap() as usize;
+        assert_eq!(block.get(regular), Some(&0.0));
         let fails = |v: &[f64], message: &str| {
             let error = read_surface(&mut Rd { v, at: 0 }).err().unwrap();
             assert!(error.to_string().contains(message), "{error}");
         };
         let mut bad_byte = block.clone();
-        bad_byte[6] = 256.0;
+        *bad_byte.get_mut(6).unwrap() = 256.0;
         fails(&bad_byte, "bad record byte");
-        fails(&block[..regular - 1], "export too short");
+        fails(block.get(..regular - 1).unwrap(), "export too short");
         let mut trailing_byte = block.clone();
         trailing_byte.insert(regular, 0.0);
-        trailing_byte[5] += 1.0;
+        *trailing_byte.get_mut(5).unwrap() += 1.0;
         fails(&trailing_byte, "not read whole");
         let mut mismatched_base = block.clone();
-        mismatched_base[regular + 10] += 1.0;
+        *mismatched_base.get_mut(regular + 10).unwrap() += 1.0;
         fails(&mismatched_base, "B-spline part differs");
         let mut nested_head = block.clone();
-        nested_head[regular] = 2.0;
+        *nested_head.get_mut(regular).unwrap() = 2.0;
         fails(&nested_head, "not a B-spline or plane");
         let mut missing_base = block;
         missing_base.truncate(regular);
