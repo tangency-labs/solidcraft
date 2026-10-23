@@ -9,4 +9,4 @@ tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_poin
 status = "green"
 claimed_by = "swarm-nlib.crv_tool_p2-a1"
 claimed_at = "2026-10-12T21:27:39Z"
-notes = "difftest: 2124 cases (124 fixtures + 2000 generated), 2124 pass bit-for-bit, 0 deferred; wired UNPORTED(nlib.crv_tool_p2) in nlib.crv_basic (N_CrvsAreCoincident, now green); 7 fns; largest: N_CrvReduceDegreeOnce, N_CrvRemoveDegenSegs, N_CrvRemoveKnots, N_CrvsMakeCompatibleAdjKnots; unit-SCC #6 (5 units); 317 upstream test entry points reach this unit"
+notes = "main CI e33985411 (2026-10-23): PASS nlib.crv_tool_p2 cases=2126 passed=2126 failed=0 deferred=0. difftest: 2124 cases (124 fixtures + 2000 generated), 2124 pass bit-for-bit, 0 deferred; wired UNPORTED(nlib.crv_tool_p2) in nlib.crv_basic (N_CrvsAreCoincident, now green); 7 fns; largest: N_CrvReduceDegreeOnce, N_CrvRemoveDegenSegs, N_CrvRemoveKnots, N_CrvsMakeCompatibleAdjKnots; unit-SCC #6 (5 units); 317 upstream test entry points reach this unit"

@@ -4008,3 +4008,44 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** no (the closed non-rail edge: source only; the harness refuses both paths; the closed squeezed edge crashed once in a generated run, not reproduced in isolation).
 - **Severity:** crash/UB (use after free).
 - **Rust port:** `FilletCorner::squeeze_edge` follows the same loop on ids (no frees), so it returns `NotFound` or deletes consistently; the difftest shim and runner refuse exactly the inputs whose loop reaches a freed vertex use or the dangling survivor, and compare the defined early-error paths (`SM_ERR` for an edge or vertex not in the corner's lists).
+
+## Note: duplicate IDs (2026-10-23)
+
+Parallel PRs gave six IDs to more than one entry. They are not renumbered, because code
+comments, shims, unit notes, findings and PRs already cite them; when citing one of these
+IDs, add the function name so the entry is unambiguous. Each entry, by its section and
+title (other references in the repo in brackets):
+
+- **UB-100:** (a) Surfaces and volumes, `SmDerivSurfDefinition::GetSampleValues` missing
+  tangent reference [`solidcore-ffi` `surface_surface_p6.rs`, `surface.surface_p6`
+  notes, findings]; (b) Intersection, `SmPolyBrep::CalculateBoundingBox` null point array
+  for a pseudo box.
+- **UB-185:** (a) Topology, `SmFilletVertex::CalcMateGeom` unbounded recursion through a
+  cycle of mates [`blend.fillet_geom_p3` notes, `MAX_MATE_DEPTH`]; (b) Numerical
+  integration (near the end of the file), fillet executive `m_bIsInitialized`
+  indeterminate before parameter setup [`blend_fillet_executive_p2`/`p3` shims and FFI,
+  findings].
+- **UB-204:** (a) NLib: matrices and polynomials, `SmMatrix(rows, cols)` uninitialised
+  inline storage used by `SmLocalSolveNd` [difftest `curve_curve_p9.rs`, findings
+  (#94)]; (b) Surfaces and volumes, `SmFilletSolver::GetSurface` unbounded recursion
+  through the geometry set [findings, `blend.fillet_solver_p1` pseudo B-rep entry].
+- **UB-210:** (a) Topology, `SmBrep::DeleteEdge` reads `pSurvF` outside the merge branch
+  [`topology/brep/p4.rs`, `topology.brep_p4` notes]; (b) Topology,
+  `SmFilletEdge::CalcFilletIntFillet` reads the context of a missing fillet corner
+  [`blend_fillet_geom_p3` shim, runner and fixtures, `blend.fillet_geom_p3` notes].
+- **UB-238** (four entries): (a) NLib: knots and basis functions,
+  `SmBSplineCurve::CreateCanonical` heap corruption for a NaN knot [`solidcore-ffi`
+  `primitive_api_curves.rs`, fuzz corpus]; (b) Spatial structures and small geometry,
+  vertex/vertex and edge/edge topology solvers dereference `NULL` in a release
+  `SM_ASSERT` [`solidcore-ffi` `intersect_topology_solver_p1.rs`]; (c) Curves,
+  `SetIntersectionCurveThroughPoint` builds UV trim curves from the address of a pointer
+  slot; (d) Topology, `SmFilletGeom::MakeRailEdgeuse` leaves a deleted vertex use linked
+  in the fillet vertex [`blend_fillet_geom_p5` shim and FFI, `blend.fillet_geom_p5`
+  notes, findings].
+- **WR-190:** (a) Topology, attributes, solvers, `SmFilletSolver::RecordFilletError`
+  reports rail 0 for rail 1 [`blend/fillet_solver/p2.rs`]; (b) Curves,
+  `SmFilletEdge::CalcBlendingRail` builds its Hermite fallback as a degree-2 curve
+  [`blend/fillet_geom/p6.rs`].
+
+New entries take the next free number after the highest in their series, as the
+Numbering paragraph at the top says.
