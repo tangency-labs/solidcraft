@@ -195,7 +195,12 @@ impl<'a> OperandNames<'a> {
         match self.operand {
             Operand::Body(_) | Operand::Stage(_) => {
                 let body = self.body.as_ref()?;
-                let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
+                // A stage's stand-in body has no names of its own: its edges are named from the
+                // stage's faces.
+                let names = self.edges.get_or_init(|| match self.operand {
+                    Operand::Stage(_) => crate::naming::edge_names_from(body, &self.names.faces),
+                    _ => crate::naming::edge_names(body),
+                });
                 let faces = body.mesh().edge_faces.get(edge).cloned().unwrap_or_default();
                 let verified = faces.iter().all(|f| self.names.verified(*f as usize));
                 Some((names.get(edge)?.clone(), verified))

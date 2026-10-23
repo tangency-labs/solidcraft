@@ -718,7 +718,7 @@ pub fn edge_names(b: &ModelBody) -> Vec<String> {
 }
 
 /// Names of a body's edges from its faces' names `faces`.
-fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
+pub(crate) fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
     let m = b.mesh();
     let mut names: Vec<String> = m
         .edge_faces

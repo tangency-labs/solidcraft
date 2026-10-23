@@ -2380,6 +2380,12 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Vec<Traced> {
 
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
 fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
+    apply_traced_as(state, f, matches!(f.kind, FeatureKind::Extrude { .. }), tools, op, targets)
+}
+
+/// [`apply_traced`]; `extrusions`: the tools are an extrude's (the feature's own, or its copies
+/// in a pattern), which may be applied as one where they lie apart.
+fn apply_traced_as(state: &mut ModelState, f: &Feature, extrusions: bool, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     let tools = if op == Operation::Intersect { intersection_tool_union(tools)? } else { tools };
     // Participants: the feature's own targets, else its explicit participants, else the bodies
     // of its component (and what it made itself): other components are left alone.
@@ -2418,7 +2424,7 @@ fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Ope
     // Batching solid targets must preserve Join's absorption order,
     // sheet material tracking and the separate bodies of a New Body extrusion.
     if tools.len() > 1
-        && matches!(f.kind, FeatureKind::Extrude { .. })
+        && extrusions
         && matches!(op, Operation::Join | Operation::Cut)
         && !target_idx.is_empty()
         && target_idx.iter().all(|i| state.bodies.get(*i).is_some_and(|b| !b.body.is_mesh() && !state.sheets.iter().any(|s| s.body == b.name)))
@@ -2445,6 +2451,8 @@ fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Ope
             // Preserve the original participants. For Join, the compound's larger
             // size must not expand the contact tolerance and absorb a nearby body.
             if apply_traced(&mut batched, f, vec![Traced::step(compound, &tools.iter().collect::<Vec<_>>())], op, &names).is_ok() {
+                #[cfg(test)]
+                cost_tests::pattern::count(0, 1);
                 *state = batched;
                 return Ok(());
             }
@@ -5326,6 +5334,9 @@ fn replay(
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
+            if matches!(&src.kind, FeatureKind::Chamfer { distance2: None, angle: None, .. }) && chamfer_copies_apart(st, &found, mats, r) {
+                continue;
+            }
             for m in mats {
                 let moved: Vec<Vec3> = found.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let ti = blend_target(st, &None, &moved)?;
@@ -5388,16 +5399,41 @@ fn replay(
             }
         }
         // New bodies from a pattern join their source when they touch it (as one feature would).
+        let extrusions = matches!(src.kind, FeatureKind::Extrude { .. });
         if f.body_names.is_empty() {
-            apply_traced(st, f, copies, op, &targets)?;
+            apply_traced_as(st, f, extrusions, copies, op, &targets)?;
         } else {
             let start = st.bodies.iter().filter(|b| b.feature == f.id).count();
             let mut named = f.clone();
             named.body_names = f.body_names.iter().skip(start).cloned().collect();
-            apply_traced(st, &named, copies, op, &targets)?;
+            apply_traced_as(st, &named, extrusions, copies, op, &targets)?;
         }
     }
     Ok(())
+}
+
+/// The copies of a chamfer of `edges`, one at each placement in `mats`, chamfered at once where
+/// they lie apart on one body (`kernel::chamfer_apart`). `false`, changing nothing, where they
+/// are to be chamfered one copy at a time.
+fn chamfer_copies_apart(st: &mut ModelState, edges: &[Vec3], mats: &[Mat], d: f64) -> bool {
+    if mats.len() < 2 {
+        return false;
+    }
+    let groups: Vec<Vec<Vec3>> = mats.iter().map(|m| edges.iter().map(|p| crate::apply_point(m, *p)).collect()).collect();
+    let mut targets = groups.iter().map(|g| blend_target(st, &None, g).ok());
+    let Some(Some(ti)) = targets.next() else { return false };
+    if !targets.all(|t| t == Some(ti)) {
+        return false;
+    }
+    let Some(mb) = st.bodies.get(ti).cloned() else { return false };
+    let Ok(nb) = kernel::chamfer_apart(&mb.body, &groups, d) else { return false };
+    #[cfg(test)]
+    cost_tests::pattern::count(1, 0);
+    let nb = mb.traced().then(nb);
+    if let Some(slot) = st.bodies.get_mut(ti) {
+        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+    }
+    true
 }
 
 #[path = "model_cache.rs"]

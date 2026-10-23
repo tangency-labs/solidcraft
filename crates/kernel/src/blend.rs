@@ -2097,6 +2097,175 @@ pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     }
 }
 
+/// [`chamfer`] of groups of edges whose chamfers lie apart (the copies of a pattern), all at
+/// once: each group chamfered the way [`chamfer`] would chamfer it alone, with one cut or one
+/// rebuild for all of them and one fit. Cutters as [`chamfer`] makes them stand side by side
+/// rather than united; whole loops are blended one after another into one solid. `Err` where
+/// that can't stand for chamfering the groups one at a time: the groups would be chamfered in
+/// different ways, cutters of two groups meet, a loop's edges are gone once another is blended,
+/// or a step or the fit fails.
+pub fn chamfer_apart(body: &Body, groups: &[Vec<Vec3>], distance: f64) -> Result<Body> {
+    body.require_brep("chamfer")?;
+    if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
+        return Err(KernelError::Invalid("chamfer size must be positive".into()));
+    }
+    if groups.len() < 2 || groups.len() > 10_000 || groups.iter().any(|g| g.is_empty() || g.len() > 1000) {
+        return Err(KernelError::Invalid("select 2…10000 groups of 1…1000 edges".into()));
+    }
+    let counts = record::counts(&[body]);
+    // As [`chamfer_built`] decides for each group alone.
+    let tools: Vec<Result<Vec<Cutter>>> =
+        groups.iter().map(|g| g.iter().enumerate().map(|(i, p)| chamfer_tool(body, *p, distance, i)).collect()).collect();
+    let built = if tools.iter().all(|t| t.as_ref().is_ok_and(|ts| !ts.iter().any(|c| c.extension_inside))) {
+        let tools: Vec<Vec<Cutter>> = tools.into_iter().filter_map(Result::ok).collect();
+        cutters_apart(body, &tools, &counts)?
+    } else {
+        // Edges whose cutters fail go to the corner rebuild first, which takes straight edges only.
+        let corner = |g: &Vec<Vec3>| -> Result<bool> { Ok(g.len() > 1 && only_straight(body, g)?) };
+        for (g, t) in groups.iter().zip(&tools) {
+            if t.as_ref().is_ok_and(|ts| !ts.iter().any(|c| c.extension_inside)) || (t.is_err() && corner(g)?) {
+                return Err(unsupported("the copies' chamfers are not all whole loops or chains"));
+            }
+        }
+        locals_apart(body, groups, distance, &counts)?
+    };
+    let edges: Vec<Vec3> = groups.concat();
+    crate::blend_fit::accept(body, built, &edges, crate::blend_fit::Size::Chamfer(distance))
+}
+
+/// Groups' cutters, each group's united, side by side and cut from `body` at once.
+fn cutters_apart(body: &Body, tools: &[Vec<Cutter>], counts: &[(usize, usize)]) -> Result<Body> {
+    let mut unions = Vec::with_capacity(tools.len());
+    let mut histories = Vec::with_capacity(tools.len());
+    for cutters in tools {
+        let (u, h) = united(cutters).ok_or_else(|| KernelError::Failed("chamfer cutters".into()))?;
+        unions.push(u);
+        histories.push(h);
+    }
+    let joined = crate::ops::union_apart(&unions)?.ok_or_else(|| unsupported("the copies' chamfers meet"))?;
+    let h = joined.history().cloned().and_then(|mut h| {
+        for (k, inner) in histories.iter().enumerate().rev() {
+            h.substitute(k, inner.as_ref()?).ok()?;
+        }
+        Some(h)
+    });
+    let all: Vec<Cutter> = tools.iter().flatten().cloned().collect();
+    let r = crate::ops::boolean(body, &joined, crate::BoolOp::Cut)?.ok_or_else(|| KernelError::Failed("chamfer cut".into()))?;
+    let h = cut_history(crate::boolean_record::through(&r, 1, h.as_ref()), body, &all);
+    Ok(r.with_checked_history(h, counts))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Loops and chains [`locals_apart`] blended on this thread (tests count them).
+    pub(crate) static LOCALS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// A local blend of one group, by edge identity in the healed body's copy.
+enum Local {
+    /// Whole loops of planar faces ([`crate::loopblend::loop_blend`]).
+    Loops(Vec<Vec<mt::EdgeID>>),
+    /// One edge running on smoothly into curved ones: a ball rolled along the chain
+    /// ([`crate::curveblend::curve_blend`]).
+    Chain(Vec<mt::EdgeID>),
+}
+
+/// Groups blended locally one after another into one solid, each as [`chamfer_built`] blends
+/// that group alone once its cutters notch or fail: whole loops of planar faces, else one edge
+/// whose chain a ball rolls along. `Err` for any other group.
+fn locals_apart(body: &Body, groups: &[Vec<Vec3>], distance: f64, counts: &[(usize, usize)]) -> Result<Body> {
+    let cur = crate::boolean_record::healed(body)?;
+    let size = cur.size();
+    let first = cur.deep_copy();
+    let all = Body::unique_edges(&first);
+    let mut locals = Vec::with_capacity(groups.len());
+    for g in groups {
+        if let Some(loops) = loop_groups(&cur, g)? {
+            locals.push(Local::Loops(loops.iter().map(|l| edge_ids(&cur, &first, l)).collect::<Result<_>>()?));
+            continue;
+        }
+        // One edge whose cutter on the healed body fails or reaches into a corner: blended along
+        // its smooth chain ([`blend_each`]). A cutter that fits cuts it instead.
+        let [p] = g.as_slice() else { return Err(unsupported("several edges that are not whole loops")) };
+        if chamfer_tool(&cur, *p, distance, 0).is_ok_and(|t| !t.extension_inside) {
+            return Err(unsupported("an edge its cutter chamfers"));
+        }
+        let id = edge_ids(&cur, &first, g)?.first().copied().ok_or_else(|| KernelError::Invalid("no edge near a selected point".into()))?;
+        let edge = all.iter().find(|e| e.id() == id).cloned().ok_or_else(|| KernelError::Failed("edge".into()))?;
+        let along: Vec<mt::Edge> = {
+            let ids = smooth_chain(&first, &edge).unwrap_or_else(|| vec![edge.id()]);
+            all.iter().filter(|x| ids.contains(&x.id())).cloned().collect()
+        };
+        let near = (size * 1e-6).max(1e-7);
+        let chain = smooth_chain_within(&first, &edge, &|e: &mt::Edge| lies_on(e, &along, near));
+        let runs_on = !tangent_faces(&first, &edge)
+            && !curved_case(&first, &edge, false)
+            && chain
+                .as_ref()
+                .is_some_and(|ids| ids.len() > 1 && all.iter().any(|x| ids.contains(&x.id()) && !matches!(x.curve(), mt::Curve::Line(_))));
+        match chain.filter(|_| runs_on) {
+            Some(ids) => locals.push(Local::Chain(ids)),
+            None => return Err(unsupported("an edge not blended along its chain")),
+        }
+    }
+    let mut solid = first.clone();
+    let mut rec = Rebuild::default();
+    let mut step = |solid: &mut Solid, ids: &[mt::EdgeID], loop_: bool| -> Result<()> {
+        let present: std::collections::HashSet<mt::EdgeID> = Body::unique_edges(solid).iter().map(|e| e.id()).collect();
+        if !ids.iter().all(|id| present.contains(id)) {
+            return Err(unsupported("an edge was changed by blending another"));
+        }
+        let (made, r) = if loop_ {
+            let res = crate::loopblend::loop_blend(solid, ids, size, distance, false)
+                .ok_or_else(|| unsupported("the edges are not a whole loop of a planar face"))?;
+            guard("chamfer", || res)?
+        } else {
+            guard("chamfer", || crate::curveblend::curve_blend(solid, ids, size, distance, false))?
+        };
+        rec = std::mem::take(&mut rec).then(r);
+        *solid = made;
+        #[cfg(test)]
+        LOCALS.with(|n| n.set(if loop_ { (n.get().0 + 1, n.get().1) } else { (n.get().0, n.get().1 + 1) }));
+        Ok(())
+    };
+    for l in &locals {
+        match l {
+            Local::Loops(loops) => {
+                for ids in loops {
+                    step(&mut solid, ids, true)?;
+                }
+            }
+            Local::Chain(ids) => step(&mut solid, ids, false)?,
+        }
+    }
+    Ok(record::after(record::rebuilt(solid, &[&first], &rec)?, &cur, counts))
+}
+
+/// Whether every edge the points pick on `body` is a line.
+fn only_straight(body: &Body, pts: &[Vec3]) -> Result<bool> {
+    let solid = body.deep_copy();
+    let all = Body::unique_edges(&solid);
+    let ids = edge_ids(body, &solid, pts)?;
+    Ok(ids.iter().all(|id| all.iter().find(|e| e.id() == *id).is_some_and(|e| matches!(e.curve(), mt::Curve::Line(_)))))
+}
+
+/// The union of chamfer cutters, with its history over them (`None`: a union failed).
+fn united(tools: &[Cutter]) -> Option<(Body, Option<History>)> {
+    let mut acc: Option<(Body, Option<History>)> = None;
+    for t in tools {
+        let next = match &acc {
+            None => Some((t.body.clone(), Some(History::identity(&t.body)))),
+            Some((a, h)) => crate::ops::boolean(a, &t.body, crate::BoolOp::Union).ok().flatten().map(|u| {
+                let h = crate::boolean_record::through(&u, 0, h.as_ref());
+                (u, h)
+            }),
+        };
+        next.as_ref()?;
+        acc = next;
+    }
+    acc
+}
+
 /// [`chamfer`], once the size is known to fit.
 fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     // Each step's result carries its history over `[body]`.
@@ -2108,19 +2277,7 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     let notch = tools.as_ref().ok().is_some_and(|ts| ts.iter().any(|t| t.extension_inside));
     // The union of the cutters, cut from the body they were built on.
     let batch = |tools: &[Cutter]| -> Option<Body> {
-        let mut acc: Option<(Body, Option<History>)> = None;
-        for t in tools {
-            let next = match &acc {
-                None => Some((t.body.clone(), Some(History::identity(&t.body)))),
-                Some((a, h)) => crate::ops::boolean(a, &t.body, crate::BoolOp::Union).ok().flatten().map(|u| {
-                    let h = crate::boolean_record::through(&u, 0, h.as_ref());
-                    (u, h)
-                }),
-            };
-            next.as_ref()?;
-            acc = next;
-        }
-        let (tool, h) = acc?;
+        let (tool, h) = united(tools)?;
         let r = crate::ops::boolean(body, &tool, crate::BoolOp::Cut).ok().flatten()?;
         let h = cut_history(crate::boolean_record::through(&r, 1, h.as_ref()), body, tools);
         Some(r.with_checked_history(h, &counts))
@@ -2409,6 +2566,7 @@ fn chamfer_sides_curved(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide,
 
 /// The prism that cuts a chamfer: the body, which of its faces is the chamfer plane, and the
 /// edge (of the body it chamfers, in its edge order) that face is made in place of.
+#[derive(Clone)]
 pub(crate) struct Cutter {
     body: Body,
     face: Option<usize>,

@@ -55,7 +55,8 @@ pub fn compound_disjoint_extrusions(tools: &[Body]) -> Result<Option<Body>> {
             let mut points = Some(Vec::new());
             let mut directions = Vec::new();
             let mut caps = 0;
-            for source in sources {
+            let mut unknown = 0;
+            for (face, source) in tool.solid.face_iter().zip(sources) {
                 let Some(left) = remaining.checked_sub(1) else { return Ok(None) };
                 remaining = left;
                 match source {
@@ -91,11 +92,25 @@ pub fn compound_disjoint_extrusions(tools: &[Body]) -> Result<Option<Body>> {
                             }
                         }
                     }
-                    Some(crate::FaceSource::ExtrudeSide { .. }) => {}
+                    // A cap named after its sketch curves keeps no region: its own edges bound it.
+                    Some(crate::FaceSource::CertifiedExtrudeCap { plane, .. }) => {
+                        caps += 1;
+                        if !edge_bounds(face, Some(plane.normal()), &mut bb, &mut points, &mut directions, &mut remaining) {
+                            return Ok(None);
+                        }
+                    }
+                    Some(crate::FaceSource::ExtrudeSide { .. } | crate::FaceSource::CertifiedExtrudeSide { .. }) => {}
+                    // A face whose source isn't kept (a side, or a cap): bounded by its own edges.
+                    None => {
+                        unknown += 1;
+                        if !edge_bounds(face, None, &mut bb, &mut points, &mut directions, &mut remaining) {
+                            return Ok(None);
+                        }
+                    }
                     _ => return Ok(None),
                 }
             }
-            if caps != 2 || bb.is_empty() || !bb.min.is_finite() || !bb.max.is_finite() {
+            if caps == 0 || (caps != 2 && unknown == 0) || bb.is_empty() || !bb.min.is_finite() || !bb.max.is_finite() {
                 return Ok(None);
             }
             bounds.push(bb);
@@ -170,6 +185,55 @@ pub fn compound_disjoint_extrusions(tools: &[Body]) -> Result<Option<Body>> {
             Some(body.with_face_sources(Some(std::sync::Arc::new(mapped))))
         })
     })
+}
+
+/// Add a face's edges to an extrusion's bounds: a line's ends (and, given the cap plane's
+/// normal, the separating axis across it), a curve's control points (inside whose hull it lies;
+/// the box test alone then). `false` for an edge of another kind, or past the work budget.
+fn edge_bounds(
+    face: &mt::Face,
+    normal: Option<Vec3>,
+    bb: &mut solidcraft_geom::Aabb3,
+    points: &mut Option<Vec<Vec3>>,
+    directions: &mut Vec<Vec3>,
+    remaining: &mut usize,
+) -> bool {
+    for wire in face.boundaries() {
+        for edge in wire.edge_iter() {
+            let Some(left) = remaining.checked_sub(1) else { return false };
+            *remaining = left;
+            match edge.curve() {
+                mt::Curve::Line(_) => {
+                    let (a, b) = (from_p3(edge.front().point()), from_p3(edge.back().point()));
+                    bb.add(a);
+                    bb.add(b);
+                    if let Some(points) = points.as_mut() {
+                        points.extend([a, b]);
+                    }
+                    if let Some(axis) = normal.and_then(|n| (b - a).cross(n).normalized()) {
+                        directions.push(axis);
+                    }
+                }
+                mt::Curve::NurbsCurve(c) => {
+                    *points = None;
+                    for h in c.control_points() {
+                        if !(h.w > 0.0) {
+                            return false;
+                        }
+                        bb.add(Vec3::new(h.x / h.w, h.y / h.w, h.z / h.w));
+                    }
+                }
+                mt::Curve::BSplineCurve(c) => {
+                    *points = None;
+                    for q in c.control_points() {
+                        bb.add(from_p3(*q));
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+    true
 }
 
 /// Whether a union can sew two matching planar faces without intersecting them.

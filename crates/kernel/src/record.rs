@@ -267,6 +267,37 @@ impl Rebuild {
         }
     }
 
+    /// This record followed by `later`, made on this one's result: one record over this one's
+    /// operands. What `later` made from a face or edge this one made comes from what that came from.
+    pub(crate) fn then(mut self, later: Rebuild) -> Rebuild {
+        for (id, (face, was, whole)) in later.faces {
+            let mut from = Vec::with_capacity(was.len());
+            let mut same = whole;
+            for w in was {
+                match w {
+                    Was::Face(f) => match self.faces.get(&f) {
+                        Some((_, inner, inner_whole)) => {
+                            from.extend(inner.iter().copied());
+                            same &= *inner_whole;
+                        }
+                        None => from.push(Was::Face(f)),
+                    },
+                    Was::Edge(e) => match self.edges.get(&e) {
+                        Some((_, roots)) => from.extend(roots.iter().copied().map(Was::Edge)),
+                        None => from.push(Was::Edge(e)),
+                    },
+                }
+            }
+            self.faces.insert(id, (face, from, same));
+        }
+        for (_, (edge, roots)) in later.edges {
+            for root in roots {
+                self.piece_of(&edge, root);
+            }
+        }
+        self
+    }
+
     fn piece_of(&mut self, new: &mt::Edge, of: mt::EdgeID) {
         let roots = self.edges.get(&of).map_or_else(|| vec![of], |(_, roots)| roots.clone());
         let (_, slot) = self.edges.entry(new.id()).or_insert_with(|| (new.clone(), Vec::new()));

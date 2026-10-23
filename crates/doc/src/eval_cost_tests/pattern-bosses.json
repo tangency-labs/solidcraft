@@ -1,0 +1,558 @@
+{
+  "format": "solidcraft/27",
+  "name": "pattern-bosses",
+  "units": "mm",
+  "params": [
+    {
+      "name": "d2",
+      "expr": "4",
+      "unit": "mm",
+      "model": true
+    }
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "Plate",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p1",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p2",
+            "pos": [
+              130.0,
+              0.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p3",
+            "pos": [
+              130.0,
+              46.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p4",
+            "pos": [
+              0.0,
+              46.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 2,
+            "b": 3,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 3,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 4,
+            "b": 1,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "coincident",
+            "p": 0,
+            "q": 1
+          }
+        ],
+        "counters": {
+          "k": 5,
+          "l": 4,
+          "p": 4
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Extrude1",
+      "suppressed": false,
+      "body_names": [
+        "Plate"
+      ],
+      "param_names": [
+        "d1"
+      ],
+      "type": "extrude",
+      "sketch": 1,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "3",
+        "convention": "total_distance",
+        "direction": "positive"
+      },
+      "operation": "new_body"
+    },
+    {
+      "id": 3,
+      "name": "Boss",
+      "suppressed": false,
+      "type": "sketch",
+      "plane": {
+        "type": "origin",
+        "name": "XY"
+      },
+      "sketch": {
+        "points": [
+          {
+            "id": "origin",
+            "pos": [
+              0.0,
+              0.0
+            ],
+            "fixed": true
+          },
+          {
+            "id": "p5",
+            "pos": [
+              8.0,
+              4.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p6",
+            "pos": [
+              4.0,
+              8.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a1.center",
+            "pos": [
+              8.0,
+              8.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p7",
+            "pos": [
+              34.0,
+              4.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p8",
+            "pos": [
+              38.0,
+              8.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a2.center",
+            "pos": [
+              34.0,
+              8.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p9",
+            "pos": [
+              38.0,
+              34.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p10",
+            "pos": [
+              34.0,
+              38.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a3.center",
+            "pos": [
+              34.0,
+              34.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p11",
+            "pos": [
+              8.0,
+              38.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "p12",
+            "pos": [
+              4.0,
+              34.0
+            ],
+            "fixed": false
+          },
+          {
+            "id": "a4.center",
+            "pos": [
+              8.0,
+              34.0
+            ],
+            "fixed": false
+          }
+        ],
+        "curves": [
+          {
+            "id": "l1",
+            "type": "line",
+            "a": 1,
+            "b": 4,
+            "construction": false
+          },
+          {
+            "id": "l2",
+            "type": "line",
+            "a": 5,
+            "b": 7,
+            "construction": false
+          },
+          {
+            "id": "l3",
+            "type": "line",
+            "a": 8,
+            "b": 10,
+            "construction": false
+          },
+          {
+            "id": "l4",
+            "type": "line",
+            "a": 11,
+            "b": 2,
+            "construction": false
+          },
+          {
+            "id": "a1",
+            "type": "arc",
+            "c": 3,
+            "a": 2,
+            "b": 1,
+            "construction": false
+          },
+          {
+            "id": "a2",
+            "type": "arc",
+            "c": 6,
+            "a": 4,
+            "b": 5,
+            "construction": false
+          },
+          {
+            "id": "a3",
+            "type": "arc",
+            "c": 9,
+            "a": 7,
+            "b": 8,
+            "construction": false
+          },
+          {
+            "id": "a4",
+            "type": "arc",
+            "c": 12,
+            "a": 10,
+            "b": 11,
+            "construction": false
+          }
+        ],
+        "constraints": [
+          {
+            "id": "k1",
+            "type": "horizontal",
+            "l": 0
+          },
+          {
+            "id": "k2",
+            "type": "horizontal",
+            "l": 2
+          },
+          {
+            "id": "k3",
+            "type": "vertical",
+            "l": 1
+          },
+          {
+            "id": "k4",
+            "type": "vertical",
+            "l": 3
+          },
+          {
+            "id": "k5",
+            "type": "tangent",
+            "a": 0,
+            "b": 4
+          },
+          {
+            "id": "k6",
+            "type": "tangent",
+            "a": 3,
+            "b": 4
+          },
+          {
+            "id": "k7",
+            "type": "radius",
+            "c": 4,
+            "value": 4.0,
+            "param": "d2"
+          },
+          {
+            "id": "k8",
+            "type": "tangent",
+            "a": 0,
+            "b": 5
+          },
+          {
+            "id": "k9",
+            "type": "tangent",
+            "a": 1,
+            "b": 5
+          },
+          {
+            "id": "k10",
+            "type": "equal",
+            "a": 4,
+            "b": 5
+          },
+          {
+            "id": "k11",
+            "type": "tangent",
+            "a": 1,
+            "b": 6
+          },
+          {
+            "id": "k12",
+            "type": "tangent",
+            "a": 2,
+            "b": 6
+          },
+          {
+            "id": "k13",
+            "type": "equal",
+            "a": 4,
+            "b": 6
+          },
+          {
+            "id": "k14",
+            "type": "tangent",
+            "a": 2,
+            "b": 7
+          },
+          {
+            "id": "k15",
+            "type": "tangent",
+            "a": 3,
+            "b": 7
+          },
+          {
+            "id": "k16",
+            "type": "equal",
+            "a": 4,
+            "b": 7
+          }
+        ],
+        "counters": {
+          "a": 4,
+          "k": 16,
+          "l": 4,
+          "p": 12
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "BossX",
+      "suppressed": false,
+      "param_names": [
+        "d3"
+      ],
+      "type": "extrude",
+      "sketch": 3,
+      "profiles": {
+        "type": "all"
+      },
+      "extent": {
+        "distance": "4",
+        "convention": "total_distance",
+        "direction": "negative"
+      },
+      "operation": "join"
+    },
+    {
+      "id": 5,
+      "name": "Root",
+      "suppressed": false,
+      "param_names": [
+        "d4"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            0.0,
+            -4.0
+          ],
+          "max": [
+            130.0,
+            46.0,
+            3.0000000000000004
+          ]
+        }
+      ],
+      "edge_names": [
+        "F2:start|F4:side:l1"
+      ],
+      "type": "chamfer",
+      "edges": [
+        [
+          21.0,
+          4.0,
+          0.0
+        ]
+      ],
+      "distance": "1"
+    },
+    {
+      "id": 6,
+      "name": "Tip",
+      "suppressed": false,
+      "param_names": [
+        "d5"
+      ],
+      "edge_refs": [
+        {
+          "dir": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "min": [
+            0.0,
+            0.0,
+            -4.0
+          ],
+          "max": [
+            130.0,
+            46.0,
+            3.0000000000000004
+          ]
+        }
+      ],
+      "edge_names": [
+        "F4:bottom|F4:side:l1"
+      ],
+      "type": "chamfer",
+      "edges": [
+        [
+          21.0,
+          4.0,
+          -4.0
+        ]
+      ],
+      "distance": "0.8"
+    },
+    {
+      "id": 7,
+      "name": "RectangularPattern1",
+      "suppressed": false,
+      "param_names": [
+        "d6",
+        "d7"
+      ],
+      "type": "pattern",
+      "features": [
+        "BossX",
+        "Root",
+        "Tip"
+      ],
+      "pattern": {
+        "type": "rectangular",
+        "dir1": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "count1": "3",
+        "spacing1": "42"
+      }
+    }
+  ],
+  "next_id": 8
+}

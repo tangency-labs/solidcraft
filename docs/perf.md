@@ -1,5 +1,53 @@
 # Design loading
 
+## Feature patterns: copies applied at once (#2774, 2026-10-19)
+
+`replay` applied a feature pattern's copies one at a time on the whole body built so far: each
+copy of an extrude was one boolean, each copy of a chamfer one chamfer, and each validated, healed
+and measured the whole body again. The body grows with the copies, so a pattern cost about n²
+work: a 42-cell Gridfinity-style baseplate (two patterns of an extrude and two chamfers) took
+about 11 minutes to open.
+
+Copies that lie apart are now applied at once:
+
+- **An extrude's copies** go into one boolean as one compound (`compound_disjoint_extrusions`),
+  as a sketch's separate profiles already did. The batch was limited to the extrude feature
+  itself; a pattern's copies of an extrude now take it too. Caps named after their sketch curves
+  (`CertifiedExtrudeCap`) and faces whose source isn't kept are bounded by their own edges (a
+  curved edge by its control points), so these tools count as apart when they are.
+- **A chamfer's copies** go into one `kernel::chamfer_apart`: each copy chamfered the way
+  `chamfer` would chamfer it alone, then one cut or one rebuild and one fit check for all of
+  them. Cutters stand side by side (`union_apart`) rather than united; whole loops and chains a
+  ball rolls along are blended one after another into one solid, their rebuild records composed
+  (`Rebuild::then`). Where the copies would be chamfered differently, their chamfers meet, or a
+  step fails, the copies are chamfered one at a time as before. Fillets are still one at a time.
+
+The result is the same body: the same faces and edges, volumes and areas within 1e-8 of each other
+(`blend_wrong_way_tests::apart`, `patterns_tests::copies`, and the identity sweep below).
+
+Names change in two ways:
+
+- A copy's blend faces were named by position (`F7:blend::face:13|:face:32`): a stage operand
+  named its edges from the stand-in body it was given, which has no face names. They are now
+  named after the source's (`F7:blend:F4:bottom@F7.1|F4:side:a1@F7.1`), with or without the
+  batch.
+- One boolean for all copies leaves the faces in another order, so faces later features name by
+  position (`F12:face:110`) can come out on a different face of the same shape. A face named
+  after its history keeps its name.
+
+Release `solidcraft-cli`, Apple M4 Pro (14 cores), macOS 27; the patterns three alternating
+before/after pairs (medians), the baseplate once each:
+
+| Design | Before | After |
+| --- | ---: | ---: |
+| plate, joined rounded boss and two chamfers, 4 × 3 pattern | 13.25 s | 3.72 s |
+| the same, 6 × 5 pattern | 59.67 s | 15.17 s |
+| 42-cell baseplate, `bench-open` evaluate | 641 s | 111 s |
+
+Most of what is left on the baseplate is the one boolean that joins the copies into the plate
+(truck's intersection of the plate with every copy, retried with coincident faces pushed apart)
+and the ball rolled along each copy's chain.
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a
