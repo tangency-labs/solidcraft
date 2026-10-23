@@ -81,3 +81,32 @@ fn body_index_and_placements_follow_geometry_undo_and_document_identity() {
     assert!(super::model_children(&h.app, 0).is_empty());
     assert!(super::entries(&h.app, component, "bodies").is_empty());
 }
+
+#[test]
+fn feature_editor_browser_rows_follow_the_marker_and_return_after_cancel() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"name":"Depth"})).unwrap();
+    let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"YZ","name":"Later sketch"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20,"name":"Later plane"})).unwrap();
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 2);
+    assert_eq!(super::entries(&h.app, 0, "construction").len(), 1);
+    h.app.edit_feature(feature);
+    // Both the fallback queries and the cached index must follow rollback.
+    assert_eq!(super::entries(&h.app, 0, "sketches").iter().map(|e| e.label.as_str()).collect::<Vec<_>>(), ["Base"]);
+    assert!(super::entries(&h.app, 0, "construction").is_empty());
+    assert!(super::entries(&h.app, 0, "bodies").is_empty());
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 1);
+    assert!(super::entries(&h.app, 0, "construction").is_empty());
+    crate::dialogs::cancel(&mut h.app);
+    super::prepare_model(&mut h.app);
+    assert_eq!(super::entries(&h.app, 0, "sketches").len(), 2);
+    assert_eq!(super::entries(&h.app, 0, "construction").len(), 1);
+    assert_eq!(super::entries(&h.app, 0, "bodies").len(), 1);
+}

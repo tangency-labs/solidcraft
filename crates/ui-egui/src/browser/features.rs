@@ -41,7 +41,13 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
 pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
     let has_features = match app.tree.model.as_ref().filter(|m| m.matches(&app.session)) {
         Some(model) => model.features.get(&component).is_some_and(|features| !features.is_empty()),
-        None => app.session.doc.features.iter().any(|feature| feature.component == component && !matches!(feature.kind, FeatureKind::Sketch { .. })),
+        None => app
+            .session
+            .doc
+            .features
+            .iter()
+            .take(app.session.doc.marker.unwrap_or(app.session.doc.features.len()))
+            .any(|feature| feature.component == component && !matches!(feature.kind, FeatureKind::Sketch { .. })),
     };
     if !has_features {
         return;
@@ -63,6 +69,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .doc
             .features
             .iter()
+            .take(app.session.doc.marker.unwrap_or(app.session.doc.features.len()))
             .enumerate()
             .filter_map(|(i, f)| (f.component == component && !matches!(f.kind, FeatureKind::Sketch { .. })).then_some(i))
             .collect(),
@@ -111,6 +118,22 @@ mod tests {
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
         let _ = h.ctx.run_ui(raw, |ui| rows(&mut h.app, ui, 0, &[], 0, &mut Actions::default()));
         drawn_rows().into_iter().map(|(label, ..)| label).collect()
+    }
+
+    #[test]
+    fn browser_feature_rows_roll_back_with_the_model() {
+        let mut h = Harness::new();
+        for name in ["Before", "After"] {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap();
+        }
+        h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before"], "{cache}");
+        }
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before", "After"], "{cache}");
+        }
     }
 
     #[test]

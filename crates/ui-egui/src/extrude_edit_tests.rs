@@ -503,3 +503,55 @@ fn two_sides_with_all_shows_distance_2_and_reverse_swaps_the_sides() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h), e);
 }
+
+#[test]
+fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
+    for finish in ["Cancel", "OK"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Source"})).unwrap();
+        h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[30,0,0],"body_name":"Other"})).unwrap();
+        h.app
+            .run("solid.extrude", json!({"face":[5,5,10],"face_body":"Source","distance":5,"operation":"new","body_name":"Extension","name":"Depth"}))
+            .unwrap();
+        h.app.session.visibility.hidden_bodies.push("Source".into());
+        let visibility = h.app.session.visibility.clone();
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        assert!(h.app.body_visible("Source"));
+        assert!(!h.app.session.body_visible("Source"), "the editor must not change persistent visibility");
+        assert!(h.app.body_visible("Other"));
+        assert!(h.app.session.world_state().body("Extension").is_none(), "the feature's result is rolled off");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.app.session.visibility.hidden_bodies.push("Other".into());
+        h.step(&json!({"widget":finish})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        assert!(!h.app.body_visible("Source"));
+        assert!(!h.app.body_visible("Other"), "unrelated visibility edits are preserved");
+        assert_eq!(h.app.session.visibility.hidden_sketches, visibility.hidden_sketches);
+        assert_eq!(h.app.session.visibility.shown_sketches, visibility.shown_sketches);
+        assert!(h.app.session.world_state().body("Extension").is_some());
+    }
+}
+
+#[test]
+fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibility() {
+    let mut h = Harness::new();
+    let owner = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Source"})).unwrap();
+    h.app.run("solid.extrude", json!({"face":[5,5,10],"face_body":"Source","distance":5,"operation":"new","name":"Depth"})).unwrap();
+    let path = vec![owner["occurrence"].as_u64().unwrap()];
+    h.app.session.visibility.hidden_occurrences.push(path);
+    let visibility = h.app.session.visibility.clone();
+    assert!(!h.app.body_visible("Source"));
+    open(&mut h);
+    assert!(h.app.body_visible("Source"), "a hidden parent must not hide the source during editing");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"missing_length"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_some());
+    assert!(h.app.body_visible("Source"));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(!h.app.body_visible("Source"));
+    assert_eq!(h.app.session.visibility, visibility);
+}

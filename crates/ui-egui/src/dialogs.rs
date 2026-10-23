@@ -405,6 +405,9 @@ pub struct Dialog {
     pub error: Option<String>,
     /// Editing an existing feature (its id, and the timeline marker to restore afterwards).
     pub editing: Option<(u64, Option<usize>)>,
+    /// Hidden face-profile sources shown only for this editor's lifetime. Visibility itself is
+    /// unchanged, so OK, Cancel, failed apply and replacing the dialog cannot leak an override.
+    pub(crate) edit_source_bodies: Vec<String>,
     /// A user pick or clear makes the profile selector explicit, even if all are reselected.
     pub profile_selection_changed: bool,
     /// Give the on-canvas value box the keyboard (and select its text) on the next frame.
@@ -593,6 +596,7 @@ impl Dialog {
             active: 0,
             error: None,
             editing: None,
+            edit_source_bodies: Vec::new(),
             profile_selection_changed: false,
             focus: true,
             collapsed: false,
@@ -4862,6 +4866,29 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d
         }
     };
+    if let FeatureKind::Extrude { sketch, .. } = &f.kind
+        && let Some(FeatureKind::Sketch { plane, .. }) = s.doc.feature(sketch.0).map(|f| &f.kind)
+    {
+        let mut plane = plane;
+        // Plane nesting comes from design files: bound the walk just like other reference walks.
+        for _ in 0..64 {
+            match plane {
+                PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane = base,
+                PlaneRef::Face { anchor: Some(anchor), .. } => {
+                    let model = s.model.state();
+                    if let Some(body) = model.body(&anchor.target.body) {
+                        let owner = s.doc.model_body_component(body);
+                        let name = s.doc.world_body_name(&model, &body.name, owner, &anchor.path);
+                        if st.body(&name).is_some() && !s.body_visible(&name) {
+                            d.edit_source_bodies.push(name);
+                        }
+                    }
+                    break;
+                }
+                _ => break,
+            }
+        }
+    }
     d.editing = Some((id, marker));
     d.active = 0;
     d.error = None;

@@ -1186,6 +1186,12 @@ impl SolveApp {
         let _ = self.run_heavy("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 
+    /// Visibility in the editor's scene: hidden face-profile sources are temporarily shown
+    /// without changing the session's visibility or either history stack.
+    pub(crate) fn body_visible(&self, name: &str) -> bool {
+        self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
+    }
+
     /// Everything shown as selected: the selection plus the open dialog's inputs.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();

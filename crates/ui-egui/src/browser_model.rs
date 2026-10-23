@@ -35,6 +35,9 @@ impl Model {
         let mut planes: HashMap<u64, Vec<usize>> = HashMap::new();
         let mut features: HashMap<u64, Vec<usize>> = HashMap::new();
         for (i, feature) in session.doc.features.iter().enumerate() {
+            if session.doc.marker.is_some_and(|marker| i >= marker) {
+                break;
+            }
             if !matches!(feature.kind, FeatureKind::Sketch { .. }) {
                 features.entry(feature.component).or_default().push(i);
             }

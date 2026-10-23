@@ -915,6 +915,7 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
             .doc
             .features
             .iter()
+            .take(app.session.doc.marker.unwrap_or(app.session.doc.features.len()))
             .enumerate()
             .filter_map(|(i, f)| {
                 let kind =
@@ -1642,7 +1643,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 row_key: format!("b:{}", b.name),
                 label: b.name.clone(),
                 icon: "body",
-                visible: !app.session.visibility.hidden_bodies.contains(&b.name),
+                visible: app.body_visible(&b.name),
                 selected: sel.iter().any(|x| matches!(x, Sel::Body { name } if *name == b.name)),
                 color: None,
                 locked: app.ui.locked_bodies.contains(&b.name),
