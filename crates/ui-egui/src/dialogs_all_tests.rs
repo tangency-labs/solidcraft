@@ -34,6 +34,9 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "joint.gear" {
             continue;
         }
+        if command == "solid.coil" {
+            continue; // an empty Profile input keeps the primitive section, which this form checks
+        }
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
             continue;
         }
@@ -335,4 +338,21 @@ fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
         assert_eq!(h.app.session.doc.to_json(), design, "{command}: opening/cancelling keeps the design");
         assert_eq!(h.app.session.pending_moves, moves, "{command}: cancel restores display-only moves");
     }
+}
+
+#[test]
+fn coil_from_a_profile_hides_the_primitive_section() {
+    let h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    let sketch = h.app.session.world_state().sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.coil");
+    assert_eq!(p["sketch"], json!(sketch));
+    assert_eq!(p["profiles"], json!([0]));
+    assert!(p.get("diameter").is_none(), "{p}");
+    assert!(p.get("section_size").is_none(), "{p}");
+    assert!(p.get("revolutions").is_some() && p.get("pitch").is_some(), "{p}");
+    assert!(p.get("operation").is_some(), "{p}");
 }

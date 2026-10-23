@@ -20,7 +20,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; operation?, targets?, name?, body_name?",
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
+         operation?, targets?, name?, body_name?",
     ),
     CommandSpec::new("solid.rib", "Rib", rib)
         .at("SOLID", "CREATE")
@@ -47,10 +49,26 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.coil";
+    let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
+    let profile_mode = given("sketch");
+    if profile_mode {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+            return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
+        }
+    } else if given("profiles") {
+        return Err(bad(cmd, "`profiles` needs `sketch`"));
+    }
+    let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
+    let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
     let axis = axis_dir_param(p, cmd)?;
-    let diameter = req_expr(cmd, p, "diameter")?;
-    check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
+    let diameter = if profile_mode {
+        None
+    } else {
+        let d = req_expr(cmd, p, "diameter")?;
+        check_expr(s, &d, Kind::Length, cmd, "diameter")?;
+        Some(d)
+    };
     let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));
     let (height, pitch) = (expr(p, "height"), expr(p, "pitch"));
     // The pitch or the revolutions from the height keep the units the lengths were given in.
@@ -69,8 +87,13 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &turns, Kind::Unitless, cmd, "revolutions")?;
     check_expr(s, &pitch, Kind::Length, cmd, "pitch")?;
-    let section_size = req_expr(cmd, p, "section_size")?;
-    check_expr(s, &section_size, Kind::Length, cmd, "section_size")?;
+    let section_size = if profile_mode {
+        None
+    } else {
+        let size = req_expr(cmd, p, "section_size")?;
+        check_expr(s, &size, Kind::Length, cmd, "section_size")?;
+        Some(size)
+    };
     let section = match str_(p, "section").map(str::to_ascii_lowercase).as_deref() {
         None | Some("circular" | "circle") => solidcraft_doc::CoilSection::Circular,
         Some("square") => solidcraft_doc::CoilSection::Square,
@@ -94,6 +117,8 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Coil {
             base,
             axis: Dir(axis),
+            sketch,
+            profiles,
             diameter,
             pitch,
             turns,

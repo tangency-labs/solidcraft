@@ -972,14 +972,23 @@ pub enum FeatureKind {
         base: PointExpr,
         #[serde(default = "z_axis")]
         axis: Dir,
+        /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive
+        /// circular or square section below.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        #[serde(default = "all_profiles", skip_serializing_if = "profiles_are_all")]
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Diameter")]
-        diameter: Expr,
+        diameter: Option<Expr>,
         #[walk(length = "Pitch")]
         pitch: Expr,
         #[walk(unitless = "Revolutions")]
         turns: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Section size")]
-        section_size: Expr,
+        section_size: Option<Expr>,
         #[serde(default)]
         section: CoilSection,
         /// -1 inside, 0 on the centre, 1 outside of the diameter.
@@ -2355,6 +2364,10 @@ fn inside_str() -> String {
 
 fn all_profiles() -> ProfileSel {
     ProfileSel::All
+}
+
+fn profiles_are_all(p: &ProfileSel) -> bool {
+    matches!(p, ProfileSel::All)
 }
 
 fn yes() -> bool {

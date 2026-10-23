@@ -776,7 +776,7 @@ impl Dialog {
                     operation: 0,
                     at: None,
                 },
-                vec![],
+                vec![SelInput::new("Profile", PROFILES, false)],
             ),
             "solid.combine" => Dialog::new(
                 Kind::Combine { operation: 1, keep_tools: false },
@@ -3680,6 +3680,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (k, v) in fields {
                 p.insert((*k).into(), json!(v));
+            }
+            if *cmd == "solid.coil"
+                && let Some((sketch, index)) = sels(d, 0).profiles().first().copied()
+            {
+                p.insert("sketch".into(), json!(sketch));
+                p.insert("profiles".into(), json!([index]));
+                p.remove("diameter");
+                p.remove("section_size");
             }
             if let Some((point, normal)) = *at {
                 match *cmd {
