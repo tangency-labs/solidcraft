@@ -53,6 +53,17 @@ pub enum GraphKind {
     Workspace,
 }
 
+/// What [`Document::merge_workspace`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// The open workspace had not moved, so it now matches the other one.
+    BroughtIn,
+    /// Both sides moved, and the changes sat in different places.
+    Merged,
+    /// The other workspace had nothing new.
+    Already,
+}
+
 /// One node of the graph, laid out in columns from the oldest version.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphPoint {
@@ -327,6 +338,214 @@ impl Document {
         self.install_snapshot(&snapshot)
     }
 
+    /// Rename a version or a workspace.
+    pub fn rename_node(&mut self, id: &str, name: &str) -> Result<()> {
+        let current = self
+            .versions
+            .versions
+            .iter()
+            .find(|version| version.id == id)
+            .map(|version| version.name.clone())
+            .or_else(|| self.versions.workspaces.iter().find(|workspace| workspace.id == id).map(|workspace| workspace.name.clone()));
+        let Some(current) = current else { return Err(DocError::Invalid(format!("no version or workspace {id}"))) };
+        if current == name.trim() {
+            return Ok(());
+        }
+        let name = checked_name(&self.versions, name)?;
+        if let Some(version) = self.versions.versions.iter_mut().find(|version| version.id == id) {
+            version.name = name;
+            return Ok(());
+        }
+        if let Some(workspace) = self.versions.workspaces.iter_mut().find(|workspace| workspace.id == id) {
+            workspace.name = name;
+        }
+        Ok(())
+    }
+
+    /// Remove a version. Anything that started from it now starts from the version before it.
+    pub fn delete_version(&mut self, id: &str) -> Result<()> {
+        let parent = self
+            .versions
+            .versions
+            .iter()
+            .find(|version| version.id == id)
+            .map(|version| version.parent.clone())
+            .ok_or_else(|| DocError::Invalid(format!("no version {id}")))?;
+        for version in &mut self.versions.versions {
+            if version.parent.as_deref() == Some(id) {
+                version.parent.clone_from(&parent);
+            }
+        }
+        for workspace in &mut self.versions.workspaces {
+            if workspace.from.as_deref() == Some(id) {
+                workspace.from.clone_from(&parent);
+            }
+        }
+        self.versions.versions.retain(|version| version.id != id);
+        self.drop_unused_blobs();
+        Ok(())
+    }
+
+    /// Remove a workspace and the versions made on it. Main, and the workspace that is open, stay.
+    pub fn delete_workspace(&mut self, id: &str) -> Result<()> {
+        if id == "main" {
+            return Err(DocError::Invalid("Main stays".into()));
+        }
+        if id == self.versions.current {
+            return Err(DocError::Invalid("open another workspace before deleting this one".into()));
+        }
+        if self.versions.workspaces.iter().all(|workspace| workspace.id != id) {
+            return Err(DocError::Invalid(format!("no workspace {id}")));
+        }
+        let doomed: Vec<String> = self.versions.versions.iter().filter(|version| version.workspace == id).map(|version| version.id.clone()).collect();
+        let parents: Vec<(String, Option<String>)> =
+            self.versions.versions.iter().map(|version| (version.id.clone(), version.parent.clone())).collect();
+        let survive = |start: &Option<String>| -> Option<String> {
+            let mut current = start.clone();
+            let mut guard = 0u32;
+            while let Some(now) = current.clone() {
+                if doomed.iter().all(|id| id != &now) {
+                    return Some(now);
+                }
+                current = parents.iter().find(|(id, _)| id == &now).and_then(|(_, parent)| parent.clone());
+                guard += 1;
+                if guard > 256 {
+                    return None;
+                }
+            }
+            None
+        };
+        for version in &mut self.versions.versions {
+            version.parent = survive(&version.parent);
+        }
+        for workspace in &mut self.versions.workspaces {
+            workspace.from = survive(&workspace.from);
+        }
+        self.versions.versions.retain(|version| version.workspace != id);
+        self.versions.workspaces.retain(|workspace| workspace.id != id);
+        self.drop_unused_blobs();
+        Ok(())
+    }
+
+    /// Bring `id` into the open workspace.
+    ///
+    /// When only one side moved on since the shared version, that side is kept. When both moved,
+    /// features and parameters combine by id and by name. The same thing changed on both sides is
+    /// refused, and nothing is written.
+    pub fn merge_workspace(&mut self, id: &str) -> Result<MergeOutcome> {
+        if id == self.versions.current {
+            return Err(DocError::Invalid("a workspace cannot be merged into itself".into()));
+        }
+        let theirs_name = self
+            .versions
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .map(|workspace| workspace.name.clone())
+            .ok_or_else(|| DocError::Invalid(format!("no workspace {id}")))?;
+        let theirs_hash = self
+            .versions
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .and_then(|workspace| workspace.snapshot.clone())
+            .ok_or_else(|| DocError::Invalid(format!("{theirs_name} has no saved design")))?;
+        let theirs = self.versions.blobs.get(&theirs_hash).cloned().ok_or_else(|| DocError::Invalid(format!("{theirs_name} has no saved design")))?;
+        let ours = self.design_value()?;
+        if ours == theirs {
+            return Ok(MergeOutcome::Already);
+        }
+        let base = match self.shared_version(id) {
+            Some(version_id) => {
+                let hash = self
+                    .versions
+                    .versions
+                    .iter()
+                    .find(|version| version.id == version_id)
+                    .map(|version| version.snapshot.clone())
+                    .ok_or_else(|| DocError::Invalid("a shared version is missing".into()))?;
+                self.versions.blobs.get(&hash).cloned().ok_or_else(|| DocError::Invalid("a shared version is missing".into()))?
+            }
+            None => return Err(DocError::Invalid(format!("{theirs_name} does not share a version with this workspace"))),
+        };
+        if ours == base {
+            self.install_snapshot(&theirs_hash)?;
+            return Ok(MergeOutcome::BroughtIn);
+        }
+        if theirs == base {
+            return Ok(MergeOutcome::Already);
+        }
+        let merged = merge_values(&base, &ours, &theirs, "")?;
+        if merged == ours {
+            return Ok(MergeOutcome::Already);
+        }
+        self.install_value(merged)?;
+        Ok(MergeOutcome::Merged)
+    }
+
+    /// The newest version that is on both this workspace's history and `other`'s.
+    fn shared_version(&self, other: &str) -> Option<String> {
+        let theirs = self.history(other);
+        self.history(&self.versions.current).into_iter().find(|id| theirs.iter().any(|theirs_id| theirs_id == id))
+    }
+
+    fn history(&self, workspace_id: &str) -> Vec<String> {
+        let Some(workspace) = self.versions.workspaces.iter().find(|workspace| workspace.id == workspace_id) else { return Vec::new() };
+        let newest = self.versions.versions.iter().rev().find(|version| version.workspace == workspace_id).map(|version| version.id.clone());
+        let mut chain = Vec::new();
+        let mut id = newest.or_else(|| workspace.from.clone());
+        let mut guard = 0u32;
+        while let Some(current) = id {
+            if chain.iter().any(|seen| seen == &current) || guard > 256 {
+                break;
+            }
+            chain.push(current.clone());
+            id = self.versions.versions.iter().find(|version| version.id == current).and_then(|version| version.parent.clone());
+            guard += 1;
+        }
+        if let Some(from) = &workspace.from
+            && !chain.iter().any(|seen| seen == from)
+        {
+            id = Some(from.clone());
+            while let Some(current) = id {
+                if chain.iter().any(|seen| seen == &current) || guard > 256 {
+                    break;
+                }
+                chain.push(current.clone());
+                id = self.versions.versions.iter().find(|version| version.id == current).and_then(|version| version.parent.clone());
+                guard += 1;
+            }
+        }
+        chain
+    }
+
+    fn drop_unused_blobs(&mut self) {
+        let mut used = std::collections::BTreeSet::new();
+        for version in &self.versions.versions {
+            used.insert(version.snapshot.clone());
+        }
+        for workspace in &self.versions.workspaces {
+            if let Some(snapshot) = &workspace.snapshot {
+                used.insert(snapshot.clone());
+            }
+        }
+        self.versions.blobs.retain(|hash, _| used.contains(hash));
+    }
+
+    fn design_value(&self) -> Result<Value> {
+        let mut copy = self.clone();
+        copy.versions = Versions::default();
+        serde_json::to_value(&copy).map_err(|error| DocError::Invalid(format!("could not read the design ({error})")))
+    }
+
+    fn install_value(&mut self, value: Value) -> Result<()> {
+        let body: Document = serde_json::from_value(value).map_err(|error| DocError::Invalid(format!("could not merge ({error})")))?;
+        let versions = self.versions.clone();
+        *self = body;
+        self.versions = versions;
+        Ok(())
+    }
+
     fn park_open_workspace(&mut self) -> Result<()> {
         let snapshot = self.store_blob(false, &mut |_| None)?;
         let current = self.versions.current.clone();
@@ -413,6 +632,115 @@ fn checked_name(versions: &Versions, name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
+fn merge_values(base: &Value, ours: &Value, theirs: &Value, path: &str) -> Result<Value> {
+    if ours == theirs {
+        return Ok(ours.clone());
+    }
+    if ours == base {
+        return Ok(theirs.clone());
+    }
+    if theirs == base {
+        return Ok(ours.clone());
+    }
+    match (base, ours, theirs) {
+        (Value::Object(base), Value::Object(ours), Value::Object(theirs)) => {
+            let mut keys: Vec<&String> = base.keys().chain(ours.keys()).chain(theirs.keys()).collect();
+            keys.sort();
+            keys.dedup();
+            let mut merged = serde_json::Map::new();
+            for key in keys {
+                let child = if path.is_empty() { key.clone() } else { format!("{path}.{key}") };
+                match (base.get(key), ours.get(key), theirs.get(key)) {
+                    (_, Some(ours), Some(theirs)) => {
+                        merged.insert(key.clone(), merge_values(base.get(key).unwrap_or(&Value::Null), ours, theirs, &child)?);
+                    }
+                    (Some(base), Some(ours), None) => {
+                        if ours != base {
+                            return Err(DocError::Invalid(format!("both workspaces changed {child}")));
+                        }
+                    }
+                    (Some(base), None, Some(theirs)) => {
+                        if theirs != base {
+                            return Err(DocError::Invalid(format!("both workspaces changed {child}")));
+                        }
+                    }
+                    (None, Some(ours), None) => {
+                        merged.insert(key.clone(), ours.clone());
+                    }
+                    (None, None, Some(theirs)) => {
+                        merged.insert(key.clone(), theirs.clone());
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Value::Object(merged))
+        }
+        (Value::Array(base), Value::Array(ours), Value::Array(theirs)) => match array_key(base, ours, theirs) {
+            Some(key) => merge_keyed_array(base, ours, theirs, key, path),
+            None => Err(DocError::Invalid(format!("both workspaces changed {path}"))),
+        },
+        _ => Err(DocError::Invalid(format!("both workspaces changed {}", if path.is_empty() { "the design" } else { path }))),
+    }
+}
+
+fn array_key(base: &[Value], ours: &[Value], theirs: &[Value]) -> Option<&'static str> {
+    let sides = [base, ours, theirs];
+    let usable = |field: &str| sides.iter().all(|side| side.is_empty() || side.iter().all(|item| field_key(item, field).is_some()));
+    let present = |field: &str| sides.iter().any(|side| !side.is_empty() && side.iter().all(|item| field_key(item, field).is_some()));
+    if present("id") && usable("id") {
+        Some("id")
+    } else if present("name") && usable("name") {
+        Some("name")
+    } else {
+        None
+    }
+}
+
+fn field_key(value: &Value, field: &str) -> Option<String> {
+    match value.get(field)? {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn index_by<'a>(items: &'a [Value], key: &str) -> BTreeMap<String, &'a Value> {
+    items.iter().filter_map(|item| field_key(item, key).map(|id| (id, item))).collect()
+}
+
+fn merge_keyed_array(base: &[Value], ours: &[Value], theirs: &[Value], key: &str, path: &str) -> Result<Value> {
+    let base = index_by(base, key);
+    let ours_index = index_by(ours, key);
+    let theirs_index = index_by(theirs, key);
+    let mut order: Vec<String> = ours.iter().filter_map(|item| field_key(item, key)).collect();
+    for id in theirs.iter().filter_map(|item| field_key(item, key)) {
+        if !order.iter().any(|seen| seen == &id) {
+            order.push(id);
+        }
+    }
+    let mut merged = Vec::new();
+    for id in order {
+        let child = format!("{path} {key} {id}");
+        match (base.get(&id), ours_index.get(&id), theirs_index.get(&id)) {
+            (_, Some(ours), Some(theirs)) => merged.push(merge_values(base.get(&id).copied().unwrap_or(&Value::Null), ours, theirs, &child)?),
+            (Some(base), Some(ours), None) => {
+                if **ours != **base {
+                    return Err(DocError::Invalid(format!("both workspaces changed {child}")));
+                }
+            }
+            (Some(base), None, Some(theirs)) => {
+                if **theirs != **base {
+                    return Err(DocError::Invalid(format!("both workspaces changed {child}")));
+                }
+            }
+            (None, Some(ours), None) => merged.push((*ours).clone()),
+            (None, None, Some(theirs)) => merged.push((*theirs).clone()),
+            (None, None, None) | (Some(_), None, None) => {}
+        }
+    }
+    Ok(Value::Array(merged))
+}
+
 fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -489,13 +817,38 @@ mod tests {
         assert_eq!(doc.name, "Now");
         assert_eq!(doc.versions.versions.len(), 1, "the fork is a saved point on Main");
         assert_eq!(doc.versions.versions[0].name, "Point");
+    }
+
+    #[test]
+    fn rename_delete_and_merge() {
+        use crate::Param;
+        let mut doc = Document::new("Robot");
+        doc.params.push(Param { name: "width".into(), expr: "1".into(), unit: "mm".into(), comment: String::new(), model: false });
+        let side = doc.branch_from_here("Side", |_| None).unwrap();
+        doc.rename_node(&side, "Trial").unwrap();
+        assert!(doc.versions.workspaces.iter().any(|workspace| workspace.name == "Trial"));
+        assert!(doc.rename_node("main", "Trial").is_err(), "a name already in use is refused");
+        doc.params[0].expr = "2".into();
         doc.switch_workspace("main").unwrap();
-        assert_eq!(doc.name, "Now");
-        let points = doc.versions.layout();
-        let side = points.iter().find(|point| point.name == "Side").unwrap();
-        let main = points.iter().find(|point| point.id == "main").unwrap();
-        assert_ne!(side.row, main.row);
-        assert!(side.parent.is_some());
+        doc.params.push(Param { name: "height".into(), expr: "3".into(), unit: "mm".into(), comment: String::new(), model: false });
+        assert_eq!(doc.merge_workspace(&side).unwrap(), MergeOutcome::Merged);
+        assert_eq!(doc.params.iter().find(|param| param.name == "width").unwrap().expr, "2");
+        assert!(doc.params.iter().any(|param| param.name == "height"));
+        doc.params[0].expr = "9".into();
+        doc.switch_workspace(&side).unwrap();
+        doc.params[0].expr = "8".into();
+        doc.switch_workspace("main").unwrap();
+        assert!(doc.merge_workspace(&side).is_err(), "the same parameter changed on both sides");
+        assert_eq!(doc.params[0].expr, "9", "a refused merge writes nothing");
+        let point = doc.versions.versions[0].id.clone();
+        doc.delete_version(&point).unwrap();
+        assert!(doc.versions.versions.iter().all(|version| version.id != point));
+        doc.switch_workspace(&side).unwrap();
+        assert!(doc.delete_workspace(&side).is_err());
+        doc.switch_workspace("main").unwrap();
+        doc.delete_workspace(&side).unwrap();
+        assert_eq!(doc.versions.workspaces.len(), 1);
+        assert!(doc.delete_workspace("main").is_err());
     }
 
     #[test]
