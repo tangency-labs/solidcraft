@@ -9,7 +9,7 @@ use solidcraft_doc::cam::{
 };
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, vec2_list};
+use crate::params::{bad, bool_, num, str_, vec2_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -19,7 +19,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.setup", "CAM Setup", setup_cmd)
         .icon("settings")
-        .params("name; work_offset?: 1…6 (G54…G59, default 1); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool"),
+        .params(
+            "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (default [0,0,1]); \
+             work_origin?: [x,y,z] mm (default [0,0,0]); stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
+        ),
     CommandSpec::new("cam.contour", "2D Contour", contour_cmd).icon("cut").params(
         "setup; name; tool (number); outer: [[x,y],…] (or regions: [{outer, holes?}]); holes?: [[[x,y],…]]; \
          side?: outside|inside|on (default outside); climb?: bool (default true); stock_to_leave?; tolerance?; \
@@ -33,9 +36,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.delete_op", "Delete CAM Operation", delete_op).icon("delete").params("setup; name"),
     CommandSpec::new("cam.post", "Post Process", post_cmd).icon("export").noundo().params(
-        "setup; post?: rs274 | name of a saved post (default rs274); program?: name (default the setup's); \
-         verify?: bool (default true: read the G-code back and check it against the toolpaths) → \
-         {gcode, extension, post, operations, readback?}",
+        "setup; post?: rs274 | name of a saved post (default rs274); program?: name (default the setup's) → \
+         {gcode, extension, post, operations, readback}. G-code is always read back and checked against the toolpaths.",
     ),
     CommandSpec::new("cam.list", "List CAM", list_cmd).icon("list").noundo().params("→ tools, setups (with operations) and saved posts"),
 ];
@@ -100,15 +102,32 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return Ok(json!({"deleted": name}));
     }
-    let work_offset = num(p, "work_offset").map_or(1u8, |n| n as u8);
+    let existing = s.doc.cam.setup(&name).cloned();
+    let work_offset = num(p, "work_offset").map_or(existing.as_ref().map(|e| e.work_offset).unwrap_or(1), |n| n as u8);
+    let tool_axis = match p.get("tool_axis") {
+        Some(v) => {
+            let a = vec3(v).ok_or_else(|| bad(cmd, "`tool_axis` must be [x, y, z]"))?;
+            [a.x, a.y, a.z]
+        }
+        None => existing.as_ref().map(|e| e.tool_axis).unwrap_or([0.0, 0.0, 1.0]),
+    };
+    let work_origin = match p.get("work_origin") {
+        Some(v) => {
+            let a = vec3(v).ok_or_else(|| bad(cmd, "`work_origin` must be [x, y, z]"))?;
+            [a.x, a.y, a.z]
+        }
+        None => existing.as_ref().map(|e| e.work_origin).unwrap_or([0.0, 0.0, 0.0]),
+    };
     let stock = match p.get("stock") {
-        None => None,
+        None => existing.as_ref().and_then(|e| e.stock),
         Some(v) => Some(stock_box(cmd, v)?),
     };
     let mut setup = CamSetup::new(&name);
     setup.work_offset = work_offset;
+    setup.tool_axis = tool_axis;
+    setup.work_origin = work_origin;
     setup.stock = stock;
-    if let Some(existing) = s.doc.cam.setup(&name) {
+    if let Some(existing) = &existing {
         setup.operations = existing.operations.clone();
     }
     setup.validate().map_err(|e| bad(cmd, e.to_string()))?;
@@ -119,6 +138,8 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     match doc.cam.setups.iter_mut().find(|x| x.name == name) {
         Some(slot) => {
             slot.work_offset = setup.work_offset;
+            slot.tool_axis = setup.tool_axis;
+            slot.work_origin = setup.work_origin;
             slot.stock = setup.stock;
         }
         None => doc.cam.setups.push(setup.clone()),
@@ -342,19 +363,17 @@ fn post_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         "operations": program.operations.len(),
         "work_offset": setup.work_offset,
     });
-    if bool_(p, "verify").unwrap_or(true) {
-        let rb = readback(&gcode, &program, &post).map_err(|e| bad(cmd, e.to_string()))?;
-        if !rb.within() {
-            return Err(bad(cmd, format!("G-code read-back deviation {:.4} mm exceeds allowed {:.4} mm", rb.max_deviation, rb.allowed)));
-        }
-        out["readback"] = json!({
-            "max_deviation": rb.max_deviation,
-            "allowed": rb.allowed,
-            "cut_length": rb.cut_length,
-            "cut_minutes": rb.cut_minutes,
-            "within": rb.within(),
-        });
+    let rb = readback(&gcode, &program, &post).map_err(|e| bad(cmd, e.to_string()))?;
+    if !rb.within() {
+        return Err(bad(cmd, format!("G-code read-back deviation {:.4} mm exceeds allowed {:.4} mm", rb.max_deviation, rb.allowed)));
     }
+    out["readback"] = json!({
+        "max_deviation": rb.max_deviation,
+        "allowed": rb.allowed,
+        "cut_length": rb.cut_length,
+        "cut_minutes": rb.cut_minutes,
+        "within": rb.within(),
+    });
     Ok(out)
 }
 
@@ -390,6 +409,8 @@ fn setup_json(setup: &CamSetup) -> Value {
     json!({
         "name": setup.name,
         "work_offset": setup.work_offset,
+        "tool_axis": setup.tool_axis,
+        "work_origin": setup.work_origin,
         "stock": setup.stock,
         "operations": setup.operations.iter().map(|op| match op {
             CamOperation::Contour { name, tool, regions, params, cut, spindle_rpm, coolant } => json!({
@@ -458,6 +479,22 @@ mod tests {
         assert!(cold.doc.format_pending.iter().any(|n| n == "cam-milling"));
         let again = run(&mut Session::new(cold.doc.as_ref().clone()), "cam.post", json!({"setup": "Top"}));
         assert!(again["readback"]["within"].as_bool().unwrap());
+
+        // Read-back always runs: `verify: false` is ignored (no opt-out).
+        let forced = run(&mut Session::new(s.doc.as_ref().clone()), "cam.post", json!({"setup": "Top", "verify": false}));
+        assert!(forced["readback"]["within"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn setup_keeps_room_for_tool_axis_and_work_origin() {
+        let mut s = Session::default();
+        run(&mut s, "cam.setup", json!({"name": "Side", "tool_axis": [1, 0, 0], "work_origin": [10, 20, 30]}));
+        assert_eq!(s.doc.cam.setups[0].tool_axis, [1.0, 0.0, 0.0]);
+        assert_eq!(s.doc.cam.setups[0].work_origin, [10.0, 20.0, 30.0]);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(cold.doc.cam.setups[0].tool_axis, [1.0, 0.0, 0.0]);
+        assert_eq!(cold.doc.cam.setups[0].work_origin, [10.0, 20.0, 30.0]);
+        assert!(s.execute("cam.setup", &json!({"name": "Bad", "tool_axis": [0, 0, 0]})).is_err());
     }
 
     #[test]
