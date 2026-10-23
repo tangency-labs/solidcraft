@@ -635,7 +635,7 @@ impl Dialog {
             ),
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
-                vec![SelInput::new("Profile", PROFILES, true), SelInput::new("Axis", AXES, false)],
+                vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXES, false)],
             ),
             "solid.fillet" => Dialog::new(fillet_kind("2 mm", false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind("1 mm", true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
@@ -3202,8 +3202,22 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => stored_axis.clone().ok_or("select an axis")?,
             };
             let (sketch, idx) = profiles();
-            let mut p =
-                json!({"sketch": sketch, "profiles": idx, "axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let mut p = json!({"axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            // A planar body face revolves like a profile (#2747); profiles win when both are picked.
+            let face = sels(d, 0).iter().find_map(|x| match x {
+                Sel::Face { body, point, .. } => Some((body, point)),
+                _ => None,
+            });
+            match face {
+                Some((body, point)) if sketch.is_null() => {
+                    p["face"] = pt(*point);
+                    p["face_body"] = json!(body);
+                }
+                _ => {
+                    p["sketch"] = sketch;
+                    p["profiles"] = idx;
+                }
+            }
             if to_object_on(&d.inputs) {
                 p["to"] = to_object_point(&d.inputs).ok_or("select the object to turn to")?;
             }
