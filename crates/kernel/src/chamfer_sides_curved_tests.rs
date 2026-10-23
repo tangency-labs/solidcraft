@@ -296,3 +296,106 @@ fn spline_outline_rim_by_two_distances() {
     let expected = base - rim_volume(perimeter, 2.0, 2.0 * 60f64.to_radians().tan());
     assert!(rel(volume(&out), expected) < 1e-4, "{} vs {expected}", volume(&out));
 }
+
+/// The oval of [`bezier_oval`] with each of its Béziers split into `k` (the same shape).
+fn split_oval(k: usize) -> (Body, f64) {
+    let (a, b, kk) = (20.0, 14.0, 0.5523);
+    let q = |x: f64, y: f64| Vec2::new(x, y);
+    let quarter = [
+        Seg2::Cubic { p0: q(a, 0.0), p1: q(a, b * kk), p2: q(a * kk, b), p3: q(0.0, b) },
+        Seg2::Cubic { p0: q(0.0, b), p1: q(-a * kk, b), p2: q(-a, b * kk), p3: q(-a, 0.0) },
+        Seg2::Cubic { p0: q(-a, 0.0), p1: q(-a, -b * kk), p2: q(-a * kk, -b), p3: q(0.0, -b) },
+        Seg2::Cubic { p0: q(0.0, -b), p1: q(a * kk, -b), p2: q(a, -b * kk), p3: q(a, 0.0) },
+    ];
+    let mut segs = Vec::new();
+    for s in quarter {
+        let mut rest = s;
+        for i in 0..k {
+            if i + 1 == k {
+                segs.push(rest);
+            } else {
+                let (x, y) = rest.split_at(1.0 / (k - i) as f64);
+                segs.push(x);
+                rest = y;
+            }
+        }
+    }
+    let perimeter = segs.iter().map(Seg2::length).sum();
+    let region = Region2 { outer: Loop2 { segs }, holes: vec![] };
+    (extrude(&Plane::XY, &[region], 0.0, 10.0).unwrap().pop().unwrap(), perimeter)
+}
+
+/// The midpoints of a body's edges at height `z`: every edge of a top rim, picked.
+fn rim_picks(b: &Body, z: f64) -> Vec<Vec3> {
+    let solid = b.deep_copy();
+    crate::body::Body::unique_edges(&solid).iter().filter_map(crate::blend::edge_mid).filter(|m| (m.z - z).abs() < 1e-6).collect()
+}
+
+/// An offset outline comes out of a drawing as many short Béziers, each with its own wall. The
+/// whole rim is one loop of the top face: its free-form pieces are fitted together and meet
+/// smoothly, as exact as the same oval of four (#4469).
+#[test]
+fn rim_of_many_short_splines_as_one_loop() {
+    let (oval, perimeter) = split_oval(5);
+    let base = volume(&oval);
+    let picks = rim_picks(&oval, 10.0);
+    assert_eq!(picks.len(), 20);
+    let out = chamfer_sides(&oval, &picks, 0.84, ChamferSide::Distance(7.0), false).unwrap();
+    sound(&out);
+    let expected = base - rim_volume(perimeter, 0.84, 7.0);
+    assert!(rel(volume(&out), expected) < 1e-4, "{} vs {expected}", volume(&out));
+    let out = chamfer(&oval, &picks, 0.84).unwrap();
+    sound(&out);
+    let expected = base - rim_volume(perimeter, 0.84, 0.84);
+    assert!(rel(volume(&out), expected) < 1e-4, "{} vs {expected}", volume(&out));
+}
+
+/// A notch in a free-form outline: the chamfers on either side meet in a mitre behind its tip,
+/// further the narrower the notch. Where a hole leaves too little face for the mitre, the whole
+/// chamfer is refused and says which corner, never a chamfer that cuts into the hole.
+#[test]
+fn notch_with_too_little_face_for_the_mitre_is_refused() {
+    let q = |x: f64, y: f64| Vec2::new(x, -y);
+    let c = |a: (f64, f64), b: (f64, f64), cc: (f64, f64), d: (f64, f64)| Seg2::Cubic {
+        p0: q(a.0, a.1),
+        p1: q(b.0, b.1),
+        p2: q(cc.0, cc.1),
+        p3: q(d.0, d.1),
+    };
+    let segs = vec![
+        c((0.0, 0.0), (10.0, -5.0), (20.0, -5.0), (30.0, 0.0)),
+        c((30.0, 0.0), (35.0, 10.0), (35.0, 20.0), (30.0, 30.0)),
+        c((30.0, 30.0), (25.0002, 40.0), (10.0, 40.0), (5.0, 35.0)),
+        // A control point away from the tip: the edge has a direction there to mitre along.
+        c((5.0, 35.0), (4.0, 31.0), (7.0, 23.0), (8.0, 20.0)),
+        c((8.0, 20.0), (0.0, 15.0), (-5.0, 5.0), (0.0, 0.0)),
+    ];
+    let outline = Loop2 { segs }.ccw();
+    // The notch's tip, and the way into the outline along its bisector.
+    let tip = q(8.0, 20.0);
+    let ends = |p: Vec2| outline.segs.iter().filter(move |s| s.start().dist(p) < 1e-9 || s.end().dist(p) < 1e-9);
+    let dirs: Vec<Vec2> =
+        ends(tip).filter_map(|s| if s.start().dist(tip) < 1e-9 { s.start_tangent() } else { -s.end_tangent() }.normalized()).collect();
+    let [d0, d1] = dirs[..] else { panic!("{dirs:?}") };
+    let bisector = (d0 + d1).normalized().unwrap();
+    let into = if outline.contains(tip + bisector * 0.5) { bisector } else { -bisector };
+    assert!(outline.contains(tip + into * 0.5));
+    // A hole 0.7 to 1.3 behind the tip.
+    let hole = Loop2::circle(tip + into * 1.0, 0.3).reversed();
+    let solid = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![hole] }], 0.0, 25.0).unwrap().pop().unwrap();
+    let base = volume(&solid);
+    let picks: Vec<Vec3> = rim_picks(&solid, 25.0).into_iter().filter(|m| Vec2::new(m.x, m.y).dist(tip + into) > 0.5).collect();
+    assert_eq!(picks.len(), 5);
+    // Small enough, the mitre stays short of the hole.
+    let out = chamfer_sides(&solid, &picks, 0.3, ChamferSide::Distance(2.0), false).unwrap();
+    sound(&out);
+    assert!(volume(&out) < base);
+    // Larger, it would run into the hole.
+    for result in [chamfer_sides(&solid, &picks, 0.84, ChamferSide::Distance(7.0), false), chamfer(&solid, &picks, 0.84)] {
+        match result {
+            Err(KernelError::TooLarge(m)) => assert!(m.contains("sharp corner near (8.00, -20.00, 25.00)"), "{m}"),
+            Err(e) => panic!("{e}"),
+            Ok(_) => panic!("a chamfer that runs into the hole was built"),
+        }
+    }
+}
