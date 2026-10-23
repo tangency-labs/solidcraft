@@ -556,14 +556,15 @@ fn is_name_shaped(s: &str) -> bool {
     matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') && cs.all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// A value typed as a definition, `name = expression`: the name and the text after the first
-/// `=`, both trimmed (the text may be empty). `None` for anything else, including text whose
+/// A value typed as a definition, `name = expression` (or `#name = expression`, #2371): the name
+/// without the `#` and the text after the first `=`, both trimmed (the text may be empty). `None` for anything else, including text whose
 /// left side is not shaped like a name (`2 = 3`), which stays an ordinary expression and fails
 /// to parse as before. The dimension input defines a user parameter this way (#2916); other
 /// value inputs can take the same form later.
 pub fn definition(s: &str) -> Option<(&str, &str)> {
     let (name, rhs) = s.split_once('=')?;
     let name = name.trim();
+    let name = name.strip_prefix('#').unwrap_or(name);
     is_name_shaped(name).then(|| (name, rhs.trim()))
 }
 
@@ -1250,6 +1251,9 @@ mod tests {
             ("w = 1 in - 5.4 mm", "w", "1 in - 5.4 mm"),
             ("_w1 = 1", "_w1", "1"),
             ("szerokość = 20", "szerokość", "20"),
+            // A `#` before the name marks it as a new parameter's (#2371).
+            ("#w = 20", "w", "20"),
+            ("  #w=20 mm", "w", "20 mm"),
             // Reserved names split too: the parameter check names the reason.
             ("mm = 5", "mm", "5"),
             // A second `=` stays in the expression, which then fails to evaluate.
@@ -1262,7 +1266,26 @@ mod tests {
         for (text, name, rhs) in splits {
             assert_eq!(definition(text), Some((name, rhs)), "{text:?}");
         }
-        for text in ["20", "20 mm", "width / 2", "= 20", "=", "", "2w = 3", "a b = 3", "a-b = 3", "w.x = 3", "(w) = 3", "-w = 3"] {
+        for text in [
+            "20",
+            "20 mm",
+            "width / 2",
+            "= 20",
+            "=",
+            "",
+            "2w = 3",
+            "a b = 3",
+            "a-b = 3",
+            "w.x = 3",
+            "(w) = 3",
+            "-w = 3",
+            "# = 3",
+            "#= 3",
+            "##w = 3",
+            "# w = 3",
+            "#2w = 3",
+            "#w",
+        ] {
             assert_eq!(definition(text), None, "{text:?}");
         }
     }

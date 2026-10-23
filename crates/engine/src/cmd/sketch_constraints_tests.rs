@@ -772,6 +772,8 @@ fn a_dimension_value_can_define_a_user_parameter() {
         ("w = 1 in - 5.4 mm", "1 in - 5.4 mm"),
         ("w = len / 3", "len / 3"),
         ("w = sqrt(400)", "sqrt(400)"),
+        ("#w = 20", "20"),
+        ("#w = len / 3", "len / 3"),
         ("w = 2 * (len / 6)", "2 * (len / 6)"),
         ("w = min(len, 20 mm)", "min(len, 20 mm)"),
     ];

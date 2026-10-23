@@ -202,7 +202,7 @@ Press D, click what you want to measure and type the value: as soon as the click
 dimension (one line, circle or arc, or the second point or line of a distance or angle), its
 value box takes the keyboard with the measured value selected, so typing replaces it. Numbers,
 units (`1 in`), expressions (`2*width`) and parameter names all work; letters go into the box,
-not to tool shortcuts. `width = 40` defines the user parameter `width` and dimensions with it,
+not to tool shortcuts. `width = 40` (or `#width = 40`) defines the user parameter `width` and dimensions with it,
 in one step. While you type, the dimension text follows the cursor, and Enter places
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
