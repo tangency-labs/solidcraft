@@ -326,6 +326,63 @@ fn vrml_models_are_read_and_placed() {
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }
 
+/// A footprint can name several models (a body and, say, a pin-1 marker). One of them missing
+/// costs that model alone: the others still come in.
+#[test]
+fn a_missing_model_keeps_the_other_models_of_its_footprint() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "gone.step")
+        (model "body.wrl" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))))"#;
+    let mut load = |path: &str| {
+        if path.contains("gone") {
+            return Err("model file was not found".to_string());
+        }
+        Ok(KicadModelFile {
+            path: path.to_string(),
+            bytes: br#"#VRML V2.0 utf8
+      Shape { geometry Box { size 2 2 2 } }"#
+                .to_vec(),
+        })
+    };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the model that is here still comes in: {meshes:?}");
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()], "the model that is here is placed");
+    assert_eq!(imported.plan.places.len(), 1);
+    assert!(
+        imported.feature.warnings.iter().any(|warning| warning.contains("gone.step") && warning.contains("was not found")),
+        "the missing model is reported: {:?}",
+        imported.feature.warnings
+    );
+}
+
+/// A footprint that names both formats of one model (`….wrl` and `….step`) has one model: the
+/// missing `….wrl` is answered by the `….step` beside it, and that file is placed once.
+#[test]
+fn one_model_named_in_both_formats_is_placed_once() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.wrl")
+        (model "part.step")))"#;
+    // Only `part.wrl` is installed: a request for either name is answered by it.
+    let mut load = |_: &str| {
+        Ok(KicadModelFile {
+            path: "part.wrl".to_string(),
+            bytes: br#"#VRML V2.0 utf8
+      Shape { geometry Box { size 2 2 2 } }"#
+                .to_vec(),
+        })
+    };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "one file, one model: {meshes:?}");
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
+}
+
 #[test]
 fn text_on_silk_and_copper_is_built_and_mirrored_text_flips() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
