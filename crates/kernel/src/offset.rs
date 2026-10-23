@@ -37,7 +37,8 @@ fn axes(f: &Frame) -> Option<(Vec3, Vec3)> {
 /// uses its natural side.
 pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
     let f = b.faces.get(face)?;
-    let out = crate::assemble::natural_out(b, face)?;
+    // `forward` is about the face's NURBS form, which may run against its surface.
+    let out = crate::assemble::natural_out(b, face)? != f.form_turns()?;
     let sign = if out { 1.0 } else { -1.0 };
     Some(match &f.surface {
         Surface::Plane { origin, u_axis, v_axis } => {

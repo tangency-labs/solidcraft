@@ -357,7 +357,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 cap.push(top);
                 added.extend(walls);
             }
-            added.push(AFace { surface: wall.cylinder(rr), natural_out: true, loops: cap, shell: selected.shell, domain: None });
+            added.push(AFace { surface: wall.cylinder(rr), nurbs: None, natural_out: true, loops: cap, shell: selected.shell, domain: None });
             added_history.push(crate::record::cap(true));
         }
         // An island inside a profile hole cuts that hole's original-radius patch,
@@ -382,7 +382,14 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         for (k, loops) in base_patches.into_iter().enumerate() {
             // The face's own parameter box only where it keeps its outer loop.
             let domain = if k == 0 { selected.domain } else { None };
-            asm.face(AFace { surface: selected.surface.clone(), natural_out: selected.natural_out, loops, shell: selected.shell, domain });
+            asm.face(AFace {
+                surface: selected.surface.clone(),
+                nurbs: selected.nurbs.clone(),
+                natural_out: selected.natural_out,
+                loops,
+                shell: selected.shell,
+                domain,
+            });
         }
         for f in added {
             asm.face(f);
@@ -470,7 +477,7 @@ impl Wrap {
                 AUse { edge: et.edge, forward: !et.forward, given: None },
                 AUse { edge: ra, forward: false, given: None },
             ];
-            walls.push(AFace { surface, natural_out: true, loops: vec![lp], shell, domain: None });
+            walls.push(AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None });
             be.push(eb);
             te.push(et);
         }
