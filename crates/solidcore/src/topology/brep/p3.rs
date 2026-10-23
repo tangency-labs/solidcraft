@@ -3600,8 +3600,13 @@ fn brep_curve_solve(
     let editing = b.editing_enabled();
     b.set_editing_enabled(false);
     let res = (|| -> Result<Vec<(usize, f64)>> {
-        let cache = crate::topology::brep_cache::BrepCache::new(crate::geom::a_object::BREP_TYPE)?;
         let keys = |o: CacheObject| arena_identity(o);
+        // (CacheMakeOrValidate: the cache with its vertex, curve and surface trees)
+        let cache = crate::topology::brep_cache::make_brep_cache(
+            k,
+            crate::topology::brep_cache::CacheSource::Brep(b),
+            &keys,
+        )?;
         let owners = |_: ObjectRef| None;
         let objects = crate::topology::brep_cache::BrepObjects {
             brep: b,

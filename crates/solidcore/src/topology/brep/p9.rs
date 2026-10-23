@@ -2129,6 +2129,7 @@ fn computed_uv_domain(
     .map_or(initial, |out| out.domain))
 }
 
+#[derive(Clone, Copy)]
 struct FacePointInput {
     face: FaceId,
     point: Point3,
@@ -2140,7 +2141,7 @@ struct FacePointInput {
 
 fn classify_with_retries(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     mut input: FacePointInput,
     classify_to_original: bool,
     pc: &mut crate::intersect::point_class::PointClassification<EntityRef>,
@@ -2161,9 +2162,12 @@ fn classify_with_retries(
     Ok(())
 }
 
+/// `pTgtFace->Point3DClassify(point, tol, bDoBoundaryIntersections, sPointClass,
+/// pOptGuessUV, bTgtLoopsOnly)` ([`crate::query::face::p1::point_3d_classify`]), with
+/// no target loop list (the outer loop when `outer_only`).
 fn point_3d_classify(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     input: &FacePointInput,
     pc: &mut crate::intersect::point_class::PointClassification<EntityRef>,
 ) -> Result<()> {
@@ -2174,27 +2178,21 @@ fn point_3d_classify(
         intersect_boundaries,
         guess,
         outer_only,
-    } = input;
-    let _ = (
+    } = *input;
+    crate::query::face::p1::point_3d_classify(
         k,
         b,
         face,
         point,
         tolerance,
         intersect_boundaries,
-        guess,
-        outer_only,
         pc,
-    );
-    // DISPATCH GAP: SmFace::Point3DClassify is ported
-    // (`query::face::p1::point_3d_classify`, query.face_p1 partial; no UNPORTED marker),
-    // but it takes `&mut Brep` (for `query::face::p2::point_classify`) and this caller's
-    // chain holds `&Brep`; wire it when the B-rep can be lent mutably here. Until
-    // then every such case would still defer inside it (topology.face_p2 / query.face_p2).
-    Err(SolidError::unported(
-        "SmFace::Point3DClassify",
-        "query.face_p1",
-    ))
+        crate::query::face::p1::Point3dClassifyOptions {
+            guess_uv: guess,
+            tgt_loops_only: outer_only,
+            ..crate::query::face::p1::Point3dClassifyOptions::default()
+        },
+    )
 }
 
 /// Geometry-only projection sequence used by `MakeEdgeInFaceWithVU`.

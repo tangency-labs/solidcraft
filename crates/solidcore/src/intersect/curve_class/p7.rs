@@ -65,9 +65,15 @@
 //!   `TRUE` before any member is read, as upstream. The edits of `sm_SetDoFilletingGeometry`
 //!   (`SmVertex::SetPoint`, `SmEdge::SetCurve`) need mutable topology and its `Notify`
 //!   chain and still return [`SolidError::Unported`].
+//! - **Face classifiers.** `SmFace::EdgeCurveOnClassify` / `Point3DClassify` are
+//!   [`crate::query::face::p1`]'s, on the B-rep and face that
+//!   [`ClassGeometry::topology_entity`] resolves the face handle to. Upstream's members
+//!   are `const` but may add UV trim curves and trimmed surface caches to the B-rep;
+//!   here they run on a copy of it (the caller holds the B-rep shared), so those
+//!   additions are not kept. A handle the adapter cannot resolve keeps the
+//!   [`SolidError::Unported`] deferral (`query.face_p1`).
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: the face
-//!   classifiers `SmFace::FindVertexSector` (`topology.face_p4`),
-//!   `EdgeCurveOnClassify` / `Point3DClassify` (`query.face_p1`) and `PointClassify`
+//!   classifiers `SmFace::FindVertexSector` (`topology.face_p4`) and `PointClassify`
 //!   (`query.face_p2`), and the topology zone tolerances of point classifications
 //!   (through `intersect.point_class`).
 //! - **Recursion.** None.
@@ -91,8 +97,9 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::face::p1 as qf1;
 use crate::surface::surface::Surface;
-use crate::topology::{edge, vertex, Brep, EdgeId, VertexId};
+use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::p1::{
     get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -1344,6 +1351,8 @@ fn classify_face_interval_on<O: ClassObject>(
                 .object()
                 .ok_or(SolidError::null_pointer(OP_FACE))?;
             min = face_edge_curve_on_classify(
+                k,
+                geometry,
                 face,
                 e,
                 ivl.start.t_param(),
@@ -1379,6 +1388,8 @@ fn classify_face_interval_on<O: ClassObject>(
             did_max = true;
             let e = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
             max = face_edge_curve_on_classify(
+                k,
+                geometry,
                 face,
                 e,
                 ivl.end.t_param(),
@@ -1421,6 +1432,8 @@ fn classify_face_interval_on<O: ClassObject>(
                 let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
                 // status ignored (assume the point was not on the surface)
                 ignored(face_point_3d_classify(
+                    k,
+                    geometry,
                     face,
                     pnt,
                     ctx.src_zone_tol_3d,
@@ -1827,8 +1840,28 @@ fn face_find_vertex_sector<O: ClassObject>(
     ))
 }
 
-/// `SmFace::EdgeCurveOnClassify`.
+/// The B-rep and face behind face handle `face` ([`ClassGeometry::topology_entity`]);
+/// `None` for an adapter that cannot resolve it.
+fn resolve_face<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    face: O,
+) -> Option<(&Brep, FaceId)> {
+    match geometry.topology_entity(face)? {
+        (b, EntityRef::Face(f)) => Some((b, f)),
+        _ => None,
+    }
+}
+
+/// `SmFace::EdgeCurveOnClassify(pE, dEdgeParam, *m_cpCurve, ivl, eCurveDirection,
+/// sSrcZoneTol3d, rbInside, rbPossibleProblem, reProblem, bUVSpaceOkay[, lFaceIndx])`:
+/// [`qf1::edge_curve_on_classify`] on a copy of the face's B-rep (upstream's `const`
+/// member may add UV trim curves to it; the copy keeps the caller's B-rep shared). An
+/// edge of another B-rep has no edge use on this face: not inside, no problem, as
+/// upstream's edge use walk finds.
+#[allow(clippy::too_many_arguments)]
 fn face_edge_curve_on_classify<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
     face: O,
     edge: O,
     edge_param: f64,
@@ -1839,25 +1872,42 @@ fn face_edge_curve_on_classify<O: ClassObject>(
     uv_space_okay: bool,
     face_index: Option<u64>,
 ) -> Result<EndInside> {
-    let _ = (
-        face,
-        edge,
-        edge_param,
+    let unresolved = || {
+        // DISPATCH GAP: the adapter cannot resolve the face or edge handle to its
+        // `Brep` entity (`ClassGeometry::topology_entity`).
+        SolidError::unported("SmFace::EdgeCurveOnClassify", "query.face_p1")
+    };
+    let (b, f) = resolve_face(geometry, face).ok_or_else(unresolved)?;
+    let (edge_brep, EntityRef::Edge(e)) = geometry.topology_entity(edge).ok_or_else(unresolved)?
+    else {
+        return Err(SolidError::invalid_input(
+            OP_FACE,
+            "edge class object not an edge",
+        ));
+    };
+    if !core::ptr::eq(b, edge_brep) {
+        return Ok(EndInside::default());
+    }
+    let mut copy = b.clone();
+    let class = qf1::edge_curve_on_classify(
+        k,
+        &mut copy,
+        f,
+        Some(e),
         curve,
-        interval,
-        direction,
-        src_zone_tol_3d,
-        uv_space_okay,
-        face_index,
-    );
-    // DISPATCH GAP: SmFace::EdgeCurveOnClassify is ported
-    // (`query::face::p1::edge_curve_on_classify`, query.face_p1 partial; no UNPORTED
-    // marker), but it takes the face's `Brep` and `FaceId`, which this caller's opaque face
-    // handle does not carry.
-    Err(SolidError::unported(
-        "SmFace::EdgeCurveOnClassify",
-        "query.face_p1",
-    ))
+        &qf1::EdgeCurveOnOptions {
+            edge_param,
+            curve_interval: *interval,
+            curve_orientation: direction,
+            curve_tolerance: src_zone_tol_3d,
+            uv_space_okay,
+            face_index,
+        },
+    )?;
+    Ok(EndInside {
+        inside: class.inside,
+        possible_problem: class.possible_problem,
+    })
 }
 
 /// `SmFace::PointClassify(uv, tol, bDoXSects, bUseUV, pc)`.
@@ -1877,22 +1927,46 @@ fn face_point_classify<O: ClassObject>(
     ))
 }
 
-/// `SmFace::Point3DClassify(point, tol, bDoXSects, pc)`.
+/// `SmFace::Point3DClassify(point, tol, bDoXSects, pc)`: [`qf1::point_3d_classify`]
+/// on a copy of the face's B-rep (see [`face_edge_curve_on_classify`]), its
+/// classification handed back in the caller's handles
+/// ([`ClassGeometry::topology_handle_in`] of the caller's B-rep). `point_class` holds
+/// what the classification wrote also when it fails, as upstream's.
 fn face_point_3d_classify<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
     face: O,
     point: Point3,
     src_zone_tol_3d: f64,
     do_xsects: bool,
     point_class: &mut PointClassification<O>,
 ) -> Result<()> {
-    let _ = (face, point, src_zone_tol_3d, do_xsects, point_class);
-    // DISPATCH GAP: SmFace::Point3DClassify is ported (`query::face::p1::point_3d_classify`,
-    // query.face_p1 partial; no UNPORTED marker), but it takes the face's `Brep` and
-    // `FaceId`, which this caller's opaque face handle does not carry.
-    Err(SolidError::unported(
-        "SmFace::Point3DClassify",
-        "query.face_p1",
-    ))
+    let unresolved = || {
+        // DISPATCH GAP: the adapter cannot resolve the face handle to its `Brep` face
+        // (`ClassGeometry::topology_entity`) or a classified entity back to a handle.
+        SolidError::unported("SmFace::Point3DClassify", "query.face_p1")
+    };
+    let (b, f) = resolve_face(geometry, face).ok_or_else(unresolved)?;
+    let mut copy = b.clone();
+    let mut pc = point_class.map_objects(&mut |o| {
+        geometry
+            .topology_entity(o)
+            .map(|(_, e)| e)
+            .ok_or_else(unresolved)
+    })?;
+    let r = qf1::point_3d_classify(
+        k,
+        &mut copy,
+        f,
+        point,
+        src_zone_tol_3d,
+        do_xsects,
+        &mut pc,
+        qf1::Point3dClassifyOptions::default(),
+    );
+    *point_class =
+        pc.map_objects(&mut |e| geometry.topology_handle_in(b, e).ok_or_else(unresolved))?;
+    r
 }
 
 #[cfg(test)]
