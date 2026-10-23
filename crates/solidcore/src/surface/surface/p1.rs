@@ -2095,40 +2095,29 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the length; [`SolidError::Unported`] for kinds other than B-splines
-    /// (the ported `SmIsoCurve` holds a B-spline surface).
+    /// Those of the evaluation copy and of the length.
     pub fn approximate_size(&self, k: &Kernel, domain: Option<&Extent2d>) -> Result<Vec2> {
         let dom = domain.copied().unwrap_or_else(|| self.natural_uv_domain());
         let param = 0.5;
         let uv_mid = dom.evaluate(param, param);
 
-        let SurfaceKind::BSpline(bs) = self.kind() else {
-            // DISPATCH GAP: SmIsoCurve::SmIsoCurve (curve.iso_curve, ported; no UNPORTED
-            // marker: the ported iso curve holds an SmBSplineSurface, not any surface)
-            return Err(SolidError::unported(
-                "SmIsoCurve over a non-B-spline surface",
-                "curve.iso_curve",
-            ));
+        // upstream's SmIsoCurve holds the surface itself and evaluates through its
+        // virtual Evaluate; a B-spline keeps the plain copy it always used
+        let iso = |param: SurfParamType, value: f64| -> Result<Curve> {
+            Ok(Curve::from(match self.kind() {
+                SurfaceKind::BSpline(bs) => IsoCurve::new(bs.clone(), param, value, true, true),
+                _ => {
+                    IsoCurve::from_surface(self.clone_for_evaluation()?, param, value, true, true)?
+                }
+            }))
         };
 
-        let iso1 = Curve::from(IsoCurve::new(
-            bs.clone(),
-            SurfParamType::U,
-            uv_mid.x,
-            true,
-            true,
-        ));
+        let iso1 = iso(SurfParamType::U, uv_mid.x)?;
         let size_v = iso1
             .approximate_length(k, &iso1.natural_interval(), 5, false)?
             .0;
 
-        let iso2 = Curve::from(IsoCurve::new(
-            bs.clone(),
-            SurfParamType::V,
-            uv_mid.y,
-            true,
-            true,
-        ));
+        let iso2 = iso(SurfParamType::V, uv_mid.y)?;
         let size_u = iso2
             .approximate_length(k, &iso2.natural_interval(), 5, false)?
             .0;
