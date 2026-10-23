@@ -810,19 +810,10 @@ mod tests {
         assert!(b.face_list().is_empty());
         assert!(b.edge_list().is_empty());
         assert!(b.vertex_list().is_empty());
-        // a positive radius sweeps the tube; the capped one's cap builder glues, gets
-        // through SmSurface::DropCurve and SmFace::CreateUVTrimCurves, then stops at the
-        // face-bound trimmed surface cache of its region split's ray fire
         let b = create_pipe_sweep(&mut k, 1.0, Some(&p), false).expect("pipe");
         assert_eq!(b.face_list().len(), 1);
-        let capped = create_pipe_sweep(&mut k, 1.0, Some(&p), true);
-        assert!(matches!(
-            capped,
-            Err(SolidError::Unported {
-                upstream: "TrimSrfCache::build_tree_with_face for a face-owned surface",
-                unit: "surface.trim_srf_cache"
-            })
-        ));
+        let capped = create_pipe_sweep(&mut k, 1.0, Some(&p), true).expect("capped pipe");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&capped).unwrap());
 
         let (c, l) = (circle(), line());
         assert!(invalid(&create_sweep_along_planar_path(
@@ -854,18 +845,26 @@ mod tests {
             4
         )));
         for caps in 0..=3 {
-            assert!(unported(&create_sweep_along_planar_path(
-                &mut k,
-                &[&c],
-                &[&l],
-                false,
-                caps
-            )));
+            let result = create_sweep_along_planar_path(&mut k, &[&c], &[&l], false, caps)
+                .expect("planar path");
+            let cap_count = (caps & 1) + ((caps >> 1) & 1);
+            assert_eq!(
+                (
+                    result.face_list().len(),
+                    result.edge_list().len(),
+                    result.vertex_list().len()
+                ),
+                (1 + cap_count as usize, 3, 2)
+            );
+            assert_eq!(
+                crate::topology::brep::p2::is_manifold_solid(&result).unwrap(),
+                caps == 3
+            );
         }
     }
 
     #[test]
-    fn curve_sweeps_validate_then_defer() {
+    fn curve_sweeps_validate_then_run_or_defer() {
         let mut k = Kernel::default();
         let p = path();
         let c = circle();
@@ -889,14 +888,9 @@ mod tests {
             None,
             None
         )));
-        assert!(unported(&create_curve_sweep(
-            &mut k,
-            &[Some(&c)],
-            Some(&p),
-            Some(&p),
-            None,
-            Some(&opts)
-        )));
+        let swept = create_curve_sweep(&mut k, &[Some(&c)], Some(&p), Some(&p), None, Some(&opts))
+            .expect("capped curve sweep");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&swept.brep).unwrap());
         // no B-spline profile left once the NULL entry is skipped
         assert!(invalid(&create_curve_sweep(
             &mut k,

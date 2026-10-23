@@ -1352,6 +1352,7 @@ pub fn ray_fire(
     let best_sq = answer_limit.map_or(BIG_DOUBLE, |l| l * l);
     let vectors = [ray];
     let objects = BrepObjects {
+        preparation: None,
         brep: b,
         brep_id,
         cache: Some(cache),

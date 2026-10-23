@@ -1855,6 +1855,7 @@ fn solve_original_brep_point(
     point: Vec3,
 ) -> Result<SolutionArray<CacheObject>> {
     let objects = BrepObjects {
+        preparation: None,
         brep: original,
         // There is exactly one B-rep in this query adapter's local namespace.
         brep_id: crate::topology::BrepId::from_index(0),

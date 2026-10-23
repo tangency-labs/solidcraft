@@ -495,6 +495,25 @@ pub fn point_classify_prepared(
     point_classify_with_topology(k, &mut QueryTopology::Prepared(b), f, uv, pc, opts)
 }
 
+pub(crate) fn point_classify_requested(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    uv: Point2,
+    pc: &mut PointClassification<EntityRef>,
+    opts: PointClassifyOptions<'_>,
+    preparation: &crate::query::brep::RayPreparation,
+) -> Result<()> {
+    point_classify_with_topology(
+        k,
+        &mut QueryTopology::Requested(b, preparation),
+        f,
+        uv,
+        pc,
+        opts,
+    )
+}
+
 fn point_classify_with_topology(
     k: &Kernel,
     b: &mut QueryTopology<'_>,
@@ -541,7 +560,7 @@ fn point_classify_with_topology(
                 // get every TrimSrfCache leaf node intersecting the UVPoint
                 let uv_ext = Extent2d::from_point(uv);
                 if tsc.base().tree().is_none() {
-                    if matches!(b, QueryTopology::Prepared(_)) {
+                    if matches!(b, QueryTopology::Prepared(_) | QueryTopology::Requested(..)) {
                         return Err(SolidError::Unported {
                             upstream:
                                 "SmSurfaceCache::BuildTree (prepared query requires a built tree)",

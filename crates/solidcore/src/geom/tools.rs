@@ -506,6 +506,7 @@ fn brep_point_solve_faces(
     use crate::topology::brep_cache::{make_brep_cache, BrepObjects, CacheSource};
     let cache = make_brep_cache(kernel, CacheSource::Brep(brep), keys)?;
     let objects = BrepObjects {
+        preparation: None,
         brep,
         brep_id,
         cache: Some(&cache),

@@ -1465,7 +1465,13 @@ impl Surface {
                 )?;
                 // pSurfaceCache->GetTree() (NER): a cache made while a boolean operation
                 // delays its tree builds it now
-                Self::held_cache(k, &mut built, OP_LINE)?
+                // The context already performed the owning face's virtual GetTree.
+                // Re-entering the bare base cache cannot rebuild a face-owned tree.
+                if context.is_some() && built.tree().is_some() {
+                    &built
+                } else {
+                    Self::held_cache(k, &mut built, OP_LINE)?
+                }
             }
             LineCacheSource::Held(kept) => {
                 match kept.get_or_insert_with(|| {

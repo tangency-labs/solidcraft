@@ -3621,6 +3621,7 @@ fn brep_curve_solve(
         )?;
         let owners = |_: ObjectRef| None;
         let objects = crate::topology::brep_cache::BrepObjects {
+            preparation: None,
             brep: b,
             brep_id: crate::topology::BrepId::from_index(0),
             cache: Some(&cache),

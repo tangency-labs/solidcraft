@@ -1087,8 +1087,7 @@ mod tests {
                 .any(|(o, k)| o == op && k.starts_with("status:"));
             assert!(failed, "{op} never compared");
         }
-        // The linear sweep runs to completion now (`topology.brep_p4` is ported); the
-        // other ops still reach an unported callee.
+        // Valid inputs must reach a successful kernel call or an unported callee.
         for op in [
             "rotational",
             "draft",
@@ -1101,10 +1100,10 @@ mod tests {
             "linear_reps",
             "rotational_reps",
         ] {
-            let deferred = tally
+            let reached_kernel = tally
                 .keys()
-                .any(|(o, k)| o == op && k.starts_with("deferred:"));
-            assert!(deferred, "{op} never reaches the kernel");
+                .any(|(o, k)| o == op && (k == "status:0" || k.starts_with("deferred:")));
+            assert!(reached_kernel, "{op} never reaches the kernel");
         }
         let compared: usize = tally
             .iter()

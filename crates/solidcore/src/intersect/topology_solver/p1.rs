@@ -100,7 +100,9 @@ use crate::geom::vector3d::sqrt;
 use crate::intersect::point_class::PointClassification;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
-use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+use crate::query::face::p2::{
+    point_classify_prepared, point_classify_requested, PointClassifyOptions,
+};
 use crate::surface::surface::p2::{surface_cache, Surface, SurfaceKind};
 use crate::surface::surface_cache::p1::{AltCacheKey, AltSrfCacheType};
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
@@ -128,6 +130,21 @@ const fn null_deref(operation: &'static str, reason: &'static str) -> SolidError
 /// call (upstream reaches these through casts of `SmObject*` and the
 /// `SmVertex`/`SmEdge`/`SmFace`/`SmSurface` members).
 pub trait TopologyObjects<O> {
+    /// Optional owning-face cache service for surface solves.
+    fn surface_solve_context(
+        &self,
+    ) -> Option<Box<dyn crate::surface::surface::p1::SurfaceSolveContext<O> + '_>>
+    where
+        O: Copy + PartialEq,
+    {
+        None
+    }
+
+    /// Optional operation-local request for a UV trim needed by classification.
+    fn uv_trim_preparation(&self) -> Option<&crate::query::brep::RayPreparation> {
+        None
+    }
+
     /// The cache associated with a B-rep handle. Adapters that expose B-reps
     /// provide this, or override `brep_trees` with their own tree storage.
     fn brep_cache(&self, _brep: O) -> Result<&crate::topology::brep_cache::BrepCache<O>> {
@@ -1497,16 +1514,34 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             let face_tol = objects.face_tolerance(face)?;
             // pFace->GetSurface()->GlobalLineIntersect(uv_domain, point, line_vec, NULL,
             // ray_fire, tol, solutions) (SER)
-            let solutions = objects.surface(face_surface)?.global_line_intersect(
-                ts.kernel,
-                face_surface,
-                &uv_domain,
-                self.point,
-                line_vec,
-                None,
-                ray_fire,
-                tol + face_tol,
-            )?;
+            let mut context = objects.surface_solve_context();
+            let solutions = if let Some(context) = context.as_deref_mut() {
+                objects
+                    .surface(face_surface)?
+                    .global_line_intersect_with_context(
+                        ts.kernel,
+                        Some(face_surface),
+                        None,
+                        context,
+                        &uv_domain,
+                        self.point,
+                        line_vec,
+                        None,
+                        ray_fire,
+                        tol + face_tol,
+                    )?
+            } else {
+                objects.surface(face_surface)?.global_line_intersect(
+                    ts.kernel,
+                    face_surface,
+                    &uv_domain,
+                    self.point,
+                    line_vec,
+                    None,
+                    ray_fire,
+                    tol + face_tol,
+                )?
+            };
 
             for found in solutions.as_slice() {
                 let mut sol = *found;
@@ -2022,7 +2057,8 @@ pub(super) fn curve_zone_tol_3d<O>(
 ///
 /// The solver only reads its objects, so this is the read-only
 /// [`point_classify_prepared`]: a classification that would have to create a UV trim
-/// curve or build a trim-cache tree first is [`SolidError::Unported`]. No trimmed
+/// curve or build a trim-cache tree first is [`SolidError::Unported`]. An object view
+/// may also record the visited edge use for its mutable caller to prepare. No trimmed
 /// surface cache is passed (the solver's objects expose none), so upstream's cache
 /// fast path is skipped and the loops classify the point.
 pub(super) fn face_point_classify<O>(
@@ -2044,19 +2080,17 @@ pub(super) fn face_point_classify<O>(
         ));
     };
     let mut pc = PointClassification::new(src_zone_tol);
-    match point_classify_prepared(
-        k,
-        b,
-        f,
-        uv,
-        &mut pc,
-        PointClassifyOptions {
-            src_zone_tol_3d: src_zone_tol,
-            do_boundary_intersections: do_boundaries,
-            use_uv_classification: use_uv,
-            ..PointClassifyOptions::default()
-        },
-    ) {
+    let options = PointClassifyOptions {
+        src_zone_tol_3d: src_zone_tol,
+        do_boundary_intersections: do_boundaries,
+        use_uv_classification: use_uv,
+        ..PointClassifyOptions::default()
+    };
+    let result = match objects.uv_trim_preparation() {
+        Some(preparation) => point_classify_requested(k, b, f, uv, &mut pc, options, preparation),
+        None => point_classify_prepared(k, b, f, uv, &mut pc, options),
+    };
+    match result {
         Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
         // (status ignored, as upstream)
         Ok(()) | Err(_) => Ok(pc.point_class().code()),
@@ -2429,6 +2463,7 @@ pub(crate) mod tests {
         let mut b = Brep::new();
         let f = crate::query::face::p2::tests::square(&mut b);
         let objects = BrepObjects {
+            preparation: None,
             brep: &b,
             brep_id: BrepId::from_index(0),
             cache: None,
@@ -2458,6 +2493,7 @@ pub(crate) mod tests {
                 .uv_trim_curve = None;
         }
         let objects = BrepObjects {
+            preparation: None,
             brep: &b,
             ..objects
         };

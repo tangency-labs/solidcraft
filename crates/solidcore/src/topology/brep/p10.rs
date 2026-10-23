@@ -2060,6 +2060,7 @@ fn faces_to_delete(
 
             let cache = make_brep_cache(k, CacheSource::Brep(b), env.keys)?;
             let objects = BrepObjects {
+                preparation: None,
                 brep: b,
                 brep_id: env.brep_id,
                 cache: Some(&cache),

@@ -77,6 +77,13 @@
 //!   ([`QuadricEdgeData::sort_index`]). `SmPolyVertexClass` (`SmPoly.h`) is defined
 //!   here, the only place that uses it so far.
 
+mod ray;
+
+#[cfg(test)]
+pub(crate) use ray::PreparationRequest;
+pub use ray::RayPreparation;
+pub(crate) use ray::RaySurfaceContext;
+
 use core::cell::OnceCell;
 
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
@@ -482,6 +489,7 @@ impl<'a> BrepQuery<'a> {
         if do_boundary_intersections {
             let b = target.shared();
             let objects = BrepObjects {
+                preparation: None,
                 brep: b,
                 brep_id,
                 cache: Some(self.cache(k, b)?),
@@ -592,12 +600,23 @@ impl crate::topology::shell::ShellRayWorld<CacheObject> for BrepQuery<'_> {
             ));
         }
         Ok(BrepObjects {
+            preparation: None,
             brep,
             brep_id,
             cache: None,
             keys: self.identity.keys,
             owner_of: self.identity.owner_of,
         })
+    }
+
+    fn objects_for_preparation<'a>(
+        &'a self,
+        brep: (BrepId, &'a Brep),
+        preparation: &'a RayPreparation,
+    ) -> Result<BrepObjects<'a>> {
+        let mut objects = self.objects(brep)?;
+        objects.preparation = Some(preparation);
+        Ok(objects)
     }
 
     fn class_entity(&self, object: CacheObject) -> Option<EntityRef> {

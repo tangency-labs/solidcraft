@@ -5,7 +5,9 @@
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
-use solidcore::mass::integrator::properties::{brep_area, brep_volume, PropertyAttributes};
+use solidcore::mass::integrator::properties::{
+    brep_properties, MassPropertyBehavior, PropertyAttributes,
+};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives as api;
 use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
@@ -18,8 +20,9 @@ use std::f64::consts::PI;
 
 /// Relative tolerance of the analytic comparisons.
 pub const REL_TOL: f64 = 1e-9;
-/// Accuracy passed to the mass-property integrator (its lower clamp).
-const ACCURACY: f64 = 1e-8;
+/// Requested integration accuracy, tighter than the independent analytic check.
+/// The `SM_API` area/volume wrappers clamp requests to coarser values.
+const ACCURACY: f64 = 1e-10;
 
 /// One primitive and its analytic properties.
 pub struct Spec {
@@ -130,7 +133,9 @@ pub fn curved_specs() -> Vec<Spec> {
             bbox: sphere_box,
             counts: None,
             euler: 2,
-            build: |k| api::create_sphere_no_pole(k, Point3::new(1.0, -2.0, 0.5), 3.0),
+            build: |k| {
+                api::create_sphere_no_pole_with_tolerance(k, Point3::new(1.0, -2.0, 0.5), 3.0, 1e-9)
+            },
         },
         Spec {
             name: "partial sphere r3 0..90",
@@ -312,11 +317,21 @@ fn measure(k: &Kernel, b: &Brep) -> Measured {
             Point3::new(ext.max_at(0), ext.max_at(1), ext.max_at(2)),
         )
     });
+    let properties = calculate_bounding_box(k, b, BoundingBoxOptions::default()).and_then(|ext| {
+        brep_properties(
+            k,
+            b,
+            ACCURACY,
+            ext.mid(),
+            MassPropertyBehavior::default(),
+            &attributes,
+        )
+    });
     Measured {
         counts,
         manifold_solid: is_manifold_solid(b),
-        volume: brep_volume(k, b, ACCURACY, &attributes),
-        area: brep_area(k, b, ACCURACY),
+        volume: properties.as_ref().map(|p| p.volume).map_err(Clone::clone),
+        area: properties.map(|p| p.area),
         bbox,
     }
 }

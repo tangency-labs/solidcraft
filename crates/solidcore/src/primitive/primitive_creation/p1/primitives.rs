@@ -284,9 +284,6 @@ fn drop_uv_curves(
 pub(super) fn stitch_faces(k: &mut Kernel, b: &mut Brep, tolerance: f64) -> Result<()> {
     crate::topology::brep::p4::stitch_faces(k, b, tolerance, None, false).map(drop)
 }
-fn transform_brep(k: &mut Kernel, b: &mut Brep, placement: &Axis2Placement) -> Result<()> {
-    crate::topology::brep::p5::transform(k, b, placement, None, true)
-}
 
 enum AnalyticSurface {
     Cone(Cone),
@@ -955,7 +952,14 @@ impl PrimitiveCreation {
         };
         let mut translation = Axis2Placement::IDENTITY;
         translation.translate(center);
-        ignore_status(transform_brep(k, brep, &translation))?;
+        ignore_status(crate::topology::brep::p5::transform_with_notifications(
+            k,
+            brep,
+            &translation,
+            None,
+            true,
+            Some(notifications),
+        ))?;
         status
     }
 

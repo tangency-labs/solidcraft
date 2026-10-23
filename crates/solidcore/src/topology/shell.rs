@@ -59,6 +59,10 @@
 //! faces' own pointers); the B-rep's is [`crate::query::brep::BrepQuery`]. Its view
 //! borrows the B-rep for the shape solve only, since the sector step after it may add
 //! UV trim curves.
+//! A read-only solve may request a missing UV trim or an owning-face surface cache.
+//! `RayFire` releases the view, prepares that object on the caller's topology and
+//! restarts the solve. Each request is attempted at most once; failed trim statuses
+//! remain available to the restarted classification.
 //! The single-member `Remove` / `PostInsert` co-ports (`topology.brep_p3`, PR #204)
 //! return upstream's `SM_ERR` of `Remove` (a member not in this list) as
 //! [`SolidError::sm_err`], which callers that ignore it can tell apart. `PostInsert`
@@ -1042,6 +1046,15 @@ pub trait ShellRayWorld<O> {
         brep: (crate::topology::BrepId, &'a Brep),
     ) -> Result<Self::Objects<'a>>;
 
+    /// A read-only view that may request topology preparation from the mutable ray caller.
+    fn objects_for_preparation<'a>(
+        &'a self,
+        brep: (crate::topology::BrepId, &'a Brep),
+        _preparation: &'a crate::query::brep::RayPreparation,
+    ) -> Result<Self::Objects<'a>> {
+        self.objects(brep)
+    }
+
     /// The shape of the shell's boundary faces (`SmShape(sBreps, sFaces, ...)`) of
     /// `brep`. Worlds that cannot build the real shape (a harness without the B-rep's
     /// cached geometry) defer here instead of failing later.
@@ -1164,19 +1177,28 @@ where
         })??;
         let shape = world.shell_ray_shape(kernel, (brep_id, brep), &faces)?;
         let vectors = [direction];
-        let solutions = TopologySolver::shape_point_solve(
-            &*kernel,
-            &world.objects((brep_id, &*brep))?,
-            &shape,
-            input.start,
-            TopologySolveOptions {
-                operation: SolverOperation::Rayfire,
-                requested: SolutionRequested::All,
-                tolerance_3d: input.zone_tolerance,
-                best_answer_so_far_sq: BIG_DOUBLE,
-                opt_vectors: &vectors,
-            },
-        )?;
+        let mut preparation = crate::query::brep::RayPreparation::default();
+        let solutions = loop {
+            let result = TopologySolver::shape_point_solve(
+                &*kernel,
+                &world.objects_for_preparation((brep_id, &*brep), &preparation)?,
+                &shape,
+                input.start,
+                TopologySolveOptions {
+                    operation: SolverOperation::Rayfire,
+                    requested: SolutionRequested::All,
+                    tolerance_3d: input.zone_tolerance,
+                    best_answer_so_far_sq: BIG_DOUBLE,
+                    opt_vectors: &vectors,
+                },
+            );
+            match (result, preparation.take_request()) {
+                (Err(error), Some(edgeuse)) if error.is_unported() => {
+                    preparation.prepare(kernel, brep, edgeuse)?;
+                }
+                (result, _) => break result?,
+            }
+        };
         let mut iter = solutions.as_slice().iter();
         let Some(mut chosen) = iter.next() else {
             state.region = None;
