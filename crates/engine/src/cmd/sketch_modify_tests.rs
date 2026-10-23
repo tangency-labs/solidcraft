@@ -1871,3 +1871,57 @@ fn fillet_refuses_an_offsets_corners_until_its_association_is_broken() {
         assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
     }
 }
+
+#[test]
+fn mirror_origin_axes_keep_symmetry_and_fully_constrained_sources_driving_copies() {
+    for axis in ["x", "y"] {
+        let mut s = new_sketch();
+        run(&mut s, "parameters.add", json!({"name":"width","expression":"10 mm"}));
+        run(&mut s, "sketch.line", json!({"points":[["width","3 mm"],["width + 5 mm","8 mm"]],"ids":["source"]}));
+        let before = run(&mut s, "sketch.inspect", json!({}))["dof"].clone();
+        assert_eq!(before, 0);
+        let out = run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":axis}));
+        assert_eq!(out["sketch"]["dof"], before);
+        let copy = out["curves"][0].as_str().unwrap();
+        for width in [10, 20] {
+            if width == 20 {
+                run(&mut s, "parameters.change", json!({"name":"width","expression":"20 mm"}));
+            }
+            let sk = sketch(&s);
+            let l = sk.sketch_axis_curve(axis).unwrap();
+            assert!(sk.is_linked_curve(l) && sk.curves[l].construction);
+            assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Symmetric { l: line, .. } if line == l)).count(), 2);
+            for (source_end, copy_end, x, y) in [("start", "end", width, 3), ("end", "start", width + 5, 8)] {
+                let source = sk.point(sk.resolve_point(&format!("source.{source_end}")).unwrap()).unwrap();
+                assert!(source.dist(Vec2::new(x as f64, y as f64)) < 1e-6);
+                let expected = if axis == "y" { Vec2::new(-source.x, source.y) } else { Vec2::new(source.x, -source.y) };
+                let actual = sk.point(sk.resolve_point(&format!("{copy}.{copy_end}")).unwrap()).unwrap();
+                assert!(actual.dist(expected) < 1e-6, "{axis}: {actual:?} != {expected:?}");
+            }
+            assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], before);
+        }
+    }
+}
+
+#[test]
+fn mirror_origin_axis_in_rotated_plane_reuses_projection_and_rejects_invalid_lines() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,5,0],"x_dir":[1,1,0],"y_dir":[-1,1,0]}}));
+    run(&mut s, "sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]}));
+    let out = run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":{"axis":"Y"}}));
+    let sk = sketch(&s);
+    let copy = out["curves"][0].as_str().unwrap();
+    for (source_end, copy_end) in [("start", "end"), ("end", "start")] {
+        let source = sk.point(sk.resolve_point(&format!("source.{source_end}")).unwrap()).unwrap();
+        let copy = sk.point(sk.resolve_point(&format!("{copy}.{copy_end}")).unwrap()).unwrap();
+        assert!(copy.dist(Vec2::new(source.y, source.x)) < 1e-6, "{source:?}: {copy:?}");
+    }
+    run(&mut s, "sketch.mirror", json!({"entities":["source"],"line":{"axis":"Y"}}));
+    assert_eq!(sketch(&s).links.len(), 1);
+    run(&mut s, "sketch.circle.center", json!({"center":[20,10],"radius":2,"id":"circle"}));
+    let before = s.doc.to_json();
+    for line in [json!({"axis":"Z"}), json!({"axis":"bad"}), json!({"plane":"XY"}), json!("circle"), json!("missing")] {
+        assert!(s.execute("sketch.mirror", &json!({"entities":["source"],"line":line})).is_err(), "{line}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}

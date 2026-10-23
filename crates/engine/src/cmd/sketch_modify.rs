@@ -8,7 +8,7 @@ use solidcraft_doc::ProfileSel;
 use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, intersections};
 
-use super::sketch::{add_c, edit, ids_of, solve_current};
+use super::sketch::{add_c, edit, ids_of, line_or_axis_ref, solve_current};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec2_list};
 use crate::{Result, Session};
@@ -90,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
         .enabled(in_sketch)
-        .params(concat!("entities: [curve/point ids], line: mirror line id (symmetry constraints are added)", created_doc!())),
+        .params(concat!("entities: [curve/point ids], line: straight curve id, x / y for a sketch axis, or {axis: X|Y|Z} for an origin axis in the sketch plane (symmetry constraints are added)", created_doc!())),
     CommandSpec::new("sketch.pattern.circular", "Circular Pattern", pattern_circular)
         .at("SKETCH", "PATTERN")
         .icon("sketch_circ_pattern")
@@ -1916,11 +1916,24 @@ fn copy_through(
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.mirror";
+    let origin_axis =
+        p.get("line").filter(|line| line.is_object()).map(|line| super::sketch_project::origin_axis_line(s, p, line, cmd)).transpose()?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, ps) = entities(sk, p, cmd)?;
-        let lid = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must be the mirror line"))?;
-        let l = sk.curve_index(lid).ok_or_else(|| bad(cmd, format!("unknown curve `{lid}`")))?;
-        let Some(Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, "the mirror must be a line")) };
+        let l = if let Some((source, geom)) = origin_axis {
+            let link =
+                sk.links.iter().find(|link| link.kind == solidcraft_sketch::LinkKind::Project && link.source == source).map(|link| link.id.clone());
+            let link = match link {
+                Some(link) => link,
+                None => sk.add_link(solidcraft_sketch::LinkKind::Project, source, &geom)?,
+            };
+            sk.link_curves(&link).first().copied().ok_or_else(|| bad(cmd, "the origin axis does not resolve to a straight line"))?
+        } else {
+            line_or_axis_ref(sk, p.get("line"), cmd, "line")?
+        };
+        let Some(Shape::Line { a, b }) = sk.shape(l) else {
+            return Err(bad(cmd, "the mirror must be a straight curve of this sketch or an origin axis in its plane"));
+        };
         let u = (b - a).normalized().ok_or_else(|| bad(cmd, "degenerate mirror line"))?;
         let refl = move |q: Vec2| {
             let foot = a + u * (q - a).dot(u);

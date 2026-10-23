@@ -227,10 +227,10 @@ fn a_half_filled_window_is_an_error_instead_of_a_command() {
     let mut only_line = mirror_inputs();
     only_line[1].items = vec![Sel::SketchCurve { id: ids[0].clone() }];
     assert!(commands(&h.app, &Mod::Mirror, &only_line, &serde_json::Map::new()).is_err());
-    // The AXES mask also takes an origin axis, which is no curve of this sketch.
+    // An axis normal to the sketch plane cannot be a mirror line.
     let mut origin_axis = mirror_inputs();
     origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone() }];
-    origin_axis[1].items = vec![Sel::Axis { name: "Y".into() }];
+    origin_axis[1].items = vec![Sel::Axis { name: "Z".into() }];
     assert!(commands(&h.app, &Mod::Mirror, &origin_axis, &serde_json::Map::new()).is_err());
     // The line itself must not be in the entities: the old click flow could not express that
     // either, and the engine silently dropped it.
@@ -776,4 +776,49 @@ fn a_missing_centre_a_short_count_and_a_bad_angle_are_all_refused() {
     h.app.dialog.as_mut().unwrap().inputs[1].items.clear();
     let d = h.app.dialog.clone().unwrap();
     assert!(apply_commands(&h.app, &d).unwrap_err().contains("centre"));
+}
+
+#[test]
+fn mirror_origin_axis_picks_use_the_same_reference_as_symmetry() {
+    for (plane, name, expected) in [("XY", "X", "x"), ("XY", "Y", "y"), ("XZ", "Z", "y"), ("YZ", "Y", "x")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":plane})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+        h.step(&json!({"start":"sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::SketchCurve { id: "source".into() }];
+        h.settle();
+        h.step(&json!({"click":{"handle":"dialog:Mirror line"}})).unwrap();
+        let on_axis = match name {
+            "X" => [10, 0, 0],
+            "Y" => [0, 10, 0],
+            _ => [0, 0, 10],
+        };
+        h.step(&json!({"click":{"world":on_axis}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::Axis { name: name.into() }]);
+        if plane == "XY" && name == "Y" {
+            h.step(&json!({"shot":"mirror-origin-y-before"})).unwrap();
+        }
+        let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(cmds[0].1["line"], expected);
+        h.frames(2);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+        if plane == "XY" && name == "Y" {
+            h.step(&json!({"shot":"mirror-origin-y-after"})).unwrap();
+        }
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.sketch_axis_curve(expected).is_some());
+        assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Symmetric { .. })).count(), 2);
+    }
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":{"origin":[0,5,0],"x_dir":[1,1,0],"y_dir":[-1,1,0]}})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,3],[15,8]],"ids":["source"]})).unwrap();
+    let mut inputs = mirror_inputs();
+    inputs[0].items = vec![Sel::SketchCurve { id: "source".into() }];
+    inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    let cmds = commands(&h.app, &Mod::Mirror, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(cmds[0].1["line"], json!({"axis":"Y"}));
+    h.app.run(&cmds[0].0, cmds[0].1.clone()).unwrap();
 }

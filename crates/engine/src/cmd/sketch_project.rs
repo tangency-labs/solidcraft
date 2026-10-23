@@ -209,6 +209,29 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
     warnings
 }
 
+/// Resolve an origin axis as a mirror line, keeping its projection linked and fixed.
+pub(super) fn origin_axis_line(s: &Session, p: &Value, line: &Value, cmd: &str) -> Result<(LinkSource, Vec<solidcraft_sketch::LinkGeom>)> {
+    let id = super::sketch::target_sketch(s, p, cmd)?;
+    let doc = placed_candidate(s, &s.doc);
+    let st = s.model.state_before(id);
+    let st = state_for_sketch(s, &doc, id, &st)?;
+    let plane = sketch_plane(&doc, id, &st)?;
+    let src = source(s, line, cmd)?;
+    let LinkSource::Axis { name } = &src else { return Err(bad(cmd, "the mirror line must be a straight sketch curve or an origin axis")) };
+    let dir = match name.as_str() {
+        "X" => Vec3::X,
+        "Y" => Vec3::Y,
+        "Z" => Vec3::Z,
+        _ => return Err(bad(cmd, "the origin axis must be X, Y or Z")),
+    };
+    if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(plane.origin).abs() > 1e-6 {
+        return Err(bad(cmd, "the origin axis must lie in the sketch plane"));
+    }
+    let (vals, _) = doc.param_values();
+    let r = resolve(&doc, &vals, &st, &plane, LinkKind::Project, &src)?;
+    Ok((r.source, r.geom))
+}
+
 /// Add a link for `src` to sketch `id` in `doc` (not stored in the session). Returns the link id.
 pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, kind: LinkKind, src: LinkSource) -> Result<String> {
     let doc = placed_candidate(s, doc);

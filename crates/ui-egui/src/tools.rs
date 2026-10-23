@@ -541,7 +541,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
-fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
+pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
     use solidcraft_engine::geom::Vec3;
     let dir = match name {
         "X" => Vec3::X,
