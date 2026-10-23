@@ -2128,6 +2128,19 @@ fn hover_drawn(hover: &Option<Hit>) -> String {
     }
 }
 
+/// The body the current hover actually selects, after the active dialog's filter.
+fn hovered_body(app: &SolveApp) -> Option<String> {
+    if app.tool.is_some() {
+        return None;
+    }
+    let hit = app.viewport.hover.as_ref()?;
+    let (_, selected) = candidate(app, std::slice::from_ref(hit))?;
+    match selected {
+        Sel::Body { name } => Some(name),
+        _ => None,
+    }
+}
+
 fn highlight_geometry_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let selected = app.highlighted();
@@ -2135,6 +2148,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
     hover_drawn(&app.viewport.hover).hash(&mut h);
+    hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`).
@@ -2341,6 +2355,8 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // Timeline modifiers light only their resulting faces; browser rows light whole bodies.
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
+    let body_hover = hovered_body(app);
+    hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
     for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
         let whole = hovered.iter().any(|x| matches!(x, Sel::Body { name } if name == &b.name));
         let faces: Vec<_> = if whole {
@@ -2388,20 +2404,9 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     }
     // Hover (pre-highlight).
     match hover {
-        // Body selection: the whole body lights up.
-        Some(Hit::Face { body, .. }) if app.ui.pick_bodies && app.dialog.is_none() && app.tool.is_none() => {
-            if let Some(b) = st.body(body) {
-                let k = t.hover_face_lift;
-                let c = body_rgb(app, body);
-                let m = shown(b);
-                let count = b.body.face_count();
-                mesh_tris(&mut feedback, &m, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true, |f| {
-                    (f as usize) < count
-                });
-            }
-        }
         Some(Hit::Face { body, index, .. })
-            if !app.preview.effective_replaced().contains(body)
+            if body_hover.as_ref() != Some(body)
+                && !app.preview.effective_replaced().contains(body)
                 && !sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && i == index)) =>
         {
             if let Some(b) = st.body(body) {
@@ -6233,6 +6238,31 @@ mod tests {
             app.session.selection = selected;
             assert_eq!(build_highlight(&app).merged().tris.len(), expected, "whole-body feedback must neither omit nor duplicate selected faces");
         }
+    }
+
+    #[test]
+    fn body_input_hover_lights_the_whole_body_and_refreshes_for_face_inputs() {
+        let mut app = cylinder_app();
+        app.ui.show_origin = false;
+        let body = app.session.world_state().bodies[0].clone();
+        let hit = Hit::Face { body: body.name.clone(), index: 0, point: Vec3::ZERO };
+        app.start("file.save_mesh");
+        app.viewport.hover = Some(hit.clone());
+        let expected = shown_mesh(&app, &body, &None).triangles.len() * 3 * crate::gpu::TRI_SIZE;
+        assert_eq!(hovered_body(&app), Some(body.name.clone()));
+        assert_eq!(build_highlight(&app).merged().tris.len(), expected);
+        let body_key = highlight_key(&app);
+        for accept in [crate::selection::FACES, crate::selection::FACES | crate::selection::BODIES] {
+            app.dialog.as_mut().unwrap().inputs[0].accept = accept;
+            assert_eq!(hovered_body(&app), None, "face inputs must keep face feedback");
+            assert_ne!(highlight_key(&app), body_key, "a changed input must invalidate cached body feedback");
+            assert!(build_highlight(&app).merged().tris.len() < expected);
+        }
+        app.dialog.as_mut().unwrap().inputs[0].accept = crate::selection::BODIES;
+        let (_, sel) = candidate(&app, std::slice::from_ref(&hit)).unwrap();
+        dialog_pick(&mut app, &hit, sel);
+        assert!(app.highlighted().contains(&Sel::Body { name: body.name.clone() }));
+        assert_eq!(build_highlight(&app).merged().tris.len(), expected, "hover must not duplicate the selected body's faces");
     }
 
     #[test]
