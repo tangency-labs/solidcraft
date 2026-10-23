@@ -551,6 +551,10 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Fix { .. } => {}
         Distance { p, q, value } => out.push(s.p(p).dist(s.p(q)) - value),
+        // At zero the signed component has the same solutions as its magnitude, but keeps
+        // a nonzero derivative when the points line up for freedom and redundancy analysis.
+        DistanceX { p, q, value: 0.0 } => out.push(s.p(q).x - s.p(p).x),
+        DistanceY { p, q, value: 0.0 } => out.push(s.p(q).y - s.p(p).y),
         DistanceX { p, q, value } => out.push((s.p(q).x - s.p(p).x).abs() - value),
         DistanceY { p, q, value } => out.push((s.p(q).y - s.p(p).y).abs() - value),
         PointLineDistance { p, l, value } => {

@@ -1052,3 +1052,26 @@ fn profiles_crossing_next_to_an_overshooting_end_keeps_the_corner_beside_it() {
     assert_eq!(areas.len(), 1, "{areas:?}");
     assert!(areas.iter().all(|a| (a - (2.0 - x)).abs() < 1e-4), "{areas:?}");
 }
+
+#[test]
+fn zero_component_dimensions_keep_independent_rank() {
+    for vertical in [false, true] {
+        for value in [0.0, 0.5, 1.0] {
+            let mut sk = Sketch::new();
+            let q = sk.add_point(if vertical { v(10.0, 3.0) } else { v(3.0, 10.0) }, None).unwrap();
+            let existing =
+                if vertical { ConstraintKind::DistanceX { p: 0, q, value: 10.0 } } else { ConstraintKind::DistanceY { p: 0, q, value: 10.0 } };
+            sk.add_constraint(existing, None).unwrap();
+            assert_eq!(solve(&mut sk).dof, 1);
+            let added = if vertical { ConstraintKind::DistanceY { p: 0, q, value } } else { ConstraintKind::DistanceX { p: 0, q, value } };
+            let id = sk.add_constraint(added, None).unwrap();
+            let report = solve(&mut sk);
+            assert!(report.ok(), "{report:?}");
+            assert_eq!(report.dof, 0, "{vertical}, {value}: {report:?}");
+            assert!(!report.redundant.contains(&id), "{report:?}");
+            let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+            assert!(determined_by(&sk, ci).is_empty());
+            assert!(constraint_residual(&sk, ci).unwrap() < 1e-6);
+        }
+    }
+}
