@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include "../shim/blend_fillet_solver_p5.cpp"
 static int rollover_worker_main() {
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
     sc_rollover::Request request{};
     std::array<double,sc_rollover::INPUT_LIMIT> input{};
     if(!sc_rollover::read_all(STDIN_FILENO,&request,sizeof(request)) ||
@@ -11,6 +11,7 @@ static int rollover_worker_main() {
        !sc_rollover::read_all(STDIN_FILENO,input.data(),request.count*sizeof(double))) return 2;
 #ifdef SC_ROLLOVER_FAULT_TEST
     if(request.signal==2) test_exit_trap=true;
+    else if(request.signal==3) { for(;;) ::pause(); } // exercise the parent timeout
     else if(request.signal>=0) ::raise(request.signal==0?SIGSEGV:SIGABRT);
     new_failure=request.fail_new;calloc_failure=request.fail_calloc;
 #endif

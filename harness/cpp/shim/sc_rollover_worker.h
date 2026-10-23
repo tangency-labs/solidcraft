@@ -7,7 +7,7 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -27,7 +27,35 @@ struct Header { int64_t status,length; };
 #ifdef SC_ROLLOVER_FAULT_TEST
 inline int64_t fail_new=-1,fail_calloc=-1,test_signal=-1;
 #endif
+#if defined(__linux__) || defined(__APPLE__)
+inline bool cloexec_pipe(int fds[2]) {
 #if defined(__linux__)
+    return ::pipe2(fds,O_CLOEXEC)==0;
+#else
+    if(::pipe(fds)!=0) return false;
+    if(::fcntl(fds[0],F_SETFD,FD_CLOEXEC)==0 &&
+       ::fcntl(fds[1],F_SETFD,FD_CLOEXEC)==0) return true;
+    ::close(fds[0]);::close(fds[1]);
+    return false;
+#endif
+}
+inline int spawn_worker(pid_t* child,const char* path,
+                        const posix_spawn_file_actions_t* actions,char* const argv[]) {
+#if defined(__APPLE__)
+    // Darwin has no atomic pipe2(O_CLOEXEC). Close every descriptor except the
+    // explicit dup2 actions, including pipes another thread has just created
+    // but has not yet marked CLOEXEC. No worker can inherit another's pipes.
+    posix_spawnattr_t attributes;
+    int error=::posix_spawnattr_init(&attributes);
+    if(error!=0) return error;
+    error=::posix_spawnattr_setflags(&attributes,POSIX_SPAWN_CLOEXEC_DEFAULT);
+    if(error==0) error=::posix_spawn(child,path,actions,&attributes,argv,environ);
+    ::posix_spawnattr_destroy(&attributes);
+    return error;
+#else
+    return ::posix_spawn(child,path,actions,nullptr,argv,environ);
+#endif
+}
 inline bool write_all(int fd, const void* data, size_t n) {
     const char* p=static_cast<const char*>(data);
     while(n) { ssize_t sent=::write(fd,p,n); if(sent<0 && errno==EINTR) continue;
@@ -47,15 +75,15 @@ inline bool read_all(int fd, void* data, size_t n) {
 }
 #endif
 // One bounded request is written into a private pipe before spawn: no parent
-// write can race a dying child and deliver SIGPIPE. Both pipes are CLOEXEC, so
-// concurrent calls cannot keep each other's worker descriptors alive.
+// write can race a dying child and deliver SIGPIPE. Pipes are CLOEXEC; Darwin
+// also closes all non-explicit descriptors at spawn to cover pipe/fcntl races.
 inline int32_t isolated(int64_t operation,const double* input,int64_t count,
                         double* out,int64_t cap,int64_t* len) {
-#if defined(__linux__) && defined(SC_ROLLOVER_WORKER_PATH)
+#if (defined(__linux__) || defined(__APPLE__)) && defined(SC_ROLLOVER_WORKER_PATH)
     if(count<0 || count>static_cast<int64_t>(INPUT_LIMIT)) return SC_ERR_ARG;
     int in[2],result[2];
-    if(::pipe2(in,O_CLOEXEC)!=0) return SC_ERR_EXCEPTION;
-    if(::pipe2(result,O_CLOEXEC)!=0) {::close(in[0]);::close(in[1]);return SC_ERR_EXCEPTION;}
+    if(!cloexec_pipe(in)) return SC_ERR_EXCEPTION;
+    if(!cloexec_pipe(result)) {::close(in[0]);::close(in[1]);return SC_ERR_EXCEPTION;}
     Request request{operation,count
 #ifdef SC_ROLLOVER_FAULT_TEST
         ,fail_new,fail_calloc,test_signal
@@ -73,7 +101,7 @@ inline int32_t isolated(int64_t operation,const double* input,int64_t count,
     const char* path=SC_ROLLOVER_WORKER_PATH;
     char* argv[]={const_cast<char*>(path),const_cast<char*>("--rollover-worker"),nullptr};
     pid_t child=-1;
-    int error=okay?::posix_spawn(&child,path,&actions,nullptr,argv,environ):-1;
+    int error=okay?spawn_worker(&child,path,&actions,argv):-1;
     ::posix_spawn_file_actions_destroy(&actions);
     ::close(in[0]);::close(result[1]);
     if(error!=0) {::close(result[0]);return SC_ERR_EXCEPTION;}

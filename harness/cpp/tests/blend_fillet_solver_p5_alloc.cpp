@@ -7,7 +7,8 @@
 //   -DNOMINMAX -DSM_GRAPHICS_CALLBACKS=1 -Iharness/cpp/shim \
 //   -Iupstream/source/SMLib/inc -Iupstream/source/SM_API/inc \
 //   harness/cpp/tests/blend_fillet_solver_p5_alloc.cpp \
-//   harness/cpp/shim/topology_edgeuse_p1.cpp -Wl,--wrap=calloc \
+//   harness/cpp/shim/topology_edgeuse_p1.cpp harness/cpp/shim/sc_shim.cpp \
+//   -Wl,--wrap=calloc \
 //   -L"${SOLIDCORE_CPP_DIR:-bin/cpp}/lib" -lSM_API -lSMLib -pthread \
 //   -o bin/blend_fillet_solver_p5_alloc
 // Add -fsanitize=address -fno-omit-frame-pointer for `direct` leak checks.
@@ -15,10 +16,14 @@
 // nice -n 10 bin/blend_fillet_solver_p5_alloc direct 2
 // nice -n 10 bin/blend_fillet_solver_p5_alloc new 0   # failure index 0..299
 // nice -n 10 bin/blend_fillet_solver_p5_alloc calloc 91
+// On macOS omit --wrap=calloc: calloc is overridden via malloc_zone_calloc.
 #include <cstdio>
 #include <cstdlib>
 #include <new>
 #include <cstring>
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#endif
 static long new_failure=-1,calloc_failure=-1;
 static bool test_exit_trap=false;
 struct ExitTrap { ~ExitTrap() { if(test_exit_trap) std::abort(); } };
@@ -31,19 +36,54 @@ void* operator new(std::size_t size) {
 }
 void operator delete(void* p) noexcept {std::free(p);}
 void operator delete(void* p,std::size_t) noexcept {std::free(p);}
+#if defined(__APPLE__)
+extern "C" void* calloc(std::size_t n,std::size_t size) {
+#else
 extern "C" void* __real_calloc(std::size_t,std::size_t);
 extern "C" void* __wrap_calloc(std::size_t n,std::size_t size) {
+#endif
     if(calloc_failure==0) {calloc_failure=-1; return nullptr;}
     if(calloc_failure>0) --calloc_failure;
+#if defined(__APPLE__)
+    return ::malloc_zone_calloc(::malloc_default_zone(),n,size);
+#else
     return __real_calloc(n,size);
+#endif
 }
+static const char* worker_executable=nullptr;
 #define SC_ROLLOVER_FAULT_TEST
-#define SC_ROLLOVER_WORKER_PATH "/proc/self/exe"
+#define SC_ROLLOVER_WORKER_PATH worker_executable
 #include "../worker/rollover.cpp"
 int main(int argc,char**argv) {
     if(argc==2 && std::strcmp(argv[1],"--rollover-worker")==0) std::_Exit(rollover_worker_main());
     if(argc<3) return 2;
+    worker_executable=argv[0]; // runner passes an absolute path on both hosts
     const long value=std::strtol(argv[2],nullptr,10);
+    if(std::strcmp(argv[1],"--descriptor-worker")==0)
+        std::_Exit(::fcntl(static_cast<int>(value),F_GETFD)==-1 && errno==EBADF?0:3);
+    if(std::strcmp(argv[1],"descriptor")==0) {
+        int fds[2];
+        if(::pipe(fds)!=0) return 3;
+#if defined(__linux__)
+        ::fcntl(fds[0],F_SETFD,FD_CLOEXEC);
+        ::fcntl(fds[1],F_SETFD,FD_CLOEXEC);
+#endif
+        // On Darwin intentionally leave this pipe unmarked, simulating another
+        // thread between pipe() and fcntl(). The spawned worker must close it.
+        char descriptor[32];std::snprintf(descriptor,sizeof(descriptor),"%d",fds[0]);
+        char* args[]={argv[0],const_cast<char*>("--descriptor-worker"),descriptor,nullptr};
+        posix_spawn_file_actions_t actions;
+        if(::posix_spawn_file_actions_init(&actions)!=0) {::close(fds[0]);::close(fds[1]);return 3;}
+        pid_t child=-1;
+        int error=sc_rollover::spawn_worker(&child,worker_executable,&actions,args);
+        ::posix_spawn_file_actions_destroy(&actions);
+        ::close(fds[0]);::close(fds[1]);
+        int status=0;pid_t reaped=-1;
+        if(error==0) do {reaped=::waitpid(child,&status,0);} while(reaped<0 && errno==EINTR);
+        if(error!=0 || reaped!=child || !WIFEXITED(status) || WEXITSTATUS(status)!=0) return 3;
+        std::printf("DESCRIPTOR PASS: unrelated pipe not inherited\n");
+        return 0;
+    }
     double input[]={0,0,-1,0,1,0,1,102,1,0,1,103};
     double out[128]; int64_t len=0;
     if(std::strcmp(argv[1],"direct-target")==0) {

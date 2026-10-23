@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import resource
 import subprocess
+import sys
 
 
 def run(command, **kwargs):
@@ -29,8 +30,11 @@ def main():
                "-Iupstream/source/SMLib/inc", "-Iupstream/source/SM_API/inc",
                "harness/cpp/tests/blend_fillet_solver_p5_alloc.cpp",
                "harness/cpp/shim/topology_edgeuse_p1.cpp",
-               "-Wl,--wrap=calloc", f"-L{cpp / 'lib'}", "-lSM_API", "-lSMLib",
+               "harness/cpp/shim/sc_shim.cpp",
+               f"-L{cpp / 'lib'}", "-lSM_API", "-lSMLib",
                "-pthread", "-o", str(binary)]
+    if sys.platform != "darwin":
+        command += ["-Wl,--wrap=calloc"]
     if args.asan:
         command += ["-fsanitize=address", "-fno-omit-frame-pointer"]
     built = run(command, cwd=root, timeout=120)
@@ -45,10 +49,11 @@ def main():
             print(result.stdout.strip(), flush=True)
         print("ASAN/LSAN PASS: 4 direct calls, fixture destructors executed", flush=True)
         return
-    guarded = run([binary, "guard", 0], cwd=root, timeout=40)
-    if guarded.returncode:
-        raise RuntimeError(guarded.stdout + guarded.stderr)
-    print(guarded.stdout.strip(), flush=True)
+    for mode in ("guard", "descriptor"):
+        checked = run([binary, mode, 0], cwd=root, timeout=40)
+        if checked.returncode:
+            raise RuntimeError(checked.stdout + checked.stderr)
+        print(checked.stdout.strip(), flush=True)
     statuses = collections.Counter()
     count = 0
     for mode in ("new", "calloc"):
@@ -66,6 +71,10 @@ def main():
             raise RuntimeError(result.stdout + result.stderr)
     print(f"ALLOCATION PASS: {count} probes, 0 host crashes; statuses={dict(statuses)}")
     print("SIGNAL PASS: native SIGSEGV and SIGABRT contained as SC_ERR_EXCEPTION")
+    result = run([binary, "signal", 3], cwd=root, timeout=40)
+    if result.returncode:
+        raise RuntimeError(result.stdout + result.stderr)
+    print("TIMEOUT PASS: stalled worker killed and reaped as SC_ERR_EXCEPTION", flush=True)
     result = run([binary, "exit", 0], cwd=root, timeout=40)
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)

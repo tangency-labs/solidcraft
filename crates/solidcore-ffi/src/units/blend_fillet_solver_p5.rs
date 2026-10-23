@@ -11,14 +11,15 @@
 //! data and is rejected for this incomplete fixture only. `TestRollOver` op 2 builds
 //! real `SmLine` rails inside a real planar face; Rust uses the real classification
 //! reset and propagates remaining topology/refinement dependencies.
-//! Native fixture construction, evaluation and destruction run in a bounded Linux
+//! Native fixture construction, evaluation and destruction run in a bounded Linux/macOS
 //! worker executed with `posix_spawn` (a fresh allocator image). A signal, destructor abort or stalled worker is a native exception,
 //! never an operation status or rejected fixture. No SMLib pointer crosses IPC.
 //! The multi-interval rail-copy guard rejects null curves only after the
 //! defined null-surface return; earlier returns remain covered.
 //! Unsupported platforms fail closed rather than executing SMLib in process.
-//! The native worker is Linux-only; macOS worker exceptions do not establish a
-//! Rust/C++ numerical mismatch. Native parity claims here refer to Linux x86-64.
+//! macOS uses close-by-default spawn actions to isolate concurrent workers even
+//! between pipe creation and marking descriptors close-on-exec. Native parity
+//! claims require a differential run on the reported platform.
 
 use crate::{call_with_buffer, FfiError};
 
