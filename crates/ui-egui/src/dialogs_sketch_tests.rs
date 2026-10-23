@@ -195,11 +195,11 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     d.repeat_after_apply = true;
     h.app.dialog = Some(d);
     let (finish, done) = std::sync::mpsc::channel();
-    h.app.applying = Some(Applying { done, started: crate::now_ms(), cmds, seen: true });
+    h.app.applying = Some(Applying::computing(done, cmds));
     let undo = h.app.session.undo.len();
     h.frames(2);
     assert_eq!(h.app.session.undo.len(), undo);
-    finish.send(()).unwrap();
+    finish.send(None).unwrap();
     h.frames(3);
     assert!(h.app.applying.is_none());
     let d = h.app.dialog.as_ref().unwrap();

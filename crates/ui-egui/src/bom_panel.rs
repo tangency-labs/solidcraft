@@ -85,93 +85,93 @@ fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.bom.take() else { return };
     let t = Tokens::get();
-    let mut open = true;
     let bom = d.rows(app);
     let rows: Vec<Value> = bom["rows"].as_array().cloned().unwrap_or_default();
     let (mut export, mut apply_row) = (None, None);
-    let title = RichText::new(crate::i18n::tr_label("Bill of Materials")).strong().size(t.font_button);
-    crate::frame::window(ctx, title, crate::frame::Width::Wide).id(egui::Id::new("sc_bom")).open(&mut open).resizable(true).show(ctx, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            let was = (d.top, d.by_definition, d.group_children);
-            let mut levels = usize::from(d.top);
-            let levels_width = crate::ui_kit::ContentWidth::button(ui, "Parts only").max(crate::ui_kit::ContentWidth::button(ui, "Top level")) * 2.0;
-            ui.allocate_ui(egui::vec2(levels_width, crate::ui_kit::row_height()), |ui| {
-                crate::ui_kit::segmented(ui, &mut levels, &["Parts only", "Top level"], Default::default());
-            });
-            d.top = levels == 1;
-            ui.separator();
-            let mut grouping = usize::from(d.by_definition);
-            let grouping_width =
-                crate::ui_kit::ContentWidth::button(ui, "By part number").max(crate::ui_kit::ContentWidth::button(ui, "By definition")) * 2.0;
-            ui.allocate_ui(egui::vec2(grouping_width, crate::ui_kit::row_height()), |ui| {
-                crate::ui_kit::segmented(ui, &mut grouping, &["By part number", "By definition"], Default::default());
-            });
-            d.by_definition = grouping == 1;
-            ui.separator();
-            crate::ui_kit::checkbox(ui, "Sub-parts in their part's row", &mut d.group_children);
-            if was != (d.top, d.by_definition, d.group_children) {
-                d.picked = None;
-            }
-        });
-        ui.separator();
-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-            egui::Grid::new("sc_bom_grid").num_columns(6).striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
-                for h in ["Item", "Part number", "Description", "Rev", "Qty", "Definition"] {
-                    ui.label(RichText::new(h).strong().color(t.text_dim));
+    let closed =
+        crate::ui_kit::Window::new(egui::Id::new("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let was = (d.top, d.by_definition, d.group_children);
+                let mut levels = usize::from(d.top);
+                let levels_width =
+                    crate::ui_kit::ContentWidth::button(ui, "Parts only").max(crate::ui_kit::ContentWidth::button(ui, "Top level")) * 2.0;
+                ui.allocate_ui(egui::vec2(levels_width, crate::ui_kit::row_height()), |ui| {
+                    crate::ui_kit::segmented(ui, &mut levels, &["Parts only", "Top level"], Default::default());
+                });
+                d.top = levels == 1;
+                ui.separator();
+                let mut grouping = usize::from(d.by_definition);
+                let grouping_width =
+                    crate::ui_kit::ContentWidth::button(ui, "By part number").max(crate::ui_kit::ContentWidth::button(ui, "By definition")) * 2.0;
+                ui.allocate_ui(egui::vec2(grouping_width, crate::ui_kit::row_height()), |ui| {
+                    crate::ui_kit::segmented(ui, &mut grouping, &["By part number", "By definition"], Default::default());
+                });
+                d.by_definition = grouping == 1;
+                ui.separator();
+                crate::ui_kit::checkbox(ui, "Sub-parts in their part's row", &mut d.group_children);
+                if was != (d.top, d.by_definition, d.group_children) {
+                    d.picked = None;
                 }
-                ui.end_row();
-                for (i, row) in rows.iter().enumerate() {
-                    let picked = d.picked == Some(i);
-                    if crate::ui_kit::list_picker(ui, &i.to_string(), &text(row, "item"), picked).clicked() {
-                        d.picked = if picked { None } else { Some(i) };
-                        d.fields = [text(row, "part_number"), text(row, "description"), text(row, "revision")];
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                egui::Grid::new("sc_bom_grid").num_columns(6).striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
+                    for h in ["Item", "Part number", "Description", "Rev", "Qty", "Definition"] {
+                        ui.label(RichText::new(h).strong().color(t.text_dim));
                     }
-                    ui.label(text(row, "part_number"));
-                    ui.label(text(row, "description"));
-                    ui.label(text(row, "revision"));
-                    ui.label(text(row, "count"));
-                    ui.label(RichText::new(text(row, "definition")).color(t.text_dim));
                     ui.end_row();
-                    for c in row["children"].as_array().into_iter().flatten() {
-                        ui.label(RichText::new(text(c, "item")).color(t.text_dim));
-                        ui.label(text(c, "part_number"));
-                        ui.label(text(c, "description"));
-                        ui.label(text(c, "revision"));
-                        ui.label(text(c, "count"));
-                        ui.label(RichText::new(text(c, "definition")).color(t.text_dim));
+                    for (i, row) in rows.iter().enumerate() {
+                        let picked = d.picked == Some(i);
+                        if crate::ui_kit::list_picker(ui, &i.to_string(), &text(row, "item"), picked).clicked() {
+                            d.picked = if picked { None } else { Some(i) };
+                            d.fields = [text(row, "part_number"), text(row, "description"), text(row, "revision")];
+                        }
+                        ui.label(text(row, "part_number"));
+                        ui.label(text(row, "description"));
+                        ui.label(text(row, "revision"));
+                        ui.label(text(row, "count"));
+                        ui.label(RichText::new(text(row, "definition")).color(t.text_dim));
+                        ui.end_row();
+                        for c in row["children"].as_array().into_iter().flatten() {
+                            ui.label(RichText::new(text(c, "item")).color(t.text_dim));
+                            ui.label(text(c, "part_number"));
+                            ui.label(text(c, "description"));
+                            ui.label(text(c, "revision"));
+                            ui.label(text(c, "count"));
+                            ui.label(RichText::new(text(c, "definition")).color(t.text_dim));
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            ui.label(RichText::new(format!("{} rows, {} placed", rows.len(), text(&bom, "total_occurrences"))).small().color(t.text_dim));
+            if let Some(row) = d.picked.and_then(|i| rows.get(i)) {
+                ui.separator();
+                egui::Grid::new("sc_bom_edit").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                    for (label, field) in ["Part number", "Description", "Revision"].into_iter().zip(d.fields.iter_mut()) {
+                        ui.label(label);
+                        ui.allocate_ui(egui::vec2(280.0, crate::ui_kit::row_height()), |ui| {
+                            crate::ui_kit::cell_editor(ui, ui.make_persistent_id(label), field, label, false);
+                        });
                         ui.end_row();
                     }
+                });
+                if crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Normal).clicked() {
+                    apply_row = Some(row.clone());
                 }
-            });
-        });
-        ui.label(RichText::new(format!("{} rows, {} placed", rows.len(), text(&bom, "total_occurrences"))).small().color(t.text_dim));
-        if let Some(row) = d.picked.and_then(|i| rows.get(i)) {
+            }
+            if let Some(e) = &d.error {
+                ui.label(RichText::new(e).color(t.error));
+            }
             ui.separator();
-            egui::Grid::new("sc_bom_edit").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                for (label, field) in ["Part number", "Description", "Revision"].into_iter().zip(d.fields.iter_mut()) {
-                    ui.label(label);
-                    ui.allocate_ui(egui::vec2(280.0, crate::ui_kit::row_height()), |ui| {
-                        crate::ui_kit::cell_editor(ui, ui.make_persistent_id(label), field, label, false);
-                    });
-                    ui.end_row();
+            ui.horizontal(|ui| {
+                for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
+                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).clicked() {
+                        export = Some(ext);
+                    }
                 }
             });
-            if crate::ui_kit::button(ui, "Apply", crate::ui_kit::Button::Normal).clicked() {
-                apply_row = Some(row.clone());
-            }
-        }
-        if let Some(e) = &d.error {
-            ui.label(RichText::new(e).color(t.error));
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
-                if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).clicked() {
-                    export = Some(ext);
-                }
-            }
         });
-    });
     if let Some(row) = apply_row {
         apply(app, &mut d, &row);
     }
@@ -180,7 +180,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         params["format"] = json!(ext);
         app.pick_save_command(&format!("bill-of-materials.{ext}"), &[ext], "assembly.bom", params);
     }
-    if open {
+    if !closed {
         app.bom = Some(d);
     }
 }

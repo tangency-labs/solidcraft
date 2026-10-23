@@ -504,6 +504,20 @@ fn timeline_folders_refuse_unknown_non_contiguous_and_split_contents() {
 }
 
 #[test]
+fn deleted_timeline_group_ids_are_not_reused_after_reopening() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Block"}));
+    let params = json!({"features": ["Block"]});
+    let first = run(&mut s, "timeline.group", params.clone())["group"].as_u64().unwrap();
+    run(&mut s, "timeline.ungroup", json!({"group": first}));
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    let second = run(&mut s, "timeline.group", params)["group"].as_u64().unwrap();
+    assert!(second > first, "deleted folder {first} was reused as {second}");
+    assert!(s.execute("timeline.rename_group", &json!({"group": first, "name": "Stale reference"})).is_err());
+}
+
+#[test]
 fn timeline_move_many_is_atomic_and_one_undo_step() {
     let mut s = Session::default();
     for (name, body, x) in [("First", "FirstBody", 0), ("Second", "SecondBody", 20), ("Third", "ThirdBody", 40)] {

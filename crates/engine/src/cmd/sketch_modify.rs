@@ -345,6 +345,22 @@ pub fn trim_piece(sk: &Sketch, curve: &str, at: Vec2) -> Option<Vec<Vec2>> {
     Some((0..=n).map(|i| sh.point(a + (b - a) * f64::from(i) / f64::from(n))).collect())
 }
 
+/// Trim and extend refuse an offset's output: its ends are recomputed from its source curves on
+/// every solve, so a new end there would be pulled straight back (the trim reported success and
+/// left the curve whole).
+fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<()> {
+    match sk.curves.get(ci).filter(|c| sk.offset_distance(&c.id).is_some()) {
+        Some(c) => Err(bad(
+            cmd,
+            format!(
+                "`{}` is an offset, and its ends follow its source curves: {what} the source curves instead, or break the offset association first",
+                c.id
+            ),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
@@ -383,6 +399,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         sk.remove_curves(&[ci]);
         return Ok((json!({"deleted": id}), removed));
     }
+    refuse_offset_ends(sk, ci, "trim", cmd)?;
     release_extent(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
     let (pieces, pts) = split_at(sk, ci, &ts)?;
@@ -590,6 +607,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, rep.failure(|_| "solve the existing sketch constraints before extending".into())));
         }
         let ci = curve_arg(sk, p, cmd)?;
+        refuse_offset_ends(sk, ci, "extend", cmd)?;
         let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
         let (pa, pb) = match sk.curves.get(ci).map(|c| c.kind.clone()) {
             Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => (a, b),
@@ -738,6 +756,26 @@ fn refuse_infinite_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
         None => ["a", "b"].iter().any(|k| infinite(str_(p, k).and_then(|i| sk.curve_index(i)))),
     };
     if at_corner { Err(bad(cmd, "an infinite line has no corner to round or cut: make it a normal line first")) } else { Ok(()) }
+}
+
+/// Fillets and chamfers refuse a corner of an offset's output (#2874). The output's ends are
+/// recomputed from its source curves on every solve, so a corner cut there would be pulled back
+/// to the sharp corner, leaving full circles and an unsolved sketch.
+fn refuse_offset_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
+    let output = |c: usize| sk.curves.get(c).filter(|c| sk.offset_distance(&c.id).is_some()).map(|c| c.id.clone());
+    let found = match str_(p, "point").and_then(|r| sk.resolve_point(r)) {
+        Some(q) => (0..sk.curves.len()).filter(|c| sk.curves.get(*c).is_some_and(|x| x.kind.uses(q))).find_map(output),
+        None => ["a", "b"].iter().find_map(|k| str_(p, k).and_then(|i| sk.curve_index(i)).and_then(output)),
+    };
+    match found {
+        Some(id) => Err(bad(
+            cmd,
+            format!(
+                "`{id}` is an offset, and its corners follow its source curves: round or cut the source corners before offsetting, or break the offset association first"
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// A corner of two lines: (line a, line b, corner point, far end of a, far end of b).
@@ -958,6 +996,7 @@ fn kept_json(kept: Vec<CornerKept>) -> (Vec<String>, Vec<String>) {
 /// the arc, the tangent constraints and what became of the corner point.
 fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize, Vec<String>, CornerKept)> {
     refuse_infinite_corner(sk, p, cmd)?;
+    refuse_offset_corner(sk, p, cmd)?;
     weld_corner(sk, p);
     let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
         Ok(x) => x,
@@ -1068,6 +1107,7 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
 fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Result<(f64, f64)>) -> Result<Value> {
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         refuse_infinite_corner(sk, p, cmd)?;
+        refuse_offset_corner(sk, p, cmd)?;
         weld_corner(sk, p);
         let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
         let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());

@@ -575,7 +575,7 @@ fn named_views_save_restore_rename_and_delete() {
     app.cam.set_view(solidcraft_engine::render::StandardView::Top);
     let t = Target::NamedView { name: "Named View1".into() };
     act(&mut app, &t, "Restore");
-    assert_eq!(app.cam, saved, "goes back to the saved camera at once");
+    assert_eq!(app.cam_anim.map(|a| a.to), Some(saved), "animates back to the saved camera");
     act(&mut app, &t, "Rename");
     assert!(context_menu::finish_rename(&mut app, Some("Front detail"), true));
     let t = Target::NamedView { name: "Front detail".into() };
@@ -585,7 +585,7 @@ fn named_views_save_restore_rename_and_delete() {
     let top = context_menu::items(&app, &Target::NamedView { name: "Top".into() });
     assert!(!find(&top, "Delete").enabled);
     context_menu::run_item(&mut app, &find(&top, "Restore"), pos2(0.0, 0.0));
-    assert_ne!(app.cam, saved);
+    assert!(app.cam_anim.is_some());
 }
 
 #[test]
@@ -846,6 +846,41 @@ fn menus_near_the_window_corner_open_inward() {
             h.frames(2);
         }
     }
+}
+
+/// #3313: renaming a body by typing in the Rename box and pressing Enter (or Tab) renames it.
+#[test]
+fn typing_a_new_body_name_and_enter_renames_it() {
+    for confirm in ["Enter", "Tab"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let b = h.app.session.model.state().bodies[0].name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key": "F2"})).unwrap();
+        h.frames(2);
+        assert!(h.app.menu.rename.is_some(), "F2 opens the Rename box");
+        h.step(&json!({"text": "Lid"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"key": confirm})).unwrap();
+        h.frames(2);
+        let names: Vec<String> = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(names, ["Lid"], "{confirm} renames the body; status {:?}", h.app.status);
+    }
+    // Escape still cancels.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let b = h.app.session.model.state().bodies[0].name.clone();
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b.clone()}]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "F2"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"text": "Lid"})).unwrap();
+    h.frames(1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(h.app.session.model.state().bodies[0].name, b, "Escape keeps the old name");
 }
 
 #[test]

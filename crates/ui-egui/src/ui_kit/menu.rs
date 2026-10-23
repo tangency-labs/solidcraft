@@ -1,4 +1,5 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
+use crate::ui_kit::{Container, Surface};
 use crate::{context_menu::Item, fonts::RichTextExt as _, icons, theme::Tokens};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
@@ -6,7 +7,7 @@ pub(crate) struct Menu;
 
 impl Menu {
     pub(crate) fn context<R>(response: &Response, add: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
-        egui::Popup::context_menu(response).frame(Self::frame()).show(add)
+        Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(add)
     }
 
     pub(crate) fn button<R>(ui: &mut Ui, label: impl Into<egui::WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
@@ -40,7 +41,7 @@ impl Menu {
             ui.add_enabled_ui(!opening_press, add).inner
         };
         let popup = if nested {
-            let submenu = egui::menu::SubMenu::new();
+            let submenu = Container::new(ui.ctx(), Surface::Popup).submenu();
             let submenu = if opening_press {
                 submenu.config(egui::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside))
             } else {
@@ -48,7 +49,7 @@ impl Menu {
             };
             submenu.show(ui, &response, content)
         } else {
-            egui::Popup::menu(&response).frame(frame).show(content)
+            Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(frame).show(content)
         };
         let response = egui::InnerResponse { response, inner: popup.map(|r| r.inner) };
         ui.set_style(previous);
@@ -56,18 +57,7 @@ impl Menu {
     }
 
     pub(crate) fn frame() -> egui::Frame {
-        let t = Tokens::get();
-        egui::Frame::NONE
-            .fill(t.dialog_body)
-            .stroke(Stroke::new(1.0, t.dialog_border))
-            .corner_radius(t.radius_xl)
-            .inner_margin(egui::Margin::symmetric(t.space_6 as i8, t.space_6 as i8))
-            .shadow(egui::Shadow {
-                offset: [0, t.space_14 as i8],
-                blur: (t.space_24 + t.space_12) as u8,
-                spread: 0,
-                color: t.app_bar.gamma_multiply(0.18),
-            })
+        super::Container::menu_frame()
     }
 
     pub(crate) fn show<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -123,7 +113,7 @@ impl Menu {
         let width = crate::context_menu::LIST_W;
         let x = if row.right() + width <= screen.right() { row.right() } else { (row.left() - width).max(screen.left()) };
         let at = pos2(x, row.top().min((screen.bottom() - height).max(screen.top())));
-        crate::frame::area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| Self::show(ui, width, add))
+        Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| Self::show(ui, width, add))
     }
 }
 
@@ -375,7 +365,8 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
                 response.request_focus();
                 *focused = true;
             }
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            // Leaving the box with Tab keeps the new name as Enter does; only Escape cancels (#3313).
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab))) {
                 done = Some(true);
             }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {

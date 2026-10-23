@@ -22,7 +22,8 @@
 //!   into `$SOLIDCRAFT_SCENARIO_SHOTS` when that is set; `{"debug": 1}`
 //!   prints the UI state (`"widgets"`: also every widget's text; `"handles"`: every published
 //!   handle, browser rows as `row:<label>` and their fold arrows as `fold:<label>`)
-//! - `{"camera": {"yaw": rad, "pitch": rad}}` puts the camera at an orbit
+//! - `{"camera": {"yaw": rad, "pitch": rad}}` puts the camera at an orbit; `{"view_anim": "top",
+//!   "max_deg": 10}` animates to a view and fails if any frame turns the view more than that
 //! - AT may also be `{"plane": "XY"}` (the middle of an origin plane's square), `{"axis": "Z"}`,
 //!   `{"dimension": "d1"}`, `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`]),
 //!   `{"browser": "Bodies"}` (a browser row by its label) or `{"chevron": "Bodies"}` (its fold arrow)
@@ -268,7 +269,7 @@ impl Harness {
     pub fn settle(&mut self) {
         for _ in 0..2000 {
             // Queued input used up and the view no longer moving.
-            if self.app.synthetic.is_empty() {
+            if self.app.synthetic.is_empty() && self.app.cam_anim.is_none() {
                 break;
             }
             self.frame();
@@ -375,6 +376,36 @@ impl Harness {
             (Some(x), Some(y)) => Ok([x, y]),
             _ => Err(format!("{v} is not on screen: {r}")),
         }
+    }
+
+    /// Animate the view to `v` (as the axis view does), sampling the camera every frame: no
+    /// frame may turn the view (its right or back vector) by more than `max_deg`, the last
+    /// included, so the move ends without a jump.
+    fn view_anim(&mut self, v: &str, max_deg: f64) -> Result<(), String> {
+        let basis = |c: &solidcraft_engine::render::Camera| c.basis();
+        let mut prev = basis(&self.app.cam);
+        self.app.animate_view(v);
+        if self.app.cam_anim.is_none() {
+            return Err(format!("view_anim {v}: no animation started"));
+        }
+        let mut worst = (0.0f64, 0usize);
+        for i in 0..240 {
+            self.frame();
+            let now = basis(&self.app.cam);
+            let ang = |a: solidcraft_engine::geom::Vec3, b: solidcraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
+            if d > worst.0 {
+                worst = (d, i);
+            }
+            prev = now;
+            if self.app.cam_anim.is_none() {
+                if worst.0 > max_deg {
+                    return Err(format!("view_anim {v}: frame {} of {} turns the view {:.1}° (limit {max_deg}°)", worst.1 + 1, i + 1, worst.0));
+                }
+                return Ok(());
+            }
+        }
+        Err(format!("view_anim {v}: still animating after 240 frames"))
     }
 
     /// Run one step.
@@ -484,10 +515,13 @@ impl Harness {
                 if let Some(p) = c.get("pitch").and_then(Value::as_f64) {
                     self.app.cam.pitch = p;
                 }
+                self.app.cam_anim = None;
                 self.frames(2);
                 // Where `camera.panned` and `camera.zoomed` checks measure from.
                 self.cam_mark = Some(self.app.cam);
                 return Ok(());
+            } else if let Some(v) = s.get("view_anim").and_then(Value::as_str) {
+                return self.view_anim(v, s.get("max_deg").and_then(Value::as_f64).unwrap_or(10.0));
             } else if s.get("autosave").is_some() {
                 self.start_autosave();
                 return Ok(());
@@ -653,7 +687,14 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
             }
             "camera" => {
                 // {"camera": {"yaw_deg": y, "pitch_deg": p, "back"?: [x,y,z]}}: where the camera
-                // looks from (yaw and pitch in its up-axis frame, ±0.5°).
+                // looks from (yaw and pitch in its up-axis frame, ±0.5°),
+                // once any view animation has finished.
+                for _ in 0..240 {
+                    if h.app.cam_anim.is_none() {
+                        break;
+                    }
+                    h.frame();
+                }
                 let (yaw, pitch) = (h.app.cam.yaw.to_degrees(), h.app.cam.pitch.to_degrees());
                 let near = |got: f64, want: &Value| want.as_f64().is_none_or(|w| ((got - w + 540.0).rem_euclid(360.0) - 180.0).abs() < 0.5);
                 if !near(yaw, &v["yaw_deg"]) || !near(pitch, &v["pitch_deg"]) {

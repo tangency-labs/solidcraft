@@ -19,7 +19,7 @@ mod analysis;
 #[path = "motion_animation.rs"]
 mod animation;
 #[path = "contact_sweep.rs"]
-mod contact_sweep;
+pub(crate) mod contact_sweep;
 #[path = "motion_sweep.rs"]
 mod sweep;
 
@@ -97,12 +97,6 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 const MAX_ITEMS: usize = 10_000;
-
-fn next_id(s: &Session, cmd: &str) -> Result<u64> {
-    let a = &s.doc.assembly;
-    let ids = a.contact_sets.iter().map(|c| c.id).chain(a.studies.iter().map(|m| m.id)).chain(a.exploded.iter().map(|e| e.id));
-    super::next_free_id(cmd, ids)
-}
 
 fn occurrences(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
     let list = p.get("occurrences").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`occurrences` must list occurrences"))?;
@@ -477,7 +471,7 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.assembly.contact_sets.len() >= MAX_ITEMS {
         return Err(bad(cmd, "too many contact sets"));
     }
-    let id = next_id(s, cmd)?;
+    let id = s.doc_mut().allocate_id()?;
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Contact Set{}", s.doc.assembly.contact_sets.len() + 1));
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
@@ -585,9 +579,13 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
             keys.push(StudyKey { joint, index, points });
         }
     }
-    let id = next_id(s, cmd)?;
-    let count = s.doc.assembly.studies.len();
-    let a = &mut s.doc_mut().assembly;
+    let doc = s.doc_mut();
+    let id = match existing {
+        Some(i) => doc.assembly.studies.get(i).ok_or_else(|| bad(cmd, "no such motion study"))?.id,
+        None => doc.allocate_id()?,
+    };
+    let count = doc.assembly.studies.len();
+    let a = &mut doc.assembly;
     let out = match existing.and_then(|i| a.studies.get_mut(i)) {
         Some(m) => {
             if let Some(n) = steps {
@@ -1003,7 +1001,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.assembly.exploded.len() >= MAX_ITEMS {
         return Err(bad(cmd, "too many exploded views"));
     }
-    let id = next_id(s, cmd)?;
+    let id = s.doc_mut().allocate_id()?;
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Exploded View{}", s.doc.assembly.exploded.len() + 1));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
     Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))

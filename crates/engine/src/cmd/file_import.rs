@@ -344,17 +344,16 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
         // Too many to hold together: the parts are placed, not locked.
         return Ok(Vec::new());
     }
-    let mut id = s.doc.assembly.joints.iter().map(|j| j.id).max().unwrap_or(0);
     let mut ids = Vec::with_capacity(pairs.len());
     let point = |m: &Mat, p: Vec3| solidcraft_doc::apply_point(m, p);
     let vector = |m: &Mat, v: Vec3| solidcraft_doc::apply_vector(m, v);
     let made: Vec<Joint> = pairs
         .iter()
         .map(|(a, b, m)| {
-            id += 1;
+            let id = s.doc_mut().allocate_id()?;
             ids.push(id);
             // As built: B's origin, seen from A (B's placement in A) and from B itself.
-            Joint {
+            Ok(Joint {
                 id,
                 name: format!("Rigid Group {a}:{b}"),
                 kind: JointKind::Rigid,
@@ -370,9 +369,9 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
     s.doc_mut().assembly.joints.extend(made);
     // Dozens of coinciding glyphs say nothing: the group shows in the browser instead.
     s.visibility.hidden_joints.retain(|h| !ids.contains(h));

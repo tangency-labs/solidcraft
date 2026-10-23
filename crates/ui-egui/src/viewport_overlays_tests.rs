@@ -24,6 +24,7 @@ fn compass_keeps_signed_targets_hover_and_clicks_at_both_scales() {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout": mode}));
             h.call("ui.prefs", json!({"ui_scale": scale}));
+            h.app.preferences.look_at_anim = false;
             h.settle();
             let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
             assert_eq!(outer.size(), vec2(116.0, 116.0));
@@ -354,4 +355,79 @@ fn compass_circle_grabs_on_hover_and_the_home_chip_points() {
     h.call("ui.move", json!({"x": centre.x - 200.0, "y": centre.y + 200.0}));
     h.settle();
     assert_ne!(h.output.cursor_icon, egui::CursorIcon::Grab, "no hand away from the compass");
+}
+
+#[test]
+fn bottom_readouts_clear_floating_history_on_the_first_frame() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.layout = LayoutMode::Floating;
+    h.app.preferences.timeline_left = false;
+    h.app.preferences.show_frame_rate = true;
+    for command in ["inspect.draft", "inspect.accessibility", "inspect.curvature_map"] {
+        h.app.session.analysis = None;
+        h.app.run(command, json!({})).unwrap();
+        for shown in [false, true, false, true] {
+            h.app.ui.show_timeline = shown;
+            h.frame();
+            let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
+            let history = crate::scenario::rect_of("history:card");
+            assert_eq!(history.is_some(), shown);
+            for name in ["analysis:legend", "viewport:frame_rate"] {
+                let readout = crate::scenario::rect_of(name).unwrap();
+                assert!(viewport.contains_rect(readout), "{name}: {readout:?}");
+                if let Some(history) = history {
+                    assert!(!readout.intersects(history), "{name}: {readout:?} overlaps {history:?}");
+                } else {
+                    assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01);
+                }
+            }
+        }
+    }
+    h.app.session.analysis = None;
+    h.app.run("inspect.draft", json!({})).unwrap();
+    // Start with a measured floating card, then switch without a settling frame.
+    h.app.ui.layout = LayoutMode::Floating;
+    h.app.ui.show_timeline = true;
+    h.frame();
+    h.app.ui.layout = LayoutMode::Docked;
+    h.frame();
+    let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
+    let history = crate::scenario::rect_of("history:strip").unwrap();
+    for name in ["analysis:legend", "viewport:frame_rate"] {
+        let readout = crate::scenario::rect_of(name).unwrap();
+        assert!(!readout.intersects(history));
+        assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01);
+    }
+}
+
+#[test]
+fn continuity_legend_clears_floating_history() {
+    let mut h = Harness::new();
+    h.app.ui.layout = LayoutMode::Floating;
+    h.app.preferences.timeline_left = false;
+    h.app.ui.show_timeline = true;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+    h.app.start("inspect.continuity");
+    h.frame();
+    let legend = crate::scenario::rect_of("continuity_legend").unwrap();
+    let history = crate::scenario::rect_of("history:card").unwrap();
+    assert!(!legend.intersects(history), "{legend:?} overlaps {history:?}");
+}
+
+#[test]
+fn left_history_sidebar_leaves_bottom_readouts_at_the_bottom() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.layout = LayoutMode::Floating;
+    h.app.preferences.timeline_left = true;
+    h.app.preferences.show_frame_rate = true;
+    h.app.ui.show_timeline = true;
+    h.app.run("inspect.draft", json!({})).unwrap();
+    h.frame();
+    let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
+    for name in ["analysis:legend", "viewport:frame_rate"] {
+        let readout = crate::scenario::rect_of(name).unwrap();
+        assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01, "{name}: {readout:?} in {viewport:?}");
+    }
 }

@@ -8,6 +8,35 @@ const fn icon_primary(rgb: [u8; 3]) -> Color32 {
 impl Tokens {
     pub const fn light() -> Tokens {
         Tokens {
+            file_dim: Color32::from_rgb(58, 70, 86),
+            file_recovery_well: Color32::from_rgb(247, 226, 184),
+            file_action_height: 32.0,
+            file_back_height: 40.0,
+            file_recovery_icon: 32.0,
+            file_grid_gap: 14.0,
+            file_background: Color32::from_rgb(247, 249, 251),
+            file_surface: Color32::WHITE,
+            file_border: Color32::from_rgb(224, 229, 236),
+            file_image_tint: Color32::WHITE,
+            file_rail: Color32::from_rgb(35, 110, 173),
+            file_rail_ink: Color32::WHITE,
+            file_rail_hover: Color32::from_rgb(43, 118, 180),
+            file_primary: Color32::from_rgb(227, 240, 251),
+            file_primary_ink: Color32::from_rgb(26, 80, 127),
+            file_primary_border: Color32::from_rgb(50, 139, 211),
+            file_recovery: Color32::from_rgb(255, 246, 229),
+            file_recovery_ink: Color32::from_rgb(122, 74, 5),
+            file_recovery_border: Color32::from_rgb(240, 210, 154),
+            file_nav_width: 248.0,
+            file_nav_height: 38.0,
+            file_tile_height: 84.0,
+            file_tile_icon: 44.0,
+            file_recent_height: 52.0,
+            file_sample_image_height: 84.0,
+            file_content_inset_x: 40.0,
+            file_content_inset_y: 32.0,
+            file_section_gap: 28.0,
+            font_start_title: 28.0,
             space_2: 2.0,
             space_3: 3.0,
             space_4: 4.0,
@@ -107,7 +136,6 @@ impl Tokens {
             error: Color32::from_rgb(214, 54, 54),
             warning: Color32::from_rgb(222, 150, 30),
             icon: Color32::from_rgb(70, 78, 92),
-            icon_fill: Color32::from_rgb(178, 196, 222),
             timeline: Color32::from_rgb(232, 235, 240),
             hover: Color32::from_rgb(226, 234, 246),
             sel_face: Color32::from_rgb(76, 127, 203),
@@ -157,8 +185,6 @@ impl Tokens {
             dialog_bg: Color32::from_rgb(250, 251, 252),
             dialog_border: Color32::from_rgb(213, 219, 227),
             chip: Color32::from_rgb(38, 120, 218),
-            heading_bg: Color32::from_rgb(218, 223, 231),
-            subheading_bg: Color32::from_rgb(234, 237, 242),
             profile_fill: Color32::from_rgba_unmultiplied_const(255, 196, 120, 70),
             glyph_bg: Color32::WHITE,
             glyph_edge: Color32::from_rgb(190, 110, 100),
@@ -203,30 +229,7 @@ impl Tokens {
                 Color32::from_rgb(204, 0, 140),
             ],
             analysis: AnalysisColors::DEFAULT,
-            icons: IconColors {
-                sheet: Color32::from_rgb(170, 200, 240),
-                sheet_2: Color32::from_rgb(150, 185, 235),
-                sheet_light: Color32::from_rgb(214, 229, 248),
-                sheet_line: Color32::from_rgb(127, 166, 218),
-                highlight: Color32::WHITE,
-                glint: Color32::from_rgba_premultiplied(160, 160, 160, 160),
-                folder: Color32::from_rgb(236, 200, 110),
-                plane: Color32::from_rgb(244, 214, 150),
-                fold: Color32::from_rgb(130, 140, 160),
-                stripe: Color32::from_gray(30),
-                sky: Color32::from_rgb(190, 205, 230),
-                floor: Color32::from_rgb(60, 62, 70),
-                paint: [Color32::from_rgb(220, 70, 60), Color32::from_rgb(70, 150, 230), Color32::from_rgb(240, 200, 60)],
-                axes: [Color32::from_rgb(210, 60, 60), Color32::from_rgb(60, 160, 60), Color32::from_rgb(60, 100, 220)],
-                access: [Color32::from_rgb(70, 180, 90), Color32::from_rgb(220, 70, 60)],
-                draft: [Color32::from_rgb(70, 180, 90), Color32::from_rgb(235, 200, 50)],
-                curvature: [Color32::from_rgb(60, 110, 230), Color32::from_rgb(70, 190, 90), Color32::from_rgb(225, 60, 45)],
-                interference: Color32::from_rgb(225, 70, 60),
-                warning: Color32::from_rgb(250, 200, 60),
-                agent: Color32::from_rgb(168, 85, 247),
-                marker_halo: Color32::from_black_alpha(150),
-            },
-            app_bar_icon: [Color32::from_rgb(225, 230, 238), Color32::from_rgb(120, 140, 170), Color32::from_rgb(120, 190, 255)],
+            icons: IconColors { highlight: Color32::WHITE, agent: Color32::from_rgb(168, 85, 247), marker_halo: Color32::from_black_alpha(150) },
             logo: [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197), Color32::WHITE],
         }
     }
@@ -262,6 +265,19 @@ impl Tokens {
         t.sketch_mode_tint = 0.12;
         t.sketch_footer_icon_size = 15.0;
         t.font_section_tracking = 0.04;
+        t.file_dim = Color32::from_rgb(180, 187, 200);
+        t.file_recovery_well = Color32::from_rgb(92, 68, 32);
+        t.file_background = Color32::from_rgb(31, 35, 43);
+        t.file_surface = Color32::from_rgb(39, 43, 52);
+        t.file_border = Color32::from_rgb(63, 69, 82);
+        t.file_rail = Color32::from_rgb(30, 80, 128);
+        t.file_rail_hover = Color32::from_rgb(46, 99, 149);
+        t.file_primary = Color32::from_rgb(27, 48, 72);
+        t.file_primary_ink = Color32::from_rgb(156, 199, 245);
+        t.file_primary_border = Color32::from_rgb(58, 136, 238);
+        t.file_recovery = Color32::from_rgb(67, 51, 28);
+        t.file_recovery_ink = Color32::from_rgb(245, 204, 137);
+        t.file_recovery_border = Color32::from_rgb(115, 88, 43);
         t.app_bar = Color32::from_rgb(28, 31, 38);
         t.toolbar = Color32::from_rgb(39, 43, 52);
         t.panel = Color32::from_rgb(39, 43, 52);
@@ -294,19 +310,18 @@ impl Tokens {
         t.render_ink = Color32::from_rgb(224, 116, 174);
         t.render_soft = Color32::from_rgb(64, 35, 54);
         t.tab_on_fill_dark = Color32::BLACK;
-        t.dialog_body = Color32::from_rgb(59, 68, 83);
+        t.dialog_body = Color32::from_rgb(39, 43, 52);
         t.dialog_footer = Color32::from_rgb(47, 52, 62);
         t.dialog_rule = Color32::from_rgb(53, 59, 71);
-        t.control_fill = Color32::from_rgb(39, 43, 52);
+        t.control_fill = Color32::from_rgb(28, 31, 38);
         t.control_border = Color32::from_rgb(74, 82, 98);
-        t.dialog_label = Color32::from_rgb(180, 187, 200);
+        t.dialog_label = t.text;
         t.selected_ink = Color32::from_rgb(156, 199, 245);
         t.selected_bg = Color32::from_rgb(42, 70, 110);
         t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[1]);
         t.error = Color32::from_rgb(240, 100, 96);
         t.warning = Color32::from_rgb(236, 170, 70);
         t.icon = Color32::from_rgb(208, 214, 226);
-        t.icon_fill = Color32::from_rgb(86, 112, 150);
         t.timeline = Color32::from_rgb(33, 37, 45);
         t.hover = Color32::from_rgb(54, 61, 74);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
@@ -325,11 +340,9 @@ impl Tokens {
         t.dimension_driven = Color32::from_rgb(142, 150, 164);
         t.sketch_point_free = Color32::from_rgb(92, 150, 255);
         t.profile_fill = Color32::from_rgba_unmultiplied_const(120, 150, 200, 40);
-        t.dialog_bg = Color32::from_rgb(59, 68, 83);
-        t.dialog_border = Color32::from_rgb(72, 83, 99);
+        t.dialog_bg = Color32::from_rgb(39, 43, 52);
+        t.dialog_border = Color32::from_rgb(63, 69, 82);
         t.chip = Color32::from_rgb(59, 101, 168);
-        t.heading_bg = Color32::from_rgb(38, 44, 55);
-        t.subheading_bg = Color32::from_rgb(48, 55, 68);
         t.glyph_bg = Color32::from_rgb(44, 50, 60);
         t.glyph_edge = Color32::from_rgb(200, 130, 120);
         t.glyph_text = icon_primary(crate::icon_svg::CONSTRAINT_PRIMARY[1]);
@@ -344,7 +357,7 @@ impl Tokens {
         t.bend_up = Color32::from_rgb(110, 200, 120);
         t.bend_down = Color32::from_rgb(240, 150, 80);
         t.form_ink = t.text;
-        t.form_dim = t.text_dim;
+        t.form_dim = Color32::from_rgb(180, 187, 200);
         t.form_primary = t.accent;
         t.form_error = t.error;
         t.form_error_fill = t.timeline_item_error;
@@ -373,15 +386,8 @@ impl Tokens {
         if !dark {
             t.form_success = Color32::from_rgb(39, 88, 78);
         }
-        // The icons that show the same meanings follow; on the dark toolbar the blue is a little
-        // stronger, to stay clear of the icon fill.
-        let good = if dark { Color32::from_rgb(35, 115, 245) } else { Color32::from_rgb(51, 115, 230) };
-        t.icons.axes[0] = t.triad[0];
-        t.icons.axes[1] = t.triad[1];
-        t.icons.access = [good, Color32::from_rgb(217, 102, 13)];
         t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_RED_GREEN[dark as usize]);
         t.glyph_text = icon_primary(crate::icon_svg::CONSTRAINT_RED_GREEN[dark as usize]);
-        t.icons.draft = [good, Color32::from_rgb(242, 230, 153)];
         t.surface_accent = if dark { Color32::from_rgb(200, 135, 55) } else { Color32::from_rgb(164, 80, 0) };
         t.mesh_accent = if dark { Color32::from_rgb(190, 175, 70) } else { Color32::from_rgb(130, 103, 0) };
         t.form_accent = if dark { Color32::from_rgb(165, 135, 220) } else { Color32::from_rgb(115, 73, 205) };

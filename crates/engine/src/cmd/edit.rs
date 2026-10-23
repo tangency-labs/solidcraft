@@ -330,15 +330,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
-    let id = s
-        .doc
-        .timeline_groups
-        .iter()
-        .map(|group| group.id)
-        .max()
-        .unwrap_or(0)
-        .checked_add(1)
-        .ok_or_else(|| bad(cmd, "no more timeline folder ids are available"))?;
+    let id = s.doc_mut().allocate_id()?;
     let parent = match p.get("parent") {
         Some(Value::Null) | None => None,
         Some(_) => Some(timeline_group_id_field(s, p, "parent", cmd)?),
@@ -1252,6 +1244,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
+    }
+    // The trial still holds the old feature, so a plane offset from its own name was made there,
+    // and once swapped in it would be built on itself (#3567).
+    if new.kind.names_feature(&old.name) {
+        return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its

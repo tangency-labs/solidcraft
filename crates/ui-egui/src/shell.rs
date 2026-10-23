@@ -1,16 +1,28 @@
 //! Transient shell geometry shared by automation, drawing and viewport occlusion.
+use crate::ui_kit::{Container, Surface};
 use egui::{Rect, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::{SolveApp, theme::Tokens, toolbar};
 
-/// Shell frame selected by automation for this session.
+/// Saved workspace layout; automation may override it for a session.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LayoutMode {
     #[default]
     Floating,
+    #[serde(rename = "compact", alias = "docked")]
     Docked,
+}
+
+impl LayoutMode {
+    pub(crate) fn publish(self, ctx: &egui::Context) {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_container_layout"), self));
+    }
+
+    pub(crate) fn current(ctx: &egui::Context) -> Self {
+        ctx.data(|data| data.get_temp(egui::Id::new("sc_container_layout"))).unwrap_or_default()
+    }
 }
 
 /// The gap from the viewport edge to the floating cards and between the cards.
@@ -58,17 +70,20 @@ pub(crate) struct Cards {
 }
 
 impl Cards {
-    pub fn new(available: Rect, mode: LayoutMode) -> Self {
-        let margin = if mode == LayoutMode::Floating { SHELL_GAP } else { 0.0 };
-        let gap = if mode == LayoutMode::Floating { SHELL_GAP } else { 1.0 };
+    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32) -> Self {
+        let margin = Container::for_layout(mode, Surface::Chrome).gap();
+        let gap = margin;
         let left = available.left() + margin;
         let top = available.top() + margin;
         let right = (available.right() - margin).max(left);
         let workspace = Rect::from_min_size(
             pos2(left, top),
-            vec2(toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)), toolbar::RIBBON_HEIGHT - if mode == LayoutMode::Docked { 1.0 } else { 0.0 }),
+            vec2(
+                toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)),
+                ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 },
+            ),
         );
-        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + toolbar::RIBBON_HEIGHT));
+        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + ribbon_height));
         Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
     }
 }
@@ -80,16 +95,29 @@ pub(crate) struct State {
     pub panels: Vec<Rect>,
     pub browser: Option<Rect>,
     pub history: Option<Rect>,
+    /// In-memory seam drag width, never serialized as a preference.
+    pub history_drag_width: Option<f32>,
+    /// Unreserved canvas bounds used by History docking targets.
+    pub history_dock_space: Option<Rect>,
+    /// Browser/history collapse progress shared by both cards for this frame.
+    pub history_folding: Option<[f32; 2]>,
+    pub history_fold_motion: Option<[crate::timeline_left::FoldMotion; 2]>,
     pub content: Option<Rect>,
 }
 
 /// One source of occlusion for navigation, picking, overlays and fit.
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     let mut rects = Vec::new();
-    if app.ui.layout == LayoutMode::Floating {
+    if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());
-        rects.extend(app.shell.history);
+        if crate::agent_chat::shown(app) && app.agent_chat.open && !app.preferences.agent_chat_popped {
+            rects.extend(app.agent_chat.panel_rect);
+        }
+    }
+    rects.extend(app.shell.history.filter(|_| app.ui.show_timeline));
+    if app.ui.show_timeline && app.preferences.timeline_left {
+        rects.extend(app.shell.history.map(|card| crate::ui_kit::HistorySeam::new(card).pill));
     }
     rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
     rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
@@ -102,16 +130,64 @@ pub(crate) fn covered(app: &SolveApp, p: egui::Pos2) -> bool {
     covered_rects(app).iter().any(|r| r.contains(p))
 }
 
+/// Space reserved below viewport overlays by the floating History card. Its rect is set before
+/// the viewport is painted, so showing or hiding History takes effect in the same frame. History
+/// docked as the left sidebar sits beside the viewport, not below it, so it reserves nothing.
+pub(crate) fn viewport_bottom_inset(app: &SolveApp, viewport: Rect) -> f32 {
+    if app.ui.layout != LayoutMode::Floating || (app.ui.show_timeline && app.preferences.timeline_left) {
+        return 0.0;
+    }
+    app.shell
+        .history
+        .filter(|r| r.is_finite() && r.width() >= 1.0 && r.height() >= 30.0)
+        .map_or(0.0, |history| (viewport.bottom() - history.top() + SHELL_GAP).clamp(0.0, viewport.height().max(0.0)))
+}
+
+/// Bottom-anchored overlays share the content area's History clearance without moving the
+/// viewport's projection or its left and right anchors.
+pub(crate) fn bottom_overlay_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
+    viewport.max.y -= viewport_bottom_inset(app, viewport);
+    viewport
+}
+
 /// The former central panel remains the anchor for controls and docked panels.
 pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
-    if app.ui.layout == LayoutMode::Floating { app.shell.content.unwrap_or(viewport).intersect(viewport) } else { viewport }
+    app.shell.content.unwrap_or(viewport).intersect(viewport)
+}
+
+/// Free anchor space shared by both layouts. Compact edge hosts have already consumed
+/// their allocation; content-hugging Browser and floating overlays reserve their measured span.
+pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
+    let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
+    if let Some(history) = app.shell.history {
+        if app.preferences.timeline_left {
+            content.min.x = (history.right() + gap).clamp(content.left(), content.right());
+        } else {
+            content.max.y = (history.top() - gap).clamp(content.top(), content.bottom());
+        }
+    }
+    if let Some(browser) = app.shell.browser {
+        content.min.x = (browser.right() + gap).clamp(content.left(), content.right());
+    }
+    content
+}
+
+/// Tool sheets may cover Browser and History, while shell chrome and Assistant stay clear.
+/// Assistant's outside-rail exception stays in its owner.
+pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
+    let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
+    let mut bounds = crate::agent_chat::tool_space(app, app.viewport.rect.unwrap_or(placement));
+    for card in app.shell.cards.iter().filter(|r| r.is_finite() && r.is_positive()) {
+        bounds.min.y = (card.bottom() + gap).clamp(bounds.top(), bounds.bottom());
+    }
+    bounds
 }
 
 pub(crate) fn panel_top(app: &SolveApp, viewport: Rect, bottom: f32, side: crate::frame::Side) -> f32 {
     let content = content_rect(app, viewport);
-    if app.ui.layout == LayoutMode::Floating && side == crate::frame::Side::Right {
-        // Preserve measured compass clearance when there is room; reclaim it on short
-        // views with the same 360 px panel budget as Docked.
+    if side == crate::frame::Side::Right {
+        // Both layouts use the measured compass, rather than a legacy fixed-height gap.
+        // Reclaim that space on short views while keeping the panel usable.
         app.viewport
             .layout
             .as_ref()

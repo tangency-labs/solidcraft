@@ -2,6 +2,7 @@
 //! view and the navigation bar.
 
 use crate::fonts::RichTextExt as _;
+use crate::ui_kit::{Container, Surface};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -62,21 +63,24 @@ pub struct ViewportState {
     pick_bounds: std::sync::Mutex<Option<BodyBounds>>,
     /// The model scene's blocks of bodies by key, from the last scene built.
     pub(crate) blocks: std::sync::Mutex<std::collections::HashMap<u64, CachedBlock>>,
+    /// The triangles of each mesh the last scene drew as instances, by the mesh's address (the
+    /// mesh held, so its address stays its own).
+    instanced_tris: std::sync::Mutex<InstancedTris>,
+    /// The levels of detail of large instanced meshes ([`crate::mesh_lod`]).
+    pub(crate) mesh_lods: crate::mesh_lod::MeshLods,
     /// View-dependent display refinement (#1320): which bodies are drawn finer than the chosen
     /// display quality, and their refined plans.
     pub(crate) lod: std::sync::Mutex<crate::display_lod::Lod>,
     /// The view and model the refinement was last chosen for.
     lod_view: u64,
     /// Each body mesh's box (the mesh held, so its address stays its own), from the last state.
-    mesh_bounds: std::sync::Mutex<std::collections::HashMap<usize, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::geom::Aabb3)>>,
+    mesh_bounds: std::sync::Mutex<MeshBounds>,
     /// Each shown body mesh's section index for the cut's normal (the mesh held, so its address
     /// stays its own): a Section Analysis dragged along its normal cuts through it.
     section_index: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<solidcraft_engine::view::SectionIndex>)>>,
     /// Each body mesh's picking index (made the first time a pick reaches the body), kept while
     /// the mesh is part of the world state.
     pub(crate) pick_index: crate::pick_index::PickIndexes,
-    /// The GPU pick buffer's scene, read-backs and requests.
-    pub(crate) pick_buffer: crate::pick_buffer::State,
     /// The last click in the view was the middle button's (for the middle double-click).
     pub(crate) middle_clicked: bool,
     /// The last pick (its key and hits): reused while nothing it depends on changed.
@@ -321,6 +325,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.ui.ground_shadow.hash(&mut h);
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
     lod_generation(app).hash(&mut h);
+    app.viewport.mesh_lods.generation().hash(&mut h);
     // The section plane (its cut outlines are part of the model scene).
     section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
     app.cam.up.hash(&mut h);
@@ -538,7 +543,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
             None => (shown && proj.cam.fov > 0.0 && lens.in_front(bx)).then_some(f64::INFINITY),
         };
         let err_px = crate::display_lod::error_px(q, b.body.size(), bx, on_screen, &lens);
-        candidates.push(crate::display_lod::Candidate { body: b, err_px, triangles: b.mesh().triangles.len() });
+        candidates.push(crate::display_lod::Candidate { body: b, err_px, triangles: b.mesh_in_place().0.triangles.len() });
     }
     let busy = match app.viewport.lod.lock() {
         Ok(mut lod) => {
@@ -560,14 +565,62 @@ pub(crate) struct CachedBlock {
     meshes: Vec<std::sync::Arc<solidcraft_engine::geom::Mesh>>,
 }
 
+/// [`ViewportState::mesh_bounds`]: each box by the shared mesh it was measured on (held, so its
+/// address stays its own) and the placement that moved it ([`ModelBody::mesh_in_place`]).
+///
+/// [`ModelBody::mesh_in_place`]: solidcraft_engine::doc::ModelBody::mesh_in_place
+type MeshBounds = std::collections::HashMap<(usize, [u64; 16]), (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::geom::Aabb3)>;
+
+/// [`ViewportState::instanced_tris`].
+type InstancedTris = std::collections::HashMap<usize, (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>)>;
+
+/// A body alone is drawn as an instance of its triangles (shared vertices, indexed) from this many
+/// triangles: a large imported mesh. Smaller ones are drawn so only when placed more than once.
+pub(crate) const INSTANCE_ALONE: usize = 50_000;
+
+/// Shared vertices made ahead, off the window thread ([`warm_shared_tris`]), by mesh address
+/// (the mesh held, so its address stays its own), until a scene takes them.
+static WARMED: std::sync::Mutex<Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>)>> =
+    std::sync::Mutex::new(Vec::new());
+/// Most meshes kept warmed and not taken yet (a design opened and closed before it was drawn).
+const MAX_WARMED: usize = 8;
+
+/// Make a large mesh's shared vertices ahead of its first scene, on the caller's thread (the
+/// background mesher, after a file is opened or inserted): welding a scanned part takes a
+/// noticeable part of a second, which the window thread would otherwise spend on the first frame
+/// that shows it.
+pub(crate) fn warm_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) {
+    if mesh.triangles.len() < INSTANCE_ALONE || WARMED.lock().map_or(true, |w| w.iter().any(|(m, _)| std::sync::Arc::ptr_eq(m, mesh))) {
+        return;
+    }
+    let tris = std::sync::Arc::new(crate::gpu::SharedTris::new(mesh));
+    if let Ok(mut warmed) = WARMED.lock() {
+        if warmed.len() >= MAX_WARMED {
+            warmed.remove(0);
+        }
+        warmed.push((mesh.clone(), tris));
+    }
+}
+
+/// The shared vertices made ahead for `mesh`, taken from the warmed ones.
+fn taken_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> Option<std::sync::Arc<crate::gpu::SharedTris>> {
+    let mut warmed = WARMED.lock().ok()?;
+    let at = warmed.iter().position(|(m, _)| std::sync::Arc::ptr_eq(m, mesh))?;
+    Some(warmed.remove(at).1)
+}
+
 /// One body as the model scene draws it.
 struct BodyDraw {
+    /// Its mesh where it stands, or (with `place`) the shared mesh `place` moves there.
     mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>,
+    /// The move from `mesh` to where the body stands, for a body drawn as an instance.
+    place: Option<solidcraft_engine::doc::Mat>,
     col: [u8; 4],
     faded: bool,
     opacity: f64,
     face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
-    /// Its faces are drawn from its plan on the GPU (only its edges are built here).
+    /// Its faces are drawn elsewhere, from its plan on the GPU or as an instance of shared
+    /// triangles (only its edges are built here).
     on_gpu: bool,
 }
 
@@ -576,6 +629,7 @@ impl BodyDraw {
     fn key(&self, shaded: bool, edges: bool, hidden_edges: bool, edge_col: [u8; 4], hidden_col: [u8; 4]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (std::sync::Arc::as_ptr(&self.mesh) as usize).hash(&mut h);
+        self.place.iter().flatten().flatten().for_each(|v| v.to_bits().hash(&mut h));
         (self.col, self.faded, self.opacity.to_bits(), self.on_gpu, shaded, edges, hidden_edges, edge_col, hidden_col).hash(&mut h);
         let mut looks: Vec<_> = self.face_looks.iter().map(|(f, l)| (*f, l.color, l.opacity.to_bits())).collect();
         looks.sort_unstable();
@@ -611,14 +665,16 @@ impl BodyDraw {
                 }
             }
         }
+        let at = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p)).to_f32();
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_pickable(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
             }
             for w in e.windows(2) {
-                out.line(w[0].to_f32(), w[1].to_f32(), edge_col, 1.3, false);
+                let (a, b) = (at(w[0]), at(w[1]));
+                out.line(a, b, edge_col, 1.3, false);
                 if hidden_edges {
-                    out.hidden_line(w[0].to_f32(), w[1].to_f32(), hidden_col, 1.0);
+                    out.hidden_line(a, b, hidden_col, 1.0);
                 }
             }
         }
@@ -657,6 +713,99 @@ fn push_block(
     made.insert(key, block);
 }
 
+/// The model scene's instanced meshes: the shared triangles drawn more than once among the shown
+/// bodies (or large: [`INSTANCE_ALONE`]), and each body placed from them.
+struct Instances {
+    /// Each candidate body's shared mesh and placement, by body name.
+    candidates: std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)>,
+    /// The meshes drawn as instances, in the order their first placement came, by address.
+    meshes: Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
+    kept: InstancedTris,
+    lods: crate::mesh_lod::MeshLods,
+}
+
+impl Instances {
+    /// The shown bodies' shared meshes, keeping those more than one body is drawn from and large
+    /// ones.
+    fn new(app: &SolveApp, shown: &[&solidcraft_engine::doc::ModelBody], shaded: bool) -> Instances {
+        let kept = app.viewport.instanced_tris.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
+        let mut candidates = std::collections::HashMap::new();
+        if shaded {
+            let mut uses: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            let placed: Vec<_> = shown.iter().filter_map(|b| Some((b.name.clone(), shared_mesh(app, b)?))).collect();
+            for (_, (mesh, _)) in &placed {
+                *uses.entry(std::sync::Arc::as_ptr(mesh) as usize).or_default() += 1;
+            }
+            candidates = placed
+                .into_iter()
+                .filter(|(_, (m, _))| m.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1))
+                .collect();
+        }
+        Instances { candidates, meshes: Vec::new(), kept, lods: app.viewport.mesh_lods.clone() }
+    }
+
+    /// Draw `b` as an instance when it is one, in colour `col` (its alpha for a see-through
+    /// `look`): its shared mesh and placement.
+    fn place(
+        &mut self,
+        b: &solidcraft_engine::doc::ModelBody,
+        col: [u8; 4],
+        look: crate::gpu::InstanceLook,
+    ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
+        let (mesh, m) = self.candidates.get(&b.name)?.clone();
+        let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
+        let key = std::sync::Arc::as_ptr(&mesh) as usize;
+        let at = match self.meshes.iter().position(|(k, i)| std::sync::Arc::ptr_eq(k, &mesh) && i.look == look) {
+            Some(at) => at,
+            None => {
+                // The same triangles (and levels) for each look of a mesh.
+                let made = self.meshes.iter().find(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)).map(|(_, i)| (i.tris.clone(), i.levels.clone()));
+                let (tris, levels) = match made {
+                    Some(made) => made,
+                    None => (
+                        match self.kept.get(&key).filter(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)) {
+                            Some((_, t)) => t.clone(),
+                            None => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
+                        },
+                        // A large mesh's levels of detail, once made (until then, drawn in full).
+                        self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default(),
+                    ),
+                };
+                self.meshes.push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels }));
+                self.meshes.len() - 1
+            }
+        };
+        let (_, inst) = self.meshes.get_mut(at)?;
+        inst.place(rows, col);
+        Some((mesh, m))
+    }
+
+    /// The instanced meshes, keeping their triangles for the next scene.
+    fn finish(self, app: &SolveApp) -> Vec<crate::gpu::InstancedMesh> {
+        let kept: InstancedTris =
+            self.meshes.iter().map(|(mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
+        self.lods.retain(&kept.keys().copied().collect());
+        if let Ok(mut k) = app.viewport.instanced_tris.lock() {
+            *k = kept;
+        }
+        self.meshes.into_iter().map(|(_, inst)| inst).collect()
+    }
+}
+
+/// The shared mesh `b`'s faces are drawn from and the move that places it ([`drawn_mesh`]
+/// without making the moved copy); `None` for a body drawn finer than its display quality.
+fn shared_mesh(
+    app: &SolveApp,
+    b: &solidcraft_engine::doc::ModelBody,
+) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
+    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
+    if refined(app, b).is_some() {
+        return None;
+    }
+    let q = current();
+    Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
+}
+
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
@@ -678,10 +827,13 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
     let mut run: Vec<BodyDraw> = Vec::new();
     let mut run_key = std::collections::hash_map::DefaultHasher::new();
-    for b in &st.bodies {
-        if !app.session.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name) {
-            continue;
-        }
+    let shown: Vec<&solidcraft_engine::doc::ModelBody> =
+        st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)).collect();
+    // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
+    // are drawn as instances of them: one copy of the triangles on the GPU, and none moved on
+    // the CPU.
+    let mut instances = Instances::new(app, &shown, shaded);
+    for b in shown {
         let faded = body_faded(app, b, &active_bodies);
         let base = body_color(&s.doc, b).unwrap_or(tk.body);
         let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
@@ -701,7 +853,25 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 .collect();
             sc.planned.push(crate::gpu::PlannedBody { plan, face_colors });
         }
-        let body = BodyDraw { mesh: drawn_mesh(app, b), col, faded, opacity, face_looks, on_gpu };
+        // Opaque, faded and see-through bodies alike, in one colour (faces of their own colour
+        // are built as before).
+        let look = if faded {
+            crate::gpu::InstanceLook::Faded
+        } else if opacity < 0.999 {
+            crate::gpu::InstanceLook::Glass
+        } else {
+            crate::gpu::InstanceLook::Opaque
+        };
+        let alpha = match look {
+            crate::gpu::InstanceLook::Faded => col[3],
+            crate::gpu::InstanceLook::Glass => (opacity.clamp(0.05, 1.0) * 255.0).round() as u8,
+            crate::gpu::InstanceLook::Opaque => 255,
+        };
+        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, [col[0], col[1], col[2], alpha], look)).flatten();
+        let body = match instanced {
+            Some((mesh, place)) => BodyDraw { mesh, place: Some(place), col, faded, opacity, face_looks, on_gpu: true },
+            None => BodyDraw { mesh: drawn_mesh(app, b), place: None, col, faded, opacity, face_looks, on_gpu },
+        };
         let key = body.key(shaded, edges, hidden_edges, edge_col, hidden_col);
         key.hash(&mut run_key);
         run.push(body);
@@ -719,6 +889,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
     }
+    sc.instanced = instances.finish(app);
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
@@ -969,9 +1140,9 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_visible() {
         return Vec::new();
     }
-    // While the Origin is hidden, Create Sketch brings the planes back: then every plane;
-    // otherwise only those not hidden one by one.
-    let creating = !app.ui.show_origin && app.picking_sketch_plane();
+    // While the Origin is hidden, a dialog picking a plane brings the planes back: then every
+    // plane; otherwise only those not hidden one by one.
+    let creating = !app.ui.show_origin && app.picking_plane();
     origin_quads(origin_size(app.cam.half_height()))
         .into_iter()
         .filter(|(n, _, _)| creating || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
@@ -1064,25 +1235,29 @@ fn body_bounds(
         {
             return b.clone();
         }
-        // Boxes of meshes the last state had too are kept (each body's box walks its mesh).
+        // Boxes of meshes the last state had too are kept (each body's box walks its mesh). A
+        // placed part's box is its shared mesh's points moved, so no moved copy is made.
         let mut known = app.viewport.mesh_bounds.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
-        let mut now = std::collections::HashMap::with_capacity(st.bodies.len());
+        let mut now: MeshBounds = std::collections::HashMap::with_capacity(st.bodies.len());
         let b = std::sync::Arc::new(
             st.bodies
                 .iter()
                 .map(|b| {
-                    let mesh = b.mesh();
-                    let ptr = std::sync::Arc::as_ptr(&mesh) as usize;
-                    let bounds = match known.remove(&ptr).or_else(|| now.remove(&ptr)) {
+                    let (mesh, m) = b.mesh_in_place();
+                    let key = (std::sync::Arc::as_ptr(&mesh) as usize, std::array::from_fn(|i| m[i / 4][i % 4].to_bits()));
+                    let bounds = match known.remove(&key).or_else(|| now.get(&key).cloned()) {
                         Some((_, bounds)) => bounds,
-                        None => mesh.bounds(),
+                        None => b.mesh_bounds(),
                     };
-                    now.insert(ptr, (mesh, bounds));
+                    now.insert(key, (mesh, bounds));
                     (b.name.clone(), bounds)
                 })
                 .collect::<Vec<_>>(),
         );
-        app.viewport.pick_index.retain(|k| now.contains_key(&k));
+        // Pick indexes are kept for the meshes this state is picked from (a placed part's
+        // shared mesh).
+        let live: std::collections::HashSet<usize> = now.keys().map(|(mesh, _)| *mesh).collect();
+        app.viewport.pick_index.retain(|k| live.contains(&k));
         if let Ok(mut k) = app.viewport.mesh_bounds.lock() {
             *k = now;
         }
@@ -1349,8 +1524,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 _ => {}
             }
         }
-        let m = b.mesh();
-        if let Some((t, ti)) = crate::pick_index::raycast(app.viewport.pick_index.of(&m).as_deref(), &m, o, d) {
+        // A placed part is picked in its own frame, from its shared mesh and index: the ray is
+        // moved there (a rigid move keeps distances along it), so no moved copy is made.
+        let (m, place) = b.mesh_in_place();
+        let Some((lo, ld)) = local_ray(&place, o, d) else { continue };
+        if let Some((t, ti)) = crate::pick_index::raycast(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld) {
             let fi = m.tri_face.get(ti).copied().unwrap_or(0) as usize;
             let hit = Hit::Face { body: b.name.clone(), index: fi, point: o + d * t };
             if bestf.as_ref().is_none_or(|(bt, _)| t < *bt) {
@@ -1367,9 +1545,6 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let visible = |p: Vec3| wireframe || bestf.as_ref().is_none_or(|(t, _)| (p - o).dot(d) <= *t + slack);
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
-    // The edges seen near the cursor, when the GPU pick buffer has them for this view (Select
-    // Other wants hidden ones too).
-    let seen = if all { None } else { crate::pick_buffer::edges_near(app, proj, pos, &st) };
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
@@ -1382,14 +1557,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         {
             continue;
         }
-        let m = b.mesh();
-        // Only the segments that can come near the cursor: of the edges the pick buffer sees
-        // there, else from the index. Either way in the order a scan of every edge would meet
-        // them, so ties go the same way.
-        let near = match &seen {
-            Some(seen) => seen.segments(i, &m),
-            None => crate::pick_index::segments_near(app.viewport.pick_index.of(&m).as_deref(), &m, o, d, reach),
-        };
+        // In the part's own frame, as for faces; its points are moved back to where it stands.
+        let (m, place) = b.mesh_in_place();
+        let Some((lo, ld)) = local_ray(&place, o, d) else { continue };
+        let moved = !solidcraft_engine::doc::is_identity(&place);
+        let at = |p: Vec3| if moved { solidcraft_engine::doc::apply_point(&place, p) } else { p };
+        // Only the segments that can come near the cursor, from the index, in the order a scan
+        // of every edge would meet them, so ties go the same way.
+        let near = crate::pick_index::segments_near(app.viewport.pick_index.of(&m).as_deref(), &m, lo, ld, reach);
         let mut last_edge = None;
         for (ei, si) in near {
             let Some(e) = m.edges.get(ei) else { continue };
@@ -1398,22 +1573,22 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
             if last_edge != Some(ei) {
                 last_edge = Some(ei);
-                for v in [e.first(), e.last()].into_iter().flatten() {
-                    if let Some(sp) = proj.to_screen(*v) {
+                for v in [e.first(), e.last()].into_iter().flatten().map(|v| at(*v)) {
+                    if let Some(sp) = proj.to_screen(v) {
                         let dd = sp.distance(pos);
-                        if dd < 7.0 && visible(*v) && bestv.wants(dd) {
-                            bestv.offer(dd, Hit::Vertex { body: b.name.clone(), point: *v });
+                        if dd < 7.0 && visible(v) && bestv.wants(dd) {
+                            bestv.offer(dd, Hit::Vertex { body: b.name.clone(), point: v });
                         }
                     }
                 }
             }
-            let (Some(p0), Some(p1)) = (e.get(si), e.get(si + 1)) else { continue };
-            let (Some(a), Some(c)) = (proj.to_screen(*p0), proj.to_screen(*p1)) else { continue };
+            let (Some(p0), Some(p1)) = (e.get(si).map(|p| at(*p)), e.get(si + 1).map(|p| at(*p))) else { continue };
+            let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
             let dd = seg_dist(pos, a, c);
             // Visible where the cursor is: the edge's point under the cursor, not an end or
             // the middle, which can lie deeper than the face the cursor is on.
-            if dd < 6.0 && beste.wants(dd) && visible(ray_segment_closest(o, d, *p0, *p1)) {
-                beste.offer(dd, Hit::Edge { body: b.name.clone(), index: ei, mid: polyline_mid(e) });
+            if dd < 6.0 && beste.wants(dd) && visible(ray_segment_closest(o, d, p0, p1)) {
+                beste.offer(dd, Hit::Edge { body: b.name.clone(), index: ei, mid: at(polyline_mid(e)) });
             }
         }
     }
@@ -1694,7 +1869,7 @@ fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     let h = pad * 2.0 + 18.0 + along.as_ref().map_or(0.0, |_| row) + row * rows.len() as f32;
     let r = Rect::from_min_size(pos2(rect.left() + 12.0, rect.bottom() - 12.0 - h), vec2(230.0, h));
     painter.rect(r, t.radius_md, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-    crate::scenario::publish_handle("analysis:legend", r.center());
+    crate::scenario::publish_target("analysis:legend", r);
     let mut y = r.top() + pad;
     painter.text(pos2(r.left() + pad, y), Align2::LEFT_TOP, title, FontId::proportional(t.font_button), t.text);
     y += 18.0;
@@ -1946,13 +2121,24 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
     }
 }
 
+/// What the highlight draws of the hovered item. A face or a plane is lit the same wherever on it
+/// the pointer is, so the point under the pointer is left out: the highlight (a whole scanned
+/// mesh is one face) is not built again at every move of the pointer across it.
+fn hover_drawn(hover: &Option<Hit>) -> String {
+    match hover {
+        Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
+        Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
+        other => format!("{other:?}"),
+    }
+}
+
 fn highlight_geometry_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let selected = app.highlighted();
     app.session.revision.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
-    format!("{:?}", app.viewport.hover).hash(&mut h);
+    hover_drawn(&app.viewport.hover).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`).
@@ -1968,7 +2154,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.origin_visible().hash(&mut h);
-    app.picking_sketch_plane().hash(&mut h);
+    app.picking_plane().hash(&mut h);
     app.session.visibility.hidden_origin.hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
@@ -2025,7 +2211,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     };
     let mut planes: Vec<(String, [Vec3; 4], Color32)> = origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane)).collect();
     planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane)));
-    let through = app.picking_sketch_plane();
+    let through = app.picking_plane();
     for (name, q, base) in &planes {
         let (selected, hovered) = plane_state(name);
         let fill = if hovered {
@@ -2297,6 +2483,16 @@ fn body_rgb(app: &SolveApp, name: &str) -> (u8, u8, u8) {
     (c.r(), c.g(), c.b())
 }
 
+/// The ray `o` + t `d` in the frame of a mesh that `place` (a rigid move) puts in the world, with
+/// the same t along it; `None` for a move with no inverse.
+fn local_ray(place: &solidcraft_engine::doc::Mat, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+    if solidcraft_engine::doc::is_identity(place) {
+        return Some((o, d));
+    }
+    let back = solidcraft_engine::doc::mat_inverse(place)?;
+    Some((solidcraft_engine::doc::apply_point(&back, o), solidcraft_engine::doc::apply_vector(&back, d)))
+}
+
 pub(crate) fn polyline_mid(pts: &[Vec3]) -> Vec3 {
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     let mut acc = 0.0;
@@ -2429,7 +2625,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || (primary_nav.is_some() && primary_down)
         || mode.is_some()
         || app.viewport.axis_drag.is_some()
-        || app.viewport.spin;
+        || app.viewport.spin
+        || app.cam_anim.is_some();
     let hits = hover.filter(|_| inside && app.viewport.boxsel.is_none() && !navigating).map(|p| pick_cached(app, &proj, p)).unwrap_or_default();
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
@@ -2462,6 +2659,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");
     update_refinement(app, ui.ctx(), &proj);
+    // Levels of detail being made: keep frames coming to draw them when they are.
+    if app.viewport.mesh_lods.busy() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+    }
     crate::frame_watch::step(app, "display refinement");
     let key = scene_key(app);
     let t0 = crate::now_ms();
@@ -2528,10 +2729,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
         });
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
-        crate::pick_buffer::paint(app, ui.ctx(), &painter, &proj);
     }
-    analysis_legend(app, &painter, rect);
-    crate::frame_rate::paint(app, ui, &painter, rect);
+    let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
+    analysis_legend(app, &painter, overlay_rect);
+    crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
     // ---- interaction ----
     // A tool's click that moved on the way (#2448) clicks where the button is let go.
@@ -2988,7 +3189,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::select_other::show(app, ui.ctx());
     axis_view(app, ui, rect);
     nav_bar(app, ui, rect);
-    agent_chip(app, ui, rect);
+    agent_chip(app, ui, overlay_rect);
     transient_messages(app, ui, rect);
 }
 
@@ -3044,6 +3245,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
     }
 }
 
+/// How long a status message stays in the view (milliseconds).
+const STATUS_TOAST_MS: f64 = 6000.0;
+
 /// A single visual pattern for ongoing work and the existing six-second status.
 fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) {
     if app.status.is_none() && app.computing_since().is_none() {
@@ -3056,17 +3260,27 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) {
     }
     let mut free = crate::viewport_layout::free_rect(crate::shell::content_rect(app, viewport), &obstacles).shrink(t.space_8);
     if let Some((msg, at, error)) = app.status.clone() {
-        if crate::now_ms() - at < 6000.0 {
+        let shown_ms = crate::now_ms() - at;
+        if shown_ms < STATUS_TOAST_MS {
             if let Some(r) = paint_toast(ui, free, msg, error, false) {
                 crate::scenario::publish_rect("toast", r);
                 free.max.y = r.top() - t.space_8;
                 // Open the run's messages from the tokenised status toast.
                 crate::scenario::publish_handle("status:chip", r.center());
-                if ui.interact(r, egui::Id::new("sc_status_chip"), Sense::click()).on_hover_text(crate::i18n::tr("messages.chip_hint")).clicked() {
-                    app.messages.open = true;
+                let hint = if app.status_undo { crate::i18n::tr_label("Undo") } else { crate::i18n::tr("messages.chip_hint") };
+                if ui.interact(r, egui::Id::new("sc_status_chip"), Sense::click()).on_hover_text(hint).clicked() {
+                    if app.status_undo {
+                        app.status = None;
+                        let _ = app.run("edit.undo", json!({}));
+                    } else {
+                        app.messages.open = true;
+                    }
                 }
             }
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+            // One frame when it is due to go, not a frame every half second while it shows.
+            let left_ms = STATUS_TOAST_MS - shown_ms;
+            let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
         } else {
             app.status = None;
         }
@@ -3099,7 +3313,7 @@ fn paint_toast(ui: &egui::Ui, free: Rect, text: String, error: bool, computing: 
     if !r.is_finite() {
         return None;
     }
-    let frame = egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).corner_radius(t.radius_md).shadow(t.shell_shadow());
+    let frame = Container::new(ui.ctx(), Surface::Toast).frame(ui.ctx(), t.panel, crate::frame::Side::Left);
     ui.painter().add(frame.paint(r.shrink(frame.stroke.width)));
     let dot = pos2(r.left() + 14.0, r.center().y);
     if computing {
@@ -3622,7 +3836,22 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
 pub(crate) fn refresh_layout(app: &mut SolveApp, scale: f32) {
     if let Some(rect) = app.viewport.rect {
         let docks = crate::shell::covered_rects(app);
-        let content = crate::shell::content_rect(app, rect);
+        let mut content = crate::shell::content_rect(app, rect);
+        // The full-height Assistant reserves control space, while rendering and picking
+        // keep the original viewport projection. Ordinary feature dialogs do not move controls.
+        if app.ui.layout == crate::shell::LayoutMode::Floating
+            && crate::agent_chat::shown(app)
+            && app.agent_chat.open
+            && !app.preferences.agent_chat_popped
+            && !app.preferences.agent_chat_minimized
+            && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
+        {
+            if app.preferences.agent_chat_side == "left" {
+                content.min.x = (chat.right() + crate::shell::SHELL_GAP).clamp(content.left(), content.right());
+            } else {
+                content.max.x = (chat.left() - crate::shell::SHELL_GAP).clamp(content.left(), content.right());
+            }
+        }
         app.viewport.layout = Some(if app.ui.layout == crate::shell::LayoutMode::Docked {
             crate::viewport_layout::Layout::new(rect, &docks, scale, app.preferences.navigator_style)
         } else {
@@ -3741,8 +3970,13 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some((name, d, _, _)) = tips.get(i)
     {
         crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover())
-            .on_hover_text(format!("View from {}. Click again to reverse. Drag to orbit; hold Shift to snap.", name.to_uppercase()));
+        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover()).on_hover_text(
+            format!(
+                "View from {}. Click again to reverse. Drag to orbit{}.",
+                name.to_uppercase(),
+                if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
+            ),
+        );
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         if ui.input(|i| i.pointer.primary_clicked()) {
             let frame = app.cam.to_frame(*d);
@@ -3759,7 +3993,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let hr = ui.interact(home, ui.id().with("axis_view_home"), Sense::click());
     // The home button sits in its own small round chip.
     painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
-    icons::paint(&painter, home, "home", t.icon, if hr.hovered() { t.accent_soft } else { t.overlay }, t.accent);
+    icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
     // Cursors: a grabbing hand while orbiting, an open hand over the circle, a pointer on the home
     // chip (the axis ends keep their pointing hand).
     if hr.hovered() {
@@ -3797,18 +4031,10 @@ pub(crate) fn nearest_quarter_turn(yaw: f64) -> f64 {
 /// Turn the view to face the selected planar face or plane, else the active sketch; asked again
 /// while it already faces it, from the other side (#1886).
 pub fn look_at_selection(app: &mut SolveApp) {
-    let target = app.session.selection.iter().find_map(|s| match s {
-        Sel::Face { body, index, point } => crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| (*point, n)),
-        Sel::Plane { name } => solidcraft_engine::geom::Plane::named(name).map(|p| (p.origin, p.normal())),
-        _ => None,
-    });
-    match target {
-        Some((p, n)) => {
-            let mut to = app.cam.looking_from(crate::dialogs::facing(app, n, true));
-            to.target = p;
-            app.animate_to(to);
-        }
-        None => crate::dialogs::look_at_sketch_again(app),
+    if solidcraft_engine::find_command("view.normal_to").is_some_and(|command| command.info(&app.session).disabled_reason.is_none()) {
+        app.start("view.normal_to");
+    } else {
+        crate::dialogs::look_at_sketch_again(app);
     }
 }
 
@@ -3824,6 +4050,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                 crate::i18n::tr("nav.touchpad.orbit")
             } else if app.preferences.nav == crate::prefs::OPENSCAD_NAV {
                 "Orbit (left drag on empty space; Shift+left drag box-selects)"
+            } else if app.preferences.free_orbit {
+                "Orbit (right drag)"
             } else {
                 "Orbit (right drag; hold Shift to snap)"
             },
@@ -3841,12 +4069,10 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let menu_id = ui.id().with("nav_view_menu");
     let mut menu_open = ui.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
     let w = items.len() as f32 * 30.0 + 10.0;
-    let bar = app
-        .viewport
-        .layout
-        .as_ref()
-        .map(|l| l.navigation)
-        .unwrap_or_else(|| Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 22.0), vec2(w, 30.0)));
+    let bar = app.viewport.layout.as_ref().map(|l| l.navigation).unwrap_or_else(|| {
+        let available = crate::shell::bottom_overlay_rect(app, rect);
+        Rect::from_center_size(pos2(available.center().x, available.bottom() - 22.0), vec2(w, 30.0))
+    });
     crate::scenario::publish_rect("nav:outer", bar);
     let active = ui.rect_contains_pointer(bar)
         || ui.rect_contains_pointer(axis_rect(app, rect))
@@ -3857,7 +4083,8 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || menu_open;
     let mut painter = ui.painter_at(rect);
     painter.set_opacity(if active || app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { 1.0 } else { 0.45 });
-    painter.rect(bar, t.radius_md, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let surface = Container::new(ui.ctx(), Surface::Navigation).frame(ui.ctx(), t.overlay, crate::frame::Side::Left);
+    painter.add(surface.paint(bar.shrink(surface.stroke.width)));
     let columns = ((bar.width() - 10.0) / 30.0).round().clamp(1.0, 10.0) as usize;
     for (i, (icon, tip)) in items.iter().enumerate() {
         let br = Rect::from_min_size(
@@ -3877,7 +4104,7 @@ fn nav_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         if active || resp.hovered() {
             painter.rect_filled(br, t.radius_sm, if active { t.accent_soft } else { t.hover });
         }
-        icons::paint(&painter, br.shrink(4.0), icon, t.icon, t.icon_fill, t.accent);
+        icons::paint_icon(&painter, br.shrink(4.0), icon, f32::from(t.icon.a()) / 255.0);
         if resp.on_hover_text(*tip).clicked() {
             let toggle = |m: NavMode, cur: Option<NavMode>| if cur == Some(m) { None } else { Some(m) };
             match *icon {
@@ -3912,12 +4139,13 @@ fn view_menu(app: &mut SolveApp, ui: &mut egui::Ui, button: Rect) -> bool {
     let t = crate::theme::Tokens::get();
     // A preset dropdown extends beyond this menu; let it consume its own clicks.
     let child_popup_open = egui::Popup::is_any_open(ui.ctx());
-    let area = crate::frame::area(egui::Id::new("sc_view_menu"))
+    let area = Container::new(ui.ctx(), Surface::Popup)
+        .area(egui::Id::new("sc_view_menu"))
         .order(egui::Order::Foreground)
         .pivot(Align2::RIGHT_BOTTOM)
         .fixed_pos(button.right_top() - vec2(0.0, 6.0));
     let r = area.show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
+        Container::popup_frame(ui.style()).show(ui, |ui| {
             ui.set_width(220.0);
             ui.label(egui::RichText::new(crate::i18n::tr_label("VIEW")).semibold().color(crate::theme::Tokens::get().text).size(t.font_caption));
             ui.label(app.tr("ui.graphics_preset"));
@@ -4606,6 +4834,570 @@ mod tests {
         assert!(bounds.min.x >= 29.99 && bounds.max.x <= 32.01 && bounds.max.y >= 41.99, "{bounds:?}");
     }
 
+    /// The parts the instancing tests place: a box (flat triangles, its vertices shared by
+    /// position and each fragment lit with its triangle's normal) and a cylinder (smooth, its
+    /// vertices shared by position and normal).
+    const PARTS: [(&str, &str); 2] = [("solid.box", r#"{"length":20,"width":10,"height":5}"#), ("solid.cylinder", r#"{"radius":6,"height":12}"#)];
+
+    /// A design with a part (`command` with `params`, see [`PARTS`]) placed three times (one
+    /// placement turned), drawn on a device that builds bodies on the CPU.
+    fn three_placed_parts((command, params): (&str, &str)) -> SolveApp {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.ui.show_origin = false;
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        app.run("component.create", json!({"name":"Part"})).unwrap();
+        app.run(command, serde_json::from_str(params).unwrap()).unwrap();
+        app.run("occurrence.copy", json!({"component":"Part","translate":[40,0,0]})).unwrap();
+        let turned = app.run("occurrence.copy", json!({"component":"Part","translate":[0,40,0]})).unwrap()["occurrence"].clone();
+        app.run("occurrence.move", json!({"occurrence":turned,"axis":[1,1,0],"angle":"30 deg"})).unwrap();
+        // With the part active, its other placements are drawn faded.
+        app.run("component.activate", json!({"component":"root"})).unwrap();
+        app
+    }
+
+    /// A part placed by several occurrences is drawn from one copy of its triangles, once per
+    /// placement: one instanced mesh with a placement for each occurrence, whose triangles land
+    /// where each occurrence's own moved mesh has them, and no moved copy is made to draw them.
+    #[test]
+    fn a_part_placed_many_times_is_drawn_from_one_copy_of_its_triangles() {
+        for (part, flat) in PARTS.into_iter().zip([true, false]) {
+            placed_three_times_is_drawn_from_one_copy(part, flat);
+        }
+    }
+
+    fn placed_three_times_is_drawn_from_one_copy(part: (&str, &str), flat: bool) {
+        let app = three_placed_parts(part);
+        let st = app.session.world_state();
+        assert_eq!(st.bodies.len(), 3);
+        eprintln!("DBG before {}", st.bodies.iter().filter(|b| b.cached_mesh().is_some()).count());
+        let scene = build_scene(&app);
+        assert_eq!(scene.instanced.len(), 1, "one shared mesh");
+        assert_eq!(scene.instanced[0].count(), 3, "a placement per occurrence");
+        let shared = &scene.instanced[0].tris;
+        assert_eq!(shared.flat, flat, "{part:?}");
+        let corners = shared.indices.len();
+        let vertices = shared.vertices.len() / crate::gpu::SHARED_SIZE;
+        assert!(vertices * 2 < corners, "{part:?}: {vertices} vertices shared by {corners} corners");
+        assert!(scene.blocks.iter().all(|b| b.bytes.tris.is_empty()), "no body's triangles built where it stands");
+        let moved = st.bodies.iter().filter(|b| b.cached_mesh().is_some()).count();
+        assert!(moved <= 1, "{moved} bodies made a moved mesh to be drawn");
+        let merged = scene.merged();
+        // Each placement's triangles where its own mesh has them, with its normals.
+        let vertex = |b: &[u8]| -> [f32; 6] { std::array::from_fn(|i| f32::from_le_bytes([b[4 * i], b[4 * i + 1], b[4 * i + 2], b[4 * i + 3]])) };
+        let mut drawn: Vec<[f32; 6]> = merged.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().map(|v| vertex(v)).collect();
+        let mut expected: Vec<[f32; 6]> = Vec::new();
+        for b in &st.bodies {
+            let m = b.mesh();
+            for i in m.triangles.iter().flatten().map(|i| *i as usize) {
+                let (p, n) = (m.positions[i].to_f32(), m.normals[i].to_f32());
+                expected.push([p[0], p[1], p[2], n[0], n[1], n[2]]);
+            }
+        }
+        let order = |a: &[f32; 6], b: &[f32; 6]| a.iter().map(|x| (x * 1e3).round() as i64).cmp(b.iter().map(|x| (x * 1e3).round() as i64));
+        drawn.sort_by(order);
+        expected.sort_by(order);
+        assert_eq!(drawn.len(), expected.len());
+        for (d, e) in drawn.iter().zip(&expected) {
+            assert!(d.iter().zip(e).all(|(x, y)| (x - y).abs() < 1e-3), "{d:?} vs {e:?}");
+        }
+        // Each placement's edges are drawn where it stands.
+        let one = st.bodies[0].mesh();
+        let segments: usize = one
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| one.edge_pickable(*i) && one.shaded_edge_visible(*i))
+            .map(|(_, e)| e.len().saturating_sub(1))
+            .sum();
+        assert_eq!(merged.lines.len(), 3 * segments * crate::gpu::LINE_SIZE);
+    }
+
+    /// Manual GPU benchmark: 25 placements of the mesh `SOLIDCRAFT_BENCH_MESH` (an STL, OBJ or
+    /// 3MF) drawn offscreen at 3600 × 2190 px (divided by `SOLIDCRAFT_BENCH_DIV`) with 4× MSAA
+    /// while the camera turns, each frame waited for: the placements' own triangles (`merged`, as
+    /// before instancing) and as instances. Prints the median frame time of each.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "manual: SOLIDCRAFT_BENCH_MESH=part.stl cargo test --release -p solidcraft-ui-egui --lib -- --ignored instanced_scene_gpu_benchmark --nocapture"]
+    fn instanced_scene_gpu_benchmark() {
+        use egui_wgpu::wgpu;
+        let Some(path) = std::env::var_os("SOLIDCRAFT_BENCH_MESH") else { return };
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.ui.show_origin = false;
+        let component = app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap()["component"].clone();
+        app.run("component.activate", json!({"component":"root"})).unwrap();
+        let size = app.session.world_state().bodies[0].mesh_bounds().size();
+        let step = size.x.max(size.y) * 1.3;
+        for k in 1..25 {
+            app.run("occurrence.copy", json!({"component":component,"translate":[f64::from(k % 5) * step, f64::from(k / 5) * step, 0.0]})).unwrap();
+        }
+        // `SOLIDCRAFT_BENCH_OPACITY=0.5`: every placement see-through.
+        if let Some(opacity) = std::env::var("SOLIDCRAFT_BENCH_OPACITY").ok().and_then(|v| v.parse::<f64>().ok()) {
+            app.run("appearance.assign", json!({"components": [component.to_string()], "color": "#b4b8bc", "opacity": opacity})).unwrap();
+        }
+        let Some((_, device, queue)) = crate::gpu::offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let scale: u32 = std::env::var("SOLIDCRAFT_BENCH_DIV").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
+        let (w, h, samples) = (3600u32 / scale, 2190u32 / scale, 4u32);
+        let depth = solidcraft_gpu::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        app.viewport.gpu = Some(GpuTarget { format, depth: Some(depth), samples, tess: false });
+        app.fit_view();
+        let texture = |format, samples| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("bench"),
+                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let (color, resolve, depth_view) = (texture(format, samples), texture(format, 1), texture(depth, samples));
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(w as f32, h as f32));
+        let t0 = std::time::Instant::now();
+        let scene = build_scene(&app);
+        let t1 = std::time::Instant::now();
+        drop(build_scene(&app));
+        eprintln!("scene built in {:.0} ms, again in {:.0} ms", (t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3);
+        let proj = projection(&app, rect);
+        let st = app.session.world_state();
+        let seen = st.bodies.iter().filter(|b| proj.to_screen(b.mesh_bounds().center()).is_some_and(|p| rect.contains(p))).count();
+        eprintln!("{w} x {h} px: {seen} of {} placements in view", st.bodies.len());
+        // `SOLIDCRAFT_BENCH_CLOSE=1`: close up on the middle placement, most of the others out of view.
+        if std::env::var("SOLIDCRAFT_BENCH_CLOSE").is_ok_and(|v| v == "1") {
+            let middle = st.bodies.iter().map(|b| b.mesh_bounds()).nth(12).unwrap_or_default();
+            app.cam.target = middle.center();
+            app.cam.distance = middle.diagonal() * 1.5;
+            let proj = projection(&app, rect);
+            let seen = st.bodies.iter().filter(|b| proj.to_screen(b.mesh_bounds().center()).is_some_and(|p| rect.contains(p))).count();
+            eprintln!("close up: {seen} of {} placements' centres in view", st.bodies.len());
+        }
+        let yaw = app.cam.yaw;
+        // The levels of detail, made off the window thread meanwhile.
+        let t = std::time::Instant::now();
+        while app.viewport.mesh_lods.busy() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let lod = build_scene(&app);
+        eprintln!(
+            "levels of detail made in {:.1} s: {:?}",
+            t.elapsed().as_secs_f64(),
+            lod.instanced.iter().map(|m| m.levels.iter().map(|(t, e)| (t.indices.len() / 3, *e)).collect::<Vec<_>>()).collect::<Vec<_>>()
+        );
+        // `SOLIDCRAFT_BENCH_PNG=dir`: the view drawn from each placement's own triangles, in full
+        // as instances, and from the levels (`SOLIDCRAFT_BENCH_PNG_ONLY=1`: then stop).
+        if let Some(dir) = std::env::var_os("SOLIDCRAFT_BENCH_PNG") {
+            const SIDE: u32 = 1024;
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIDE as f32, SIDE as f32));
+            let proj = projection(&app, rect);
+            let e = proj.cam.eye().to_f32();
+            let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+            for (name, scene) in [("own", scene.clone().merged()), ("full", scene.clone()), ("lod", lod.clone())] {
+                if let Some(rgba) = crate::gpu::render_offscreen(
+                    scene,
+                    None,
+                    proj.vp.to_f32(),
+                    proj.cam.back().to_f32(),
+                    eye,
+                    SIDE,
+                    None,
+                    [0.0; 8],
+                    crate::gpu::analysis_colors(&Tokens::get().analysis),
+                ) && let Some(png) = solidcraft_engine::render::png(SIDE as usize, SIDE as usize, rgba)
+                {
+                    let _ = std::fs::write(std::path::Path::new(&dir).join(format!("{name}.png")), png);
+                }
+            }
+        }
+        if std::env::var_os("SOLIDCRAFT_BENCH_PNG_ONLY").is_some() {
+            return;
+        }
+        for (label, scene) in [("own triangles", scene.clone().merged()), ("instanced", scene), ("instanced, levels of detail", lod)] {
+            let mut renderer = crate::gpu::Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false }, None);
+            let slot: SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene)));
+            let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
+            let (mut times, mut prepared) = (Vec::new(), Vec::new());
+            for k in 0..40 {
+                app.cam.yaw = yaw + f64::from(k) * 0.05;
+                let proj = projection(&app, rect);
+                let e = proj.cam.eye().to_f32();
+                let frame = Frame {
+                    product: false,
+                    key: 1,
+                    slot: slot.clone(),
+                    sketch_key: 0,
+                    sketch_slot: none(),
+                    hl_key: 0,
+                    hl_slot: none(),
+                    pv_key: 0,
+                    pv_slot: none(),
+                    pv_hide: false,
+                    view_proj: proj.vp.to_f32(),
+                    back: proj.cam.back().to_f32(),
+                    size_px: [w as f32, h as f32],
+                    clip: [0.0; 4],
+                    cap: [0.0; 4],
+                    images: Vec::new(),
+                    analysis: [0.0; 8],
+                    analysis_colors: crate::gpu::analysis_colors(&Tokens::get().analysis),
+                    access: None,
+                    outline: true,
+                    eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
+                    ao_radius: 0.0,
+                    ssaa: 1.0,
+                };
+                let t0 = std::time::Instant::now();
+                let mut encoder = device.create_command_encoder(&Default::default());
+                renderer.prepare(&device, &queue, &mut encoder, &frame);
+                if k >= 5 {
+                    prepared.push(t0.elapsed().as_secs_f64() * 1e3);
+                }
+                {
+                    let mut pass = encoder
+                        .begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("bench"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &color,
+                                depth_slice: None,
+                                resolve_target: Some(&resolve),
+                                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Discard },
+                            })],
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(solidcraft_gpu::view::far_depth(solidcraft_gpu::view::reversed_depth(Some(depth)))),
+                                    store: wgpu::StoreOp::Discard,
+                                }),
+                                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
+                            }),
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                            multiview_mask: None,
+                        })
+                        .forget_lifetime();
+                    renderer.paint(&frame, &mut pass, [0.0, 0.0, w as f32, h as f32]);
+                }
+                queue.submit([encoder.finish()]);
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                if k >= 5 {
+                    times.push(t0.elapsed().as_secs_f64() * 1e3);
+                }
+            }
+            times.sort_by(f64::total_cmp);
+            prepared.sort_by(f64::total_cmp);
+            eprintln!(
+                "{label}: median {:.1} ms a frame (min {:.1}, max {:.1}), of which {:.1} ms preparing on the CPU",
+                times[times.len() / 2],
+                times[0],
+                times[times.len() - 1],
+                prepared[prepared.len() / 2]
+            );
+        }
+    }
+
+    /// A large mesh's shared vertices made ahead (by the background mesher after a file is
+    /// opened or inserted) are the ones its first scene draws: that frame welds nothing.
+    #[test]
+    fn a_large_meshs_shared_vertices_are_made_ahead_of_its_first_scene() {
+        use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+        // A flat grid of 160 × 160 squares: 51 200 triangles, each corner its own vertex.
+        let n = 160u32;
+        let corners: Vec<[u32; 2]> =
+            (0..n).flat_map(|j| (0..n).flat_map(move |i| [[i, j], [i + 1, j], [i + 1, j + 1], [i, j], [i + 1, j + 1], [i, j + 1]])).collect();
+        let mut doc = Document::default();
+        let meshes = vec![MeshData {
+            name: "Grid".into(),
+            positions: corners.iter().flat_map(|[x, y]| [f64::from(*x), f64::from(*y), 0.0]).collect(),
+            triangles: (0..u32::try_from(corners.len()).unwrap()).collect(),
+            color: None,
+        }];
+        doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
+        let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        let (mesh, _) = app.session.world_state().bodies[0].mesh_in_place();
+        assert!(mesh.triangles.len() >= INSTANCE_ALONE);
+        warm_shared_tris(&mesh);
+        let warmed = WARMED.lock().unwrap().iter().find(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)).map(|(_, t)| t.clone()).unwrap();
+        assert_eq!(warmed.vertices.len() / crate::gpu::SHARED_SIZE, 161 * 161, "the grid's corners shared");
+        let scene = build_scene(&app);
+        assert_eq!(scene.instanced.len(), 1, "a large mesh alone is drawn from shared vertices");
+        assert!(std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &warmed), "the ones made ahead");
+        assert!(!WARMED.lock().unwrap().iter().any(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)), "taken");
+    }
+
+    /// A design with one imported mesh of about 100 000 triangles (a sphere of radius 50, each
+    /// corner its own point, as an STL is read), drawn on a device that builds bodies on the CPU.
+    fn large_scan() -> SolveApp {
+        use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+        let n = 160u32;
+        let at = |i: u32, j: u32| {
+            let (t, p) = (std::f64::consts::PI * f64::from(i) / f64::from(n), std::f64::consts::TAU * f64::from(j) / f64::from(2 * n));
+            let (st, sp, cp) =
+                (if i == 0 || i == n { 0.0 } else { t.sin() }, if j == 2 * n { 0.0 } else { p.sin() }, if j == 2 * n { 1.0 } else { p.cos() });
+            [50.0 * st * cp, 50.0 * st * sp, 50.0 * t.cos()]
+        };
+        let corners: Vec<[f64; 3]> = (0..n)
+            .flat_map(|i| (0..2 * n).flat_map(move |j| [at(i, j), at(i + 1, j + 1), at(i, j + 1), at(i, j), at(i + 1, j), at(i + 1, j + 1)]))
+            .collect();
+        let mut doc = Document::default();
+        let meshes = vec![MeshData {
+            name: "Scan".into(),
+            positions: corners.iter().flatten().copied().collect(),
+            triangles: (0..u32::try_from(corners.len()).unwrap()).collect(),
+            color: None,
+        }];
+        doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes }, Some("Scan")).unwrap();
+        let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.ui.show_origin = false;
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        app
+    }
+
+    /// A large mesh is drawn in full until its levels of detail are made off the window thread;
+    /// then the scene is built again with them, and seen small, a coarse level draws it as the
+    /// full triangles do (within a fraction of a pixel). Skipped without a GPU adapter (the
+    /// levels are checked anyway).
+    #[test]
+    fn a_large_mesh_seen_small_is_drawn_from_its_levels_of_detail() {
+        let mut app = large_scan();
+        let (mesh, _) = app.session.world_state().bodies[0].mesh_in_place();
+        assert!(mesh.triangles.len() >= INSTANCE_ALONE);
+        let key = scene_key(&app);
+        let first = build_scene(&app);
+        assert_eq!(first.instanced.len(), 1);
+        assert!(first.instanced[0].levels.is_empty(), "drawn in full meanwhile");
+        let began = std::time::Instant::now();
+        while app.viewport.mesh_lods.busy() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the levels are made");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_ne!(scene_key(&app), key, "the scene is built again when they are");
+        let scene = build_scene(&app);
+        let levels = &scene.instanced[0].levels;
+        assert!(levels.len() >= 2, "{} levels", levels.len());
+        // Small on screen: the sphere about 30 px across.
+        app.fit_view();
+        app.cam.distance *= 4.0;
+        const SIZE: u32 = 256;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let render = |scene: GpuScene| {
+            crate::gpu::render_offscreen(
+                scene,
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                None,
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            )
+        };
+        // The level the placement is drawn from there.
+        let rows = [[1.0f32, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let scale = crate::gpu::placement_scale(&rows, &scene.instanced[0].tris.bounds, &proj.vp.to_f32(), [SIZE as f32; 2]);
+        let errors: Vec<f32> = std::iter::once(0.0).chain(levels.iter().map(|(_, e)| *e)).collect();
+        assert!(crate::gpu::level_for(&errors, scale) >= 1, "a coarse level: scale {scale} px/mm, errors {errors:?}");
+        let (Some(lod), Some(full)) = (render(scene.clone()), render(scene.merged())) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let drawn = full.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+        assert!(drawn > 300, "the sphere is drawn: {drawn} pixels");
+        let differ = lod.chunks(4).zip(full.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+        assert!(differ * 20 < drawn, "{differ} of {drawn} pixels differ");
+    }
+
+    /// See-through and faded placements of a part are drawn as instances too, with their alpha:
+    /// glass with an appearance's opacity, faded context with another component active. None
+    /// of their triangles go to the glass sorted triangle by triangle, and they look as their
+    /// own triangles did. GPU pictures skipped without an adapter.
+    #[test]
+    fn see_through_and_faded_placements_are_drawn_as_instances() {
+        use crate::gpu::InstanceLook;
+        let mut app = three_placed_parts(PARTS[0]);
+        app.run("appearance.assign", json!({"components": ["Part"], "color": "#3366cc", "opacity": 0.4})).unwrap();
+        let glass = build_scene(&app);
+        assert_eq!(glass.instanced.len(), 1);
+        assert_eq!((glass.instanced[0].look, glass.instanced[0].count()), (InstanceLook::Glass, 3));
+        assert!(glass.instanced[0].instances.as_chunks::<{ crate::gpu::INSTANCE_SIZE }>().0.iter().all(|p| p[51] == 102), "alpha 0.4");
+        assert!(glass.glass.is_empty(), "no triangle sorted one by one");
+        assert!(!glass.clone().merged().glass.is_empty());
+        // One placement active (as right after the part is made): the others faded.
+        let mut context = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        context.viewport.gpu = app.viewport.gpu;
+        context.ui.ground_shadow = false;
+        context.ui.show_origin = false;
+        context.run("component.create", json!({"name":"Part"})).unwrap();
+        context.run(PARTS[0].0, serde_json::from_str(PARTS[0].1).unwrap()).unwrap();
+        context.run("occurrence.copy", json!({"component":"Part","translate":[40,0,0]})).unwrap();
+        context.run("occurrence.copy", json!({"component":"Part","translate":[0,40,0]})).unwrap();
+        let faded = build_scene(&context);
+        let looks: Vec<_> = faded.instanced.iter().map(|m| (m.look, m.count())).collect();
+        assert!(looks.contains(&(InstanceLook::Faded, 2)), "the other placements faded: {looks:?}");
+        assert!(faded.trans.is_empty());
+        for (name, scene) in [("glass", glass), ("faded", faded)] {
+            app.fit_view();
+            const SIZE: u32 = 256;
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+            let proj = projection(&app, rect);
+            let e = proj.cam.eye().to_f32();
+            let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+            let render = |scene: GpuScene| {
+                crate::gpu::render_offscreen(
+                    scene,
+                    None,
+                    proj.vp.to_f32(),
+                    proj.cam.back().to_f32(),
+                    eye,
+                    SIZE,
+                    None,
+                    [0.0; 8],
+                    crate::gpu::analysis_colors(&Tokens::get().analysis),
+                )
+            };
+            let (Some(instanced), Some(own)) = (render(scene.clone()), render(scene.merged())) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            let drawn = own.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+            assert!(drawn > 1000, "{name}: drawn {drawn}");
+            let differ = instanced.chunks(4).zip(own.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+            // A pixel here and there along the boxes' edges, where moving the corners on the GPU
+            // rounds them differently.
+            assert!(differ * 50 < drawn, "{name}: {differ} of {drawn} pixels differ");
+        }
+    }
+
+    /// Each placement of a part is picked where it stands, the turned one too, from the part's
+    /// shared mesh: the face under the cursor names that placement's body, at the point the
+    /// cursor is over, and no placement makes a moved copy of the mesh to be picked.
+    #[test]
+    fn each_placement_is_picked_where_it_stands_from_the_shared_mesh() {
+        let mut app = three_placed_parts(PARTS[0]);
+        app.fit_view();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let proj = projection(&app, rect);
+        let st = app.session.world_state();
+        // The top face's centre of each placement, from its moved box corners.
+        let tops: Vec<(String, Vec3)> = st
+            .bodies
+            .iter()
+            .map(|b| {
+                let (mesh, m) = b.mesh_in_place();
+                let local = mesh.bounds();
+                (
+                    b.name.clone(),
+                    solidcraft_engine::doc::apply_point(
+                        &m,
+                        Vec3::new((local.min.x + local.max.x) / 2.0, (local.min.y + local.max.y) / 2.0, local.max.z),
+                    ),
+                )
+            })
+            .collect();
+        for (name, top) in &tops {
+            let at = proj.to_screen(*top).unwrap();
+            let hits = pick(&app, &proj, at);
+            let face = hits.iter().find_map(|h| match h {
+                Hit::Face { body, point, .. } => Some((body.clone(), *point)),
+                _ => None,
+            });
+            let (body, point) = face.unwrap_or_else(|| panic!("no face of {name} under {at:?}: {hits:?}"));
+            assert_eq!(&body, name);
+            assert!(point.dist(*top) < 0.05, "{point:?} vs {top:?}");
+        }
+        assert!(
+            st.bodies.iter().all(|b| b.cached_mesh().is_none() || b.mesh_in_place().1 == solidcraft_engine::doc::IDENTITY),
+            "a moved copy was made to pick"
+        );
+    }
+
+    /// A part drawn as instances looks the same as its placements' own triangles drawn one by
+    /// one. Skipped without a GPU adapter.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn instances_draw_like_their_placements_own_triangles() {
+        for part in PARTS {
+            if !placed_three_times_draws_like_its_own_triangles(part) {
+                return;
+            }
+        }
+    }
+
+    /// `false` without a GPU adapter.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn placed_three_times_draws_like_its_own_triangles(part: (&str, &str)) -> bool {
+        let mut app = three_placed_parts(part);
+        app.fit_view();
+        const SIZE: u32 = 256;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let render = |scene: GpuScene| {
+            crate::gpu::render_offscreen(
+                scene,
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                None,
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            )
+        };
+        let scene = build_scene(&app);
+        assert!(!scene.instanced.is_empty());
+        let (Some(instanced), Some(one_by_one)) = (render(scene.clone()), render(scene.clone().merged())) else {
+            eprintln!("skipping: no GPU adapter");
+            return false;
+        };
+        let drawn = instanced.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+        assert!(drawn > (SIZE * SIZE) as usize / 50, "the parts are drawn: {drawn} pixels");
+        let differ = instanced.chunks(4).zip(one_by_one.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+        assert!(differ * 200 < drawn, "{part:?}: {differ} of {drawn} pixels differ");
+        // Close up on the turned placement, the others out of view: what is in view is all drawn.
+        let turned = app.session.world_state().bodies[2].mesh_bounds();
+        app.cam.target = turned.center();
+        app.cam.distance = turned.diagonal() * 0.75;
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let render = |scene: GpuScene| {
+            crate::gpu::render_offscreen(
+                scene,
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                None,
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            )
+        };
+        let (Some(instanced), Some(one_by_one)) = (render(scene.clone()), render(scene.merged())) else { return false };
+        let drawn = instanced.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+        assert!(drawn > (SIZE * SIZE) as usize / 4, "{part:?}: close up, the part fills the view: {drawn} pixels");
+        let differ = instanced.chunks(4).zip(one_by_one.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+        assert!(differ * 200 < drawn, "{part:?} close up: {differ} of {drawn} pixels differ");
+        true
+    }
+
     #[test]
     fn ray_segment_closest_takes_the_point_under_the_ray() {
         let (o, d) = (Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 0.0, -1.0));
@@ -5268,6 +6060,14 @@ mod tests {
         app.viewport.spin = false;
         hover_frame(&mut app, &ctx, vec![]);
         assert!(app.viewport.hover.is_some());
+        app.cam_anim = Some(solidcraft_engine::render::CameraAnim::new(app.cam, app.cam, 0.0));
+        for _ in 0..3 {
+            hover_frame(&mut app, &ctx, vec![]);
+            assert!(app.viewport.hover.is_none());
+        }
+        app.cam_anim = None;
+        hover_frame(&mut app, &ctx, vec![]);
+        assert!(app.viewport.hover.is_some());
     }
 
     /// After a close-up refines a body (#1320), the model draws it from the refined plan (on the
@@ -5334,6 +6134,31 @@ mod tests {
         let mut app = SolveApp::new(s, crate::Services::default());
         app.ui.show_origin = false;
         app
+    }
+
+    /// Moving the pointer across a face keeps its highlight (a scanned mesh is one face of
+    /// millions of triangles): only another face, edge or plane builds it again.
+    #[test]
+    fn a_face_highlight_is_kept_while_the_pointer_moves_across_the_face() {
+        let mut app = cylinder_app();
+        let hover = |index: usize, x: f64| Hit::Face { body: "Body1".into(), index, point: Vec3::new(x, 0.0, 5.0) };
+        app.viewport.hover = Some(hover(0, 10.0));
+        let key = highlight_key(&app);
+        let before = build_highlight(&app).merged();
+        assert!(!before.tris.is_empty(), "the face is lit");
+        app.viewport.hover = Some(hover(0, 9.0));
+        assert_eq!(highlight_key(&app), key, "the same face, another point");
+        assert_eq!(build_highlight(&app).merged().tris, before.tris);
+        app.viewport.hover = Some(hover(1, 9.0));
+        assert_ne!(highlight_key(&app), key, "another face");
+        app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO });
+        let edge = highlight_key(&app);
+        app.viewport.hover = Some(Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::X });
+        assert_ne!(highlight_key(&app), edge, "an edge's middle picks which part of it is lit");
+        app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::ZERO });
+        let plane = highlight_key(&app);
+        app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::X });
+        assert_eq!(highlight_key(&app), plane, "the same plane, another point");
     }
 
     #[test]
@@ -6245,8 +7070,8 @@ mod tests {
         assert_eq!(h.app.cam.target, before.target);
         assert_eq!(h.app.cam.distance, before.distance);
         orbit_drag(&mut h.app, rect, 0.0, 0.0, None, false, false);
-        assert!((h.app.cam.yaw - 1.6).abs() < 1e-6);
         h.frames(2);
+        assert!((h.app.cam.yaw - 1.6).abs() < 1e-6);
         assert!(h.app.viewport.orbit_free.is_none());
     }
 
@@ -6602,10 +7427,11 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         let keys = |app: &SolveApp| (scene_key(app), highlight_key(app));
-        h.call("ui.prefs", json!({"open": "Graphics"}));
-        assert!(h.widget("Colour vision").is_some() && h.widget("Mode").is_some());
+        h.call("ui.prefs", json!({"open": "Interface"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:color_vision");
+        assert!(h.widget("Colour vision").is_some() && h.widget("Off").is_some() && h.widget("Deutan").is_some());
         let before = keys(&h.app);
-        h.call("ui.prefs", json!({"color_vision": "deutan"}));
+        h.step(&json!({"click":{"handle":"dialog:Mode:Deutan"}})).unwrap();
         h.frame();
         assert_eq!(crate::theme::vision(), ColorVision::Deutan);
         assert_eq!(Tokens::get(), Tokens::themed(crate::theme::is_dark(), ColorVision::Deutan));
@@ -6862,6 +7688,26 @@ mod grid_plane_tests {
         app.ui.show_origin = true;
         let sc = build_highlight(&app);
         assert!(sc.xray.is_empty() && !sc.guide_trans.is_empty(), "outside Create Sketch the planes are depth-tested");
+    }
+
+    /// #2581: a dialog waiting for a plane (here Mirror's plane) shows the origin planes in the
+    /// view as Create Sketch does, so the plane can be picked there; while it waits for its
+    /// objects it doesn't.
+    #[test]
+    fn a_dialog_picking_a_plane_shows_the_origin_planes() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length":40,"width":40,"height":40})).unwrap();
+        app.ui.show_origin = false;
+        app.start("solid.mirror");
+        let d = app.dialog.as_ref().expect("the Mirror dialog");
+        assert_eq!(d.active, 0, "it starts on its objects");
+        assert!(!app.picking_plane() && origin_planes(&app).is_empty(), "no planes while picking objects");
+        app.dialog.as_mut().unwrap().active = 1;
+        assert!(app.picking_plane());
+        assert_eq!(origin_planes(&app).len(), 3, "every origin plane is offered for the mirror plane");
+        assert!(!build_highlight(&app).xray.is_empty(), "drawn through the model");
+        app.dialog = None;
+        assert!(origin_planes(&app).is_empty());
     }
 
     /// Primary rolls a live preview back for reselect, but not while a manipulator is dragged

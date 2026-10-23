@@ -588,6 +588,7 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
     for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
+        h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Product"})).unwrap();
         enter(&mut h.app, true).unwrap();
         h.frames(3);

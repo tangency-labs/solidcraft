@@ -940,27 +940,25 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
-    ui_kit::row(ui, crate::i18n::tr("update.prefs_label"), |ui| {
-        ui.add_enabled_ui(can, |ui| ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates));
-    });
-    ui.horizontal(|ui| {
+    ui.add_enabled_ui(can, |ui| ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates));
+    ui.horizontal_wrapped(|ui| {
         let busy = app.updater.status == Status::Checking;
+        let (status, warning) = match (&app.updater.status, offered_or_newer(app)) {
+            _ if !can => (String::new(), false),
+            (Status::Checking, _) => (crate::i18n::tr("update.checking").to_string(), false),
+            (Status::Failed(e), _) => (crate::i18n::format("update.failed", &[("error", e)]), true),
+            (_, Some(v)) => (crate::i18n::format("update.available", &[("version", &v)]), false),
+            (Status::UpToDate, None) => (crate::i18n::tr("update.up_to_date").to_string(), false),
+            (Status::Idle, None) => (String::new(), false),
+        };
+        if !status.is_empty() {
+            ui_kit::settings_badge(ui, &status, warning);
+        }
         let r = ui_kit::button(ui, crate::i18n::tr("update.check_now"), ui_kit::Button::Enabled(can && !busy));
         crate::scenario::publish_rect("prefs:check_now", r.rect);
         if r.clicked() {
             let ctx = ui.ctx().clone();
             check_now(app, &ctx);
-        }
-        let status = match (&app.updater.status, offered_or_newer(app)) {
-            _ if !can => String::new(),
-            (Status::Checking, _) => crate::i18n::tr("update.checking").to_string(),
-            (Status::Failed(e), _) => crate::i18n::format("update.failed", &[("error", e)]),
-            (_, Some(v)) => crate::i18n::format("update.available", &[("version", &v)]),
-            (Status::UpToDate, None) => crate::i18n::tr("update.up_to_date").to_string(),
-            (Status::Idle, None) => String::new(),
-        };
-        if !status.is_empty() {
-            ui_kit::text(ui, &status, ui_kit::Text::Inline);
         }
     });
     let note = if can {
@@ -970,7 +968,7 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         crate::i18n::format("update.prefs_dev", &[("version", current_version())])
     };
-    ui_kit::text(ui, &note, ui_kit::Text::Note("updates"));
+    ui_kit::text(ui, &note, ui_kit::Text::Hint("updates"));
     if let Some(v) = offered_or_newer(app)
         && offered(app).is_none()
         && ui_kit::button(ui, crate::i18n::format("update.show", &[("version", &v)]), ui_kit::Button::Normal).clicked()

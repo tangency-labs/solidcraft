@@ -27,7 +27,7 @@ pub use backend::{
     RenderMode, RenderOperation, RenderPolicy, RenderProfile, RenderRequest, ResolveError, ResolvedRequest, ScratchLayout, builtin_backend,
     resolve_request,
 };
-pub use camera::{Camera, Mat4, Quat, StandardView, UpAxis};
+pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ease_in_out};
 pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
 pub use gif::gif;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};

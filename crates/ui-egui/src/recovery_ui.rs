@@ -111,7 +111,7 @@ pub fn close(app: &mut SolveApp) {
     }
 }
 
-fn ago(secs: u64) -> String {
+pub(crate) fn ago(secs: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(secs);
     let d = now.saturating_sub(secs);
     match d {
@@ -123,10 +123,10 @@ fn ago(secs: u64) -> String {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    if app.recoverable.is_empty() {
+    // File view presents the same entries inline, without a second window covering them.
+    if app.home.open || app.recoverable.is_empty() {
         return;
     }
-    let dir = app.autosave.as_ref().map(|a| a.dir.clone()).or_else(recovery::default_dir);
     let mut act: Option<(Entry, bool)> = None;
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
         .actions("", crate::i18n::tr_label("Later"), None)
@@ -153,25 +153,30 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     let later = closed || action != ui_kit::Action::None;
-    let dir_s = dir.map(|d| d.to_string_lossy().to_string());
-    if let Some((e, recover)) = act {
-        app.recoverable.retain(|x| x.id != e.id);
-        if recover {
-            if app.session.is_dirty() {
-                app.set_status("save or discard the open design's changes before recovering another", true);
-                app.recoverable.insert(0, e);
-                return;
-            }
-            // Rebuilt off the window thread like any other file; once it is in, it is
-            // autosaved under this app's entry before the old entry goes.
-            let kind = crate::file_load::Kind::Recover { id: e.id.clone(), dir: dir_s };
-            let _ = crate::file_load::begin_request(app, crate::file_load::Request::new(&e.name, kind));
-        } else {
-            let _ = app.run("doc.recovery_discard", json!({"id": e.id, "dir": dir_s}));
-        }
+    if let Some((entry, recover)) = act {
+        apply(app, entry, recover);
     }
     if later {
         app.recoverable.clear();
+    }
+}
+
+/// Shared recovery action for the launch prompt and File view; dirty work is never replaced.
+pub(crate) fn apply(app: &mut SolveApp, entry: Entry, recover: bool) {
+    let dir_s = app.autosave.as_ref().map(|a| a.dir.clone()).or_else(recovery::default_dir).map(|d| d.to_string_lossy().to_string());
+    app.recoverable.retain(|x| x.id != entry.id);
+    if recover {
+        if app.session.is_dirty() {
+            app.set_status("save or discard the open design's changes before recovering another", true);
+            app.recoverable.insert(0, entry);
+            return;
+        }
+        // Rebuilt off the window thread like any other file; once it is in, it is
+        // autosaved under this app's entry before the old entry goes.
+        let kind = crate::file_load::Kind::Recover { id: entry.id.clone(), dir: dir_s };
+        let _ = crate::file_load::begin_request(app, crate::file_load::Request::new(&entry.name, kind));
+    } else {
+        let _ = app.run("doc.recovery_discard", json!({"id": entry.id, "dir": dir_s}));
     }
 }
 
@@ -451,6 +456,26 @@ mod tests {
 
     fn entry(id: &str, name: &str) -> Entry {
         Entry { id: id.into(), path: None, name: name.into(), saved_at: 0, features: 3 }
+    }
+
+    #[test]
+    fn file_view_recovery_is_inline_and_the_design_workspace_keeps_the_prompt() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.app.recoverable = vec![entry("a", "Bracket"), entry("b", "Housing")];
+        h.frames(4);
+        assert!(crate::scenario::handle_at("home:recovery:recover").is_some());
+        assert!(h.widget("Later").is_none(), "the recovery window must not cover File view");
+        assert_eq!(h.app.recoverable.len(), 2);
+        h.step(&json!({"click": {"handle": "home:recover"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("home:recovery:0:recover").is_some());
+        assert!(crate::scenario::handle_at("home:recovery:1:discard").is_some());
+        assert!(h.widget("Later").is_none());
+        h.app.home.open = false;
+        h.frames(4);
+        assert!(h.widget("Later").is_some());
+        assert_eq!(h.app.recoverable.len(), 2);
     }
 
     #[test]

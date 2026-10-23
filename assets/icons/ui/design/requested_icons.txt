@@ -203,9 +203,11 @@ scale	false
 screw	false
 section	false
 select	false
+send	false
 settings	false
 sheet_rules	false
 shell	false
+shield	false
 silhouette	false
 sketch	false
 sketch_break	false
@@ -237,6 +239,7 @@ split_face	false
 spun	false
 star	false
 status_error	false
+status_recovery	false
 style	false
 suppress	false
 surface_blend	false

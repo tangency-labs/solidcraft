@@ -41,11 +41,16 @@ pub(crate) fn enabled() -> bool {
     *ON.get_or_init(|| std::env::var("SOLIDCRAFT_DISPLAY_REFINE").map_or(true, |v| v != "0"))
 }
 
-/// A body's identity here: the address of its reference mesh, which is shared by every copy of
-/// the same body across timeline snapshots and held by the cache so the address stays its own.
-pub(crate) fn body_id(b: &ModelBody) -> (usize, Arc<Mesh>) {
-    let m = b.mesh();
-    (Arc::as_ptr(&m) as usize, m)
+/// What keeps a body's identity ([`body_id`]) its own while the cache holds it.
+pub(crate) type Holder = Arc<dyn std::any::Any + Send + Sync>;
+
+/// A body's identity here: the address of its [`ModelBody::display_identity`], which is shared by
+/// every copy of the same body across timeline snapshots and held by the cache so the address
+/// stays its own. Taking it meshes nothing: a part placed many times is drawn without making its
+/// moved copies.
+pub(crate) fn body_id(b: &ModelBody) -> (usize, Holder) {
+    let holder = b.display_identity();
+    (Arc::as_ptr(&holder) as *const () as usize, holder)
 }
 
 /// How the camera maps millimetres to pixels.
@@ -118,7 +123,7 @@ pub(crate) struct Candidate<'a> {
 
 struct Entry {
     /// Keeps the body's id address its own while the entry lives.
-    _holder: Arc<Mesh>,
+    _holder: Holder,
     refined: Refined,
     bytes: usize,
     used: u64,
@@ -127,7 +132,7 @@ struct Entry {
 #[cfg(not(target_arch = "wasm32"))]
 struct Job {
     key: (usize, DisplayQuality, u8),
-    holder: Arc<Mesh>,
+    holder: Holder,
     rx: std::sync::mpsc::Receiver<Refined>,
 }
 
@@ -264,7 +269,7 @@ impl Lod {
         }
     }
 
-    fn insert(&mut self, key: (usize, DisplayQuality, u8), holder: Arc<Mesh>, refined: Refined) {
+    fn insert(&mut self, key: (usize, DisplayQuality, u8), holder: Holder, refined: Refined) {
         let bytes = refined.as_ref().map_or(0, |(plan, mesh)| mesh_bytes(mesh) + plan.vertex_count() * 48 + mesh.triangles.len() * 12);
         self.cache.insert(key, Entry { _holder: holder, refined, bytes, used: self.clock });
     }
@@ -464,8 +469,8 @@ mod tests {
             .map(|[a, b, c]| 10.0 - r((a + b + c) * (1.0 / 3.0)))
             .fold(0.0, f64::max);
         assert!(sag <= q.refined_chord(b.body.size(), 3) * 1.01, "sag {sag}");
-        // The reference mesh never changes.
-        assert!(Arc::ptr_eq(&body_id(&b).1, &b.mesh()));
+        // Refining never makes (or replaces) the reference mesh.
+        assert!(b.cached_mesh().is_none());
         // Zoomed out a little: kept; far out: the chosen level.
         assert!(!lod.update(q, cand(3.0), &live));
         assert_eq!(lod.step(&b), 3);

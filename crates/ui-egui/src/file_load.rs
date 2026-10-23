@@ -7,6 +7,7 @@
 //! control-channel commands that change the design are held until the file is in. A control
 //! (MCP) `doc.open` or import is answered when its file finishes loading.
 
+use crate::ui_kit::{Container, Surface};
 use std::collections::VecDeque;
 use std::sync::{
     Arc,
@@ -906,7 +907,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Above the dialogs over the design; menus, tooltips and the resize edges stay above it.
     ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, id));
     ctx.move_to_top(egui::LayerId::new(egui::Order::Middle, card_id));
-    egui::Area::new(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
+    Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
         ui.interact(cover, egui::Id::new("file_loading_block"), egui::Sense::click_and_drag());
         ui.painter().rect_filled(cover, 0.0, egui::Color32::from_black_alpha(70));
@@ -1119,8 +1120,8 @@ mod tests {
         let preview = solidcraft_engine::io::DesignPreview {
             meshes: vec![solidcraft_engine::doc::MeshData {
                 name: "Saved triangle".into(),
-                positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0],
-                triangles: vec![0, 1, 2],
+                positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
+                triangles: vec![0, 1, 2].into(),
                 color: Some([0.8, 0.2, 0.1]),
             }],
         };
@@ -1135,7 +1136,7 @@ mod tests {
         let preview = solidcraft_engine::io::DesignPreview {
             meshes: vec![solidcraft_engine::doc::MeshData {
                 name: "Hostile overdraw".into(),
-                positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0],
+                positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: (0..10_000).flat_map(|_| [0, 1, 2]).collect(),
                 color: None,
             }],

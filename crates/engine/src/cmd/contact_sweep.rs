@@ -32,6 +32,65 @@ struct CachedBody {
     chord: f64,
 }
 
+/// Bodies [`ContactMeshes`] keeps; it starts over when full.
+const MAX_CACHED_MESHES: usize = 4 * MAX_BODIES;
+
+/// A body's contact mesh and what is measured on it, made once per body content.
+#[derive(Clone)]
+pub(crate) struct ContactMesh {
+    mesh: Arc<Mesh>,
+    chord: f64,
+    /// Its thinnest width across its facet directions (the sweep's step is a quarter of it).
+    thickness: f64,
+}
+
+/// Contact meshes by the body's geometry ([`solidcraft_doc::ModelBody::geometry_key`]), shared
+/// by a session and its scratch copies: driving a joint again meshes no body that did not change.
+#[derive(Default)]
+pub(crate) struct ContactMeshes(HashMap<u64, ContactMesh>);
+
+/// Tessellate `body` for contact checks and measure how thin it is.
+fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    let mesh = body.body.tessellate(tolerance)?;
+    if mesh.triangles.len() > MAX_TRIANGLES || mesh.positions.len().saturating_add(mesh.triangles.len().saturating_mul(4)) > 200_000 {
+        return Err(limit("body exceeds contact sweep tessellation budget"));
+    }
+    let extent = mesh.bounds().size();
+    // Whole-body widths along bounded distinct facet normals catch tilted
+    // plates without interpreting skinny mesh triangles as thin material.
+    // Local thin walls of a wider body remain a sampling limitation.
+    let mut thickness = extent.x.min(extent.y).min(extent.z);
+    let mut directions: Vec<Vec3> = Vec::new();
+    for triangle in &mesh.triangles {
+        let Some([a, b, c]) = mesh.tri(triangle) else {
+            return Err(limit("invalid contact tessellation"));
+        };
+        let Some(direction) = (b - a).cross(c - a).normalized() else { continue };
+        if directions.len() < 32 && !directions.iter().any(|d| d.dot(direction).abs() > 1.0 - 1e-6) {
+            directions.push(direction);
+        }
+    }
+    for direction in directions {
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        for point in &mesh.positions {
+            let projected = point.dot(direction);
+            low = low.min(projected);
+            high = high.max(projected);
+        }
+        thickness = thickness.min(high - low);
+    }
+    if !thickness.is_finite() || thickness <= 1e-9 {
+        return Err(limit("body is too thin for a bounded contact sweep"));
+    }
+    // Flat faces tessellate exactly; only planes known from how the face was
+    // made count (an unknown face is taken as curved).
+    let faces = body.body.face_count();
+    let flat = faces <= 1024 && (0..faces).all(|i| body.body.face_plane(i).is_some());
+    let chord = if flat { 0.0 } else { tolerance };
+    Ok(ContactMesh { mesh: Arc::new(mesh), chord, thickness })
+}
+
 /// A member of a contact set: (occurrence id, name).
 pub(super) type Member = (u64, String);
 
@@ -90,47 +149,24 @@ impl ContactGeometry {
                 let (mesh, chord) = if let Some(cached) = meshes.get(&body.name) {
                     cached.clone()
                 } else {
-                    let tolerance = (body.body.size() * 1e-3).max(1e-3);
-                    let mesh = body.body.tessellate(tolerance)?;
-                    if mesh.triangles.len() > MAX_TRIANGLES || mesh.positions.len().saturating_add(mesh.triangles.len().saturating_mul(4)) > 200_000 {
-                        return Err(limit("body exceeds contact sweep tessellation budget"));
-                    }
-                    let extent = mesh.bounds().size();
-                    // Whole-body widths along bounded distinct facet normals catch tilted
-                    // plates without interpreting skinny mesh triangles as thin material.
-                    // Local thin walls of a wider body remain a sampling limitation.
-                    let mut thickness = extent.x.min(extent.y).min(extent.z);
-                    let mut directions: Vec<Vec3> = Vec::new();
-                    for triangle in &mesh.triangles {
-                        let Some([a, b, c]) = mesh.tri(triangle) else {
-                            return Err(limit("invalid contact tessellation"));
-                        };
-                        let Some(direction) = (b - a).cross(c - a).normalized() else { continue };
-                        if directions.len() < 32 && !directions.iter().any(|d| d.dot(direction).abs() > 1.0 - 1e-6) {
-                            directions.push(direction);
+                    let key = body.geometry_key();
+                    let known = key.and_then(|k| s.contact_meshes.lock().ok().and_then(|c| c.0.get(&k).cloned()));
+                    let made = match known {
+                        Some(made) => made,
+                        None => {
+                            let made = contact_mesh(body)?;
+                            if let (Some(k), Ok(mut cache)) = (key, s.contact_meshes.lock()) {
+                                if cache.0.len() >= MAX_CACHED_MESHES {
+                                    cache.0.clear();
+                                }
+                                cache.0.insert(k, made.clone());
+                            }
+                            made
                         }
-                    }
-                    for direction in directions {
-                        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
-                        for point in &mesh.positions {
-                            let projected = point.dot(direction);
-                            low = low.min(projected);
-                            high = high.max(projected);
-                        }
-                        thickness = thickness.min(high - low);
-                    }
-                    if !thickness.is_finite() || thickness <= 1e-9 {
-                        return Err(limit("body is too thin for a bounded contact sweep"));
-                    }
-                    out.step = out.step.min(thickness * 0.25);
-                    let mesh = Arc::new(mesh);
-                    // Flat faces tessellate exactly; only planes known from how the face was
-                    // made count (an unknown face is taken as curved).
-                    let faces = body.body.face_count();
-                    let flat = faces <= 1024 && (0..faces).all(|i| body.body.face_plane(i).is_some());
-                    let chord = if flat { 0.0 } else { tolerance };
-                    meshes.insert(body.name.clone(), (mesh.clone(), chord));
-                    (mesh, chord)
+                    };
+                    out.step = out.step.min(made.thickness * 0.25);
+                    meshes.insert(body.name.clone(), (made.mesh.clone(), made.chord));
+                    (made.mesh, made.chord)
                 };
                 out.bodies.push(CachedBody {
                     path: path.clone(),

@@ -20,6 +20,7 @@
 //! [`Config`] (kept with the preferences, edited in [`editor`]) holds the person's own list for
 //! any of them: how many tools and in which place, clockwise from the top.
 
+use crate::ui_kit::{Container, Surface};
 use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2, pos2, vec2};
@@ -340,7 +341,7 @@ pub(crate) fn paint(painter: &Painter, c: Pos2, scale: f32, studio: Studio, item
             let at = c + vec2(a.sin(), -a.cos()) * (hub + ring) / 2.0;
             let ink = if item.enabled { t.icon } else { t.border };
             let side = (24.0 * scale).max(12.0);
-            crate::icons::paint(painter, Rect::from_center_size(at, vec2(side, side)), &item.icon, ink, t.icon_fill, t.accent);
+            crate::icons::paint_icon(painter, Rect::from_center_size(at, vec2(side, side)), &item.icon, f32::from(ink.a()) / 255.0);
         }
     }
     match hot.and_then(|k| items.get(k)).filter(|i| i.enabled) {
@@ -500,7 +501,7 @@ fn paint_open(app: &SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let area = Rect::from_center_size(wheel.centre, vec2(2.0 * (RING + 6.0), 2.0 * (RING + 6.0)));
-    crate::frame::area(egui::Id::new("sc_mouse_gesture")).fixed_pos(area.min).order(egui::Order::Foreground).show(ctx, |ui| {
+    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_mouse_gesture")).fixed_pos(area.min).order(egui::Order::Foreground).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(area.size(), Sense::hover());
         paint(&ui.painter_at(r.expand(4.0)), wheel.centre, 1.0, wheel.studio, &list, pointer, t);
     });
@@ -571,39 +572,36 @@ fn apply(list: &mut Vec<String>, op: Op) -> bool {
 /// The rows of Preferences › Navigation that belong to gestures: the switch, the button that
 /// opens the editor, and what the mouse mode has to be.
 pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    let note = |ui: &mut egui::Ui, s: &str| {
-        ui.label("");
-        ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tr_label(s)).size(t.font_small).color(t.text_dim)).wrap());
-        ui.end_row();
-    };
-    ui.label(crate::i18n::tr_label("Mouse gestures"));
-    ui.horizontal(|ui| {
-        crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut app.preferences.mouse_gestures.enabled);
-        if crate::ui_kit::button(ui, crate::i18n::tr_label("Customize…"), crate::ui_kit::Button::Normal).clicked() {
-            app.gesture.editor.open = true;
-            app.gesture.editor.studio = Studio::of(app);
-        }
-    });
-    ui.end_row();
-    if app.preferences.nav != MOUSE_MODE {
-        ui.label("");
+    crate::ui_kit::settings_block(ui, crate::i18n::tr_label("Mouse gestures"), t.space_24 * 6.0 + t.space_6, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.colored_label(
-                t.warning,
+            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut app.preferences.mouse_gestures.enabled);
+            let customize = crate::ui_kit::button(ui, crate::i18n::tr_label("Customize…"), crate::ui_kit::Button::Normal);
+            crate::scenario::publish_handle("gestures:customize", customize.rect.center());
+            if customize.clicked() {
+                app.gesture.editor.open = true;
+                app.gesture.editor.studio = Studio::of(app);
+            }
+        });
+        if app.preferences.nav != MOUSE_MODE {
+            crate::ui_kit::text(
+                ui,
                 crate::i18n::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
+                crate::ui_kit::Text::Hint("mouse_gesture_mode"),
             );
             if crate::ui_kit::button(ui, crate::i18n::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
                 app.preferences.nav = MOUSE_MODE.to_string();
                 app.preferences.zoom_reverse = crate::prefs::nav_preset(MOUSE_MODE).reverse_zoom;
             }
-        });
-        ui.end_row();
-    } else if app.preferences.mouse_gestures.enabled {
-        note(
-            ui,
-            "With gestures on, the right button no longer orbits the view: hold it and move to open the ring, then touch a tool's zone. A plain right-click still opens the menu.",
-        );
-    }
+        } else if app.preferences.mouse_gestures.enabled {
+            crate::ui_kit::text(
+                ui,
+                crate::i18n::tr_label(
+                    "With gestures on, the right button no longer orbits the view: hold it and move to open the ring, then touch a tool's zone. A plain right-click still opens the menu.",
+                ),
+                crate::ui_kit::Text::Hint("mouse_gesture_help"),
+            );
+        }
+    });
 }
 
 /// The customization window: pick a studio, then how many tools its ring holds, which, and in
@@ -613,13 +611,11 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let t = Tokens::get();
-    let mut open = true;
     let mut studio = app.gesture.editor.studio;
     let mut config = app.preferences.mouse_gestures.clone();
-    crate::frame::window(ctx, crate::i18n::tr_label("Mouse gestures"), crate::frame::Width::Wide)
-        .id(egui::Id::new("sc_gesture_editor"))
-        .open(&mut open)
-        .show(ctx, |ui| {
+    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_gesture_editor"), "settings", crate::i18n::tr_label("Mouse gestures"))
+        .cards(3.0)
+        .show_body(ctx, |ui| {
             crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut config.enabled);
             if app.preferences.nav != MOUSE_MODE {
                 ui.colored_label(
@@ -729,7 +725,7 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
         });
     app.gesture.editor.studio = studio;
     app.preferences.mouse_gestures = config;
-    app.gesture.editor.open = open;
+    app.gesture.editor.open = !closed;
 }
 
 #[cfg(test)]
@@ -945,6 +941,45 @@ mod tests {
             serde_json::from_str::<Config>(r#"{"enabled":true,"wheels":{"part":["undo"],"future":["x"]}}"#).is_ok(),
             "unknown studios are kept, not fatal"
         );
+    }
+
+    #[test]
+    fn customization_uses_the_shared_header_keeps_edits_and_has_no_resize_edges() {
+        use crate::scenario::{Harness, handle_at, rect_of};
+        use serde_json::json;
+        for dark in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.call("ui.set", json!({"dark":dark}));
+            h.app.preferences.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
+            h.app.gesture.editor.open = true;
+            h.app.gesture.editor.studio = Studio::Part;
+            h.frames(6);
+            let header = rect_of("dialog:header").unwrap();
+            assert_eq!(header.height(), Tokens::get().form_header_height);
+            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 2);
+            h.step(&json!({"widget":"Add a tool"})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3);
+            let window = rect_of("dialog:window").unwrap();
+            for at in [window.left_center(), window.right_center(), window.right_bottom()] {
+                h.call("ui.move", json!({"x":at.x,"y":at.y}));
+                h.frames(2);
+                assert!(!matches!(
+                    h.output.cursor_icon,
+                    egui::CursorIcon::ResizeHorizontal
+                        | egui::CursorIcon::ResizeVertical
+                        | egui::CursorIcon::ResizeNwSe
+                        | egui::CursorIcon::ResizeNeSw
+                ));
+            }
+            let close = handle_at("dialog:close").unwrap();
+            h.call("ui.click", json!({"x":close.x,"y":close.y}));
+            h.frames(2);
+            assert!(!h.app.gesture.editor.open);
+            assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part).len(), 3, "closing retains edits");
+        }
     }
 
     #[test]

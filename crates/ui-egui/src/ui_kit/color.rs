@@ -1,5 +1,6 @@
 //! Opaque document RGB editing. Interface paint uses tokens; the gradients are colour data.
 use super::{layout::label, metrics::dimension};
+use crate::ui_kit::{Container, Surface};
 use crate::{i18n, scenario, theme::Tokens};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
 
@@ -22,11 +23,12 @@ pub(crate) fn color_field(ui: &mut Ui, rgb: &mut [u8; 3]) -> Response {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, ui.is_enabled(), i18n::tr("color.edit")));
     publish(&format!("dialog:color:{}", label(ui)), &response);
     let mut edited = false;
-    egui::Popup::menu(&response)
+    Container::new(ui.ctx(), Surface::Popup)
+        .menu(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .width(t.form_card_width + t.space_24 + t.space_12)
         .frame(
-            egui::Frame::popup(ui.style())
+            Container::popup_frame(ui.style())
                 .fill(t.control_fill)
                 .stroke(egui::Stroke::new(1.0, t.border))
                 .corner_radius(t.radius_xl)

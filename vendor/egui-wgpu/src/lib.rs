@@ -131,6 +131,65 @@ impl SurfaceConfig {
     };
 }
 
+/// SolidCraft: whether a device was lost (the driver reset it, Windows' TDR among others, #4172).
+///
+/// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
+/// fails: from then on every call on the device fails quietly, and the device's lost callback
+/// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
+/// (`PendingWrites::activate`), so the painter first submits nothing ([`DeviceLost::probe`]):
+/// that submission meets the loss instead, and the frame's uploads are skipped.
+#[derive(Clone, Debug, Default)]
+pub struct DeviceLost {
+    lost: Arc<std::sync::atomic::AtomicBool>,
+    reason: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl DeviceLost {
+    /// Watch `device`: its lost callback marks the loss. A device has one lost callback, so this
+    /// replaces any set before.
+    pub fn watch(device: &wgpu::Device) -> Self {
+        let lost = Self::default();
+        let seen = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            seen.mark(&format!("{reason:?}: {message}"));
+        });
+        lost
+    }
+
+    /// Mark the device lost, for `reason` (the first reason is kept).
+    pub fn mark(&self, reason: &str) {
+        if let Ok(mut kept) = self.reason.lock() {
+            kept.get_or_insert_with(|| reason.to_owned());
+        }
+        self.lost.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// The device was lost.
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Why the device was lost, as wgpu said it.
+    pub fn reason(&self) -> Option<String> {
+        self.reason.lock().ok().and_then(|r| r.clone())
+    }
+
+    /// The flag [`DeviceLost::is_lost`] reads, for others drawing on the same device.
+    pub fn flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.lost.clone()
+    }
+
+    /// Whether the device is lost, asking the driver first: an empty submission reaches the
+    /// driver, so a loss it reports is marked here rather than met by the next upload.
+    pub fn probe(&self, queue: &wgpu::Queue) -> bool {
+        if self.is_lost() {
+            return true;
+        }
+        queue.submit([]);
+        self.is_lost()
+    }
+}
+
 /// Access to the render state for egui.
 #[derive(Clone)]
 pub struct RenderState {
@@ -171,6 +230,9 @@ pub struct RenderState {
     ///
     /// Update this to have the surface reconfigured on the next paint.
     pub surface_config: SurfaceConfig,
+
+    /// SolidCraft: the device was lost; the painter draws nothing more (#4172).
+    pub device_lost: DeviceLost,
 }
 
 async fn request_adapter(
@@ -313,6 +375,8 @@ impl RenderState {
                 queue,
             }) => (instance, adapter, device, queue),
         };
+        // SolidCraft: a device the driver loses stops the painter, not the app (#4172).
+        let device_lost = DeviceLost::watch(&device);
 
         log_adapter_info(&adapter.get_info());
 
@@ -361,6 +425,7 @@ impl RenderState {
             msaa_supported,
             renderer: Arc::new(RwLock::new(renderer)),
             surface_config: config.surface,
+            device_lost,
         })
     }
 }
@@ -871,4 +936,21 @@ pub fn clamp_surface_extent(width: u32, height: u32, max_side: u32) -> (u32, u32
     };
     let scale_f32 = scale as f32;
     (fit(width), fit(height), scale_f32)
+}
+
+#[cfg(test)]
+mod device_lost_tests {
+    /// A loss is marked once, with the first reason, and every clone (and the shared flag) sees it.
+    #[test]
+    fn a_marked_loss_is_seen_by_every_clone() {
+        let lost = super::DeviceLost::default();
+        let painter = lost.clone();
+        let flag = lost.flag();
+        assert!(!painter.is_lost() && lost.reason().is_none());
+        lost.mark("Unknown: Device lost");
+        lost.mark("Destroyed: ");
+        assert!(painter.is_lost());
+        assert!(flag.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(painter.reason().as_deref(), Some("Unknown: Device lost"));
+    }
 }

@@ -50,7 +50,11 @@ hidapi = { version = "2.6.7", default-features = false, features = ["windows-nat
 raw-window-handle = "0.6"
 # Native crash capture (src/native_crash.rs): the exception filter, the faulting module, a minidump.
 # The window's resize border and DPI size (src/native_frame.rs): the window procedure, hit test, DPI.
+# Finding 3D mice through Plug and Play without asking other devices anything (src/space_mouse/windows_hid.rs).
 windows-sys = { version = "0.61", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Devices_Properties",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",

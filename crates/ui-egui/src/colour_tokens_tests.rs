@@ -29,9 +29,7 @@ fn moved_colours_keep_the_values_they_were_drawn_with() {
         assert_eq!(t.analysis.access, [[0.20, 0.75, 0.30], [0.85, 0.22, 0.20]]);
         assert_eq!(t.analysis.curvature, [[0.15, 0.35, 0.95], [0.10, 0.80, 0.25], [0.90, 0.15, 0.10]]);
         assert!(!t.analysis.hatch);
-        assert_eq!(t.app_bar_icon, [Color32::from_rgb(225, 230, 238), Color32::from_rgb(120, 140, 170), Color32::from_rgb(120, 190, 255)]);
         assert_eq!(t.logo, [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197), Color32::WHITE]);
-        assert_eq!(t.icons.glint, Color32::from_white_alpha(160));
         assert_eq!(t.icons.marker_halo, Color32::from_black_alpha(150));
         assert_eq!(t.icons.agent, Color32::from_rgb(168, 85, 247));
     }
@@ -59,7 +57,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
 // palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that
 // `icon_svg` resolves. `icon_svg`'s own tests hold that every master parses and that only the
-// palette's colours exist; the colour vision modes do not reach them yet.
+// palette's colours exist, including its colour-vision variants.
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
@@ -75,10 +73,8 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
-    ("frame.rs", 1, "the window shadow"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
     ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
-    ("home.rs", 2, "thumbnail tints"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),

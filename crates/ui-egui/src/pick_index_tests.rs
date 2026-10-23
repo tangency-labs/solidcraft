@@ -67,9 +67,12 @@ fn indexes_follow_the_model_state() {
     assert!(app.viewport.pick_index.len() <= 5);
 }
 
-/// Timing, not a check (`cargo test -p solidcraft-ui-egui --lib pick_timing -- --ignored
-/// --nocapture`): picks over a grid of the view, scanning every triangle and edge versus through
-/// the indexes, on many curved bodies and on one body with many curved faces.
+/// Timing, not a check (`cargo test --release -p solidcraft-ui-egui --lib pick_timing -- --ignored
+/// --nocapture`; `SOLIDCRAFT_BENCH_MESH=part.stl` adds 25 placements of that mesh): picks over a
+/// grid of a 1400 × 900 view, scanning every triangle and edge versus through the indexes, on many
+/// curved bodies, on one body with many curved faces, and on eight layers of bodies seen from
+/// above (rays passing near many hidden edges). Release, Apple M2 Max: tens of microseconds a
+/// pick through the indexes on each, 25 placements of a 2 M-triangle scan included.
 #[test]
 #[ignore]
 fn pick_timing_on_curved_models() {
@@ -89,21 +92,51 @@ fn pick_timing_on_curved_models() {
             one.execute("solid.cylinder", &json!({"radius": 14, "height": 30, "base": [x, y, 0], "operation": "join"})).unwrap();
         }
     }
-    for (name, s) in [("many bodies", many), ("one body", one)] {
-        let mut app = SolveApp::new(s, crate::Services::default());
+    let mut deep = solidcraft_engine::Session::default();
+    for k in 0..8 {
+        for i in 0..8 {
+            for j in 0..8 {
+                let (x, y, z) = (f64::from(i) * 40.0 + f64::from(k) * 5.0, f64::from(j) * 40.0 + f64::from(k) * 3.0, f64::from(k) * 25.0);
+                deep.execute("solid.cylinder", &json!({"radius": 15, "height": 20, "base": [x, y, z], "operation": "new_body"})).unwrap();
+            }
+        }
+    }
+    let mut scenes = vec![
+        ("many bodies", SolveApp::new(many, crate::Services::default()), 0.6),
+        ("one body", SolveApp::new(one, crate::Services::default()), 0.6),
+    ];
+    scenes.push(("eight layers", SolveApp::new(deep, crate::Services::default()), 1.2));
+    if let Some(path) = std::env::var_os("SOLIDCRAFT_BENCH_MESH") {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let component = app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap()["component"].clone();
+        app.run("component.activate", json!({"component":"root"})).unwrap();
+        let size = app.session.world_state().bodies[0].mesh_bounds().size();
+        let step = size.x.max(size.y) * 1.3;
+        for k in 1..25 {
+            app.run("occurrence.copy", json!({"component":component,"translate":[f64::from(k % 5) * step, f64::from(k / 5) * step, 0.0]})).unwrap();
+        }
+        scenes.push(("25 placed meshes", app, 0.6));
+    }
+    for (name, mut app, pitch) in scenes {
         app.ui.show_origin = false;
-        app.cam.target = solidcraft_engine::geom::Vec3::new(160.0, 160.0, 15.0);
-        app.cam.distance = 900.0;
+        (app.cam.yaw, app.cam.pitch) = (0.6, pitch);
         let st = app.session.world_state();
+        app.cam.fit(&st.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh_bounds())));
         let (tris, segs) = st
             .bodies
             .iter()
-            .map(|b| b.mesh())
+            .map(|b| b.mesh_in_place().0)
             .fold((0, 0), |(t, s), m| (t + m.triangles.len(), s + m.edges.iter().map(|e| e.len().saturating_sub(1)).sum::<usize>()));
         let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
         let proj = projection(&app, rect);
         let points: Vec<_> = (0..20).flat_map(|j| (0..30).map(move |i| pos2(30.0 + i as f32 * 45.0, 30.0 + j as f32 * 42.0))).collect();
-        // Indexes made once, before timing.
+        // Indexes made once, before timing (large ones on workers).
+        for b in &st.bodies {
+            let m = b.mesh_in_place().0;
+            while app.viewport.pick_index.of(&m).is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
         for p in &points {
             pick(&app, &proj, *p);
         }
@@ -116,7 +149,7 @@ fn pick_timing_on_curved_models() {
             super::SCAN.with(|s| s.set(false));
             t.elapsed().as_secs_f64() * 1000.0 / points.len() as f64
         };
-        let (scan, indexed) = (time(true), time(false));
+        let (scan, indexed) = (if tris < 10_000_000 { time(true) } else { f64::NAN }, time(false));
         eprintln!("{name}: {} bodies, {tris} triangles, {segs} edge segments: scan {scan:.3} ms per pick, indexed {indexed:.3} ms", st.bodies.len());
     }
 }

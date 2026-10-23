@@ -4,6 +4,7 @@
 //! locks that value; Tab moves to the next box; Enter places the shape with the typed values,
 //! which become dimension constraints. Values are expressions ("25", "1 in", "d1 * 2").
 
+use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
@@ -423,23 +424,27 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             s.store(ui.ctx(), id);
         }
         let pos = in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos());
-        crate::frame::area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            let fill = if b.locked { tk.accent_soft } else { tk.panel };
-            egui::Frame::popup(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1)).show(ui, |ui| {
-                let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
-                // A completion gets first use of forward Tab. Shift+Tab always moves back;
-                // the box reached by egui's generic traversal must not complete its text.
-                let changed = (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut b.value);
-                completed |= changed && source == Some(i);
-                if r.changed() || changed {
-                    b.locked = true;
-                }
-                if focus && i == 0 {
-                    r.request_focus();
-                }
-                any_focused |= r.has_focus() || r.lost_focus();
-            });
-        });
+        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Foreground).show(
+            ui.ctx(),
+            |ui| {
+                let fill = if b.locked { tk.accent_soft } else { tk.panel };
+                Container::popup_frame(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1)).show(ui, |ui| {
+                    let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
+                    // A completion gets first use of forward Tab. Shift+Tab always moves back;
+                    // the box reached by egui's generic traversal must not complete its text.
+                    let changed =
+                        (source.is_none() || (source == Some(i) && tab != Some(true))) && crate::params_dialog::complete(ui, &r, &mut b.value);
+                    completed |= changed && source == Some(i);
+                    if r.changed() || changed {
+                        b.locked = true;
+                    }
+                    if focus && i == 0 {
+                        r.request_focus();
+                    }
+                    any_focused |= r.has_focus() || r.lost_focus();
+                });
+            },
+        );
     }
     if let Some(source) = source
         && !completed

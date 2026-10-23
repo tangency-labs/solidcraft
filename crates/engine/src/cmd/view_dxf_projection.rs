@@ -16,10 +16,19 @@ pub(super) struct Drawing {
     pub segments: usize,
     pub projection_ms: f64,
     pub occlusion_ms: f64,
+    /// Shown sketch curves: one path per visible or hidden run of each curve.
+    pub sketch: Vec<Path>,
 }
 
-pub(super) fn drawing(meshes: &super::meshes::Scene, cam: &Camera) -> Result<Drawing, &'static str> {
-    scene::drawing(meshes, cam)
+/// A connected run of a projected sketch curve.
+#[derive(Clone, Debug)]
+pub(super) struct Path {
+    pub points: Vec<Vec2>,
+    pub hidden: bool,
+}
+
+pub(super) fn drawing(meshes: &super::meshes::Scene, sketch: &[super::sketch::Part], cam: &Camera) -> Result<Drawing, &'static str> {
+    scene::drawing(meshes, sketch, cam)
 }
 
 /// Keep the hidden curves connected: restarting a dash on every short chord would make a

@@ -17,6 +17,11 @@ pub struct CrashUi {
 }
 
 impl CrashUi {
+    /// Cached report count; rendering preferences never reads the filesystem.
+    pub(crate) fn saved_count(&self) -> usize {
+        self.reports.len()
+    }
+
     /// Read the reports again (when the window opens or changes; never every frame).
     pub fn refresh(&mut self) {
         let dir = self.dir_path();

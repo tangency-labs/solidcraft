@@ -172,3 +172,64 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     assert!(centers.len() >= 3, "{centers:?}");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
 }
+
+#[test]
+fn view_dxf_exports_a_sketch_only_design_on_the_sketch_layer() {
+    let mut s = Session::default();
+    assert!(s.execute(CMD, &json!({"camera":camera(StandardView::Top)})).is_err());
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[60,40]}));
+    run(&mut s, "sketch.circle.center", json!({"center":[30,20],"radius":8}));
+    for finish in [false, true] {
+        if finish {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        let v = export(&mut s, camera(StandardView::Top), "omit");
+        // Four rectangle sides and one circle, each its own entity.
+        assert_eq!(v["sketch"], 5, "{v}");
+        let geometry = solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap();
+        let (mut sides, mut circle) = (Vec::new(), 0);
+        for g in geometry {
+            let solidcraft_io::Geom2::Line(a, b) = g else { panic!("{g:?}") };
+            // The drawing is centred on the camera target (20, 15).
+            let on_circle = |p: Vec2| ((p - Vec2::new(10., 5.)).len() - 8.).abs() < 0.02;
+            if on_circle(a) && on_circle(b) {
+                circle += 1;
+            } else {
+                sides.push((a.dist(b) * 1000.).round() as i64);
+            }
+        }
+        sides.sort_unstable();
+        assert_eq!(sides, [40_000, 40_000, 60_000, 60_000], "finish={finish}");
+        assert!(circle > 16, "{circle}");
+    }
+}
+
+#[test]
+fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on_top() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,-5],"x_dir":[1,0,0],"y_dir":[0,1,0]}}));
+    run(&mut s, "sketch.line", json!({"points":[[-20,15],[60,15]]}));
+    // The box's edges run along y = 0 and y = 30; only the sketch line lies on y = 15 (0 in the
+    // drawing, which is centred on the camera target; the top view is tilted a hair).
+    let length = |v: &Value| {
+        let lines = solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap();
+        lines
+            .iter()
+            .filter_map(|g| if let solidcraft_io::Geom2::Line(a, b) = g { Some((*a, *b)) } else { None })
+            .filter(|(a, b)| a.y.abs() < 1e-3 && b.y.abs() < 1e-3)
+            .map(|(a, b)| a.dist(b))
+            .sum::<f64>()
+    };
+    let active = export(&mut s, camera(StandardView::Top), "omit");
+    assert_eq!(active["sketch"], 1, "{active}");
+    assert!((length(&active) - 80.).abs() < 1e-3 && active["dxf"].as_str().unwrap().contains("SKETCH"));
+    run(&mut s, "sketch.finish", json!({}));
+    let finished = export(&mut s, camera(StandardView::Top), "omit");
+    assert_eq!(finished["sketch"], 2, "{finished}");
+    assert!((length(&finished) - 40.).abs() < 1e-3, "{}", length(&finished));
+    let dashed = export(&mut s, camera(StandardView::Top), "dashed");
+    assert_eq!(dashed["sketch"], 2);
+    assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
+}

@@ -16,7 +16,6 @@
     "error": "#fb4934",
     "warning": "#fabd2f",
     "icon": "#d5c4a1",
-    "icon_fill": "#458588",
     "timeline": "#1d2021",
     "hover": "#46403e",
     "sel_face": "#458588",
@@ -62,8 +61,6 @@
     "dialog_bg": "#3c3836",
     "dialog_border": "#504945",
     "chip": "#458588",
-    "heading_bg": "#282828",
-    "subheading_bg": "#32302f",
     "section_cap": "#d65d0e",
     "profile_fill": "#83a59828",
     "glyph_bg": "#32302f",
@@ -96,24 +93,6 @@
       "#b8bb26",
       "#83a598"
     ],
-    "app_bar_icon": [
-      "#ebdbb2",
-      "#928374",
-      "#83a598"
-    ],
-    "icons.folder": "#d79921",
-    "icons.axes": [
-      "#fb4934",
-      "#b8bb26",
-      "#83a598"
-    ],
-    "icons.agent": "#d3869b",
-    "icons.warning": "#fabd2f",
-    "icons.interference": "#fb4934",
-    "icons.paint": [
-      "#fb4934",
-      "#83a598",
-      "#fabd2f"
-    ]
+    "icons.agent": "#d3869b"
   }
 }

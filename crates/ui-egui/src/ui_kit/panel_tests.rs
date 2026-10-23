@@ -90,7 +90,7 @@ fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
                 let frame = Panel::feature_frame(&ctx, layout, side);
                 let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
                 let panel = Panel::new("Fillet", egui::Id::new("gallery_feature"), anchor, vp, side, frame);
-                panel.window().show(&ctx, |ui| {
+                panel.window(&ctx).show(&ctx, |ui| {
                     panel.feature(
                         ui,
                         FeatureOptions {
@@ -147,7 +147,7 @@ fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
                         crate::frame::Side::Right,
                         frame,
                     );
-                    panel.window().show(&ctx, |ui| {
+                    panel.window(&ctx).show(&ctx, |ui| {
                         panel.palette(ui, bottom, 0.0, |ui, part| match part {
                             Part::Header => {
                                 status_header(
@@ -197,7 +197,7 @@ fn wide_tables_remain_bounded_with_pinned_actions_on_small_viewports() {
                     let side = crate::frame::Side::Right;
                     let anchor = viewport.right_top();
                     let panel = Panel::new("Table", egui::Id::new("wide"), anchor, viewport, side, Panel::feature_frame(&ctx, layout, side)).wide();
-                    panel.window().show(&ctx, |ui| {
+                    panel.window(&ctx).show(&ctx, |ui| {
                         panel.feature(
                             ui,
                             FeatureOptions {
@@ -310,6 +310,7 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
         let mut drawn = 0;
         let pages = [
             WindowPage {
+                group: None,
                 icon: "settings",
                 label: "ui.general",
                 handle: "test:page:general",
@@ -320,6 +321,7 @@ fn window_pages_have_shared_metrics_callbacks_and_a_pinned_left_footer_action() 
                 },
             },
             WindowPage {
+                group: None,
                 icon: "orbit",
                 label: "ui.navigation",
                 handle: "test:page:navigation",
@@ -548,4 +550,98 @@ fn window_footer_is_optional_and_can_contain_only_a_left_action() {
         assert!(scenario::handle_at("dialog:ok").is_none() && scenario::handle_at("dialog:cancel").is_none());
         assert!(scenario::handle_at("dialog:close").is_some());
     }
+}
+
+#[test]
+fn universal_containers_follow_one_layout_without_changing_transient_surfaces() {
+    use crate::{frame::Side, shell::LayoutMode};
+    let ctx = crate::fonts::test_context();
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let t = Tokens::get();
+        for surface in [Surface::Panel, Surface::Feature, Surface::Palette, Surface::Chrome] {
+            LayoutMode::Floating.publish(&ctx);
+            let floating = Container::new(&ctx, surface);
+            assert!(floating.floating());
+            let floating = floating.frame(&ctx, t.panel, Side::Left);
+            assert_ne!(floating.shadow, egui::Shadow::NONE);
+            assert!(floating.corner_radius.nw > 0);
+            LayoutMode::Docked.publish(&ctx);
+            let docked = Container::new(&ctx, surface);
+            assert!(!docked.floating());
+            assert_eq!(docked.gap(), 0.0);
+            let docked = docked.frame(&ctx, t.panel, Side::Left);
+            assert_eq!(docked.corner_radius.nw, 0, "{surface:?}: flush with left edge");
+            assert_eq!(docked.fill, floating.fill);
+            assert_eq!(docked.shadow, egui::Shadow::NONE, "compact surfaces meet their edge without shadows");
+        }
+        for surface in [
+            Surface::ApplicationBar,
+            Surface::Window,
+            Surface::Popup,
+            Surface::Canvas,
+            Surface::Toast,
+            Surface::Navigation,
+            Surface::Viewport,
+            Surface::InputShield,
+        ] {
+            LayoutMode::Floating.publish(&ctx);
+            let floating = Container::new(&ctx, surface).frame(&ctx, t.panel, Side::Left);
+            LayoutMode::Docked.publish(&ctx);
+            let docked = Container::new(&ctx, surface).frame(&ctx, t.panel, Side::Left);
+            assert_eq!(floating, docked, "{surface:?}: anchored/modal/canvas content never becomes a workspace dock");
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn required_platform_window_keeps_recovery_pending_until_an_explicit_choice() {
+    let ctx = crate::fonts::test_context();
+    for _ in 0..3 {
+        scenario::clear_handles();
+        frame(&ctx, vec![], |ui| {
+            assert!(!Window::new(ui.id().with("required_recovery"), "restore", "Recover unsaved work?").required().show_body(ui.ctx(), |ui| {
+                button(ui, "Recover", Button::Normal);
+                button(ui, "Discard", Button::Normal);
+            }));
+        });
+    }
+    assert!(scenario::handle_at("dialog:close").is_none(), "recovery cannot be dismissed through the header");
+    assert!(scenario::rect_of("dialog:header").is_some());
+    assert!(scenario::rect_of("dialog:footer").is_none());
+}
+
+#[test]
+fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
+    use crate::ui_kit::DockEdges;
+    use crate::{frame::Side, shell::LayoutMode};
+    let ctx = crate::fonts::test_context();
+    LayoutMode::Docked.publish(&ctx);
+    let t = Tokens::get();
+    let browser = Container::new(&ctx, Surface::Panel).joined(DockEdges { left: true, top: true, ..Default::default() });
+    let frame = browser.frame(&ctx, t.panel, Side::Left);
+    assert_eq!(frame.corner_radius, egui::CornerRadius { nw: 0, ne: 0, sw: 0, se: t.radius_lg });
+    let joined = browser.joined(DockEdges { left: true, top: true, bottom: true, ..Default::default() });
+    assert_eq!(joined.frame(&ctx, t.panel, Side::Left).corner_radius, egui::CornerRadius::ZERO);
+    let a = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(100.0, 60.0));
+    let allocation = frame.outer_rect(a);
+    let below = egui::Rect::from_min_size(egui::pos2(a.left(), allocation.bottom()), a.size());
+    let beside = egui::Rect::from_min_size(egui::pos2(allocation.right(), a.top()), a.size());
+    assert_eq!(frame.outer_rect(below).top(), allocation.bottom(), "vertical allocations touch");
+    assert_eq!(frame.outer_rect(beside).left(), allocation.right(), "horizontal allocations touch");
+    assert_eq!(frame.widget_rect(a).bottom() - frame.stroke.width, frame.widget_rect(below).top(), "one shared horizontal border");
+    assert_eq!(frame.widget_rect(a).right() - frame.stroke.width, frame.widget_rect(beside).left(), "one shared vertical border");
+}
+
+#[test]
+fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
+    let ctx = crate::fonts::test_context();
+    crate::shell::LayoutMode::Docked.publish(&ctx);
+    let t = Tokens::get();
+    let container = Container::new(&ctx, Surface::Feature);
+    let frame = container.frame(&ctx, t.dialog_body, crate::frame::Side::Right);
+    assert_eq!(container.tool_frame(frame, false).corner_radius, egui::CornerRadius::same(t.radius_lg));
+    assert_eq!(container.tool_frame(frame, true).corner_radius, egui::CornerRadius { nw: t.radius_lg, ne: 0, sw: t.radius_lg, se: 0 });
 }

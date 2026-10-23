@@ -380,7 +380,7 @@ impl Model {
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests);
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before));
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || unhex(r.get("fingerprint").unwrap_or(&Json::Null))? != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -403,7 +403,7 @@ impl Model {
             // Each result where an evaluation would have put it, so an edit undone (or set back)
             // finds it again rather than evaluating the feature anew.
             if !result.skipped {
-                let local = fingerprint(0, f, &vals, false, &step_digests) ^ placement_digest(doc, f);
+                let local = fingerprint(0, f, &vals, false, &step_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, prev, local, ctx, &before),
                     CachedEval {

@@ -674,6 +674,9 @@ pub fn read(s: &str) -> Result<Document> {
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
     d.next_id = d.next_id.max(floor).max(1);
+    // These lists used to allocate independently. Keep their existing identities, but never
+    // let a later deletion make them available again after loading an older design.
+    d.next_id = d.next_item_id()?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
@@ -2035,6 +2038,46 @@ mod tests {
             assert!(back.next_id > largest, "next_id {} after load with {stale:?}", back.next_id);
             let fresh = back.add_component(None, 0).unwrap();
             assert!(fresh > largest, "new component reused id {fresh}");
+        }
+    }
+
+    #[test]
+    fn older_auxiliary_ids_advance_the_saved_counter_before_deletion() {
+        use serde_json::json;
+
+        let origin = json!({"occurrence": 0, "snap": {"type": "point", "point": [0, 0, 0]}});
+        let cases = [
+            ("browser_groups", json!({"id": 100, "name": "Group", "component": 0, "folder": "bodies", "items": []})),
+            ("timeline_groups", json!({"id": 100, "name": "Folder", "features": []})),
+            (
+                "canvases",
+                json!({"id": 100, "name": "Canvas", "format": "png", "data": "", "pixels": [1, 1],
+                    "plane": {"type": "origin", "name": "XY"}, "center": [0, 0], "width": 10,
+                    "angle": 0, "opacity": 0.5, "flip": false, "visible": true}),
+            ),
+            ("joints", json!({"id": 100, "name": "Joint", "kind": "rigid", "a": origin, "b": origin})),
+            ("contact_sets", json!({"id": 100, "name": "Contact", "occurrences": []})),
+            ("studies", json!({"id": 100, "name": "Study", "steps": 10, "keys": []})),
+            ("exploded", json!({"id": 100, "name": "View", "moves": []})),
+        ];
+        for (field, item) in cases {
+            let json = edited(&Document::new("Legacy IDs"), |v| {
+                v.as_object_mut().unwrap().remove("next_id");
+                if matches!(field, "browser_groups" | "timeline_groups" | "canvases") {
+                    v[field] = json!([item]);
+                } else {
+                    v["assembly"] = json!({field: [item]});
+                }
+            });
+            let mut back = read(&json).unwrap_or_else(|e| panic!("{field}: {e}"));
+            assert_eq!(back.next_id, 101, "{field}");
+            back.browser_groups.clear();
+            back.timeline_groups.clear();
+            back.canvases.clear();
+            back.assembly = Default::default();
+            let mut reopened = read(&back.to_json()).unwrap();
+            assert_eq!(reopened.allocate_id().unwrap(), 101, "{field}: deleted legacy id was forgotten");
+            assert_eq!(reopened.allocate_id().unwrap(), 102, "{field}");
         }
     }
 

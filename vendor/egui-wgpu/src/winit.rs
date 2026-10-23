@@ -643,6 +643,19 @@ impl Painter {
         // SolidCraft: one clock reading for this frame's surface retries (#1935).
         let now = web_time::Instant::now();
 
+        // SolidCraft: a lost device draws nothing more; the app sees `RenderState::device_lost`
+        // and restarts (#4172).
+        if self
+            .render_state
+            .as_ref()
+            .is_some_and(|rs| rs.device_lost.is_lost())
+        {
+            // The app's frame (not this paint) acts on it: keep its frames coming.
+            self.context
+                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
+            return vsync_sec;
+        }
+
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
         // below set `needs_recreate`. Recreate the surface now, before re-borrowing
         // `self.render_state` / `self.surfaces` for the rest of the paint.
@@ -750,6 +763,19 @@ impl Painter {
                 return vsync_sec;
             }
         };
+
+        // SolidCraft: before the uploads, an empty submission asks the driver whether the device
+        // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
+        // the submission meets it instead, marks it lost, and the frame is dropped unpresented.
+        if render_state.device_lost.probe(&render_state.queue) {
+            render_queue_guard.commands_submitted = true;
+            log::error!(
+                "The graphics device was lost: {}",
+                render_state.device_lost.reason().unwrap_or_default()
+            );
+            self.context.request_repaint_of(viewport_id);
+            return vsync_sec;
+        }
 
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as

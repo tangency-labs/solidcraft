@@ -180,9 +180,7 @@ impl Assembly {
                 .copied()
                 .filter(|s| seq != 0 || !self.referenced.contains(s))
                 .filter(|s| f.des.get(s).is_some_and(|d| matches!(d.typ, 143 | 144) || (d.typ == 128 && !self.surface_references.contains(s))));
-            if let Some(item) = sew_surfaces(t, surfaces, if seq == 0 { "Body1" } else { name }, styles, &mut faces, &mut sewer)? {
-                items.push(item);
-            }
+            items.extend(sew_surfaces(t, surfaces, if seq == 0 { "Body1" } else { name }, styles, &mut faces, &mut sewer)?);
             made += items.len();
             list.clear();
             let _ = write!(list, "#{origin}");

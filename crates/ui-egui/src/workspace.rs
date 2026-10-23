@@ -857,11 +857,10 @@ mod tests {
 
     /// Every way into a sketch (New Sketch on the ribbon then a plane, a double-click in the
     /// timeline or the browser, Edit Sketch in the browser's menu) opens the SKETCH tab and looks
-    /// at the sketch; Finish Sketch (palette or ribbon) lands on MODEL with the earlier view back
+    /// at the sketch; Finish Sketch (palette or ribbon) lands on MODEL with the view left where it is
     /// and the sketch still listed, as before the ribbon redesign.
     #[test]
     fn entering_and_finishing_a_sketch_keeps_the_tab_view_and_history() {
-        let iso = json!({"camera": {"yaw_deg": -45, "pitch_deg": 35}});
         let top = json!({"camera": {"yaw_deg": 0, "pitch_deg": 90}});
         let expect = |h: &mut crate::scenario::Harness, e: &serde_json::Value, what: &str| {
             h.frames(3);
@@ -877,7 +876,7 @@ mod tests {
         h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
         h.step(&json!({"click": {"handle": "sketch_palette:finish"}})).unwrap();
         expect(&mut h, &json!({"sketching": false, "errors": 0}), "Finish");
-        expect(&mut h, &iso, "Finish puts the view back");
+        expect(&mut h, &top, "Finish leaves the view where it is");
         assert_eq!(h.app.ui.tab, "MODEL");
         assert!(crate::scenario::handle_at("timeline:Sketch1").is_some() && crate::scenario::handle_at("row:Sketch1").is_some());
 
@@ -899,7 +898,7 @@ mod tests {
             assert_eq!(h.app.ui.tab, "SKETCH", "{how}");
             h.step(&json!({"click": {"handle": "button:sketch.finish"}})).unwrap();
             expect(&mut h, &json!({"sketching": false}), how);
-            expect(&mut h, &iso, how);
+            expect(&mut h, &top, how);
             assert_eq!(h.app.ui.tab, "MODEL", "{how}");
         }
     }

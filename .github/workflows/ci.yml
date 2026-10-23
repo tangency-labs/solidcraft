@@ -280,6 +280,10 @@ jobs:
         run: cargo xtask licences --check
       - name: Dependency layers
         run: cargo xtask layers
+      - name: Universal UI containers
+        run: |
+          cargo xtask ui-containers
+          cargo test -p xtask ui_containers --locked
       - name: Sorted lists
         run: cargo xtask lists
       - name: Design format pending changes

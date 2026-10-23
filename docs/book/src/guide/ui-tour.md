@@ -34,6 +34,12 @@
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+
+  Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
+  through both poles, preserving roll without axis snapping. It defaults to off for every mouse
+  preset. With SolidWorks navigation, right-click a planar face and choose **Normal to Selection**
+  to use Look At (also Ctrl+8); repeat to flip the side, preserving scale and projection.
+
   **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer
   orbits: hold it and move the pointer 4 pt to open a ring of tools (280 pt inside, 350 pt outside), even
@@ -66,7 +72,10 @@
 - **Dialogs** dock on the right with a live preview. Most features also show drag handles and a
   value box in the viewport.
 - **Timeline** (bottom). Every feature in order. Double-click to edit, drag the marker to roll
-  back, and drag features to reorder them.
+  back, and drag features to reorder them. Preferences can put the timeline vertically at the
+  far left of the viewport, beside the browser. Its seam handle switches between icon
+  chips and compact feature names; the browser can collapse to a rail beside either width.
+  Previous, Play and Next sit at the top. Double-click Previous to roll to the start.
 - **Command search (S).** Click the ribbon search field or press S to open the search popup
   below it. Results group commands by their ribbon path and show matching features and user
   parameters from this design. With an empty query, recent commands appear first, followed by
@@ -77,13 +86,28 @@
   JSON as you type and shows parser errors. Shift+Enter runs it and keeps the popup open.
   Right-click a command for its existing pin and toolbar actions.
 
-Preferences (File › Preferences) hold the theme, the units of new designs, the mouse preset, the
+Preferences (File › Preferences) hold the theme, workspace layout, the units of new designs, the mouse preset, the
 visual style and autosave. Graphics › Colour vision gives the colours that carry a meaning (sketch
 states, axes, bends, analyses, icons) values for a weak red, green or blue sense: Protan, Deutan or
 Tritan. In a mode, the faces Draft and Accessibility Analysis mark as failing are striped too.
 Command messages and errors show for a few seconds in the status chip at the bottom left of the view. Click the chip, or choose Help › **Messages…**, for every message of the session: newest first, errors in red, each line selectable, with **Copy all** for a bug report.
 Help › Keyboard Shortcuts lists every key, and File › Keyboard
 Shortcuts changes them.
+
+### Workspace layout
+
+General › **Workspace layout** switches between **Floating** cards and **Compact**
+panels. Compact joins the workspace selector and ribbon into one top bar, puts
+Browser flush underneath with a square join, and docks tool sheets below the
+compass. Tool sheets remain draggable: their four corners round away from the right
+edge, and their two right corners square when docked there. Browser keeps only the height its contents need. Assistant remains on the
+outside edge, and History keeps its chosen bottom, left or shared Browser column.
+The choice is saved between launches. Switching preserves the current tool,
+camera, selection and design; Cancel and Restore Defaults work like other preferences.
+
+General › **Show text under ribbon icons** is a separate, saved option for either
+layout. Turn it off for shorter icon-only command buttons; tooltips, section names
+and command menus remain available.
 
 ### Colour themes
 
@@ -130,6 +154,9 @@ pills when `on_accent` has less than 4.5:1 contrast with the fill. See the
   point for your own theme.
 - **Remove** deletes the selected imported theme.
 
+Retired window-band and procedural icon colours in older exports are discarded on import.
+Command icons use the shared SVG palette.
+
 Imported themes are kept with your preferences, so they work in the browser app too. Colour
 vision modes still apply on top of any theme.
 
@@ -149,10 +176,9 @@ While the readout is on, the view redraws every frame. With vertical sync the fr
 out at the display's refresh rate; the interface time and the GPU counts still show the work.
 
 Navigation › **Smooth wheel zoom** is on by default. Turn it off to apply each wheel or
-trackpad event immediately, with no smoothing tail. Re-enabling smoothing during
+trackpad event immediately, with no smoothing tail. It is independent of **Animate view
+changes**, which controls axis views, Look At, Home and Fit. Re-enabling smoothing during
 a wheel gesture takes effect after that gesture ends, avoiding leftover zoom being replayed.
-Every other view change (axis view, view cube, Look At, Home, Fit, named views, arrow keys)
-and every orbit, pan and zoom drag applies at once, with no animation.
 
 Navigation › **Alias** uses Alias's camera keys: Shift+Alt+left drag orbits, Shift+Alt+middle
 drag pans and Shift+Alt+right drag zooms (drag down to move away, up to move closer). Without

@@ -27,10 +27,19 @@ pub(super) const LABEL_ACTIONS_SHARE: f32 = 0.45;
 /// Widest a label column may grow, as a multiple of `form_label_width`.
 const LABEL_COLUMN_MAX: f32 = 1.6;
 
+/// A label as drawn: the leading indent kept, the text itself translated (a nested row such as
+/// `"  Of"` lines up under the one above and still translates). Measuring (`label_width`) and the
+/// row label (`sized_row`) both prepare their text with this, so a label is translated exactly
+/// once and the label column and the captions line up on the same text.
+pub(super) fn indented_label(text: &str) -> String {
+    let indent = text.len() - text.trim_start().len();
+    format!("{}{}", &text[..indent], crate::i18n::tr_label(text.trim_start()))
+}
+
 /// Measured width of a label in the form label font. Tokens: `font_label, dialog_label`.
 pub(super) fn label_width(ui: &Ui, text: &str) -> f32 {
     let t = Tokens::get();
-    ui.painter().layout_no_wrap(crate::i18n::tr_label(text).to_string(), egui::FontId::proportional(t.font_label), t.dialog_label).size().x.ceil()
+    ui.painter().layout_no_wrap(indented_label(text), egui::FontId::proportional(t.font_label), t.dialog_label).size().x.ceil()
 }
 
 /// Minimum content widths for table controls, including their token/native control metrics.
@@ -72,6 +81,9 @@ pub(super) fn header_column(ui: &Ui, text: &str) -> f32 {
 /// two frames and shrinks again when the long rows go away.
 /// Shared label width, capped at 1.6x. Tokens: `form_label_width, font_label, dialog_label, space_4`.
 pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
+    if let Some(width) = ui.stack().iter().find_map(|node| node.tags().get_downcast::<f32>(super::layout::FIXED_LABEL)) {
+        return width.min(row_width * 0.6);
+    }
     let t = Tokens::get();
     // Wide manager cards use the approved 104 pt label column; compact cards retain room
     // for their existing controls. Both sizes derive from the same form/spacing tokens.
@@ -108,7 +120,29 @@ pub(crate) fn table_row_height() -> f32 {
 }
 
 /// Label/control gutter for the same responsive form grid as label_column.
-pub(super) fn label_gap(width: f32) -> f32 {
+pub(super) fn label_gap(ui: &Ui, width: f32) -> f32 {
     let t = Tokens::get();
-    if width >= t.form_card_width + t.space_24 * 2.0 { t.space_10 } else { t.space_8 }
+    if ui.stack().iter().any(|node| node.tags().contains(super::layout::FIXED_LABEL)) {
+        t.space_14
+    } else if width >= t.form_card_width + t.space_24 * 2.0 {
+        t.space_10
+    } else {
+        t.space_8
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::indented_label;
+
+    /// `label_width` and `sized_row` share `indented_label`, so a label is translated once. German
+    /// `Profiles` is `Profile`, which is itself an English key that would translate again to
+    /// `Profil`; the row must show `Profile`, not the second translation.
+    #[test]
+    fn a_label_is_translated_once() {
+        let _de = crate::i18n::scope("de");
+        assert_eq!(indented_label("Profiles"), "Profile");
+        assert_eq!(indented_label("  Profiles"), "  Profile");
+        assert_eq!(indented_label("Profile"), "Profil");
+    }
 }

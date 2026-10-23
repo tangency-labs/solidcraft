@@ -49,7 +49,7 @@ impl ReviewWindow {
 /// Open only through ui.start; executing the validator never opens a window.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut window) = app.material_card_review.take() else { return };
-    let viewport = crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect()));
+    let viewport = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     if !viewport.is_finite() || !viewport.is_positive() {
         app.material_card_review = Some(window);
         return;
@@ -61,12 +61,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let docked = egui::pos2(side.anchor_x(viewport), top);
     let title = tr("ui.material_review.title");
     let moved = crate::frame::dock_offset(ctx, "material_card_review");
-    let anchor = crate::frame::offset_anchor(docked, moved, viewport, side);
+    let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
+    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let panel = ui_kit::Panel::new(
         title,
         egui::Id::new("sc_material_card_review"),
         anchor,
-        viewport,
+        drag_bounds,
         side,
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
@@ -78,7 +79,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         panel
     };
     let mut close = false;
-    panel.window().show(ctx, |ui| {
+    panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(
             ui,
             ui_kit::FeatureOptions {

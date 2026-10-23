@@ -13,6 +13,7 @@ mod layers;
 mod licences;
 mod lists;
 mod test;
+mod ui_containers;
 mod web_offline;
 mod web_offline_test;
 
@@ -23,6 +24,7 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
+  ui-containers   enforce the universal container for all UI hosts
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   assets          check that every non-code asset file is attributed in ATTRIBUTION.md
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
@@ -64,7 +66,7 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, layers, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, layers, ui-containers, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -74,6 +76,7 @@ fn main() -> ExitCode {
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
         Some("layers") => cmd_layers(),
+        Some("ui-containers") => ui_containers::run(&root()),
         Some("assets") => assets::run(&root()),
         Some("icons") => icons::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
@@ -374,6 +377,7 @@ fn cmd_ci() -> Result<(), String> {
     licences::run(&root(), true)?;
     lists::run(&root(), false)?;
     cmd_layers()?;
+    ui_containers::run(&root())?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;

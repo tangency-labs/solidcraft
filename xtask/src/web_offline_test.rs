@@ -2,7 +2,8 @@
 //!
 //! Serves six release builds, a site without the app and a development build at
 //! `/solidcraft/app/` (as on GitHub Pages, with its 10-minute HTTP caching) from a local server
-//! that can also act offline, flaky, hung or mid-deployment, plus another copy of the app at
+//! that can also act offline, flaky, hung or mid-deployment, or hold chosen responses until the
+//! test lets them go (nothing here depends on how fast the network or the machine is), plus another copy of the app at
 //! `/solidcraft/elsewhere/` on the same origin, and drives headless Chrome through the DevTools
 //! protocol through these steps (twenty-two page launches, which failures are numbered by):
 //!
@@ -14,18 +15,21 @@
 //!    page whose code can't be fetched);
 //! 5. the same for build v3: v1 starts, and v2's unfinished download is dropped (failed updates
 //!    don't pile up);
-//! 6. build v2 deployed again: its page fails at once while its other files are still coming:
-//!    v1 starts, and its download doesn't stay in progress (so it can be dropped);
+//! 6. build v2 deployed again: its page fails at once while its other files are held back:
+//!    v1 starts, and once they are let go its download doesn't stay in progress (so it can be
+//!    dropped);
 //! 7. v3's files download, but v4 is deployed meanwhile (its `index.html` comes): v1 starts, and
 //!    v3 isn't marked complete (a kept build never mixes deployments);
 //! 8. online: the first launch already gets v3 (resuming its download), and only v3 stays kept;
 //! 9. offline: v3 starts;
 //! 10. network hangs: after waiting for it a few seconds, v3 starts from the kept copy;
-//! 11. build v4 deployed, but the check for it is slow while v4's worker takes over (as when
-//!     another tab updates): the kept v3 starts and works, its copy retired but not deleted;
+//! 11. build v4 deployed, but the check for it is held back while v4's worker takes over (as
+//!     when another tab updates, which starts once the launch is waiting for the check): the kept
+//!     v3 starts and works, its copy retired but not deleted;
 //! 12. no open page uses the retired copies any more: a launch (v4) deletes them;
-//! 13. build v5's worker downloads slowly while a launch finds v6 deployed and downloads it:
-//!     v6 starts, v5's download isn't dropped from under its worker, then v6's worker takes over;
+//! 13. build v5's worker downloads, its files held back by the server, while a launch finds v6
+//!     deployed and downloads it: v6 starts, v5's download (let go afterwards) isn't dropped
+//!     from under its worker, then v6's worker takes over;
 //! 14. with no launch in between (a page left open), updates to v2 and then v3 both fail: the
 //!     second one's install drops the first's unfinished download;
 //! 15. the app removed (no `sw.js`, no `build.json`): the site's page starts, from the network;
@@ -51,7 +55,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -67,8 +71,6 @@ const ELSEWHERE: &str = "/solidcraft/elsewhere/";
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(240);
 /// sw.js's NAVIGATE_TIMEOUT_MS, less a margin: a hung network is waited for at least this long.
 const SLOW_NETWORK_WAIT: Duration = Duration::from_secs(3);
-/// How long a file takes in Mode::SlowFiles.
-const SLOW_FILE: Duration = Duration::from_secs(6);
 /// Where Mode::SignIn redirects to (on `localhost`: another origin than the 127.0.0.1 app).
 const SIGN_IN: &str = "/sign-in";
 
@@ -251,11 +253,14 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     })?;
     step("flaky again: build v3 neither, so v1 starts; v2's unfinished download is dropped", t);
 
+    let name2_ = cache_name(PREFIX, &kept.get(1).map(|(v, _)| v.clone()).unwrap_or_default());
+    let asked = server.slow.load(Ordering::SeqCst);
     server.set(Mode::FailFast(v2.clone()));
     let t = launch(&mut cdp, "v1")?;
-    // Past the time the slow files would have arrived.
-    std::thread::sleep(SLOW_FILE + Duration::from_secs(1));
-    wait_for(&mut cdp, &state_js, "no download is left marked in progress", |s| s["filling"] == json!([]))?;
+    // The other files of v2 are asked for (and held) around the page's failure; let them go.
+    server.wait_asked_slowly(asked + kept.get(1).map_or(0, |(_, n)| n.saturating_sub(1)))?;
+    server.release();
+    wait_for(&mut cdp, &state_js, "no download is left marked in progress", |s| s["caches"].get(&name2_).is_some() && s["filling"] == json!([]))?;
     step("one file fails at once, others are still coming: v1 starts; v2's isn't left in progress", t);
 
     server.set(Mode::Mixed(v3.clone(), v4.clone()));
@@ -297,14 +302,28 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     server.set(Mode::SlowCheck(v4.clone()));
     cdp.call("Network.clearBrowserCache", json!({}))?;
     other.eval(age)?;
-    other.eval(
-        "navigator.serviceWorker.getRegistration().then((r) => {
-          setTimeout(() => { r.update(); location.replace('about:blank'); }, 1000);
-          return true;
-        })",
-    )?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
+    // The other tab updates once the launch is waiting for build.json, and leaves.
+    let waiting = server.checks.clone();
+    let before = waiting.load(Ordering::SeqCst);
+    let updater = std::thread::spawn(move || -> Result<Cdp, String> {
+        let t = Instant::now();
+        while waiting.load(Ordering::SeqCst) <= before {
+            if t.elapsed() > LAUNCH_TIMEOUT {
+                return Err("the launch never asked for build.json".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        other.eval(
+            "navigator.serviceWorker.getRegistration().then((r) => {
+              setTimeout(() => { r.update(); location.replace('about:blank'); }, 0);
+              return true;
+            })",
+        )?;
+        Ok(other)
+    });
     let t = launch(&mut cdp, "v3")?;
+    let mut other = updater.join().map_err(|_| "the updating tab panicked".to_string())??;
     let [name3, name4] = [2, 3].map(|i| kept.get(i).map(|(v, _)| cache_name(PREFIX, v)).unwrap_or_default());
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
@@ -325,16 +344,17 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     let update = "navigator.serviceWorker.getRegistration().then((r) => { r.update(); return true; })";
     let name5 = kept.get(4).map(|(v, _)| cache_name(PREFIX, v)).unwrap_or_default();
     let asked = server.slow.load(Ordering::SeqCst);
-    server.set(Mode::SlowFiles(v5));
+    server.set(Mode::SlowFiles(v5.clone(), v6.clone()));
     cdp.eval(update)?;
     wait_for(&mut cdp, &state_js, "v5's worker starts downloading", |s| s["caches"].get(&name5).is_some())?;
     // Chrome sends a server at most six requests at once: a build with more files has the rest
     // wait for the first ones. v6 is deployed once all of v5's are asked for (any asked later
     // would get v6's file, which rightly ends v5's download, but that isn't this step).
-    let files5 = kept.get(4).map_or(0, |(_, n)| *n);
-    server.wait_asked_slowly(asked + files5)?;
+    server.wait_asked_slowly(asked + only_in(&v5, &v6)?)?;
     server.set(Mode::Serve(v6));
+    // v5's files are still held while v6 launches; they come once v6 has started.
     let t = launch(&mut cdp, "v6")?;
+    server.release();
     wait_for(&mut cdp, &state_js, "v5's download is finished, not dropped", |s| s["complete"].as_array().is_some_and(|c| c.contains(&json!(name5))))?;
     cdp.eval(update)?;
     wait_for(&mut cdp, &state_js, "the worker keeps build v6", keeps(5))?;
@@ -408,6 +428,15 @@ const STATE_JS: &str = "(async () => {
 })()";
 
 /// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
+/// How many files `build` keeps that `other` doesn't have.
+fn only_in(build: &Path, other: &Path) -> Result<usize, String> {
+    let path = build.join("build.json");
+    let json: Value =
+        std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(|| format!("{}: not readable", path.display()))?;
+    let files = json["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str());
+    Ok(files.filter(|f| !other.join(f).exists()).count())
+}
+
 fn cache_name(path: &str, version: &str) -> String {
     format!("solidcraft-app {path} {version}")
 }
@@ -521,11 +550,16 @@ enum Mode {
     Mixed(PathBuf, PathBuf),
     /// The network hangs: connections stay open, unanswered (until the mode changes).
     Hang,
-    /// Online, serving this build, but `build.json` hangs (until the mode changes).
+    /// Online, serving this build, but `build.json` hangs (until the mode changes), and `sw.js`
+    /// waits for the first `build.json` request: the browser's own check for a new worker, which
+    /// a navigation makes, must not install it before the launch is waiting for `build.json`.
     SlowCheck(PathBuf),
-    /// Online, serving this build, but its files (not `build.json`, `sw.js`) take SLOW_FILE.
-    SlowFiles(PathBuf),
-    /// Like SlowFiles, but `index.html` fails at once.
+    /// Online, serving this build, but its files (not `build.json`, `sw.js`) that the second build
+    /// lacks are held until `Server::release`. A file both builds have (`index.html`, a name that
+    /// no build changes) is served: the browser would make a request for the second build's copy
+    /// wait for the held one, and the launch of the second build must not depend on the first.
+    SlowFiles(PathBuf, PathBuf),
+    /// Like SlowFiles, but `index.html` fails at once (and isn't counted as asked for).
     FailFast(PathBuf),
     /// A sign-in in front of the app (an expired session): every request is redirected to
     /// SIGN_IN on another origin.
@@ -537,6 +571,37 @@ struct Server {
     mode: Arc<Mutex<Mode>>,
     /// How many files were asked for in Mode::SlowFiles.
     slow: Arc<AtomicUsize>,
+    /// How many `build.json` requests were held in Mode::SlowCheck.
+    checks: Arc<AtomicUsize>,
+    /// Closed by Mode::SlowFiles, Mode::FailFast and Mode::SlowCheck: their held files wait until it opens
+    /// (`Server::release`, or the first held `build.json`).
+    gate: Arc<Gate>,
+}
+
+/// Responses wait here while it is closed.
+struct Gate {
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn set(&self, open: bool) {
+        if let Ok(mut o) = self.open.lock() {
+            *o = open;
+            self.changed.notify_all();
+        }
+    }
+
+    fn pass(&self) {
+        if let Ok(mut o) = self.open.lock() {
+            while !*o {
+                match self.changed.wait(o) {
+                    Ok(g) => o = g,
+                    Err(_) => return,
+                }
+            }
+        }
+    }
 }
 
 impl Server {
@@ -546,45 +611,62 @@ impl Server {
         let port = listener.local_addr().map_err(|e| format!("server: {e}"))?.port();
         let mode = Arc::new(Mutex::new(Mode::Refuse));
         let slow = Arc::new(AtomicUsize::new(0));
-        let (shared, asked) = (mode.clone(), slow.clone());
+        let checks = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(Gate { open: Mutex::new(true), changed: Condvar::new() });
+        let (shared, asked, held, door) = (mode.clone(), slow.clone(), checks.clone(), gate.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (shared, asked, elsewhere) = (shared.clone(), asked.clone(), elsewhere.clone());
-                std::thread::spawn(move || answer(stream, &shared, &asked, &elsewhere));
+                let (shared, asked, held, door, elsewhere) = (shared.clone(), asked.clone(), held.clone(), door.clone(), elsewhere.clone());
+                std::thread::spawn(move || answer(stream, &shared, &Counters { slow: &asked, checks: &held, gate: &door }, &elsewhere));
             }
         });
-        Ok(Server { port, mode, slow })
+        Ok(Server { port, mode, slow, checks, gate })
     }
 
-    /// Wait (at most 30 s) until `n` files in all were asked for in Mode::SlowFiles.
+    /// Wait until `n` files in all were asked for in Mode::SlowFiles.
     fn wait_asked_slowly(&self, n: usize) -> Result<(), String> {
-        for _ in 0..300 {
+        let t = Instant::now();
+        while t.elapsed() < LAUNCH_TIMEOUT {
             if self.slow.load(Ordering::SeqCst) >= n {
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(50));
         }
         Err(format!("only {} of {n} slow files were asked for", self.slow.load(Ordering::SeqCst)))
     }
 
+    /// Let go of the files held back in Mode::SlowFiles and Mode::FailFast.
+    fn release(&self) {
+        self.gate.set(true);
+    }
+
     fn set(&self, mode: Mode) {
+        if matches!(mode, Mode::SlowFiles(..) | Mode::FailFast(_) | Mode::SlowCheck(_)) {
+            self.gate.set(false);
+        }
         if let Ok(mut m) = self.mode.lock() {
             *m = mode;
         }
     }
 }
 
-/// Hold a connection while the server's mode stays as it was (at most 20 s).
+/// Hold a connection while the server's mode stays as it was.
 fn hold(shared: &Mutex<Mode>, still: impl Fn(&Mode) -> bool) {
-    for _ in 0..200 {
-        std::thread::sleep(Duration::from_millis(100));
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
         if !shared.lock().is_ok_and(|m| still(&m)) {
             return;
         }
     }
 }
 
-fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsewhere: &Path) {
+struct Counters<'a> {
+    slow: &'a AtomicUsize,
+    checks: &'a AtomicUsize,
+    gate: &'a Gate,
+}
+
+fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, seen: &Counters, elsewhere: &Path) {
     let Ok(read) = stream.try_clone() else { return };
     let mut reader = BufReader::new(read);
     let mut request = String::new();
@@ -629,10 +711,10 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
         Mode::Serve(dir) => (dir, false, false),
         Mode::Flaky(dir) => (dir, true, false),
         Mode::SlowCheck(dir) => (dir, false, true),
-        Mode::SlowFiles(dir) => {
-            if !small {
-                slow.fetch_add(1, Ordering::SeqCst);
-                std::thread::sleep(SLOW_FILE);
+        Mode::SlowFiles(dir, next) => {
+            if !small && file.is_some_and(|f| !next.join(f).exists()) {
+                seen.slow.fetch_add(1, Ordering::SeqCst);
+                seen.gate.pass();
             }
             (dir, false, false)
         }
@@ -641,7 +723,8 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
                 return;
             }
             if !small {
-                std::thread::sleep(SLOW_FILE);
+                seen.slow.fetch_add(1, Ordering::SeqCst);
+                seen.gate.pass();
             }
             (dir, false, false)
         }
@@ -654,10 +737,15 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, slow: &AtomicUsize, elsew
         Mode::Refuse => return,
         Mode::Hang => return hold(shared, |m| matches!(m, Mode::Hang)),
     };
+    if slow_check && file == Some("sw.js") {
+        seen.gate.pass();
+    }
     if flaky && !small {
         return;
     }
     if slow_check && file == Some("build.json") {
+        seen.checks.fetch_add(1, Ordering::SeqCst);
+        seen.gate.set(true);
         return hold(shared, |m| matches!(m, Mode::SlowCheck(_)));
     }
     let body = file.and_then(|f| std::fs::read(dir.join(f)).ok());

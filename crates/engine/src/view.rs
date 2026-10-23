@@ -110,7 +110,7 @@ pub fn bounds(s: &Session) -> Aabb3 {
 
 /// [`bounds`], with the browser's Sketches folder shown (`sketches`) or hidden.
 pub fn visible_bounds(s: &Session, sketches: bool) -> Aabb3 {
-    bounds_by(s, sketches, |body| body.mesh().bounds())
+    bounds_by(s, sketches, |body| body.mesh_bounds())
 }
 
 /// [`visible_bounds`] without meshing anything: a body not meshed yet counts with its outline

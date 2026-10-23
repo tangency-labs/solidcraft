@@ -299,6 +299,25 @@ fn trimmed_surfaces_sew_into_a_solid() {
     assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "{} {}", m.volume, m.area);
 }
 
+/// One part whose surfaces make two separate boxes: two solids, not one shell of two lumps
+/// (closed edge by edge, but not connected, so it was read as an open body).
+#[test]
+fn separate_lumps_of_one_part_are_separate_solids() {
+    let mut ents = Vec::new();
+    let mut faces = trimmed_box(&mut ents, 0.0);
+    faces.extend(trimmed_box(&mut ents, 100.0));
+    let members = faces.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",");
+    ents.push((308, 0, format!("0,5HFrame,{},{members}", faces.len())));
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 2);
+    for (body, x) in imp.bodies.iter().zip([0.0, 100.0]) {
+        let m = measure(&body.body).unwrap();
+        assert!(body.closed && rel(m.volume, 6000.0) < 1e-6, "{} {}", body.name, m.volume);
+        assert!(m.bbox.min.dist(Vec3::new(x, 0.0, 0.0)) < 1e-6, "{} at {:?}", body.name, m.bbox.min);
+    }
+}
+
 /// Trim pieces whose ends miss each other by a hundredth of a millimetre, far past the file's
 /// stated resolution: the loop is closed and the box sews into a solid. A gap of half a
 /// millimetre is no corner written loosely, and stays open.
@@ -532,4 +551,11 @@ fn a_curve_over_a_tiny_knot_span_still_bounds_its_faces() {
         let m = measure(&imp.bodies[0].body).unwrap();
         assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "span {span}: {} {}", m.volume, m.area);
     }
+}
+
+#[test]
+fn the_global_sections_native_system_becomes_the_originating_system() {
+    let imp = round_trip(&box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap());
+    assert_eq!(imp.system, "SolidCraft");
+    assert_eq!(imp.preprocessor, "SolidCraft IGES");
 }

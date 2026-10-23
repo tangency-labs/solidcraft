@@ -121,11 +121,6 @@ impl PreviewState {
         if self.rolled_back { &[] } else { &self.replaced }
     }
 
-    /// Whether the preview scene should be drawn.
-    pub fn draw_active(&self) -> bool {
-        self.active && !self.rolled_back
-    }
-
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
         if self.active || !self.replaced.is_empty() {
@@ -484,8 +479,13 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
                 }
             }
         } else {
+            // A cut or intersect from a component with no body of its own takes part in every
+            // body: the command decides that (#1234), and the preview asks it the same (#3085).
             found = params.get("faces").and_then(|_| params.get("face_body")).and_then(Value::as_str).map_or_else(
-                || before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component),
+                || {
+                    before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component)
+                        || (matches!(op, "cut" | "intersect") && s.cut_takes_every_body(before))
+                },
                 |name| s.world_state().body(name).is_some(),
             );
         }
@@ -1190,6 +1190,27 @@ mod tests {
         let whole = compute(&s, &cmds, colors()).unwrap();
         assert!(whole.error.as_deref().is_some_and(|e| e.contains("no body to cut")), "{:?}", whole.error);
         assert_eq!(whole.scene.xray.len(), tool.scene.xray.len());
+    }
+
+    /// #3085: a cut sketched in the root, where every body lives in a component, cuts every body
+    /// it meets (#1234). The preview said "there is no body to cut or intersect" all the same,
+    /// while the cut itself went through.
+    #[test]
+    fn a_cut_from_an_empty_root_is_not_refused_by_its_preview() {
+        let mut s = session_of(&[
+            ("component.create", json!({"name": "Part"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})),
+            ("component.activate", json!({"component": "root"})),
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [7, 7]})),
+            ("sketch.finish", json!({})),
+        ]);
+        let params = json!({"distance": 20, "operation": "cut"});
+        let cmds = vec![("solid.extrude".to_string(), params.clone())];
+        assert_eq!(extrusion_target_error(&s, &cmds, &s.model.state()), None);
+        s.execute("solid.extrude", &params).unwrap();
+        let volume = s.model.state().body("Block").map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0);
+        assert!((volume - (1000.0 - 160.0)).abs() < 1e-6, "{volume}");
     }
 
     /// While an arrow is dragged the inputs change faster than a tool is built: a tool built

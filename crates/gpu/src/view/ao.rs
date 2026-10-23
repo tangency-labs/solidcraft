@@ -6,7 +6,7 @@
 //! bits for portable integer texel reads. GLSL cannot load from a depth texture, and float
 //! colour attachments are not available on every GL adapter.
 
-use super::{Batches, color_layout, depth_compare, far_depth, planned_layout, tri_layout};
+use super::{Batches, TriSource, color_layout, depth_compare, far_depth, instance_layout, planned_layout, shared_layout, tri_layout};
 
 pub(super) struct Resources {
     pub layout: wgpu::BindGroupLayout,
@@ -16,6 +16,8 @@ pub(super) struct Resources {
     size: [u32; 2],
     pipeline: wgpu::RenderPipeline,
     planned_pipeline: wgpu::RenderPipeline,
+    instanced_pipeline: wgpu::RenderPipeline,
+    instanced_flat_pipeline: wgpu::RenderPipeline,
 }
 
 fn texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]) -> (wgpu::TextureView, wgpu::TextureView, wgpu::BindGroup) {
@@ -64,14 +66,19 @@ impl Resources {
         });
         let built = [Some(tri_layout())];
         let evaluated = [Some(planned_layout()), Some(color_layout())];
-        let pipeline = |planned: bool| {
+        let placed = [Some(shared_layout()), Some(instance_layout())];
+        let pipeline = |source: TriSource| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("sc_ao_prepass"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module,
-                    entry_point: Some("vs_tri"),
-                    buffers: if planned { &evaluated } else { &built },
+                    entry_point: Some(source.entry()),
+                    buffers: match source {
+                        TriSource::Built => &built[..],
+                        TriSource::Planned => &evaluated[..],
+                        TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
+                    },
                     compilation_options: Default::default(),
                 },
                 primitive: wgpu::PrimitiveState::default(),
@@ -85,7 +92,7 @@ impl Resources {
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module,
-                    entry_point: Some("fs_ao_depth"),
+                    entry_point: Some(&source.fragment("fs_ao_depth")),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::R32Uint,
                         blend: None,
@@ -97,10 +104,12 @@ impl Resources {
                 cache: None,
             })
         };
-        let planned_pipeline = pipeline(true);
-        let pipeline = pipeline(false);
+        let planned_pipeline = pipeline(TriSource::Planned);
+        let instanced_pipeline = pipeline(TriSource::Instanced);
+        let instanced_flat_pipeline = pipeline(TriSource::InstancedFlat);
+        let pipeline = pipeline(TriSource::Built);
         let (depth, values, bind) = texture(device, &layout, [1, 1]);
-        Self { layout, bind, depth, values, size: [1, 1], pipeline, planned_pipeline }
+        Self { layout, bind, depth, values, size: [1, 1], pipeline, planned_pipeline, instanced_pipeline, instanced_flat_pipeline }
     }
 
     pub fn prepare(
@@ -158,6 +167,11 @@ impl Resources {
                 pass.set_vertex_buffer(1, draw.colors.slice(..));
                 pass.set_index_buffer(draw.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
+            }
+            // The depth prepass is left out of the performance overlay's counts, as before.
+            let uncounted = super::Tally::default();
+            for draw in batch.instanced.iter().filter(|d| d.look == super::InstanceLook::Opaque) {
+                draw.draw(&mut pass, &self.instanced_pipeline, &self.instanced_flat_pipeline, &uncounted);
             }
         }
     }

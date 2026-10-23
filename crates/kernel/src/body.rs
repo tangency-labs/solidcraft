@@ -1094,10 +1094,10 @@ impl Body {
     }
 
     /// Characteristic size (bounding box diagonal) for tolerances. [`Body::new`] measured it
-    /// while it read the vertices anyway, so the answer is cached; a body built by hand carries
-    /// 0 and is walked here once, and mesh bodies always measure their triangles.
+    /// while it read the vertices anyway, and a mesh body when it was made, so the answer is
+    /// cached; a body built by hand carries 0 and is walked here.
     pub fn size(&self) -> f64 {
-        if self.mesh.is_none() && self.size > 0.0 {
+        if self.size > 0.0 {
             return self.size;
         }
         let mut b = solidcraft_geom::Aabb3::EMPTY;

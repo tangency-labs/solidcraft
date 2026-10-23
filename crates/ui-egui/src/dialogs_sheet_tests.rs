@@ -206,7 +206,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
                 ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))), ..Default::default() }, |ui| {
                     crate::ui_kit::Panel::new("FLAT PATTERN", id, pos2(1400.0, 294.0), viewport, crate::frame::Side::Right, egui::Frame::NONE)
                         .width(360.0)
-                        .window()
+                        .window(&ctx)
                         .show(ui.ctx(), |ui| {
                             ui.label("Flat size: 50 × 10 × 2.5 mm");
                         });

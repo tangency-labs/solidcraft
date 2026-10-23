@@ -483,6 +483,30 @@ fn two_tangent_circle_from_a_click_on_a_curve_leaves_the_curves_as_drawn() {
     }
 }
 
+/// #3099: a centre circle drawn through a point stays on it. Centred on a line's midpoint and
+/// through its end, the circle's radius follows the line when the line is dimensioned.
+#[test]
+fn centre_circle_through_a_point_keeps_it_on_the_circle() {
+    let mut s = new_sketch();
+    let l = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 30], [40, 30]]}))["curves"])[0].clone();
+    let r = run(&mut s, "sketch.circle.center", json!({"center": format!("mid:{l}"), "radius": 20, "through": format!("{l}.end")}));
+    let c = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let (li, ci) = (sk.curve_index(&l).unwrap(), sk.curve_index(&c).unwrap());
+    let end = sk.resolve_point(&format!("{l}.end")).unwrap();
+    assert!(sk.constraints.iter().any(|k| k.kind == ConstraintKind::PointOnCurve { p: end, c: ci }), "{:?}", sk.constraints);
+    run(&mut s, "sketch.dimension", json!({"entities": [l], "value": 60}));
+    let sk = sketch(&s);
+    let line = sk.shape(li).unwrap();
+    let solidcraft_sketch::Shape::Line { a, b } = line else { panic!("{line:?}") };
+    assert!(close(a.dist(b), 60.0));
+    assert!(close(sk.radius(ci).unwrap(), 30.0), "the circle followed the line's end: {:?}", sk.radius(ci));
+    // Through a plain position: nothing to keep it on.
+    let r = run(&mut s, "sketch.circle.center", json!({"center": [100, 0], "radius": 5, "through": [105, 0]}));
+    let ci = sketch(&s).curve_index(&ids(&r["curves"])[0]).unwrap();
+    assert!(!sketch(&s).constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { c, .. } if c == ci)));
+}
+
 #[test]
 fn ellipse_splines_conic() {
     let pi = std::f64::consts::PI;
@@ -1789,4 +1813,61 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
     let lone = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [8,0]], "connect": false}))["curves"])[0].clone();
     let piece = super::trim_piece(&sketch(&s), &lone, Vec2::new(3.0, 0.0)).unwrap();
     assert!(near(piece[0], [0.0, 0.0]) && near(piece[piece.len() - 1], [8.0, 0.0]), "{piece:?}");
+}
+
+/// An offset's ends follow its source curves, so trimming a piece off it or extending it is
+/// refused (the trim used to report success and leave the curve whole). Trimming away a whole
+/// offset curve still works, and once the association is broken the trim cuts it.
+#[test]
+fn trim_and_extend_refuse_an_offsets_ends_until_its_association_is_broken() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
+    assert_eq!(out, ["l5", "l6", "l7", "l8"]);
+    run(&mut s, "sketch.line", json!({"points": [[20, -10], [20, 10]]}));
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let e = s.execute("sketch.trim", &json!({"curve": "l5", "at": [30, -2]})).unwrap_err().to_string();
+    assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
+    let e = s.execute("sketch.extend", &json!({"curve": "l5", "at": [42, -2]})).unwrap_err().to_string();
+    assert!(e.contains("offset"), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused trim changes nothing");
+
+    run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));
+    run(&mut s, "sketch.trim", json!({"curve": "l5", "at": [30, -2]}));
+    let sk = sketch(&s);
+    let sh = sk.shape(sk.curve_index("l5").unwrap()).unwrap();
+    assert!(
+        matches!(sh, solidcraft_sketch::Shape::Line { a, b } if a.dist(Vec2::new(-2.0, -2.0)) < 1e-9 && b.dist(Vec2::new(20.0, -2.0)) < 1e-9),
+        "{sh:?}"
+    );
+}
+
+/// #2874: an offset's corners follow its source curves, so filleting them is refused before
+/// anything changes (the whole batch), instead of leaving full circles and an unsolved sketch.
+/// Once the offset association is broken the same corners round normally.
+#[test]
+fn fillet_refuses_an_offsets_corners_until_its_association_is_broken() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
+    assert_eq!(out, ["l5", "l6", "l7", "l8"]);
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let corners = json!({"points": ["l5.start", "l5.end", "l6.end", "l7.end"], "radius": "2 mm"});
+    let e = s.execute("sketch.fillet", &corners).unwrap_err().to_string();
+    assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused fillet changes nothing");
+    let e = s.execute("sketch.chamfer.equal_distance", &json!({"point": "l6.end", "distance": 1})).unwrap_err().to_string();
+    assert!(e.contains("offset"), "{e}");
+
+    run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));
+    let f = run(&mut s, "sketch.fillet", corners);
+    assert_eq!(f["sketch"]["solved"], json!(true), "{f}");
+    let sk = sketch(&s);
+    let arcs = ids(&f["curves"]);
+    assert_eq!(arcs.len(), 4);
+    for arc in &arcs {
+        let ai = sk.curve_index(arc).unwrap();
+        assert!(matches!(sk.curves[ai].kind, CurveKind::Arc { .. }), "{arc} is a trimmed arc");
+        assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
+    }
 }

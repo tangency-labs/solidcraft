@@ -36,8 +36,8 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64) -> Result<(), Strin
     if crate::viewport::section_plane(app).is_some() {
         return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
     }
-    if app.session.model.state().bodies.is_empty() {
-        return Err(app.tr_label("No visible bodies to export.").into());
+    if !solidcraft_engine::cmd::view_dxf_exportable(&app.session) {
+        return Err(app.tr_label("No visible bodies or sketches to export.").into());
     }
     if !tolerance.is_finite() || !(0.0001..=1.0).contains(&tolerance) {
         return Err(app.tr_label("dxf.invalid_tolerance").into());

@@ -1434,6 +1434,17 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
     let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
     assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
+    // Their size (the diagonal of the box around them) is measured once, when made: a large
+    // scan's size is asked for every frame.
+    for body in [&b, &moved, &mirrored] {
+        assert!(body.size > 0.0, "measured when made");
+        let walked = body.mesh.as_ref().unwrap().positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut a, p| {
+            a.add(*p);
+            a
+        });
+        assert!((body.size() - walked.diagonal()).abs() < 1e-9, "{} vs {}", body.size(), walked.diagonal());
+    }
+    assert!((b.size() - 300.0f64.sqrt()).abs() < 1e-9);
     let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
     assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));
     assert!(boolean(&solid, &b, BoolOp::Union).is_err());

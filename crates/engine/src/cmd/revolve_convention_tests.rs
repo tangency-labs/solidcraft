@@ -307,3 +307,56 @@ fn curved_targets_keep_only_the_material_before_the_post_for_both_axis_signs() {
         }
     }
 }
+
+/// The construction-axis points of a feature's JSON moved along x by `dx`.
+fn shift_points(v: &mut Value, dx: f64) {
+    match v {
+        Value::Array(a) if a.len() == 3 && a.iter().all(Value::is_number) => a[0] = json!(a[0].as_f64().unwrap() + dx),
+        Value::Array(a) => a.iter_mut().for_each(|x| shift_points(x, dx)),
+        Value::Object(o) => o.values_mut().for_each(|x| shift_points(x, dx)),
+        _ => {}
+    }
+}
+
+/// A construction axis picked as the revolve axis (#2885, #4506) is saved by name, survives
+/// saving and opening, and the revolve follows the axis when it is edited.
+#[test]
+fn construction_axis_revolve_follows_the_axis() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,30,0]},"name":"Axis1"}));
+    profile(&mut s, false);
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"Axis1","angle":"180 deg","operation":"new","profiles":[0],"name":"Turn"}));
+    let turn = s.doc.find_feature("Turn").unwrap();
+    assert!(matches!(&turn.kind, FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Construction { name }, .. } if name == "Axis1"));
+    let reopened = Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.find_feature("Turn").unwrap().kind, turn.kind);
+    let volume = |s: &Session| solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap().volume;
+    assert!((volume(&s) - 60.0 * PI).abs() < 0.05);
+    assert!((volume(&Session::new(reopened)) - 60.0 * PI).abs() < 0.05);
+    // Moving the axis 1 mm away from the profile widens the ring: radii 3 to 5 instead of 2 to 4.
+    let mut axis = serde_json::to_value(s.doc.find_feature("Axis1").unwrap()).unwrap();
+    let def = if axis.get("def").is_some() { axis.get_mut("def") } else { axis.pointer_mut("/kind/def") }.unwrap();
+    shift_points(def, -1.0);
+    let set = if axis.get("def").is_some() { json!({"def": axis["def"]}) } else { json!({"kind": {"def": axis["kind"]["def"]}}) };
+    run(&mut s, "timeline.edit", json!({"feature":"Axis1","set":set}));
+    assert!((volume(&s) - 80.0 * PI).abs() < 0.05, "{}", volume(&s));
+}
+
+#[test]
+fn construction_axis_revolve_rejects_invalid_axes_atomically() {
+    for (a, b, message) in [
+        ([0, 0, 0], [0, 0, 30], "does not lie in the sketch plane"),
+        ([0, 0, 1], [0, 30, 1], "does not lie in the sketch plane"),
+        ([3, 0, 0], [3, 30, 0], "profile crosses the revolve axis"),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "construct.axis.two_points", json!({"a":{"point":a},"b":{"point":b},"name":"Axis1"}));
+        profile(&mut s, false);
+        let before = s.doc.to_json();
+        let error =
+            s.execute("solid.revolve", &json!({"sketch":"Profile","axis":"Axis1","angle":"180 deg","operation":"new"})).unwrap_err().to_string();
+        assert!(error.contains(message), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.model.state().bodies.is_empty());
+    }
+}

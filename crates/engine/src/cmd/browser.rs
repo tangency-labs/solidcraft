@@ -89,7 +89,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let component = component_of(s, p, cmd)?;
     let items = keys(p, "items", cmd)?;
     let d = s.doc_mut();
-    let id = super::next_free_id(cmd, d.browser_groups.iter().map(|g| g.id))?;
+    let id = d.allocate_id()?;
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) if n.len() <= 128 => n.to_string(),
         Some(_) => return Err(bad(cmd, "`name` is too long")),
@@ -1097,12 +1097,26 @@ mod tests {
     }
 
     #[test]
-    fn the_next_free_id_is_one_past_the_largest_and_never_wraps() {
-        use super::super::next_free_id;
-        assert_eq!(next_free_id("t", std::iter::empty()).unwrap(), 1);
-        assert_eq!(next_free_id("t", [3, 9, 4].into_iter()).unwrap(), 10);
-        assert_eq!(next_free_id("t", [u64::MAX - 1].into_iter()).unwrap(), u64::MAX);
-        assert!(next_free_id("t", [1, u64::MAX].into_iter()).is_err());
+    fn exhausted_shared_ids_refuse_a_group_without_changing_the_design() {
+        let mut s = Session::default();
+        s.doc_mut().next_id = u64::MAX;
+        let before = s.doc.to_json();
+        let result = s.execute("browser.group", &json!({"folder": "bodies"}));
+        assert!(result.is_err() && !matches!(result, Err(crate::EngineError::Internal(..))), "{result:?}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+
+    #[test]
+    fn deleted_group_ids_are_not_reused_after_reopening() {
+        let mut s = Session::default();
+        let params = json!({"folder": "bodies"});
+        let first = run(&mut s, "browser.group", params.clone())["group"].as_u64().unwrap();
+        run(&mut s, "browser.ungroup", json!({"group": first}));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        let second = run(&mut s, "browser.group", params)["group"].as_u64().unwrap();
+        assert!(second > first, "deleted group {first} was reused as {second}");
+        assert!(s.execute("browser.rename_group", &json!({"group": first, "name": "Stale reference"})).is_err());
     }
 
     #[test]

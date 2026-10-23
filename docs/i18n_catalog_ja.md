@@ -56,7 +56,9 @@
 | Angle decimals | 角度の小数点以下の桁数 | `ui.angle_decimals` |
 | angle, height | 角度, 高さ | `angle, height` |
 | Animate | アニメーション | `Animate` |
+| Animate view changes | 視点変更をアニメーション表示 | `ui.animate_view_changes` |
 | Animation | アニメーション | `ui.animation` |
+| Animation speed | アニメーション速度 | `ui.animation_speed` |
 | Anti-aliasing | アンチエイリアス | `ui.anti_aliasing` |
 | Anti-aliasing applies the next time SolidCraft starts | アンチエイリアスは次回 SolidCraft を起動したときに適用されます | `settings.msaa_applies_on_restart` |
 | Appearance | 外観 | `cmd.appearance_assign` |
@@ -84,6 +86,7 @@
 | Axis Through Edge | エッジを通る軸 | `cmd.construct_axis_edge` |
 | Axis Through Two Planes | 2平面を通る軸 | `cmd.construct_axis_two_planes` |
 | Axis Through Two Points | 2点を通る軸 | `cmd.construct_axis_two_points` |
+| Axis view, Look At, Home and Fit | 軸ビュー、正面視、ホーム、全体表示 | `ui.look_at_anim_desc` |
 | Base point | 基点 | `ui.base_point` |
 | Bend Line Position | 曲げ線位置 | `Bend Line Position` |
 | Bend Position | 曲げ位置 | `Bend Position` |

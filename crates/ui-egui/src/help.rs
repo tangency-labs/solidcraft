@@ -5,6 +5,7 @@
 
 use crate::SolveApp;
 use crate::ui_kit;
+use crate::ui_kit::{Container, Surface};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("SOLIDCRAFT_COMMIT");
@@ -62,8 +63,12 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
         let mut pick: Option<&str> = None;
-        let resp =
-            crate::frame::area(egui::Id::new("sc_help_menu")).fixed_pos(anchor).constrain(true).order(egui::Order::Foreground).show(ctx, |ui| {
+        let resp = Container::new(ctx, Surface::Popup)
+            .area(egui::Id::new("sc_help_menu"))
+            .fixed_pos(anchor)
+            .constrain(true)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
                 crate::context_menu::menu_frame(ui, |ui| {
                     for (id, label, icon) in [
                         ("docs", "Documentation", "library"),

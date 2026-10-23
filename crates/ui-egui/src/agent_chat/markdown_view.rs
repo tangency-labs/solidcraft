@@ -101,7 +101,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                             .selectable(true)
                             .wrap(),
                     );
-                    if ui.small_button(tr("ui.agent_chat_copy")).clicked() {
+                    if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
                         ui.ctx().copy_text(text.clone());
                     }
                 });

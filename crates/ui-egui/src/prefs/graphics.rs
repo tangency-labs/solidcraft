@@ -1,0 +1,161 @@
+//! Graphics preferences use the shared settings form and illustrative option cards.
+use super::*;
+
+pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = crate::theme::Tokens::get();
+    ui_kit::settings_heading(ui, app.tr("prefs.graphics"), app.tr("prefs.graphics_note"));
+    ui.horizontal_wrapped(|ui| {
+        let response =
+            ui.allocate_ui_with_layout(egui::vec2(t.form_card_width + t.space_24 * 2.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                let presets = ["performance", "quality", "custom"];
+                let mut selected = presets.iter().position(|preset| *preset == graphics_preset(&app.preferences)).unwrap_or(2);
+                let labels = [app.tr("ui.graphics_performance"), app.tr("ui.graphics_quality"), app.tr("ui.graphics_custom")];
+                let changed = ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments::default());
+                if changed && let Some(preset) = presets.get(selected).filter(|preset| **preset != "custom") {
+                    let _ = app.run("view.graphics_preset", json!({"preset":preset}));
+                }
+            });
+        let rect = response.response.rect;
+        crate::scenario::publish_handle("view:graphics_preset", rect.center());
+        for (index, preset) in ["performance", "quality", "custom"].into_iter().enumerate() {
+            crate::scenario::publish_handle(
+                &format!("view:graphics_preset:{preset}"),
+                egui::pos2(rect.left() + rect.width() * (index as f32 + 0.5) / 3.0, rect.center().y),
+            );
+        }
+        response.response.on_hover_text(app.tr("ui.graphics_preset_help"));
+    });
+    ui_kit::text(ui, app.tr("prefs.graphics_presets_note"), ui_kit::Text::Hint("preset"));
+    ui_kit::settings_section(ui, "quality", app.tr("prefs.curved_surfaces"), |ui| {
+        use solidcraft_engine::doc::display_quality::DisplayQuality;
+        ui_kit::text(ui, app.tr("ui.display_quality"), ui_kit::Text::Heading("display_quality"));
+        let current = DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default();
+        ui.horizontal_wrapped(|ui| {
+            for ((q, facets), note) in DisplayQuality::ALL.into_iter().zip([5, 8, 14, 64]).zip([
+                "prefs.quality_fastest",
+                "prefs.quality_default",
+                "prefs.quality_smoother",
+                "prefs.quality_slowest",
+            ]) {
+                if ui_kit::option_card(
+                    ui,
+                    crate::i18n::tr(&format!("ui.display_quality_{}", q.id())),
+                    Some(app.tr(note)),
+                    current == q,
+                    true,
+                    ui_kit::PreferenceFigure::Quality(facets),
+                )
+                .clicked()
+                {
+                    app.preferences.display_quality = q.id().into();
+                }
+            }
+        });
+        ui_kit::text(ui, app.tr("settings.display_quality_note"), ui_kit::Text::Hint("quality"));
+    });
+    ui_kit::settings_section(ui, "edges", app.tr("prefs.edges"), |ui| {
+        ui.horizontal(|ui| {
+            ui_kit::text(ui, app.tr("ui.anti_aliasing"), ui_kit::Text::Heading("antialiasing"));
+            ui_kit::settings_badge(ui, app.tr("prefs.applies_on_restart"), true);
+        });
+        ui.horizontal_wrapped(|ui| {
+            for m in MSAA {
+                let enabled = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+                let label = if m == 1 { app.tr("ui.colour_vision_off").to_owned() } else { format!("{m}×") };
+                let response = ui_kit::option_card(
+                    ui,
+                    &label,
+                    if enabled { None } else { Some(app.tr("prefs.not_on_gpu")) },
+                    app.preferences.msaa == m,
+                    enabled,
+                    ui_kit::PreferenceFigure::Antialiasing(m),
+                )
+                .on_hover_text(app.tr("settings.msaa_applies_on_restart"));
+                crate::scenario::publish_target(&format!("prefs:msaa:{m}"), response.rect);
+                if enabled && response.clicked() {
+                    app.preferences.msaa = m;
+                }
+            }
+        });
+        ui_kit::text(ui, app.tr("prefs.anti_aliasing_note"), ui_kit::Text::Hint("msaa"));
+        ui.add_space(t.space_6);
+        ui_kit::text(ui, app.tr("ui.supersampling"), ui_kit::Text::Heading("supersampling"));
+        ui.horizontal_wrapped(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(t.form_card_width - t.space_24, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                let mut selected = SUPERSAMPLING.iter().position(|f| *f == app.preferences.supersampling).unwrap_or(0);
+                if ui_kit::segmented(ui, &mut selected, &[app.tr("ui.colour_vision_off"), "1.5×", "2×"], ui_kit::Segments::default())
+                    && let Some(factor) = SUPERSAMPLING.get(selected)
+                {
+                    app.preferences.supersampling = *factor;
+                }
+            });
+            ui.add_enabled_ui(app.preferences.supersampling > 1.0, |ui| {
+                setting::supersampling_adaptive(app, ui);
+            });
+        });
+        ui_kit::text(ui, app.tr("prefs.supersampling_brief"), ui_kit::Text::Hint("supersampling"))
+            .on_hover_text(app.tr("settings.supersampling_note"));
+        ui.add_space(t.space_6);
+        ui_kit::text(ui, app.tr_label("Ambient occlusion"), ui_kit::Text::Heading("contact_shading"));
+        ui.horizontal_wrapped(|ui| {
+            for (on, label) in [(false, "ui.colour_vision_off"), (true, "prefs.contact_shading")] {
+                let response = ui_kit::option_card(
+                    ui,
+                    app.tr(label),
+                    None,
+                    app.preferences.ambient_occlusion == on,
+                    true,
+                    ui_kit::PreferenceFigure::ContactShading(on),
+                );
+                if on != app.preferences.ambient_occlusion {
+                    crate::scenario::publish_handle("view:ambient_occlusion", response.rect.center());
+                }
+                if response.clicked() {
+                    let _ = app.run("view.ambient_occlusion", json!({"enabled":on}));
+                }
+            }
+        });
+        ui_kit::text(ui, app.tr("prefs.contact_shading_note"), ui_kit::Text::Hint("ao"));
+    });
+    ui_kit::settings_section(ui, "viewport", app.tr("prefs.viewport"), |ui| {
+        ui.columns(2, |columns| {
+            if let Some(left) = columns.get_mut(0) {
+                ui_kit::checkbox(left, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
+                ui_kit::checkbox(left, crate::i18n::tr_label("Perspective view"), &mut app.ui.perspective);
+                setting::show_frame_rate(app, left).on_hover_text(app.tr("settings.frame_rate_note"));
+                left.add_enabled_ui(app.preferences.show_frame_rate, |ui| {
+                    ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
+                        .on_hover_text(app.tr("settings.frame_rate_details_note"));
+                });
+            }
+            if let Some(right) = columns.get_mut(1) {
+                ui_kit::checkbox(right, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
+                right.add_enabled_ui(app.ui.show_grid, |ui| {
+                    setting::grid_follows_view(app, ui);
+                });
+                let response = setting::measure_axis_distances(app, right);
+                crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
+                response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
+            }
+        });
+        ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+            ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
+                let mut selected = usize::from(app.ui.visual_style.min(3));
+                ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
+                app.ui.visual_style = selected as u8;
+            });
+        });
+    });
+    ui.horizontal(|ui| {
+        ui_kit::text(ui, app.tr_label("Renderer"), ui_kit::Text::Inline);
+        let renderer = match (&app.viewport.gpu, &app.help.gpu) {
+            (Some(_), Some(g)) => {
+                ui_kit::settings_badge(ui, "GPU", false);
+                g.to_owned()
+            }
+            (Some(_), None) => "GPU".into(),
+            _ => crate::i18n::tr("prefs.cpu").into(),
+        };
+        ui_kit::text(ui, &renderer, ui_kit::Text::Inline);
+    });
+}

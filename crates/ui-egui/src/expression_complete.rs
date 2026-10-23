@@ -17,6 +17,8 @@ struct Popup {
     accept: bool,
     dismissed: bool,
     explicit: bool,
+    /// Where each suggestion was drawn, for a press on one (see [`complete`]).
+    rows: Vec<egui::Rect>,
 }
 
 fn popup_id() -> egui::Id {
@@ -95,7 +97,21 @@ pub(crate) fn begin_frame(ctx: &egui::Context) {
 
 pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
     let ctx = ui.ctx().clone();
-    if !ctx.memory(|m| m.has_focus(resp.id)) {
+    // A press on a suggestion takes the focus from the editor before the list can see it
+    // clicked, and the editor then gives up what was typed (#3257). The press picks the
+    // suggestion under it, and the editor gets its focus back below.
+    let pressed_row = ctx
+        .input(|i| i.pointer.primary_pressed().then(|| i.pointer.interact_pos()).flatten())
+        .and_then(|at| ctx.data(|d| d.get_temp::<Popup>(popup_id())).filter(|p| p.editor == resp.id)?.rows.iter().position(|r| r.contains(at)));
+    // Its release is a click away from the editor, which gives up the focus again: take it back,
+    // and don't let the list take that release as a click on another row.
+    let picked_by_press = resp.id.with("completion_picked_by_press");
+    let released_after_press = ctx.data(|d| d.get_temp::<bool>(picked_by_press)).is_some() && ctx.input(|i| i.pointer.any_released());
+    if released_after_press {
+        ctx.data_mut(|d| d.remove::<bool>(picked_by_press));
+        resp.request_focus();
+    }
+    if !ctx.memory(|m| m.has_focus(resp.id)) && pressed_row.is_none() {
         return false;
     }
     let state = egui::TextEdit::load_state(&ctx, resp.id);
@@ -112,6 +128,7 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         accept: false,
         dismissed: false,
         explicit: false,
+        rows: Vec::new(),
     });
     let list = suggestions_for(&ctx, &popup.word, popup.explicit);
     popup.frame = ctx.cumulative_frame_nr();
@@ -121,7 +138,11 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         ctx.data_mut(|d| d.insert_temp(popup_id(), popup));
         return false;
     }
-    let mut pick = if popup.accept { list.get(popup.selected).map(|s| s.text.clone()) } else { None };
+    let mut pick = match pressed_row {
+        Some(row) => list.get(row).map(|s| s.text.clone()),
+        None if popup.accept => list.get(popup.selected).map(|s| s.text.clone()),
+        None => None,
+    };
     popup.accept = false;
     let t = Tokens::get();
     let options: Vec<_> = list
@@ -143,16 +164,20 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
             },
         })
         .collect();
+    let list_id = resp.id.with("completions");
     if let Some(index) = ui_kit::popup_list(
         &ctx,
-        resp.id.with("completions"),
+        list_id,
         resp.rect,
         popup.selected,
         &options,
         crate::i18n::tr_label("↑ ↓ choose · Enter / Tab complete · Esc dismiss"),
-    ) {
+    ) && pick.is_none()
+        && !released_after_press
+    {
         pick = list.get(index).map(|suggestion| suggestion.text.clone());
     }
+    popup.rows = ctx.data(|d| d.get_temp::<Vec<egui::Rect>>(list_id.with("rows"))).unwrap_or_default();
     ctx.data_mut(|d| d.insert_temp(popup_id(), popup));
     let Some(pick) = pick else { return false };
     let chars: Vec<char> = text.chars().collect();
@@ -163,6 +188,9 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(start + pick.chars().count()))));
     state.store(&ctx, resp.id);
     resp.request_focus();
+    if pressed_row.is_some() {
+        ctx.data_mut(|d| d.insert_temp(picked_by_press, true));
+    }
     // Do not leave the accepted popup owning Enter on the next frame.
     ctx.data_mut(|d| d.remove::<Popup>(popup_id()));
     true
@@ -206,7 +234,7 @@ mod tests {
         fn frame(&mut self, events: Vec<egui::Event>) {
             self.accepted = false;
             self.leaked.clear();
-            let _ = self.ctx.run_ui(
+            let mut output = self.ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0))),
                     events,
@@ -229,6 +257,8 @@ mod tests {
                     });
                 },
             );
+            // Nothing paints these frames: drop their texture updates on purpose.
+            output.textures_delta.clear();
         }
 
         fn key(&mut self, key: Key) {
@@ -264,6 +294,26 @@ mod tests {
         assert!(e.leaked.is_empty());
         assert_eq!(e.cursor(), e.text.chars().count());
         assert!(e.ctx.memory(|m| m.has_focus(e.id)));
+    }
+
+    /// #3257: a click on a suggestion inserts it, though the press takes the focus from the
+    /// editor first; the editor keeps its focus and its caret goes after the inserted name.
+    #[test]
+    fn clicking_a_suggestion_inserts_it() {
+        let mut e = Editor::new("2 * wi");
+        let list = suggestions(&e.ctx, "wi");
+        let rows = e.ctx.data(|d| d.get_temp::<Popup>(popup_id())).unwrap().rows;
+        assert_eq!(rows.len(), list.len());
+        let at = rows[1].center();
+        let button =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        e.frame(vec![egui::Event::PointerMoved(at)]);
+        e.frame(vec![button(true)]);
+        assert!(e.accepted, "the press picked the suggestion under it");
+        e.frame(vec![button(false)]);
+        assert_eq!(e.text, format!("2 * {}", list[1].text));
+        assert!(e.ctx.memory(|m| m.has_focus(e.id)), "the editor keeps the focus");
+        assert_eq!(e.cursor(), e.text.chars().count());
     }
 
     #[test]

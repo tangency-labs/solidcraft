@@ -8,6 +8,7 @@
 //! error that names the policy.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
@@ -42,6 +43,9 @@ pub struct Capturer {
     depth: wgpu::TextureFormat,
     max_side: u32,
     state: Mutex<State>,
+    /// The device was lost (#4172): set by the device's lost callback, which whoever made the
+    /// device registered ([`Capturer::watching`]).
+    lost: Arc<AtomicBool>,
 }
 
 struct State {
@@ -85,7 +89,31 @@ impl Capturer {
             state: Mutex::new(State { renderer, background, key: 0, access_version: 0 }),
             device,
             queue,
+            lost: Arc::default(),
         })
+    }
+
+    /// Stop drawing once `lost` is set: the flag the device's lost callback sets (the app's
+    /// window device has one, `egui_wgpu::DeviceLost`). A lost device can't draw again; its
+    /// pictures fail with [`GpuError::DeviceLost`] without touching it (#4172).
+    pub fn watching(mut self, lost: Arc<AtomicBool>) -> Self {
+        self.lost = lost;
+        self
+    }
+
+    /// The device was lost: pictures fail with [`GpuError::DeviceLost`].
+    pub fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::Acquire)
+    }
+
+    /// [`Capturer::is_lost`], asking the driver first: an empty submission meets a loss the
+    /// driver reports and marks it, where the picture's first upload would panic inside wgpu.
+    fn probe_lost(&self) -> bool {
+        if self.is_lost() {
+            return true;
+        }
+        self.queue.submit([]);
+        self.is_lost()
     }
 
     /// A device of its own, without a window (native only): the adapter the `SOLIDCRAFT_GPU`
@@ -95,7 +123,8 @@ impl Capturer {
         let (adapter, device, queue) = crate::open_headless()?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
-        Self::new(&adapter, device, queue)
+        let lost = watch_lost(&device);
+        Ok(Self::new(&adapter, device, queue)?.watching(lost))
     }
 
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
@@ -103,7 +132,8 @@ impl Capturer {
     pub fn headless_with_depth(depth: wgpu::TextureFormat) -> Result<Self> {
         let (adapter, device, queue) = crate::open_headless()?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
-        Self::with_depth(&adapter, device, queue, depth)
+        let lost = watch_lost(&device);
+        Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
     }
 
     /// As [`Capturer::headless`], without multisampling: one sample per pixel, as the viewport
@@ -113,7 +143,8 @@ impl Capturer {
         let (adapter, device, queue) = crate::open_headless()?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let depth = crate::depth_format(&device, true);
-        Self::with_samples(&adapter, device, queue, depth, 1)
+        let lost = watch_lost(&device);
+        Ok(Self::with_samples(&adapter, device, queue, depth, 1)?.watching(lost))
     }
 
     /// The depth format pictures are drawn with; float formats are drawn with reversed depth.
@@ -141,6 +172,9 @@ impl Capturer {
     pub fn rgba(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
+        }
+        if self.probe_lost() {
+            return Err(GpuError::DeviceLost);
         }
         let mut state = self.state.lock().map_err(|_| GpuError::Render("an earlier picture failed on this device".into()))?;
         let state = &mut *state;
@@ -228,6 +262,10 @@ impl Capturer {
             size,
         );
         let submission = queue.submit([encoder.finish()]);
+        // Waiting on a device the submission found lost would panic inside wgpu.
+        if self.is_lost() {
+            return Err(GpuError::DeviceLost);
+        }
         if let Some(e) = caught(scopes) {
             return Err(GpuError::Render(e));
         }
@@ -392,6 +430,19 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
         }
     }
     sc
+}
+
+/// A flag `device`'s lost callback sets (a device of this crate's own: a device has one lost
+/// callback, and the app's window device has egui-wgpu's).
+#[cfg(not(target_arch = "wasm32"))]
+fn watch_lost(device: &wgpu::Device) -> Arc<AtomicBool> {
+    let lost = Arc::new(AtomicBool::new(false));
+    let seen = lost.clone();
+    device.set_device_lost_callback(move |reason, message| {
+        log::error!("GPU: the device was lost ({reason:?}): {message}");
+        seen.store(true, Ordering::Release);
+    });
+    lost
 }
 
 /// Error scopes catching what a picture's GPU work may raise (popped by [`caught`]).

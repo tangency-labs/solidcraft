@@ -59,6 +59,18 @@ impl PlacedMesh {
 
     /// The definition's display plan mesh at quality `q`, moved here.
     pub(super) fn plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<Arc<Mesh>> {
+        let (source, _) = self.source_plan_mesh(q, name)?;
+        Some(Arc::new(self.moved(&source)))
+    }
+
+    /// The definition's reference mesh (shared by every placement of it) and this placement.
+    pub(super) fn source_mesh(&self) -> (Arc<Mesh>, crate::Mat) {
+        (reference_mesh(&self.body, &self.mesh, self.tolerance), self.transform)
+    }
+
+    /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
+    /// this placement.
+    pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
         let cell = self.plan_meshes.get(q.index())?;
         let source = cell
             .get_or_init(|| {
@@ -66,7 +78,7 @@ impl PlacedMesh {
                 self.body.display_mesh_of(&plan).ok().map(Arc::new)
             })
             .clone()?;
-        Some(Arc::new(self.moved(&source)))
+        Some((source, self.transform))
     }
 
     /// `source` (in the definition's place) moved by this placement.
@@ -148,6 +160,44 @@ mod tests {
         assert_eq!(work.tessellate_ms, 0.);
         assert_eq!(other.tri_face, local.tri_face);
         assert!(Arc::ptr_eq(&mesh, &nested.mesh()));
+    }
+
+    /// A placement hands out its definition's own meshes and its move without making the moved
+    /// copy: every placement of a part gives the same mesh, and that mesh moved is the
+    /// placement's own.
+    #[test]
+    fn placements_share_their_definitions_meshes_in_place() {
+        use crate::display_quality::DisplayQuality;
+        let source = ModelBody::new("Part".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap(), 1);
+        let placed: Vec<ModelBody> =
+            [crate::rigid(Vec3::new(10., 20., 30.), Vec3::ZERO, Vec3::Z, 0.7), crate::rigid(Vec3::new(-4., 5., 1.), Vec3::ZERO, Vec3::X, 1.1)]
+                .iter()
+                .map(|m| {
+                    let mut p = ModelBody::new("Copy".into(), kernel::transform_matrix(&source.body, *m).unwrap(), 1);
+                    p.mesh_placement = Some(Arc::new(PlacedMesh::new(&source, m).unwrap()));
+                    p
+                })
+                .collect();
+        let (own, identity) = source.mesh_in_place();
+        assert_eq!(identity, crate::IDENTITY);
+        let q = DisplayQuality::parse("normal").unwrap();
+        for p in &placed {
+            let (mesh, m) = p.mesh_in_place();
+            assert!(Arc::ptr_eq(&mesh, &own), "the definition's mesh, not a copy");
+            let bounds = p.mesh_bounds();
+            assert!(p.cached_mesh().is_none(), "no moved copy is made");
+            let (plan_mesh, pm) = p.plan_mesh_in_place_at(q).unwrap();
+            assert!(Arc::ptr_eq(&plan_mesh, &source.plan_mesh_at(q).unwrap()));
+            assert_eq!(pm, m);
+            let moved = p.mesh();
+            let exact = moved.bounds();
+            assert!(bounds.min.dist(exact.min) < 1e-9 && bounds.max.dist(exact.max) < 1e-9, "{bounds:?} vs {exact:?}");
+            for (a, b) in mesh.positions.iter().zip(&moved.positions) {
+                assert!(crate::apply_point(&m, *a).dist(*b) < 1e-9);
+            }
+            assert!(!Arc::ptr_eq(&p.display_identity(), &source.display_identity()), "each placement is its own body");
+            assert!(Arc::ptr_eq(&p.display_identity(), &p.clone().display_identity()), "clones are the same body");
+        }
     }
 
     /// Placed parts share their definition's display plan (#3044): the definition is planned

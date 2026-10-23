@@ -13,6 +13,7 @@ fn moved_block(h: &mut Harness) {
     h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
     let body = h.app.session.world_state().bodies[0].name.clone();
     h.app.run("solid.move", json!({"bodies": [body], "translate": [500, 0, 0]})).unwrap();
+    h.app.preferences.look_at_anim = false;
     h.settle();
 }
 

@@ -72,6 +72,13 @@ impl StandardView {
     }
 }
 
+/// Smooth ease-in-out on [0, 1] (smoothstep: at its fastest, mid-way, 1.5 times the average
+/// speed, so long turns stay gentle).
+pub fn ease_in_out(t: f64) -> f64 {
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 1.0 };
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// A unit quaternion (w, x, y, z).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quat {
@@ -144,6 +151,36 @@ impl Quat {
     }
 }
 
+/// A camera move in progress: from one camera to another over `duration` seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraAnim {
+    pub from: Camera,
+    pub to: Camera,
+    pub start: f64,
+    pub duration: f64,
+}
+
+impl CameraAnim {
+    /// The usual length of a view change, in seconds.
+    pub const DURATION: f64 = 0.5;
+    /// A view change: half a second, longer for turns past a quarter turn (so a big turn, such
+    /// as from the home view to the bottom, never sweeps more than about 9 degrees a frame).
+    pub fn new(from: Camera, to: Camera, now: f64) -> CameraAnim {
+        let dy = (to.yaw - from.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let turn = dy.abs().max((to.pitch - from.pitch).abs());
+        let k = if turn.is_finite() { (turn / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0) } else { 1.0 };
+        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k }
+    }
+    /// The camera at time `now`, and whether the move has finished.
+    pub fn sample(&self, now: f64) -> (Camera, bool) {
+        let t = if self.duration > 0.0 { (now - self.start) / self.duration } else { 1.0 };
+        if !(t < 1.0) {
+            return (self.to, true);
+        }
+        (Camera::interpolate(&self.from, &self.to, ease_in_out(t)), false)
+    }
+}
+
 /// Which world axis points up in the view (#3): Z (the default) or Y, as most STEP files from
 /// other systems are modelled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -185,7 +222,7 @@ pub struct Camera {
     pub target: Vec3,
     /// Rotation about Z; 0 = looking along +Y (from the front).
     pub yaw: f64,
-    /// Elevation above the XY plane, in (−π/2, π/2].
+    /// Elevation above the XY plane, in [−π/2, π/2]. Roll preserves orientation across poles.
     pub pitch: f64,
     /// Rotation about the viewing direction. Zero keeps the world's up axis vertical.
     #[serde(default)]
@@ -341,6 +378,34 @@ impl Camera {
             self.roll = (self.roll + radians) % std::f64::consts::TAU;
         }
     }
+    /// Rotate about the current screen right, up and back axes (radians), without a pole
+    /// limit. Reconstruct both heading and roll so crossing a pole keeps the image continuous.
+    pub fn rotate_in_view(&mut self, radians: Vec3) {
+        if !self.is_valid() || !radians.is_finite() {
+            return;
+        }
+        let angle = radians.x.hypot(radians.y).hypot(radians.z);
+        if !(angle > 1e-12) || !angle.is_finite() {
+            return;
+        }
+        let (right, up, back) = self.basis();
+        let Some(axis) = (right * (radians.x / angle) + up * (radians.y / angle) + back * (radians.z / angle)).normalized() else { return };
+        let (sin, cos) = angle.sin_cos();
+        let rotate = |v: Vec3| v * cos + axis.cross(v) * sin + axis * (axis.dot(v) * (1.0 - cos));
+        let rotated_right = rotate(right);
+        let Some(rotated_back) = rotate(back).normalized() else { return };
+        let framed = self.up.to_frame(rotated_back);
+        let yaw = if framed.x.hypot(framed.y) < 1e-10 { self.yaw } else { (-framed.x).atan2(-framed.y) };
+        let pitch = framed.z.clamp(-1.0, 1.0).asin();
+        let base_right = self.up.from_frame(Vec3::new(yaw.cos(), -yaw.sin(), 0.0));
+        let Some(base_up) = rotated_back.cross(base_right).normalized() else { return };
+        let roll = rotated_right.dot(base_up).atan2(rotated_right.dot(base_right));
+        if yaw.is_finite() && pitch.is_finite() && roll.is_finite() {
+            self.yaw = yaw;
+            self.pitch = pitch;
+            self.roll = roll;
+        }
+    }
     pub fn set_view(&mut self, v: StandardView) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let (y, p) = v.angles();
@@ -433,6 +498,47 @@ mod tests {
     }
 
     #[test]
+    fn screen_rotation_crosses_both_poles_and_returns_after_a_full_turn() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                let mut cam = Camera { yaw: 0.0, pitch: 0.0, up, ..Default::default() };
+                let initial = cam;
+                let step = std::f64::consts::TAU / 256.0;
+                for _ in 0..256 {
+                    let before = cam.basis();
+                    cam.rotate_in_view(axis * step);
+                    let after = cam.basis();
+                    assert!(cam.is_valid());
+                    // An X or Y turn moves the viewing direction every step, including at a pole.
+                    if axis != Vec3::Z {
+                        assert!((before.2.dot(after.2) - step.cos()).abs() < 1e-10);
+                    }
+                    assert!(before.0.dot(after.0) > 0.999 && before.1.dot(after.1) > 0.999);
+                    assert!(after.0.cross(after.1).dist(after.2) < 1e-10);
+                }
+                let (r, u, b) = initial.basis();
+                let (rr, uu, bb) = cam.basis();
+                assert!(r.dist(rr) < 1e-9 && u.dist(uu) < 1e-9 && b.dist(bb) < 1e-9, "{up:?} {axis:?}: {cam:?}");
+                assert_eq!((cam.target, cam.distance, cam.fov, cam.up), (initial.target, initial.distance, initial.fov, initial.up));
+            }
+        }
+    }
+
+    #[test]
+    fn screen_rotation_ignores_invalid_motion_and_reverses_combined_axes() {
+        let initial = Camera { roll: 1.2, ..Default::default() };
+        let mut cam = initial;
+        for motion in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(0.0, f64::INFINITY, 0.0), Vec3::new(f64::MAX, f64::MAX, 0.0)] {
+            cam.rotate_in_view(motion);
+            assert_eq!(cam, initial);
+        }
+        let motion = Vec3::new(0.3, -0.4, 0.2);
+        cam.rotate_in_view(motion);
+        cam.rotate_in_view(-motion);
+        assert!(cam.basis().0.dist(initial.basis().0) < 1e-12 && cam.back().dist(initial.back()) < 1e-12);
+    }
+
+    #[test]
     fn front_view_projects_target_to_centre() {
         let mut c = Camera { target: Vec3::new(1.0, 2.0, 3.0), distance: 50.0, ..Default::default() };
         c.set_view(StandardView::Front);
@@ -480,13 +586,29 @@ mod tests {
     }
 
     #[test]
-    fn orientation_round_trips_and_looks_from_a_corner() {
+    fn view_animation_interpolates() {
         let mut a = Camera { target: Vec3::new(1.0, 2.0, 3.0), distance: 80.0, ..Default::default() };
         a.set_view(StandardView::Iso);
+        let mut b = Camera { target: Vec3::new(-5.0, 0.0, 10.0), distance: 120.0, ..Default::default() };
+        b.set_view(StandardView::Top);
+        let anim = CameraAnim::new(a, b, 10.0);
+        // Endpoints are exact.
+        assert_eq!(anim.sample(10.0).0, a);
+        assert_eq!(anim.sample(10.0 + anim.duration), (b, true));
+        assert_eq!(anim.sample(99.0), (b, true));
+        // Midpoint: half way in heading, elevation, target and distance.
+        let (m, done) = anim.sample(10.0 + anim.duration / 2.0);
+        assert!(!done && m.is_valid());
+        let dy = (b.yaw - a.yaw + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((m.yaw - (a.yaw + dy / 2.0)).abs() < 1e-12 && (m.pitch - (a.pitch + b.pitch) / 2.0).abs() < 1e-12);
+        assert!(m.target.dist(Vec3::new(-2.0, 1.0, 6.5)) < 1e-9 && (m.distance - 100.0).abs() < 1e-9);
         // Quaternion round trip of a basis.
         let (r, u, bk) = a.basis();
         let (r2, u2, b2) = a.orientation().basis();
         assert!(r.dist(r2) < 1e-12 && u.dist(u2) < 1e-12 && bk.dist(b2) < 1e-12);
+        // Ease: fixed ends, symmetric, monotonic.
+        assert_eq!((ease_in_out(0.0), ease_in_out(1.0), ease_in_out(0.5)), (0.0, 1.0, 0.5));
+        assert!(ease_in_out(0.25) < 0.25 && ease_in_out(0.75) > 0.75);
         // Looking from a corner direction.
         let c = a.looking_from(Vec3::new(1.0, -1.0, 1.0));
         assert!(c.back().dist(Vec3::new(1.0, -1.0, 1.0).normalized().unwrap()) < 1e-9);
@@ -519,6 +641,64 @@ mod tests {
         assert!(c.is_valid());
         c.fit(&Aabb3::EMPTY);
         assert!(c.is_valid());
+    }
+
+    /// A view change sampled every frame (60 fps) moves smoothly to the very end: no frame
+    /// turns the view, moves the target or changes the distance by much more than the average
+    /// step, and the last frame lands exactly on the target camera.
+    #[test]
+    fn view_animations_have_no_jumps() {
+        let base = Camera { target: Vec3::new(5.0, -3.0, 2.0), distance: 150.0, ..Default::default() };
+        let views = [
+            StandardView::Iso,
+            StandardView::Top,
+            StandardView::Front,
+            StandardView::Right,
+            StandardView::Bottom,
+            StandardView::Back,
+            StandardView::Left,
+        ];
+        let mut cams: Vec<Camera> = views
+            .iter()
+            .map(|v| {
+                let mut c = base;
+                c.set_view(*v);
+                c
+            })
+            .collect();
+        // Corners and edges of the axis view, and a fit (new target and distance).
+        cams.push(base.looking_from(Vec3::new(1.0, -1.0, 1.0)));
+        cams.push(base.looking_from(Vec3::new(-1.0, 0.0, 1.0)));
+        cams.push(base.looking_from(Vec3::new(0.0, 0.0, 1.0)));
+        cams.push(Camera { target: Vec3::new(-40.0, 10.0, 0.0), distance: 60.0, ..base });
+        for a in &cams {
+            for b in &cams {
+                let anim = CameraAnim::new(*a, *b, 0.0);
+                let frames = (anim.duration * 60.0).round() as usize;
+                let mut prev = anim.sample(0.0).0;
+                let (mut steps, mut done_at) = (Vec::new(), None);
+                for f in 1..=frames + 2 {
+                    let (c, done) = anim.sample(f as f64 / 60.0);
+                    let turn = c.back().dist(prev.back()) + c.basis().0.dist(prev.basis().0);
+                    let moved =
+                        c.target.dist(prev.target) / a.distance.max(b.distance) + (c.distance - prev.distance).abs() / a.distance.max(b.distance);
+                    steps.push((f, turn, moved));
+                    prev = c;
+                    if done && done_at.is_none() {
+                        done_at = Some(f);
+                        assert_eq!(c, *b);
+                    }
+                }
+                assert!(done_at.is_some_and(|f| f >= frames), "ended early at {done_at:?}");
+                let total_turn: f64 = steps.iter().map(|s| s.1).sum();
+                let total_move: f64 = steps.iter().map(|s| s.2).sum();
+                for (f, turn, moved) in &steps {
+                    // The eased curve's fastest frame is 1.5x the average: allow 2x.
+                    assert!(*turn <= 2.0 * total_turn / frames as f64 + 1e-9, "turn jump at frame {f}: {turn} of {total_turn} ({a:?} -> {b:?})");
+                    assert!(*moved <= 2.0 * total_move / frames as f64 + 1e-9, "move jump at frame {f}: {moved} of {total_move}");
+                }
+            }
+        }
     }
 
     /// With Y up: the front view looks along −Z (eye on +Z), the top view looks down −Y with X

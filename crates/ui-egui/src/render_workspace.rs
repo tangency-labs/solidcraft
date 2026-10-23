@@ -1,5 +1,6 @@
 //! Integrated product preview. Shares the installed device/pipelines, not Design's scene policy.
 
+use crate::ui_kit::{Container, Edge, Surface};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
@@ -173,10 +174,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.draft = app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
         app.render_workspace.revision = app.session.revision;
     }
-    egui::Panel::right("sc_render_settings")
+    Container::new(ui.ctx(), Surface::Panel)
+        .edge("sc_render_settings", Edge::Right)
         .exact_size(285.0)
         .resizable(false)
-        .frame(egui::Frame::NONE.fill(Tokens::get().panel).inner_margin(10))
+        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().panel).inner_margin(10))
         .show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {

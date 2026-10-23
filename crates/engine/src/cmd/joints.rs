@@ -576,10 +576,6 @@ fn limits_param(s: &Session, p: &Value, kind: JointKind, cmd: &str) -> Result<Ve
     Ok(out)
 }
 
-fn next_joint_id(s: &Session, cmd: &str) -> Result<u64> {
-    super::next_free_id(cmd, s.doc.assembly.joints.iter().map(|j| j.id))
-}
-
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
@@ -619,7 +615,7 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     j.values = q;
     let id = j.id;
     let name = j.name.clone();
-    // A new joint can take a deleted one's id; it starts shown.
+    // A new joint starts shown, even if a stale visibility entry came from an older design.
     s.visibility.hidden_joints.retain(|h| *h != id);
     s.doc_mut().assembly.joints.push(j);
     let sol = resolve(s);
@@ -652,13 +648,21 @@ fn kind_param(p: &Value, cmd: &str) -> Result<JointKind> {
         .ok_or_else(|| bad(cmd, "`type` must be rigid, revolute, slider, cylindrical, pin_slot, planar, ball, parallel, perpendicular, angle, point_on_plane, point_on_line or line_on_plane"))
 }
 
+fn new_joint_name(s: &Session, p: &Value) -> String {
+    str_(p, "name").map(str::to_string).unwrap_or_else(|| {
+        let names: std::collections::BTreeSet<_> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("Joint{n}").as_str())).unwrap_or(1);
+        format!("Joint{number}")
+    })
+}
+
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
-    let id = next_joint_id(s, cmd)?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Joint{id}"));
+    let id = s.doc_mut().allocate_id()?;
+    let name = new_joint_name(s, p);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
         None => 0.0,
@@ -716,8 +720,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let fa = side(oa)?;
     let fb = side(ob)?;
-    let id = next_joint_id(s, cmd)?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Joint{id}"));
+    let id = s.doc_mut().allocate_id()?;
+    let name = new_joint_name(s, p);
     let n = kind.dofs().len();
     let j = Joint {
         id,

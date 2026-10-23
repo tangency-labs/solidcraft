@@ -203,6 +203,8 @@ jobs:
     name: Snap ${{ matrix.arch }}
     needs: [version, linux]
     if: needs.version.outputs.build == 'true'
+    # The Snap Store hasn't accepted SolidCraft yet, so a snap failure never holds up a release.
+    continue-on-error: true
     # Repackages the Linux job's tarball, like the Flatpak. On 24.04 because the core24 base is
     # Ubuntu 24.04, which lets snapcraft build on the runner itself (--destructive-mode).
     runs-on: ${{ matrix.runner }}

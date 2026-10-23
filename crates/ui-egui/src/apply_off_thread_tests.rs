@@ -108,12 +108,12 @@ fn the_dialog_holds_its_inputs_while_ok_computes() {
     // OK computing, until the test lets it finish.
     let (finish, done) = std::sync::mpsc::channel();
     let cmds = h.app.dialog.as_ref().and_then(|d| crate::dialogs::apply_commands(&h.app, d).ok()).unwrap();
-    h.app.applying = Some(crate::dialogs::Applying { done, started: crate::now_ms(), cmds, seen: true });
+    h.app.applying = Some(crate::dialogs::Applying::computing(done, cmds));
     // A click on the square picked would take it out of the profiles.
     h.step(&json!({"click": {"world": [10, 10, 10]}})).unwrap();
     h.frames(2);
     assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()), Some(picked), "no pick while computing");
-    finish.send(()).unwrap();
+    finish.send(None).unwrap();
     until_applied(&mut h);
     assert!(h.app.dialog.is_none());
     h.step(&json!({"expect": {"bodies": 1, "volume": 13000}})).unwrap();
@@ -129,8 +129,8 @@ fn inputs_changed_while_ok_computes_are_computed_off_the_thread_too() {
     let features = h.app.session.doc.features.len();
     // OK computing other commands than the dialog's, until the test lets it finish.
     let (finish, done) = std::sync::mpsc::channel();
-    h.app.applying = Some(crate::dialogs::Applying { done, started: crate::now_ms(), cmds: Vec::new(), seen: true });
-    finish.send(()).unwrap();
+    h.app.applying = Some(crate::dialogs::Applying::computing(done, Vec::new()));
+    finish.send(None).unwrap();
     h.frames(1);
     assert!(h.app.applying.is_some(), "the dialog's own commands are computing");
     assert_eq!(h.app.session.doc.features.len(), features, "nothing applied on the window thread");

@@ -128,6 +128,32 @@ fn forward_tab_completes_expression_then_cycles_and_shift_tab_moves_back() {
     assert!((sketch.profiles[0].area - 120.0).abs() < 1e-6);
 }
 
+/// #3257: clicking a parameter suggestion under a line's length box puts the name in the box,
+/// which keeps the focus; the click places nothing, and Enter draws the line that long.
+#[test]
+fn clicking_a_parameter_suggestion_fills_the_length_box() {
+    let mut h = drawing("sketch.line");
+    h.app.run("parameters.add", json!({"name": "width", "expression": "24 mm"})).unwrap();
+    h.frames(2);
+    type_value(&mut h, "wid");
+    h.frames(1);
+    h.step(&json!({"click": {"handle": "dialog:suggestion:0"}})).unwrap();
+    h.frames(1);
+    assert_focus(&h, 0);
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "width");
+    let sketch = |h: &Harness| h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    assert_eq!(sketch(&h), 0, "the click on the list placed no point");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1);
+    let length = sk.shape(0).map(|s| match s {
+        solidcraft_engine::sketch::Shape::Line { a, b } => a.dist(b),
+        _ => 0.0,
+    });
+    assert!(length.is_some_and(|l| (l - 24.0).abs() < 1e-6), "{length:?}");
+}
+
 #[test]
 fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     let mut h = Harness::new();

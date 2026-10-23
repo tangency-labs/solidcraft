@@ -84,7 +84,7 @@ The CLI still supports arbitrary PNG/ICO exports with `solidcraft-cli icon`.
 ## Code and provenance
 
 Resources remain compiled by their owning layer through existing APIs:
-`ui-egui::icons::paint` and `Tokens` at L5, model presets in L2 `doc`, and sketch
+`ui-egui::icons::paint_icon` and `Tokens` at L5, model presets in L2 `doc`, and sketch
 fonts at L1. State, projection, interaction, commands and GPU bindings stay in
 their current modules. Embedded data uses `CARGO_MANIFEST_DIR`; application code
 needs no runtime resource registry or repository lookup.

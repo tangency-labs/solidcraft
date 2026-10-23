@@ -632,3 +632,259 @@ fn midpoint_alignment_remaps_after_unrelated_geometry_is_deleted() {
     run(&mut s, "sketch.delete", json!({"entities":[result["created"]["points"][0]]}));
     assert!(sketch(&s).constraints.is_empty());
 }
+
+fn line_ends(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, Vec2) {
+    let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("expected line") };
+    (sk.point(a).unwrap(), sk.point(b).unwrap())
+}
+
+#[test]
+fn midpoint_of_two_lines_centres_the_second_on_the_first() {
+    use solidcraft_sketch::ConstraintKind;
+    for reverse in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[0,0],[60,0]],"infer":false,"connect":false}));
+        run(&mut s, "sketch.line", json!({"points":[[5,-10],[25,-10]],"infer":false,"connect":false}));
+        let (first, second) = if reverse { ("l2", "l1") } else { ("l1", "l2") };
+        let stays = line_ends(&sketch(&s), first);
+        let length = {
+            let (a, b) = line_ends(&sketch(&s), second);
+            a.dist(b)
+        };
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let result = run(&mut s, "sketch.constraint.midpoint", json!({"a":first,"b":second}));
+        assert_eq!(result["created"]["points"].as_array().unwrap().len(), 1);
+        assert_eq!(result["created"]["constraints"].as_array().unwrap().len(), 2);
+        assert_eq!(s.undo.len(), undo + 1);
+        let sk = sketch(&s);
+        assert_eq!(line_ends(&sk, first), stays, "the first pick stays put");
+        let (a, b) = line_ends(&sk, second);
+        assert!((a.dist(b) - length).abs() < 1e-6, "the second keeps its length");
+        assert!(line_midpoint(&sk, first).dist(line_midpoint(&sk, second)) < 1e-6);
+        assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })).count(), 2);
+
+        // Saved as ordinary points and constraints: it reopens and keeps holding.
+        let after = s.doc.to_json();
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.doc.to_json(), after);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&after).unwrap());
+        reopened.active_sketch = s.active_sketch;
+        run(&mut reopened, "sketch.move_point", json!({"point":"l1.end","to":[80,15]}));
+        let sk = sketch(&reopened);
+        assert!(line_midpoint(&sk, "l1").dist(line_midpoint(&sk, "l2")) < 1e-6);
+    }
+}
+
+#[test]
+fn midpoint_takes_a_point_and_a_line_in_either_pick_order() {
+    for (a, b) in [("p", "l1"), ("l1", "p")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[0,0],[40,0]],"infer":false,"connect":false}));
+        run(&mut s, "sketch.point", json!({"point":[7,9],"id":"p"}));
+        run(&mut s, "sketch.constraint.midpoint", json!({"a":a,"b":b}));
+        let sk = sketch(&s);
+        let p = sk.point(sk.resolve_point("p").unwrap()).unwrap();
+        assert!(p.dist(line_midpoint(&sk, "l1")) < 1e-6, "{a} then {b}");
+    }
+}
+
+#[test]
+fn midpoint_of_two_lines_reuses_an_existing_midpoint() {
+    use solidcraft_sketch::ConstraintKind;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[60,0]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.line", json!({"points":[[5,-10],[25,-10]],"infer":false,"connect":false}));
+    // l3 starts at the midpoint of l2: that point is reused, not duplicated.
+    run(&mut s, "sketch.line", json!({"points":["mid:l2",[15,-30]],"infer":false,"connect":false}));
+    let count = sketch(&s).points.len();
+    let result = run(&mut s, "sketch.constraint.midpoint", json!({"a":"l1","b":"l2"}));
+    assert!(result["created"]["points"].as_array().unwrap().is_empty());
+    let sk = sketch(&s);
+    assert_eq!(sk.points.len(), count);
+    assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })).count(), 2);
+    assert!(line_midpoint(&sk, "l1").dist(line_midpoint(&sk, "l2")) < 1e-6);
+    // Applying it again finds nothing to add.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.constraint.midpoint", &json!({"a":"l2","b":"l1"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn midpoint_rejects_wrong_picks_without_changing_the_sketch() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[60,0]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.circle.center", json!({"center":[40,50],"radius":3}));
+    run(&mut s, "sketch.point", json!({"point":[7,9],"id":"p"}));
+    for params in [
+        json!({"a":"l1","b":"l1"}),
+        json!({"a":"l1","b":"c1"}),
+        json!({"a":"c1","b":"l1"}),
+        json!({"a":"p","b":"origin"}),
+        json!({"a":"p","b":"c1"}),
+        json!({"a":"l1","b":"missing"}),
+        json!({"a":"l1"}),
+        json!({"a":12,"b":"l1"}),
+    ] {
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        assert!(s.execute("sketch.constraint.midpoint", &params).is_err(), "{params}");
+        assert_eq!(s.doc.to_json(), before, "{params}");
+        assert_eq!(s.undo.len(), undo, "{params}");
+    }
+}
+
+/// A parameter's row in `parameters.list` (Null when there is none).
+fn param_row(s: &mut Session, name: &str) -> Value {
+    let l = run(s, "parameters.list", json!({}));
+    l["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+}
+
+/// The distance between a line's ends on the solved sketch.
+fn line_length(s: &Session, line: &str) -> f64 {
+    let sk = sketch(s);
+    let at = |r: &str| sk.point(sk.resolve_point(r).unwrap()).unwrap();
+    at(&format!("{line}.start")).dist(at(&format!("{line}.end")))
+}
+
+/// A session with the user parameter `len = 60 mm` and a sketch holding one 30 mm line `la`
+/// whose start is on the origin.
+fn sketch_with_len() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "60 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["la"], "infer": false}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "la.start", "b": "origin"}));
+    s
+}
+
+/// `name = expression` in a dimension's value adds the user parameter and dimensions with it
+/// (#2916): the expression may be anything the parameter editor takes (arithmetic, units,
+/// parentheses, functions, other parameters), and is stored as typed on the new parameter.
+#[test]
+fn a_dimension_value_can_define_a_user_parameter() {
+    let cases = [
+        ("w = 20", "20"),
+        ("w=40/2", "40/2"),
+        ("  w = (10 + 30) / 2 ", "(10 + 30) / 2"),
+        ("w = 1 in - 5.4 mm", "1 in - 5.4 mm"),
+        ("w = len / 3", "len / 3"),
+        ("w = sqrt(400)", "sqrt(400)"),
+        ("w = 2 * (len / 6)", "2 * (len / 6)"),
+        ("w = min(len, 20 mm)", "min(len, 20 mm)"),
+    ];
+    for (value, stored) in cases {
+        let mut s = sketch_with_len();
+        let d = run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": value}));
+        assert_eq!(d["defined"], "w", "{value}: {d}");
+        assert_eq!(d["expression"], "w", "{value}: the dimension refers to the parameter: {d}");
+        assert!((d["measured"].as_f64().unwrap() - 20.0).abs() < 1e-6, "{value}: {d}");
+        assert!((line_length(&s, "la") - 20.0).abs() < 1e-6, "{value}");
+        let w = param_row(&mut s, "w");
+        assert_eq!(w["source"], "user", "{value}: {w}");
+        assert_eq!(w["expression"], stored, "{value}: {w}");
+        assert_eq!(w["unit"], "mm", "{value}: {w}");
+        assert!((w["value"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{value}: {w}");
+        // The dimension follows the parameter from now on.
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": "30 mm"}));
+        assert!((line_length(&s, "la") - 30.0).abs() < 1e-6, "{value}");
+    }
+}
+
+/// A bare right-hand side is in the design's unit, like a bare dimension value, and the new
+/// parameter carries that unit; an angle's parameter is in degrees.
+#[test]
+fn a_defined_parameter_takes_the_design_unit_or_degrees() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["la"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": "w = 2"}));
+    assert_eq!(d["defined"], "w", "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 50.8).abs() < 1e-6, "{d}");
+    // Stored with the design's unit spelled out, as a bare dimension value is.
+    let w = param_row(&mut s, "w");
+    assert_eq!((w["unit"].as_str(), w["expression"].as_str()), (Some("in"), Some("2 in")), "{w}");
+    assert!((line_length(&s, "la") - 50.8).abs() < 1e-6);
+    // A unit in the expression wins over the design's.
+    run(&mut s, "sketch.line", json!({"points": [[0, 50], [30, 50]], "ids": ["lb"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["lb"], "value": "h = 20 mm"}));
+    assert!((d["measured"].as_f64().unwrap() - 20.0).abs() < 1e-6, "{d}");
+    assert_eq!((param_row(&mut s, "h")["unit"].as_str(), param_row(&mut s, "h")["expression"].as_str()), (Some("in"), Some("20 mm")));
+
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]], "ids": ["b"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["a", "b"], "type": "angle", "value": "ang = 60"}));
+    assert_eq!((d["defined"].as_str(), d["unit"].as_str()), (Some("ang"), Some("deg")), "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
+    let ang = param_row(&mut s, "ang");
+    assert_eq!((ang["unit"].as_str(), ang["expression"].as_str()), (Some("deg"), Some("60")), "{ang}");
+    assert!((line_angle(&s, "a", "b") - 60.0).abs() < 1e-6);
+}
+
+/// A definition that cannot be made is refused with the reason, and leaves no parameter behind:
+/// a taken or reserved name, no expression, a driven dimension, a left side that is not a name
+/// (which stays the old parse error), and a dimension the sketch refuses.
+#[test]
+fn a_definition_that_cannot_be_made_is_refused_and_leaves_nothing() {
+    let refused = [
+        ("w = 20", json!({"name": "w", "expression": "5 mm"}), "there is already a parameter `w`: type `w` to use it"),
+        ("len = 20", Value::Null, "there is already a parameter `len`"),
+        ("mm = 5", Value::Null, "`mm` is a unit name, so it cannot be a parameter name"),
+        ("sin = 5", Value::Null, "`sin` is a function name, so it cannot be a parameter name"),
+        ("pi = 5", Value::Null, "`pi` is a constant, so it cannot be a parameter name"),
+        ("w =", Value::Null, "`w =` needs a value after the `=`"),
+        ("w = ", Value::Null, "needs a value"),
+        ("2 = 3", Value::Null, "unexpected `=`"),
+        ("w == 3", Value::Null, "unexpected `=`"),
+        ("w = nope", Value::Null, "nope"),
+        ("w = 1 deg", Value::Null, ""),
+        ("w = w", Value::Null, ""),
+    ];
+    for (value, add, message) in refused {
+        let mut s = sketch_with_len();
+        if !add.is_null() {
+            run(&mut s, "parameters.add", add);
+        }
+        let before = run(&mut s, "parameters.list", json!({}))["count"].clone();
+        let e = s.execute("sketch.dimension", &json!({"entities": ["la"], "value": value})).unwrap_err().to_string();
+        assert!(e.contains(message), "{value}: {e}");
+        assert_eq!(run(&mut s, "parameters.list", json!({}))["count"], before, "{value}: a refused definition added a parameter");
+        assert_eq!(sketch(&s).constraints.iter().filter(|c| c.param.is_some()).count(), 0, "{value}: a refused definition added a dimension");
+    }
+    // A driven (reference) dimension has no value, so it defines nothing.
+    let mut s = sketch_with_len();
+    let e = s.execute("sketch.dimension", &json!({"entities": ["la"], "value": "w = 20", "driven": true})).unwrap_err().to_string();
+    assert!(e.contains("driven"), "{e}");
+    assert!(param_row(&mut s, "w").is_null());
+    // A dimension the sketch already determines is refused as before, and its parameter with it.
+    let mut s = sketch_with_len();
+    run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": 30}));
+    let e = s.execute("sketch.dimension", &json!({"entities": ["la.start", "la.end"], "value": "w = 30"})).unwrap_err().to_string();
+    assert!(e.contains("already determined"), "{e}");
+    assert!(param_row(&mut s, "w").is_null(), "the parameter of a refused dimension was kept");
+    // Placed as driven instead (`if_redundant`), it has no value and defines nothing.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["la.start", "la.end"], "value": "w = 30", "if_redundant": "driven"}));
+    assert_eq!((d["driven"].as_bool(), d.get("defined")), (Some(true), None), "{d}");
+    assert!(param_row(&mut s, "w").is_null(), "a driven dimension kept the parameter");
+}
+
+/// The parameter and the dimension are one command, so one undo removes both and one redo
+/// brings both back.
+#[test]
+fn undoing_a_defining_dimension_removes_the_parameter_too() {
+    let mut s = sketch_with_len();
+    let params = run(&mut s, "parameters.list", json!({}))["count"].as_u64().unwrap();
+    run(&mut s, "sketch.dimension", json!({"entities": ["la"], "value": "w = 20"}));
+    assert_eq!(run(&mut s, "parameters.list", json!({}))["count"].as_u64().unwrap(), params + 2, "the user parameter and the dimension's own");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(param_row(&mut s, "w").is_null());
+    assert_eq!(run(&mut s, "parameters.list", json!({}))["count"].as_u64().unwrap(), params);
+    assert!((line_length(&s, "la") - 30.0).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(param_row(&mut s, "w")["expression"], "20");
+    assert!((line_length(&s, "la") - 20.0).abs() < 1e-6);
+}

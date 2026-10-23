@@ -1,6 +1,6 @@
 [
   {
-    "note": "Centerline needs the same CREATE panel placement and icon as its neighbours (sketch.ellipse, sketch.conic): without them it never appeared in the CREATE panel's drop-down at all, pinned or not. Both it and the construction toggle draw their icon in the app's fixed construction orange, not the tab or panel accent colour a caller happens to pass to icons::paint."
+    "note": "Centerline needs the same CREATE panel placement and icon as its neighbours (sketch.ellipse, sketch.conic): without them it never appeared in the CREATE panel's drop-down at all, pinned or not. Both it and the construction toggle draw their icon in the app's fixed construction orange, independently of the tab or panel accent colour."
   },
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},

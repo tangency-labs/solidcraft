@@ -64,7 +64,138 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
     return o;
 }
 
-/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
+/// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
+/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour.
+/// The vertex colour (location 2) is not read.
+@vertex
+fn vs_tri_inst(
+    @location(0) p: vec3<f32>,
+    @location(1) n: vec3<f32>,
+    @location(3) r0: vec4<f32>,
+    @location(4) r1: vec4<f32>,
+    @location(5) r2: vec4<f32>,
+    @location(6) c: vec4<f32>,
+) -> TOut {
+    let q = vec4<f32>(p, 1.0);
+    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    var o: TOut;
+    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.c = c;
+    o.wp = wp;
+    return o;
+}
+
+/// A flat-shaded placement (`vs_tri_inst_flat`): its vertices are shared between triangles, so
+/// the face's normal is the triangle's own plane, worked out per fragment. The fragment gets its
+/// position from the eye (`rp`): small near what is looked at, so the plane comes out exact at
+/// any zoom however far from the origin the part stands, and few values per vertex (a tiled GPU
+/// stores every vertex's outputs: more of them cost more than the triangles' shared vertices
+/// save).
+struct FOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) rp: vec3<f32>,
+    @location(1) c: vec4<f32>,
+};
+
+@vertex
+fn vs_tri_inst_flat(
+    @location(0) p: vec3<f32>,
+    @location(3) r0: vec4<f32>,
+    @location(4) r1: vec4<f32>,
+    @location(5) r2: vec4<f32>,
+    @location(6) c: vec4<f32>,
+) -> FOut {
+    let q = vec4<f32>(p, 1.0);
+    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    var o: FOut;
+    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.rp = wp - u.eye.xyz;
+    o.c = c;
+    return o;
+}
+
+/// The fragment of a flat-shaded placement as the other triangles' fragments are: its normal
+/// the outward normal of its triangle (toward the eye on a front face, away on a back face, as
+/// the triangles are wound outward).
+fn flat_fragment(i: FOut, front: bool) -> TOut {
+    var n = cross(dpdx(i.rp), dpdy(i.rp));
+    let toward = select(u.back.xyz, -i.rp, u.eye.w > 0.5);
+    n = n * inverseSqrt(max(dot(n, n), 1e-30));
+    if ((dot(n, toward) < 0.0) == front) { n = -n; }
+    var o: TOut;
+    o.pos = i.pos;
+    o.n = n;
+    o.c = i.c;
+    o.wp = i.rp + u.eye.xyz;
+    return o;
+}
+
+@fragment
+fn fs_solid_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = solid(t, front);
+    return c;
+}
+
+@fragment
+fn fs_solid_cut_flat(i: FOut, @builtin(front_facing) front: bool) -> CutOut {
+    let t = flat_fragment(i, front);
+    var o: CutOut;
+    o.depth = pushed(cap_depth(t.wp, t.pos.z));
+    o.c = solid(t, front);
+    return o;
+}
+
+/// Weighted blended order-independent transparency (`view/oit.rs`): a see-through fragment's
+/// colour, premultiplied and weighted by its alpha and nearness, into the accumulation target,
+/// and its alpha into the revealage target (which keeps what is behind it by 1 - alpha).
+struct Oit {
+    @location(0) accum: vec4<f32>,
+    @location(1) reveal: vec4<f32>,
+};
+
+fn oit(c: vec4<f32>, z: f32) -> Oit {
+    let a = clamp(c.a, 0.0, 1.0);
+    // Depth 0 near and 1 far, whichever way the buffer runs.
+    let d = select(z, 1.0 - z, reversed());
+    let w = clamp(a * max(1e-2, 3e3 * pow(1.0 - d, 3.0)), 1e-2, 3e3);
+    var o: Oit;
+    o.accum = vec4<f32>(c.rgb * a, a) * w;
+    o.reveal = vec4<f32>(a);
+    return o;
+}
+
+@fragment
+fn fs_oit(i: TOut) -> Oit {
+    if (clipped(i.wp)) { discard; }
+    return oit(shade(i), i.pos.z);
+}
+
+@fragment
+fn fs_oit_flat(i: FOut, @builtin(front_facing) front: bool) -> Oit {
+    let t = flat_fragment(i, front);
+    let o = oit(shade(t), t.pos.z);
+    if (clipped(t.wp)) { discard; }
+    return o;
+}
+
+/// A see-through flat-shaded placement (faded or glass), shaded like `fs_tri`.
+@fragment
+fn fs_tri_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = shade(t);
+    if (clipped(t.wp)) { discard; }
+    return c;
+}
+
+@fragment
+fn fs_ao_depth_flat(i: FOut, @builtin(front_facing) front: bool) -> AoDepth {
+    let t = flat_fragment(i, front);
+    return opaque_depth(t, front);
+}
+
+/// Opaque model surfaces: cut by the section plane/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
 @fragment
 fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let c = solid(i, front);
@@ -150,6 +281,11 @@ struct AoDepth {
 
 @fragment
 fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
+    return opaque_depth(i, front);
+}
+
+/// The AO prepass's depth of an opaque surface's fragment.
+fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
     var depth = i.pos.z;
     if (!front && length(u.clip.xyz) > 0.5) { depth = cap_depth(i.wp, i.pos.z); }

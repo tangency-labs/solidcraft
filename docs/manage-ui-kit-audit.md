@@ -6,11 +6,15 @@ is empty. The cleanup removes unused frame chrome, row-publication state, appear
 wrappers and the plastic editor fallback. Shared controls and their options are
 listed in [the kit reference](ui-kit.md).
 
-These specialised surfaces remain in their owners:
+Outer hosts for all of the surfaces below now use `ui_kit::Container`; see the
+[layout-aware container audit](ui-container-audit.md). The boundaries in this table
+concern content and domain behavior, not permission to create a separate panel shell.
 
-| Surface / source | Why it remains outside the kit |
+These specialised contents remain in their owners:
+
+| Surface / source | Content ownership |
 | --- | --- |
-| Start page: `home.rs` | Painted start tiles, thumbnails and links rather than form cards |
+| Start page: `home.rs` | File-page composition, asynchronous thumbnail caches and links; navigation, action tiles, recent rows, samples and recovery surfaces use `ui_kit::FileView` |
 | Assistant transcript/composer containers, gallery and docking: `agent_chat/panel.rs` | Conversation/media layout, rich selectable content, drag/docking behavior; matching controls use the kit |
 | Native file/program pickers: `file_picker.rs`, host services | Host-native sheets have no egui control surface; load/progress cards use the kit |
 | Command-result ranking/list/pins: `shortcut_box.rs` | Search layout and ranking; popup shell and matching controls use the kit |

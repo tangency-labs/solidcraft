@@ -2,6 +2,10 @@
 use std::path::Path;
 use syn::visit::{self, Visit};
 
+fn test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("test") || (a.path().is_ident("cfg") && a.parse_args::<syn::Path>().is_ok_and(|p| p.is_ident("test"))))
+}
+
 /// No caller may bypass the kit for a matching control.
 const ALLOWED: &[(&str, usize, &str)] = &[];
 
@@ -96,7 +100,7 @@ fn violations(source: &str) -> Vec<String> {
 }
 
 #[test]
-fn dense_panels_use_ui_kit_elements() {
+fn all_ui_and_apps_use_ui_kit_controls() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut failures = Vec::new();
     fn scan(dir: &Path, prefix: &str, failures: &mut Vec<String>) {
@@ -114,10 +118,7 @@ fn dense_panels_use_ui_kit_elements() {
                 continue;
             }
             let source = std::fs::read_to_string(&path).unwrap();
-            // Covers dense adapters and every future Panel caller, including imported Panel aliases.
-            if name != "dialogs_dense.rs" && name != "sketch_palette.rs" && !source.contains("ui_kit") {
-                continue;
-            }
+            // Scan every feature module, including ones that have not imported the kit yet.
             let found = violations(&source);
             let allowed = ALLOWED.iter().find(|(file, _, _)| *file == relative).map_or(0, |(_, count, _)| *count);
             if found.len() > allowed {
@@ -126,6 +127,7 @@ fn dense_panels_use_ui_kit_elements() {
         }
     }
     scan(&root, "", &mut failures);
+    scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps"), "apps/", &mut failures);
     failures.sort();
     assert!(failures.is_empty(), "Use crate::ui_kit controls:\n{}", failures.join("\n"));
 }
@@ -170,6 +172,13 @@ fn legacy_declarations(source: &str, removed: &[&str]) -> Vec<String> {
             }
             visit::visit_item_fn(self, item);
         }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            let name = item.sig.ident.to_string();
+            if self.removed.contains(&name.as_str()) {
+                self.found.push(name);
+            }
+            visit::visit_impl_item_fn(self, item);
+        }
     }
     let mut guard = Declarations { removed, found: Vec::new() };
     guard.visit_file(&syn::parse_file(source).unwrap());
@@ -180,8 +189,15 @@ fn legacy_declarations(source: &str, removed: &[&str]) -> Vec<String> {
 fn removed_legacy_helpers_stay_removed() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let files: &[(&str, &[&str])] = &[
+        ("ui_kit/container.rs", &["report"]),
+        ("icons.rs", &["paint"]),
+        ("preview.rs", &["draw_active"]),
+        ("sketch_tools.rs", &["click_glyph"]),
+        ("edit_clipboard.rs", &["can_copy"]),
+        ("tool_modifiers.rs", &["ctrl_name", "alt_name", "matches_exact"]),
+        ("fonts.rs", &["install_cjk_font"]),
         ("frame.rs", &["docked", "docked_on", "heading", "add_outlined", "content_width", "remember_width", "right_aligned"]),
-        ("dialogs.rs", &["form_row", "publish_row"]),
+        ("dialogs.rs", &["form_row", "publish_row", "is_wide"]),
         ("dialogs_appearance.rs", &["swatch", "swatch_rows"]),
         (
             "ui_kit/actions.rs",
@@ -197,28 +213,6 @@ fn removed_legacy_helpers_stay_removed() {
         assert!(legacy_declarations(&source, removed).is_empty(), "{file}: removed helper reintroduced");
     }
     assert!(ALLOWED.is_empty(), "raw-control allowance table must stay empty");
-}
-
-// Main added these floating windows after the panels branch. The helper is live for them;
-// keep the bounded constructor until they migrate, and reject any new legacy callers.
-#[test]
-fn floating_window_helper_has_only_its_live_consumers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let frame = std::fs::read_to_string(root.join("frame.rs")).unwrap();
-    assert_eq!(legacy_declarations(&frame, &["window"]), ["window"]);
-    let mut callers = Vec::new();
-    for entry in std::fs::read_dir(&root).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|e| e == "rs") {
-            let source = std::fs::read_to_string(&path).unwrap();
-            // The guard's own expected-call string is test code.
-            if path.file_name().unwrap() != "ui_kit_guard_tests.rs" && source.contains("crate::frame::window(") {
-                callers.push(path.file_name().unwrap().to_str().unwrap().to_owned());
-            }
-        }
-    }
-    callers.sort();
-    assert_eq!(callers, ["bom_panel.rs", "messages.rs", "mouse_gesture.rs", "space_mouse_calibration.rs"]);
 }
 
 #[test]
@@ -241,6 +235,7 @@ fn guard_detects_editor_constructors_aliases_and_legacy_declarations() {
         5
     );
     assert_eq!(legacy_declarations("fn docked_on() {}", &["docked_on"]), ["docked_on"]);
+    assert_eq!(legacy_declarations("impl Host { fn report() {} }", &["report"]), ["report"]);
 }
 
 /// Broader than the dense-panel guard: sliders and numeric fields have no caller exceptions,
@@ -332,6 +327,16 @@ fn slider_guard(source: &str) -> SliderGuard {
         sliders: Vec<String>,
     }
     impl<'ast> Visit<'ast> for Imports {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let attrs = match item {
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Fn(i) => &i.attrs,
+                _ => return visit::visit_item(self, item),
+            };
+            if !test_only(attrs) {
+                visit::visit_item(self, item);
+            }
+        }
         fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
             if let syn::UseTree::Rename(rename) = tree
                 && matches!(rename.ident.to_string().as_str(), "Slider" | "DragValue")
@@ -498,6 +503,16 @@ fn check_guard(source: &str) -> Vec<String> {
     #[derive(Default)]
     struct Imports(Vec<String>);
     impl<'ast> Visit<'ast> for Imports {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let attrs = match item {
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Fn(i) => &i.attrs,
+                _ => return visit::visit_item(self, item),
+            };
+            if !test_only(attrs) {
+                visit::visit_item(self, item);
+            }
+        }
         fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
             if let syn::UseTree::Rename(rename) = tree
                 && matches!(rename.ident.to_string().as_str(), "Checkbox" | "RadioButton")
@@ -709,6 +724,16 @@ fn disclosure_guard(source: &str) -> DisclosureGuard {
     #[derive(Default)]
     struct Imports(Vec<String>);
     impl<'ast> Visit<'ast> for Imports {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let attrs = match item {
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Fn(i) => &i.attrs,
+                _ => return visit::visit_item(self, item),
+            };
+            if !test_only(attrs) {
+                visit::visit_item(self, item);
+            }
+        }
         fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
             if let syn::UseTree::Rename(rename) = tree
                 && rename.ident == "CollapsingHeader"

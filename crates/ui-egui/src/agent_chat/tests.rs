@@ -1468,12 +1468,17 @@ fn a_long_message_keeps_the_buttons_in_the_window() {
     }
     h.frames(4);
     let bottom = |h: &crate::scenario::Harness| f64::from(h.app.agent_chat.panel_rect.map(|r| r.bottom()).expect("the panel is drawn"));
-    let [_, rest] = h.widget("Send").expect("the Send button is drawn");
-    let rest = bottom(&h) - rest;
+    let resting: Vec<_> = ["Send", "Attach view"]
+        .into_iter()
+        .map(|name| {
+            let [_, y] = h.widget(name).unwrap_or_else(|| panic!("{name} is drawn"));
+            (name, bottom(&h) - y)
+        })
+        .collect();
     h.app.agent_chat.input = "Please make the plate thicker and then add a fillet on every outside edge.\n".repeat(60);
     h.frames(8);
     let window = 1000.0;
-    for name in ["Send", "Attach view"] {
+    for (name, rest) in resting {
         let [_, y] = h.widget(name).unwrap_or_else(|| panic!("{name} is drawn"));
         assert!(y < window, "{name} is at {y}, below the window's bottom at {window}");
         // The box is pinned to the bottom and grows upwards: the buttons stay where they were

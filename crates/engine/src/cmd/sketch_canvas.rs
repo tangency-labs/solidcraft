@@ -56,9 +56,13 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
     // It belongs to the active component (its plane is in that frame) and moves with it.
     let component = s.active_component;
     let doc = s.doc_mut();
-    let id = super::next_free_id(cmd, doc.canvases.iter().map(|c| c.id))?;
+    let id = doc.allocate_id()?;
     let base = if decal { "Decal" } else { "Canvas" };
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("{base}{id}"));
+    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| {
+        let names: std::collections::BTreeSet<_> = doc.canvases.iter().map(|c| c.name.as_str()).collect();
+        let number = (1..=doc.canvases.len().saturating_add(1)).find(|n| !names.contains(format!("{base}{n}").as_str())).unwrap_or(1);
+        format!("{base}{number}")
+    });
     doc.canvases.push(Canvas {
         id,
         name: name.clone(),
@@ -168,6 +172,19 @@ mod tests {
         b.extend(h.to_be_bytes());
         b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
         base64_encode(&b)
+    }
+
+    #[test]
+    fn deleted_canvas_ids_are_not_reused_after_reopening() {
+        let mut s = Session::default();
+        let params = json!({"data": png(10, 10)});
+        let first = s.execute("canvas.insert", &params).unwrap()["canvas"].as_u64().unwrap();
+        s.execute("canvas.delete", &json!({"canvas": first})).unwrap();
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        let second = s.execute("canvas.insert", &params).unwrap()["canvas"].as_u64().unwrap();
+        assert!(second > first, "deleted canvas {first} was reused as {second}");
+        assert!(s.execute("canvas.edit", &json!({"canvas": first, "width": 500})).is_err());
     }
 
     #[test]

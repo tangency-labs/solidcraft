@@ -31,14 +31,7 @@ enum Finish {
 #[derive(Clone, Default)]
 struct Cache(Arc<Mutex<HashMap<(&'static str, Look, u32, Finish), TextureHandle>>>);
 
-/// Draw the icon `name` in `r`. The ink, fill and accent colours the callers pass are no longer
-/// used: the palette decides. Only the ink's opacity is kept, so a dimmed (disabled) button dims
-/// its icon.
-pub fn paint(p: &Painter, r: Rect, name: &str, ink: Color32, _fill: Color32, _accent: Color32) {
-    paint_icon(p, r, name, f32::from(ink.a()) / 255.0);
-}
-
-/// [`paint`] with an explicit opacity (0 to 1).
+/// Draw palette-owned icon artwork with an explicit opacity (0 to 1).
 pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_on(p, r, name, None, opacity);
 }
@@ -46,29 +39,41 @@ pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
 /// Draw the icon `name` for a surface that is always dark (the application bar), whatever the
 /// theme: `dark: Some(true)`. `None` follows the theme.
 pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32) {
-    paint_with_ink(p, r, name, dark, opacity, None, false);
+    paint_with_ink(p, r, name, dark, opacity, None, Mirror::None);
 }
 
 /// Monochrome flat controls on the application bar use its text token exactly.
 pub(crate) fn paint_app_bar(p: &Painter, r: Rect, name: &str, opacity: f32) {
-    paint_with_ink(p, r, name, Some(true), opacity, Some(crate::theme::Tokens::get().app_bar_text), false);
+    paint_with_ink(p, r, name, Some(true), opacity, Some(crate::theme::Tokens::get().app_bar_text), Mirror::None);
 }
 
 /// Paint a single-colour icon in `ink`.
 pub(crate) fn paint_ink(p: &Painter, r: Rect, name: &str, ink: Color32) {
-    paint_with_ink(p, r, name, Some(true), 1.0, Some(ink), false);
+    paint_with_ink(p, r, name, Some(true), 1.0, Some(ink), Mirror::None);
 }
 
 /// Paint a single-colour icon in `ink`, mirrored top to bottom (a chevron pointing up).
 pub(crate) fn paint_ink_flipped(p: &Painter, r: Rect, name: &str, ink: Color32) {
-    paint_with_ink(p, r, name, Some(true), 1.0, Some(ink), true);
+    paint_with_ink(p, r, name, Some(true), 1.0, Some(ink), Mirror::Vertical);
 }
 
-fn paint_with_ink(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32, ink: Option<Color32>, flip_y: bool) {
+/// Paint a single-colour icon mirrored left to right, reusing the original master.
+pub(crate) fn paint_ink_mirrored(p: &Painter, r: Rect, name: &str, ink: Color32) {
+    paint_with_ink(p, r, name, Some(true), 1.0, Some(ink), Mirror::Horizontal);
+}
+
+#[derive(Clone, Copy)]
+enum Mirror {
+    None,
+    Vertical,
+    Horizontal,
+}
+
+fn paint_with_ink(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32, ink: Option<Color32>, mirror: Mirror) {
     let ctx = p.ctx();
     let resolved = icon_svg::resolve(name);
     let look = Look { dark: dark.unwrap_or_else(|| ctx.global_style().visuals.dark_mode), accent: resolved.accent, vision: crate::theme::vision() };
-    paint_resolved(p, r, resolved, look, opacity, ink.map_or(Finish::Artwork, Finish::Ink), flip_y);
+    paint_resolved(p, r, resolved, look, opacity, ink.map_or(Finish::Artwork, Finish::Ink), mirror);
 }
 
 /// Draw with a named palette ramp, preserving outlines, passive faces and transparency.
@@ -81,7 +86,7 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
         None => None,
     };
     let look = Look { dark: p.ctx().global_style().visuals.dark_mode, accent, vision: crate::theme::vision() };
-    paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, false);
+    paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
 /// Shared destructive-action artwork: red shaded faces, normal outlines and cutouts.
@@ -90,10 +95,10 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
 pub(crate) fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
     let resolved = icon_svg::resolve(name);
     let look = Look { dark: p.ctx().global_style().visuals.dark_mode, accent: icon_svg::accent_index("constraint"), vision: crate::theme::vision() };
-    paint_resolved(p, r, resolved, look, opacity, Finish::Danger, false);
+    paint_resolved(p, r, resolved, look, opacity, Finish::Danger, Mirror::None);
 }
 
-fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look, opacity: f32, finish: Finish, flip_y: bool) {
+fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look, opacity: f32, finish: Finish, mirror: Mirror) {
     let ctx = p.ctx();
     let ppp = ctx.pixels_per_point().max(0.5);
     let side = r.width().min(r.height());
@@ -118,7 +123,11 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
     let size = px as f32 / ppp;
     let min = pos2(((r.center().x - size / 2.0) * ppp).round() / ppp, ((r.center().y - size / 2.0) * ppp).round() / ppp);
     let tint = Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
-    let uv = if flip_y { Rect::from_min_max(pos2(0.0, 1.0), pos2(1.0, 0.0)) } else { Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)) };
+    let uv = match mirror {
+        Mirror::None => Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        Mirror::Vertical => Rect::from_min_max(pos2(0.0, 1.0), pos2(1.0, 0.0)),
+        Mirror::Horizontal => Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)),
+    };
     p.image(tex.id(), Rect::from_min_size(min, egui::vec2(size, size)), uv, tint);
 }
 

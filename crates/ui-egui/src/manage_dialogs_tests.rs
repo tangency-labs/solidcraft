@@ -296,8 +296,11 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     for label in ["name", "unit", "expression", "comment"] {
         assert!(scenario::handle_at(&format!("param:new:{label}")).is_some());
     }
-    assert_eq!(h.app.params.as_ref().unwrap().new_expr, "10 mm");
+    assert_eq!(h.app.params.as_ref().unwrap().new_expr, "", "a new parameter's expression starts blank (#2919)");
     h.step(&json!({"text":"pitch"})).unwrap();
+    // Enter after the name goes on to the blank expression, and Enter there adds the parameter.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.step(&json!({"text":"10 mm"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("pitch").unwrap().expr, "10 mm");
     assert!(h.app.params.is_some());
@@ -482,6 +485,8 @@ fn parameters_open_at_top_retain_user_scroll_and_reveal_only_requested_drafts() 
         h.step(&json!({"text":"pitch"})).unwrap();
         assert_eq!(h.app.params.as_ref().unwrap().new_name, "pitch");
         h.step(&json!({"key":"Enter"})).unwrap();
+        h.step(&json!({"text":"10 mm"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.param("pitch").unwrap().expr, "10 mm");
     }
 }
@@ -532,7 +537,7 @@ fn parameters_header_drag_retains_offset_and_bounds_the_card() {
             h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
             h.frames(6);
             let card = scenario::rect_of("dialog:header").unwrap().union(scenario::rect_of("dialog:footer").unwrap());
-            let viewport = crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap());
+            let viewport = crate::shell::tool_drag_rect(&h.app, crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap()));
             assert!(viewport.expand(2.0).contains_rect(card), "{layout:?}: {card:?} outside {viewport:?}");
             assert!(h.app.params.is_some());
         }

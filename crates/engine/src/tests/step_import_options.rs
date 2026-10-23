@@ -64,6 +64,25 @@ fn total_volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
+#[test]
+fn imported_joints_do_not_reuse_deleted_ids() {
+    let path = frame_file("joint-ids");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let first: Vec<_> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
+    assert!(!first.is_empty());
+    for id in &first {
+        run(&mut s, "joint.delete", json!({"joint": id}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    assert!(!s.doc.assembly.joints.is_empty());
+    for joint in &s.doc.assembly.joints {
+        assert!(!first.contains(&joint.id), "import reused deleted joint {}", joint.id);
+        assert!(joint.id < s.doc.next_id, "import did not reserve joint {}", joint.id);
+    }
+}
+
 /// `up: "y"` turns the file's bodies a quarter turn about X, Y becoming Z: the frame's height
 /// lies along Z, and what was its depth now runs towards -Y.
 #[test]
@@ -254,4 +273,62 @@ fn automatic_part_names_and_assembly_survive_reopening() {
     assert_eq!(again.doc.occurrences, s.doc.occurrences);
     assert!(near(extent(&again).0, [0.0, 0.0, 0.0]) && near(extent(&again).1, [40.0, 34.0, 20.0]));
     assert!((total_volume(&mut again) - (40.0 * 4.0 * 20.0 + 2.0 * 4.0 * 30.0 * 4.0)).abs() < 1e-6);
+}
+
+#[test]
+fn step_replies_include_originating_system() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-system-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("box.step");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5}))?;
+    source.execute("file.export", &json!({"path": path.to_string_lossy()}))?;
+    let text = std::fs::read_to_string(&path)?;
+    assert!(text.contains("'SolidCraft','SolidCraft'"));
+    for system in ["SolidCraft", "Example CAD"] {
+        std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", &format!("'SolidCraft','{system}'")))?;
+        for command in ["file.insert_step", "doc.open"] {
+            let reply = Session::default().execute(command, &json!({"path": path.to_string_lossy()}))?;
+            assert_eq!(reply.get("system").and_then(Value::as_str), Some(system), "{command}: {reply}");
+        }
+    }
+    std::fs::remove_dir_all(dir)?;
+    Ok(())
+}
+
+/// A header naming SolidWorks says the file has Y up; SolidCraft's own says Z; anything else
+/// says nothing (synthetic headers only).
+#[test]
+fn step_replies_name_a_y_up_exporter() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-exporter-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("box.step");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5}))?;
+    source.execute("file.export", &json!({"path": path.to_string_lossy()}))?;
+    let text = std::fs::read_to_string(&path)?;
+    let header = "'SolidCraft','SolidCraft'";
+    assert!(text.contains(header));
+    for (preprocessor, system, want) in [
+        ("SolidCraft", "SolidCraft", Some(("z", "SolidCraft"))),
+        ("SolidWorks 2021", "SolidWorks 2021", Some(("y", "SolidWorks"))),
+        ("Example CAD", "SOLIDWORKS 2019", Some(("y", "SolidWorks"))),
+        ("Example CAD", "Example CAD", None),
+    ] {
+        std::fs::write(&path, text.replace(header, &format!("'{preprocessor}','{system}'")))?;
+        for command in ["file.insert_step", "doc.open"] {
+            let reply = Session::default().execute(command, &json!({"path": path.to_string_lossy()}))?;
+            let got = reply.get("exporter_up").and_then(Value::as_str).zip(reply.get("exporter").and_then(Value::as_str));
+            assert_eq!(got, want, "{command} {system}: {reply}");
+        }
+    }
+    // The program may be named only in FILE_DESCRIPTION.
+    std::fs::write(
+        &path,
+        text.replace("FILE_DESCRIPTION((", "FILE_DESCRIPTION(('SolidWorks export',").replace(header, "'Example CAD','Example CAD'"),
+    )?;
+    let reply = Session::default().execute("file.insert_step", &json!({"path": path.to_string_lossy()}))?;
+    assert_eq!(reply.get("exporter_up").and_then(Value::as_str), Some("y"), "{reply}");
+    std::fs::remove_dir_all(dir)?;
+    Ok(())
 }

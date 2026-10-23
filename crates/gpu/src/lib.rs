@@ -21,7 +21,6 @@ use wgpu::util::DeviceExt;
 
 pub mod capture;
 mod pbr;
-pub mod pick;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod select;
 pub mod view;
@@ -96,6 +95,8 @@ pub enum GpuError {
     Pipeline(String),
     #[error("not supported yet: {0}")]
     Unsupported(String),
+    #[error("the GPU device was lost (the graphics driver was reset); it can't draw again")]
+    DeviceLost,
 }
 
 pub type Result<T> = std::result::Result<T, GpuError>;

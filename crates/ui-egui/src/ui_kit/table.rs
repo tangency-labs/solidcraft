@@ -1,5 +1,6 @@
 //! Dense editable tables. Geometry and typography share the form label-column tokens.
 use super::metrics::*;
+use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
 
@@ -356,7 +357,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     }
     scenario::publish_handle("dialog:menu:Add Column", rect.center());
     scenario::publish_rect("dialog:menu:Add Column", rect);
-    let popup = egui::Popup::menu(&response);
+    let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response);
     let open = popup.is_open();
     let result = popup.show(|ui| super::scope(ui, add)).map(|r| r.inner);
     if open {

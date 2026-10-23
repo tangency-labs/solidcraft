@@ -246,7 +246,9 @@ fn next_step(r: &mut Rng, s: &Session, last_feature: &Option<String>) -> Option<
             let edges = body.body.edges(tol).ok()?;
             let n = 1 + r.below(3);
             let picks: Vec<[f64; 3]> = (0..n).filter_map(|_| edges.get(r.below(edges.len()))).map(|e| [e.mid.x, e.mid.y, e.mid.z]).collect();
-            step("chamfer", Expect::Shrink, vec![("solid.chamfer", json!({"edges": picks, "distance": r.pick(&[0.5, 1.0, 2.0])?}))])
+            // Any, as for fillets: the edges are picked at random, and a chamfer on a concave edge
+            // fills the corner, so it adds material.
+            step("chamfer", Expect::Any, vec![("solid.chamfer", json!({"edges": picks, "distance": r.pick(&[0.5, 1.0, 2.0])?}))])
         }
         8 => {
             let faces: Vec<_> = body.body.faces(tol).ok()?.into_iter().filter(|f| f.plane_normal.is_some()).collect();

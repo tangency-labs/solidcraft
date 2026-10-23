@@ -13,6 +13,10 @@ use crate::theme::Tokens;
 /// Weight of the newest frame in the running mean (roughly the last 20 frames count).
 const NEWEST: f64 = 0.05;
 
+/// A gap between frames longer than this (seconds) means the view stood still: nothing changed,
+/// so nothing was drawn.
+const IDLE_AFTER: f64 = 1.0;
+
 /// Frames the graph and the histogram keep: about four seconds at 60 frames per second.
 pub const HISTORY: usize = 240;
 
@@ -35,20 +39,28 @@ pub struct Sample {
 #[derive(Clone, Debug, Default)]
 pub struct FrameRate {
     mean_dt: f64,
+    /// The last gap between frames was a pause: the view is idle.
+    idle: bool,
     samples: VecDeque<Sample>,
     /// The model scene's key at the last frame, to mark the frames that rebuilt it.
     scene_key: u64,
 }
 
 impl FrameRate {
-    /// Takes the time since the previous frame, in seconds. A gap over a second (the app idle
-    /// before the readout was turned on, a window being moved) is not a frame of a running view
-    /// and is left out, as is anything that isn't a positive finite time. `true` when it counted.
+    /// Takes the time since the previous frame, in seconds. A gap over a second means the view
+    /// was idle (it draws only when something changes): the mean starts again from the next
+    /// frames, and the history keeps the frames before the pause. Anything that isn't a positive
+    /// finite time is left out. `true` when it counted as a frame.
     pub fn record(&mut self, dt: f64) -> bool {
-        if !dt.is_finite() || dt <= 0.0 || dt > 1.0 {
+        if !dt.is_finite() || dt <= 0.0 {
+            return false;
+        }
+        if dt > IDLE_AFTER {
+            (self.mean_dt, self.idle) = (0.0, true);
             return false;
         }
         self.mean_dt = if self.mean_dt > 0.0 { self.mean_dt + NEWEST * (dt - self.mean_dt) } else { dt };
+        self.idle = false;
         true
     }
 
@@ -65,13 +77,16 @@ impl FrameRate {
         self.samples.iter()
     }
 
-    /// The averaged rate; `None` before the first frame was recorded.
+    /// The averaged rate; `None` before the first frame was recorded and while the view is idle.
     pub fn fps(&self) -> Option<f64> {
         (self.mean_dt > 0.0).then(|| 1.0 / self.mean_dt)
     }
 
-    /// The readout's text: rate and the matching time per frame.
+    /// The readout's text: rate and the matching time per frame, or 0 while the view is idle.
     pub fn label(&self) -> Option<String> {
+        if self.idle {
+            return Some("0 FPS".to_string());
+        }
         self.fps().map(|fps| format!("{fps:.0} FPS · {:.1} ms", 1000.0 * self.mean_dt))
     }
 
@@ -124,8 +139,10 @@ fn budget_colour(t: &Tokens, ms: f32) -> Color32 {
 }
 
 /// Records this frame and paints the readout in the view's bottom-right corner, with the details
-/// above it when they are on. While it is on the view redraws every frame, so the rate is what
-/// the view can draw rather than how often something happened to change.
+/// above it when they are on. The readout asks for no frames of its own, so it shows how often the
+/// view is really drawn and leaves an idle window idle (a readout that redrew every frame kept the
+/// GPU busy on an untouched window); the details show the frames the view drew. Once the frames
+/// stop, one more frame a little over [`IDLE_AFTER`] later shows the view idle.
 pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, rect: Rect) {
     if !app.preferences.show_frame_rate {
         app.frame_rate = FrameRate::default();
@@ -139,7 +156,9 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
         app.frame_rate.push(Sample { ms, triangles: drawn.triangles, rebuilt });
     }
     app.frame_rate.scene_key = app.viewport.key;
-    ctx.request_repaint();
+    if app.frame_rate.fps().is_some() {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(IDLE_AFTER + 0.1));
+    }
     let Some(text) = app.frame_rate.label() else { return };
     let t = Tokens::get();
     let font = FontId::monospace(t.font_body);
@@ -152,19 +171,13 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     {
         r = r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom()));
     }
-    // And above the floating History card, which would otherwise take its clicks (#4107).
-    if let Some(history) = app.shell.history
-        && r.intersects(history)
-    {
-        r = r.translate(vec2(0.0, history.top() - crate::shell::SHELL_GAP - r.bottom()));
-    }
     let id = egui::Id::new("sc_frame_rate");
     let clicked = ui.interact(r, id, Sense::click()).on_hover_text(tr("perf.click_for_details")).clicked();
     if clicked {
         app.preferences.frame_rate_details = !app.preferences.frame_rate_details;
     }
     painter.rect(r, 4.0, t.overlay, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-    crate::scenario::publish_handle("viewport:frame_rate", r.center());
+    crate::scenario::publish_target("viewport:frame_rate", r);
     painter.galley(r.center() - galley.size() / 2.0, galley, t.text);
     if app.preferences.frame_rate_details {
         details(app, painter, rect, r, drawn, &font);
@@ -299,15 +312,48 @@ mod tests {
     }
 
     #[test]
-    fn pauses_and_hostile_times_are_left_out() {
+    fn hostile_times_are_left_out_and_a_pause_reads_idle() {
         let mut f = FrameRate::default();
-        for dt in [0.0, -1.0, f64::NAN, f64::INFINITY, 5.0] {
+        for dt in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(!f.record(dt));
         }
         assert_eq!(f.fps(), None);
-        f.record(0.01);
-        f.record(3.0);
+        assert_eq!(f.label(), None);
+        assert!(f.record(0.01));
         assert!((f.fps().unwrap_or(0.0) - 100.0).abs() < 1e-6);
+        // Nothing drawn for 3 s: the view was idle, and the next frames start a new mean.
+        assert!(!f.record(3.0));
+        assert_eq!(f.fps(), None);
+        assert_eq!(f.label().as_deref(), Some("0 FPS"));
+        f.record(1.0 / 60.0);
+        assert!((f.fps().unwrap_or(0.0) - 60.0).abs() < 1e-6);
+    }
+
+    /// The readout must not keep an untouched window drawing: with it on, a frame asks for the
+    /// next one only after the idle gap (to show 0 FPS), and the idle frame asks for none.
+    #[test]
+    fn the_readout_asks_for_no_frames_of_its_own() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.show_frame_rate = true;
+        let ctx = crate::fonts::test_context();
+        let mut frame = |time: f64| {
+            let raw = egui::RawInput { time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                let painter = ui.painter().clone();
+                super::paint(&mut app, ui, &painter, rect);
+            });
+            out.textures_delta.clear();
+            out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+        };
+        for i in 0..10 {
+            frame(f64::from(i) / 60.0);
+        }
+        let busy = frame(10.0 / 60.0);
+        assert!(busy.is_some_and(|d| d.as_secs_f64() > 1.0), "a running readout asked for a frame after {busy:?}");
+        let idle = frame(2.0);
+        assert!(idle.is_some_and(|d| d.as_secs_f64() > 3600.0), "an idle readout asked for a frame after {idle:?}");
+        assert_eq!(app.frame_rate.label().as_deref(), Some("0 FPS"));
     }
 
     #[test]

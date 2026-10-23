@@ -11,6 +11,7 @@ use crate::scenario::Harness;
 fn far_sketch() -> (Harness, u64) {
     let mut h = Harness::new();
     h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane": "XY", "offset": 8, "name": "Far"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [330, 475], "p1": [350, 505]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
@@ -52,6 +53,7 @@ fn look_at_on_the_active_sketch_keeps_a_wider_zoom() {
 fn an_empty_sketch_keeps_its_planes_origin() {
     let mut h = Harness::new();
     h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
     h.app.run("sketch.create", json!({"plane": "XY", "offset": 8})).unwrap();
     h.app.cam.distance = 123.0;
     crate::dialogs::look_at_sketch(&mut h.app);

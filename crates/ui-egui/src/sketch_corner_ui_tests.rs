@@ -679,3 +679,33 @@ fn two_tangent_circle_clicked_on_two_sides_fits_the_corner_and_moves_nothing() {
         assert!(before.iter().zip(&after).all(|(a, b)| a.dist(*b) < 1e-9), "fixed {fixed}: the rectangle moved: {after:?}");
     }
 }
+
+/// #3099: the centre circle tool, its centre snapped to a line's midpoint and its second click
+/// to the line's end, keeps the circle through that end: nothing is left free.
+#[test]
+fn centre_circle_clicked_through_a_line_end_stays_on_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,30],[40,30]]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start":"sketch.circle.center"})).unwrap();
+    for at in [[20, 30, 0], [40, 30, 0]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).unwrap();
+    let end = sk.resolve_point("l1.end").unwrap();
+    assert!(
+        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { l: 0, .. })),
+        "{:?}",
+        sk.constraints
+    );
+    assert!(
+        sk.constraints.iter().any(|k| k.kind == solidcraft_engine::sketch::ConstraintKind::PointOnCurve { p: end, c: circle }),
+        "the circle stays on the line's end: {:?}",
+        sk.constraints
+    );
+}

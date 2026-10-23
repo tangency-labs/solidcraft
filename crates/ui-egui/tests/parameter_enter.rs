@@ -43,6 +43,12 @@ fn parameter_enter_adds_once_and_focuses_next_name() {
     // Name has focus after successful creation; no mouse needed for the next name.
     h.run(&json!([{"text":"height"}])).unwrap();
     assert_eq!(h.app.params.as_ref().unwrap().new_name, "height");
+    // The new row's expression starts blank: Enter after the name goes on to it, and Enter
+    // there adds the parameter.
+    enter(&mut h, false);
+    assert_eq!(h.app.session.undo.len(), undo + 1, "nothing added without an expression");
+    h.run(&json!([{"text":"10 mm"}])).unwrap();
+    assert_eq!(h.app.params.as_ref().unwrap().new_expr, "10 mm");
     enter(&mut h, false);
     assert_eq!(h.app.session.undo.len(), undo + 2);
     let result = h.app.session.execute("parameters.list", &json!({})).unwrap();

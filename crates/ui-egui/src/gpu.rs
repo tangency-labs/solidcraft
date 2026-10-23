@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 pub use solidcraft_gpu::view::{
-    AccessMap, BlockBytes, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, LINE_SIZE, PBR_SIZE, PlannedBody, Renderer, SceneBlock,
-    SceneSlot, TRI_SIZE, supersampled_size,
+    AccessMap, BlockBytes, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, LINE_SIZE,
+    LOD_PX, PBR_SIZE, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, level_for, placement_scale, supersampled_size,
 };
 
 /// A frame of the viewport as an egui paint callback.
@@ -35,13 +35,7 @@ pub fn install(rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, sa
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
     match solidcraft_gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone()) {
-        Ok(capturer) => {
-            let capturer = std::sync::Arc::new(capturer);
-            solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
-                let rgba = capturer.rgba(scene, cam, w, h).map_err(|e| e.to_string())?;
-                Ok(solidcraft_engine::capture::Picture { rgba, renderer: capturer.renderer() })
-            }));
-        }
+        Ok(capturer) => install_capturer(capturer.watching(rs.device_lost.flag())),
         Err(e) => {
             log::warn!("pictures of the model are drawn by the CPU rasterizer: the GPU cannot draw them: {e}");
             install_cpu_picture_renderer();
@@ -49,14 +43,45 @@ pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
     }
 }
 
+/// Draw this process's headless pictures with `capturer`; once its device is lost (the graphics
+/// driver was reset, #4172) the CPU rasterizer draws them, so saving still writes a thumbnail.
+#[cfg(not(target_arch = "wasm32"))]
+fn install_capturer(capturer: solidcraft_gpu::capture::Capturer) {
+    let capturer = std::sync::Arc::new(capturer);
+    solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| picture(&capturer, scene, cam, w, h)));
+}
+
+/// `scene` drawn by `capturer`, or by the CPU rasterizer once its device is lost.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture(
+    capturer: &solidcraft_gpu::capture::Capturer,
+    scene: &solidcraft_engine::render::Scene,
+    cam: &solidcraft_engine::render::Camera,
+    w: u32,
+    h: u32,
+) -> Result<solidcraft_engine::capture::Picture, String> {
+    match capturer.rgba(scene, cam, w, h) {
+        Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer: capturer.renderer() }),
+        Err(solidcraft_gpu::GpuError::DeviceLost) => Ok(cpu_picture(scene, cam, w, h)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// The last tier: draw this process's headless pictures with the CPU rasterizer, and every
 /// picture says so. The app uses it when its device cannot draw pictures; the web app always
 /// does, since a browser cannot wait for the GPU to hand a picture back.
 pub fn install_cpu_picture_renderer() {
-    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let canvas = solidcraft_engine::render::render(scene, cam, w as usize, h as usize);
-        Ok(solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" })
-    }));
+    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| Ok(cpu_picture(scene, cam, w, h))));
+}
+
+fn cpu_picture(
+    scene: &solidcraft_engine::render::Scene,
+    cam: &solidcraft_engine::render::Camera,
+    w: u32,
+    h: u32,
+) -> solidcraft_engine::capture::Picture {
+    let canvas = solidcraft_engine::render::render(scene, cam, w as usize, h as usize);
+    solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" }
 }
 
 #[cfg(test)]
@@ -372,5 +397,43 @@ mod tests {
             let used = Backends::from(adapter.get_info().backend);
             assert!(chosen.contains(used), "the offscreen device runs on {used:?}, not on {chosen:?}");
         }
+    }
+    /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
+    /// before the next frame's uploads, those uploads no longer reach the device (they panicked
+    /// inside wgpu when they were the first to meet the loss), and pictures (thumbnails of saves)
+    /// come from the CPU rasterizer. `destroy` loses the device as a driver reset does; wgpu calls
+    /// the lost callback of a destroyed device once it has polled.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_lost_device_stops_drawing_and_pictures_fall_back_to_the_cpu() {
+        use egui_wgpu::wgpu;
+        let Some((adapter, device, queue)) = super::offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let lost = egui_wgpu::DeviceLost::watch(&device);
+        let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
+        let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
+        assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
+        assert!(!lost.probe(&queue), "a working device isn't lost");
+
+        // egui's renderer is made with the window, before any loss (made on a lost device, its
+        // uniform buffer's `create_buffer_init` panics).
+        let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
+
+        device.destroy();
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert!(lost.is_lost() && lost.probe(&queue), "the lost callback marked the device");
+        assert!(lost.reason().is_some_and(|r| r.starts_with("Destroyed")), "{:?}", lost.reason());
+
+        // The next frame's uploads, as the painter would make them were it not skipping: wgpu
+        // knows the device is lost, so they fail quietly instead of panicking.
+        let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
+        let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
+        renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
+
+        // A save's thumbnail still comes: from the CPU rasterizer.
+        let picture = super::picture(&capturer, &scene, &cam, 16, 16).unwrap();
+        assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
     }
 }

@@ -123,9 +123,6 @@ pub(super) fn prepare(s: &Session, tolerance: f64) -> Result<Scene> {
         let keep = groups.get(group).is_some_and(|g| g.first == index);
         items.push(Item { body, group, keep, transform });
     }
-    if items.is_empty() {
-        return Err(bad(CMD, "no visible bodies to export"));
-    }
     let progress = Stage::new("dxf_meshes", items.len());
     let bytes = AtomicUsize::new(0);
     let results = map_with_local_pools(&items, WORKERS, |item| {

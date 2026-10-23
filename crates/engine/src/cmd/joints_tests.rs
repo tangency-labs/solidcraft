@@ -25,6 +25,26 @@ fn near(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-6
 }
 
+#[test]
+fn deleted_joint_ids_are_not_reused_after_reopening() {
+    for command in ["joint.create", "joint.as_built"] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Part"}));
+        let params = if command == "joint.create" {
+            json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Part", "point": [0, 0, 0]}})
+        } else {
+            json!({"type": "revolute", "a": 0, "b": "Part"})
+        };
+        let first = run(&mut s, command, params.clone())["joint"].as_u64().unwrap();
+        run(&mut s, "joint.delete", json!({"joint": first}));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        let second = run(&mut s, command, params)["joint"].as_u64().unwrap();
+        assert!(second > first, "{command}: deleted joint {first} was reused as {second}");
+        assert!(s.execute("joint.drive", &json!({"joint": first, "value": 45})).is_err());
+    }
+}
+
 /// A hinge leaf (oracle 63's knuckle geometry): a 40 x 30 x 3 plate and an r4 knuckle along X
 /// at y = 33, z = 4.
 fn leaf(s: &mut Session, name: &str) {

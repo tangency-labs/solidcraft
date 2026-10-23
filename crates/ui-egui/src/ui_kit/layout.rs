@@ -6,6 +6,13 @@ use egui::{Response, RichText, Ui, vec2};
 pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
+pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
+
+/// A deliberate label grid for multi-column settings, inherited by the existing shared rows.
+pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(FIXED_LABEL, dimension(label_width))), add)
+        .inner
+}
 
 /// Mark a form without global state: children inherit this tag through their UI stack.
 /// Inherited form styling and label-column identity. Tokens: `space_4/8, form_gap_y, control_height, font_label, accent, selected_bg, dialog_rule, control_fill/border/radius, text`.
@@ -79,14 +86,17 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    // A nested row (`"  Of"`) lines up under the one above: the lookup uses the text without its
+    // indent and the indent stays in front of the translation. The `LABEL` tag keeps the original.
+    let shown = indented_label(text);
+    // Measuring takes the original text and prepares it the same way, so column and row agree.
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         // Left aligned in the label column, as in the design.
-        ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(text)).size(t.font_label).color(t.dialog_label)).truncate())
-            .on_hover_text(crate::i18n::tr_label(text));
+        ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate()).on_hover_text(shown);
     });
-    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + label_gap(width)).min(rect.right()), rect.top()), rect.max);
+    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + label_gap(ui, width)).min(rect.right()), rect.top()), rect.max);
     let result = ui
         .scope_builder(
             egui::UiBuilder::new()
@@ -115,7 +125,7 @@ pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
-    let left = (rect.left() + label_column(ui, aligned_to, width) + label_gap(width)).min(rect.right());
+    let left = (rect.left() + label_column(ui, aligned_to, width) + label_gap(ui, width)).min(rect.right());
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max);
     paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), t.form_dim, false);
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
@@ -154,7 +164,14 @@ pub(crate) fn section_count<R>(
     let badge_value = count.map(|count| count.to_string());
     let badge_width = badge_value.as_ref().map_or(0.0, |value| label_width(ui, value) + t.space_12);
     let reserved = if badge_value.is_some() { badge_width + t.space_12 } else { 0.0 };
-    let title_width = label_width(ui, &caption).min((text_rect.width() - reserved).max(0.0));
+    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
+    let title_width = ui
+        .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
+        .size()
+        .x
+        .ceil()
+        .min((text_rect.width() - reserved).max(0.0));
     let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
     paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
     let mut rule_left = title_rect.right() + t.space_12;

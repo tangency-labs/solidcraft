@@ -237,7 +237,7 @@ fn width(vp: egui::Rect) -> f32 {
 
 /// The viewport the palette docks into.
 fn viewport(app: &SolveApp, ctx: &egui::Context) -> egui::Rect {
-    crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect()))
+    crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())))
 }
 
 /// Is a sketch being edited? That is the palette's own condition.
@@ -334,10 +334,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !vp.is_finite() || !vp.is_positive() {
         return;
     }
-    let bottom = vp.bottom().min(ctx.content_rect().bottom()) - crate::shell::SHELL_GAP;
+    let gap = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Palette).gap();
+    let bottom = vp.bottom().min(ctx.content_rect().bottom()) - gap;
     let top = crate::shell::panel_top(app, vp, bottom, crate::frame::Side::Right);
     let frame = crate::ui_kit::Panel::palette_frame(ctx, app.ui.layout);
-    let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP - frame.stroke.width, top + frame.stroke.width);
+    let anchor = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -370,7 +371,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         frame,
     )
     .width(width(vp));
-    let response = panel.window().show(ctx, |ui| {
+    let response = panel.window(ctx).show(ctx, |ui| {
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
                 let status = if !solved || !geometry || remaining == 0 {
@@ -1011,7 +1012,7 @@ mod tests {
     }
 
     /// A double Esc on a sketch left blank takes it away (no empty sketch in the browser or the
-    /// timeline, one undo step) and puts the view back; one line is enough to keep it.
+    /// timeline, one undo step) and leaves the view alone; one line is enough to keep it.
     #[test]
     fn a_quick_double_escape_discards_a_blank_sketch_and_keeps_one_with_a_line() {
         let mut h = crate::scenario::Harness::new();
@@ -1025,7 +1026,7 @@ mod tests {
         h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
         h.settle();
-        crate::scenario::check(&mut h, &json!({"sketching": false, "camera": {"yaw_deg": -45, "pitch_deg": 35}})).unwrap();
+        crate::scenario::check(&mut h, &json!({"sketching": false, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
         assert_eq!(h.app.ui.tab, "MODEL");
         assert!(h.app.session.doc.features.is_empty(), "the blank sketch is gone");
         assert!(crate::scenario::handles("timeline:").iter().all(|(n, _)| !n.contains("Sketch")));

@@ -292,3 +292,8 @@ SolidCraft changes:
   and the frame is skipped with a repaint asked for when it is due. The streak and the deadline
   survive a recreate; a configure the device takes ends the streak, a recreate it asked for
   included. A recreate for a lost surface goes ahead as before.
+- `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
+  (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
+  submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
+  submission rather than by the first queue write, which panicked inside wgpu-core
+  (`PendingWrites::activate`, #4172).

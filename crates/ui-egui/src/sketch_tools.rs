@@ -203,7 +203,8 @@ fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let (row, pad, swatch) = (18.0, 8.0, 22.0);
     let text_width = rows.iter().map(|(label, _)| painter.layout_no_wrap(label.to_string(), font.clone(), tk.text).size().x).fold(0.0, f32::max);
     let size = egui::vec2(pad + swatch + 8.0 + text_width + pad, rows.len() as f32 * row + 2.0 * pad);
-    let frame = egui::Rect::from_min_size(proj.rect.left_bottom() + egui::vec2(16.0, -(size.y + 16.0)), size);
+    let available = crate::shell::bottom_overlay_rect(app, proj.rect);
+    let frame = egui::Rect::from_min_size(available.left_bottom() + egui::vec2(16.0, -(size.y + 16.0)), size);
     painter.rect_filled(frame, 4.0, tk.panel.gamma_multiply(0.9));
     crate::scenario::publish_rect("continuity_legend", frame);
     for (i, (label, col)) in rows.iter().enumerate() {
@@ -467,6 +468,50 @@ pub fn refine_snap(
     })
 }
 
+/// The constraints one glyph stands for. A point that is the midpoint of several lines (their
+/// midpoints meet) shows a single MidPoint glyph, the first constraint's, for all of them;
+/// any other constraint stands for itself.
+pub fn glyph_group(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<String> {
+    use solidcraft_engine::sketch::ConstraintKind::Midpoint;
+    match sk.constraints.iter().find(|c| c.id == id).map(|c| (c.kind.clone(), c.driven)) {
+        Some((Midpoint { p, .. }, false)) => {
+            sk.constraints.iter().filter(|c| !c.driven && matches!(c.kind, Midpoint { p: q, .. } if q == p)).map(|c| c.id.clone()).collect()
+        }
+        _ => vec![id.to_string()],
+    }
+}
+
+/// What deleting glyph `id` removes: the constraints it stands for, and, for one MidPoint glyph
+/// shared by several lines, their common point once nothing else holds it (it only tied the
+/// midpoints together, so it would be left floating).
+pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<solidcraft_engine::Sel> {
+    use solidcraft_engine::{Sel, sketch::ConstraintKind::Midpoint};
+    let group = glyph_group(sk, id);
+    let shared = match sk.constraints.iter().find(|c| c.id == id).map(|c| &c.kind) {
+        Some(Midpoint { p, .. }) if group.len() > 1 => Some(*p),
+        _ => None,
+    };
+    let orphan = shared.filter(|&p| {
+        !sk.curves.iter().any(|c| c.kind.uses(p))
+            && !sk.constraints.iter().any(|c| !group.contains(&c.id) && c.kind.indices().0.contains(&p))
+            && sk.points.get(p).is_some_and(|q| !q.fixed && q.link.is_none() && q.exprs.is_none())
+    });
+    let mut out: Vec<Sel> = group.into_iter().map(|id| Sel::SketchConstraint { id }).collect();
+    if let Some(q) = orphan.and_then(|p| sk.points.get(p)) {
+        out.push(Sel::SketchPoint { id: q.id.clone() });
+    }
+    out
+}
+
+/// [`glyph_deletion`] in the active sketch.
+pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine::Sel> {
+    let st = app.session.world_state();
+    match active_sketch(app).and_then(|s| st.sketch(s)) {
+        Some(ss) => glyph_deletion(&ss.sketch, id),
+        None => vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_string() }],
+    }
+}
+
 /// The constraint glyph under a screen position (its constraint id).
 pub fn glyph_at(pos: Pos2) -> Option<String> {
     GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= GLYPH * 0.6).map(|(id, _)| id.clone()))
@@ -477,24 +522,17 @@ pub fn glyph_positions() -> Vec<(String, Pos2)> {
     GLYPHS.with(|g| g.borrow().clone())
 }
 
-/// A click on a constraint glyph selects it (true: the click was used).
-pub fn click_glyph(app: &mut SolveApp, _proj: &Proj, pos: Pos2) -> bool {
-    if app.session.active_sketch.is_none() {
-        return false;
-    }
-    let hit = GLYPHS.with(|g| g.borrow().iter().find(|(_, c)| c.distance(pos) <= GLYPH * 0.6).map(|(id, _)| id.clone()));
-    let used = hit.is_some();
-    PICKED.with(|p| *p.borrow_mut() = hit.clone());
-    if let Some(id) = hit {
-        app.set_status(format!("Constraint {id} selected: Delete removes it"), false);
-    }
-    used
-}
-
 /// Delete the selected constraint glyph (true when one was selected).
 pub fn delete_glyph(app: &mut SolveApp) -> bool {
     let Some(id) = PICKED.with(|p| p.borrow_mut().take()) else { return false };
-    let _ = app.run("sketch.delete", json!({"entities": [id]}));
+    let entities: Vec<String> = active_glyph_deletion(app, &id)
+        .into_iter()
+        .filter_map(|s| match s {
+            solidcraft_engine::Sel::SketchConstraint { id } | solidcraft_engine::Sel::SketchPoint { id } => Some(id),
+            _ => None,
+        })
+        .collect();
+    let _ = app.run("sketch.delete", json!({ "entities": entities }));
     true
 }
 
@@ -1170,9 +1208,19 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
+    // The point of each MidPoint glyph drawn so far: lines whose midpoints meet share one glyph.
+    let mut midpoints: Vec<usize> = Vec::new();
     for c in &ss.sketch.constraints {
         if c.kind.is_dimension() {
             continue;
+        }
+        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
+            && !c.driven
+        {
+            if midpoints.contains(&p) {
+                continue;
+            }
+            midpoints.push(p);
         }
         if matches!(
             c.kind,
@@ -1213,10 +1261,16 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     }
     let hovered = hover.and_then(|h| placed.iter().find(|(_, q, _)| q.distance(h) <= GLYPH * 0.6).map(|(id, _, _)| id.clone()));
     // The hovered (or selected) constraint's entities lit up.
-    if let Some(id) = hovered.as_ref().or(picked.as_ref())
-        && let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id)
-    {
-        let (cs, ps) = constraint_entities(&c.kind);
+    if let Some(id) = hovered.as_ref().or(picked.as_ref()) {
+        let group = glyph_group(&ss.sketch, id);
+        let (cs, ps) = ss.sketch.constraints.iter().filter(|c| group.contains(&c.id)).map(|c| constraint_entities(&c.kind)).fold(
+            (Vec::new(), Vec::new()),
+            |(mut cs, mut ps), (c, p)| {
+                cs.extend(c);
+                ps.extend(p);
+                (cs, ps)
+            },
+        );
         let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
         for ci in cs {
             crate::tools::paint_curve(&ss.sketch, ci, &ss.plane, painter, proj, Stroke::new(3.0, tk.accent.gamma_multiply(0.7)), &mut display_budget);
@@ -1230,11 +1284,12 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     let mut drawn: Vec<(String, Pos2)> = Vec::new();
     for (id, sp, base) in &placed {
         let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id) else { continue };
-        let failing = ss.report.failing.contains(id);
+        let group = glyph_group(&ss.sketch, id);
+        let failing = group.iter().any(|g| ss.report.failing.contains(g));
         // Redundant (already implied by the others, but holding): dimmed, not an error.
-        let redundant = !failing && ss.report.redundant.contains(id);
+        let redundant = !failing && group.iter().all(|g| ss.report.redundant.contains(g));
         let selected = picked.as_deref() == Some(id.as_str())
-            || app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchConstraint { id: x } if x == id));
+            || app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchConstraint { id: x } if group.contains(x)));
         let lit = selected || hovered.as_deref() == Some(id.as_str());
         let col = if failing {
             tk.error
@@ -1260,7 +1315,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             }
         });
         match pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
-            Some(icon) => crate::icons::paint(painter, r.shrink(2.0), icon, col, tk.glyph_bg, col),
+            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0), icon, f32::from(col.a()) / 255.0),
             None => {
                 painter.text(
                     *sp,
@@ -1276,10 +1331,11 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     if let (Some(id), Some(h)) = (hovered, hover)
         && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
     {
+        let ids = glyph_group(&ss.sketch, &id).join(", ");
         let label = if ss.report.redundant.contains(&id) {
-            format!("{} ({id}), redundant: already implied by other constraints", c.kind.name())
+            format!("{} ({ids}), redundant: already implied by other constraints", c.kind.name())
         } else {
-            format!("{} ({id})", c.kind.name())
+            format!("{} ({ids})", c.kind.name())
         };
         let at = h + egui::vec2(12.0, 12.0);
         let g = painter.layout_no_wrap(label, egui::FontId::proportional(crate::theme::Tokens::get().font_small), tk.text);

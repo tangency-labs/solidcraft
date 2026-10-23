@@ -326,10 +326,10 @@ fn encode_mesh(mesh: &MeshData) -> Result<Vec<u8>> {
     bytes.extend_from_slice(MESH_MAGIC);
     bytes.extend_from_slice(&(mesh.positions.len() as u64).to_le_bytes());
     bytes.extend_from_slice(&(mesh.triangles.len() as u64).to_le_bytes());
-    for value in &mesh.positions {
+    for value in mesh.positions.iter() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    for value in &mesh.triangles {
+    for value in mesh.triangles.iter() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     Ok(bytes)
@@ -536,7 +536,7 @@ fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignP
             return Err(invalid("overlapping preview bodies"));
         }
         end = end.checked_add(length).ok_or_else(|| invalid("preview overflow"))?;
-        let mut mesh = MeshData { name: String::new(), positions: Vec::new(), triangles: Vec::new(), color: None };
+        let mut mesh = MeshData { name: String::new(), positions: Vec::new().into(), triangles: Vec::new().into(), color: None };
         decode_mesh(data.get(offset..end).ok_or_else(|| invalid("truncated preview"))?, &mut mesh)?;
         triangles = triangles.saturating_add(mesh.triangles.len() / 3);
         if triangles > MAX_PREVIEW_TRIANGLES {
@@ -971,8 +971,8 @@ mod tests {
     fn mesh() -> MeshData {
         MeshData {
             name: "Precise mesh".into(),
-            positions: vec![0.123456789012345, -0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            triangles: vec![0, 1, 2],
+            positions: vec![0.123456789012345, -0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into(),
+            triangles: vec![0, 1, 2].into(),
             color: Some([0.25, 0.5, 0.75]),
         }
     }
@@ -995,8 +995,9 @@ mod tests {
         other.name = "Same triangles, separate appearance".into();
         other.color = None;
         doc.add_feature(FeatureKind::MeshImport { file: "example.obj".into(), meshes: vec![mesh(), other] }, None).unwrap();
+        let id = doc.allocate_id().unwrap();
         doc.canvases.push(solidcraft_doc::canvas::Canvas {
-            id: 99,
+            id,
             name: "Reference".into(),
             format: "png".into(),
             data: solidcraft_doc::canvas::base64_encode(b"original image bytes"),
@@ -1128,7 +1129,7 @@ mod tests {
             assert!(read_design_preview(&package(&entries)).is_none());
         }
         let mut too_large = mesh();
-        too_large.triangles = vec![0; (MAX_PREVIEW_TRIANGLES + 1) * 3];
+        too_large.triangles = vec![0; (MAX_PREVIEW_TRIANGLES + 1) * 3].into();
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&DesignPreview { meshes: vec![too_large] })).unwrap();
         assert!(read_design_preview(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap(), doc);

@@ -10,6 +10,7 @@ fn step(h: &mut Harness, value: Value) {
 }
 fn fixture() -> Harness {
     let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
         ("sketch.line", json!({"points":[[-30,10],[-15,10]]})),

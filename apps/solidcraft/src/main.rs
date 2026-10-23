@@ -19,6 +19,7 @@
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
 mod control_server;
+mod device_lost;
 #[cfg(target_os = "windows")]
 mod native_crash;
 #[cfg(target_os = "windows")]
@@ -76,6 +77,8 @@ struct App {
     frames: u32,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
+    /// The graphics device: lost, it can't draw again (`App::watch_device`, #4172).
+    gpu: Option<LostWatch>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     space_mouse: space_mouse::SpaceMouse,
 }
@@ -107,6 +110,7 @@ impl eframe::App for App {
                 }
             }
         }
+        self.watch_device();
         // The design on screen is the one whose commands a crash report replays.
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
@@ -147,6 +151,9 @@ impl eframe::App for App {
         solidcraft_ui_egui::save_job::tick(&mut self.solve, true);
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
         solidcraft_engine::crash::end_session();
+        if let Some(lost_at) = self.gpu.as_ref().and_then(|g| g.lost_at) {
+            device_lost::restart(self.gpu.as_ref().is_some_and(|g| g.restart_on_software), lost_at);
+        }
         // An update asked to restart into the new version or to run its installer.
         if let Some((program, args)) = solidcraft_ui_egui::update::take_launch(&mut self.solve) {
             let mut command = std::process::Command::new(&program);
@@ -163,6 +170,30 @@ impl eframe::App for App {
                 log::error!("update: starting {}: {e}", program.display());
             }
         }
+    }
+}
+
+/// The window's graphics device, watched for its loss.
+struct LostWatch {
+    lost: eframe::egui_wgpu::DeviceLost,
+    /// Where the next start runs once this device is lost ([`device_lost::restart_on_software`]).
+    restart_on_software: bool,
+    /// When the loss was seen: the app is closing to start again.
+    lost_at: Option<u64>,
+}
+
+impl App {
+    /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
+    /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
+    /// start again once closed ([`device_lost::restart`]).
+    fn watch_device(&mut self) {
+        let Some(gpu) = self.gpu.as_mut().filter(|g| g.lost_at.is_none() && g.lost.is_lost()) else { return };
+        let reason = gpu.lost.reason().unwrap_or_default();
+        log::error!("graphics: the device was lost ({reason}); closing to start again");
+        eprintln!("SolidCraft graphics: the device was lost ({reason}); starting again");
+        solidcraft_engine::crash::phase(&format!("graphics device lost: {reason}"));
+        gpu.lost_at = Some(device_lost::now_secs());
+        self.solve.quit_requested = true;
     }
 }
 
@@ -579,6 +610,11 @@ fn main() -> eframe::Result {
         notes.push(format!("The last {failed_starts} launches stopped before the window opened, so this one is in safe mode."));
     }
     let cpu_renderer = safe_mode || startup::cpu_renderer_env(std::env::var(startup::RENDERER_ENV).ok().as_deref());
+    // The launch before this one closed because its graphics device was lost (`App::watch_device`).
+    let after_loss = device_lost::recent(std::env::var(device_lost::LOST_ENV).ok().as_deref(), device_lost::now_secs());
+    if after_loss {
+        notes.push(device_lost::note(cpu_renderer));
+    }
     if safe_mode {
         notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
     }
@@ -669,6 +705,11 @@ fn main() -> eframe::Result {
                 app.load_prefs(&p);
             }
             mark("app state and prefs");
+            let gpu = cc.wgpu_render_state.as_ref().map(|rs| LostWatch {
+                lost: rs.device_lost.clone(),
+                restart_on_software: device_lost::restart_on_software(after_loss, cpu_renderer),
+                lost_at: None,
+            });
             if let Some(rs) = &cc.wgpu_render_state {
                 eprintln!("SolidCraft graphics: {:?}, MSAA {}x (requested {}x)", rs.adapter.get_info().backend, rs.msaa_samples, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
@@ -746,6 +787,7 @@ fn main() -> eframe::Result {
                 starting,
                 frames: 0,
                 take_focus_unwanted: control_port.is_some(),
+                gpu,
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 space_mouse,
             }))

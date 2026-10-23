@@ -100,6 +100,8 @@ struct Iges {
     unit: f64,
     /// Minimum resolution (model units).
     resolution: f64,
+    /// Global section field 5: the system that wrote the file.
+    native_system: String,
 }
 
 /// Split parameter text into fields at `delim`, stopping at `rdelim`; Hollerith strings (`nH…`)
@@ -281,7 +283,7 @@ fn parse(text: &str) -> R<Iges> {
     if des.is_empty() {
         return Err("the file has no entities".into());
     }
-    Ok(Iges { des, params, unit, resolution })
+    Ok(Iges { des, params, unit, resolution, native_system: field(5).trim().to_string() })
 }
 
 /// A model curve segment ready for an edge: STEP curve id, its end points, points a quarter and
@@ -1167,14 +1169,17 @@ fn color_of(t: &Tr, seq: i64) -> Option<[f32; 3]> {
 
 /// Write faces sewn by `sw` as a shell; the shell's id and whether it closes.
 fn write_shell(o: &mut Out, sw: &Sewer, faces: &[FaceB], styles: &mut Vec<(u64, [f32; 3])>) -> (u64, bool) {
-    let vids: Vec<u64> = sw
-        .verts
-        .iter()
-        .map(|p| {
-            let c = o.point(*p);
-            o.add(format!("VERTEX_POINT('',#{c})"))
-        })
-        .collect();
+    // Vertices are written as the shell's edges use them (a sewer may hold several shells).
+    let mut vids: HashMap<usize, u64> = HashMap::new();
+    let mut vertex = |o: &mut Out, i: usize| -> Option<u64> {
+        if let Some(id) = vids.get(&i) {
+            return Some(*id);
+        }
+        let c = o.point(*sw.verts.get(i)?);
+        let id = o.add(format!("VERTEX_POINT('',#{c})"));
+        vids.insert(i, id);
+        Some(id)
+    };
     let mut eids: HashMap<usize, u64> = HashMap::new();
     let mut count: HashMap<usize, (usize, usize)> = HashMap::new();
     for &(e, d) in faces.iter().flat_map(|f| f.loops.iter().flatten()) {
@@ -1195,7 +1200,7 @@ fn write_shell(o: &mut Out, sw: &Sewer, faces: &[FaceB], styles: &mut Vec<(u64, 
                 let id = match eids.get(&e) {
                     Some(id) => *id,
                     None => {
-                        let (Some(a), Some(b)) = (vids.get(ed.v[0]), vids.get(ed.v[1])) else { continue };
+                        let (Some(a), Some(b)) = (vertex(o, ed.v[0]), vertex(o, ed.v[1])) else { continue };
                         let id = o.add(format!("EDGE_CURVE('',#{a},#{b},#{},{})", ed.curve, if ed.rev { ".F." } else { ".T." }));
                         eids.insert(e, id);
                         id
@@ -1317,8 +1322,17 @@ fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
         let psa = t.o.add(format!("PRESENTATION_STYLE_ASSIGNMENT((#{ssu}))"));
         t.o.add(format!("STYLED_ITEM('color',(#{psa}),#{item})"));
     }
-    let mut s = String::from(
-        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('IGES import'),'2;1');\nFILE_NAME('','',(''),(''),'SolidCraft IGES','','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n",
+    // The global section's native system ID (field 5) is the file's originating system.
+    let native: String = f
+        .native_system
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control())
+        .map(|c| if c == '\\' { ' ' } else { c })
+        .collect::<String>()
+        .replace('\'', "''");
+    let mut s = format!(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('IGES import'),'2;1');\nFILE_NAME('','',(''),(''),'SolidCraft IGES','{}','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n",
+        native.trim()
     );
     for (i, l) in t.o.lines.iter().enumerate() {
         let _ = writeln!(s, "#{}={l};", i + 1);
@@ -1335,7 +1349,7 @@ fn sew_surfaces(
     styles: &mut Vec<(u64, [f32; 3])>,
     faces: &mut Vec<FaceB>,
     sw: &mut Sewer,
-) -> R<Option<u64>> {
+) -> R<Vec<u64>> {
     faces.clear();
     sw.verts.clear();
     sw.grid.clear();
@@ -1358,17 +1372,60 @@ fn sew_surfaces(
         faces.push(FaceB { surface: d.surface, sense: true, loops, color: d.color });
     }
     if faces.is_empty() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     orient(faces);
-    let (shell, closed) = write_shell(&mut t.o, sw, faces, styles);
+    // Faces that share no edge, directly or through others, are separate bodies: one shell of
+    // two lumps is closed edge by edge but not a solid.
+    let pieces = connected(faces);
     let name = name.replace('\'', "''");
-    Ok(Some(if closed {
-        t.o.add(format!("MANIFOLD_SOLID_BREP('{name}',#{shell})"))
-    } else {
-        t.warn("the surfaces do not close into a solid: imported as an open body");
-        t.o.add(format!("SHELL_BASED_SURFACE_MODEL('{name}',(#{shell}))"))
-    }))
+    let mut items = Vec::with_capacity(pieces.len());
+    for (k, piece) in pieces.into_iter().enumerate() {
+        let (shell, closed) = write_shell(&mut t.o, sw, &piece, styles);
+        let name = if k == 0 { name.clone() } else { format!("{name} {}", k + 1) };
+        items.push(if closed {
+            t.o.add(format!("MANIFOLD_SOLID_BREP('{name}',#{shell})"))
+        } else {
+            t.warn("the surfaces do not close into a solid: imported as an open body");
+            t.o.add(format!("SHELL_BASED_SURFACE_MODEL('{name}',(#{shell}))"))
+        });
+    }
+    Ok(items)
+}
+
+/// The faces in groups that share edges, taken out of `faces`.
+fn connected(faces: &mut Vec<FaceB>) -> Vec<Vec<FaceB>> {
+    let mut parent: Vec<usize> = (0..faces.len()).collect();
+    let root = |parent: &[usize], mut i: usize| {
+        while let Some(&p) = parent.get(i).filter(|p| **p != i) {
+            i = p;
+        }
+        i
+    };
+    let mut first: HashMap<usize, usize> = HashMap::new();
+    for (fi, f) in faces.iter().enumerate() {
+        for &(e, _) in f.loops.iter().flatten() {
+            let other = *first.entry(e).or_insert(fi);
+            let (a, b) = (root(&parent, fi), root(&parent, other));
+            if let Some(x) = parent.get_mut(a) {
+                *x = b;
+            }
+        }
+    }
+    // In file order: a group comes where its first face does.
+    let mut slot: HashMap<usize, usize> = HashMap::new();
+    let mut out: Vec<Vec<FaceB>> = Vec::new();
+    let roots: Vec<usize> = (0..faces.len()).map(|i| root(&parent, i)).collect();
+    for (f, r) in faces.drain(..).zip(roots) {
+        let k = *slot.entry(r).or_insert_with(|| {
+            out.push(Vec::new());
+            out.len() - 1
+        });
+        if let Some(g) = out.get_mut(k) {
+            g.push(f);
+        }
+    }
+    out
 }
 
 /// A face read from a trimmed or bounded surface, its loops not yet sewn.

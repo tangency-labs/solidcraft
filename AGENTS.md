@@ -33,9 +33,11 @@ People trust SolidCraft with their designs; a crash loses their work. **This out
   and calls through its function pointers), two functions in
   `apps/solidcraft/src/open_documents.rs` (macOS hands Finder files only to an Objective-C
   method), the Windows-only `apps/solidcraft/src/native_crash.rs` (the exception filter that
-  records crashes inside native code such as graphics drivers) and the Windows-only
+  records crashes inside native code such as graphics drivers), the Windows-only
   `apps/solidcraft/src/native_frame.rs` (the window procedure that answers the resize-border hit
-  test of the window without OS decorations).
+  test of the window without OS decorations) and the Windows-only
+  `apps/solidcraft/src/space_mouse/windows_hid.rs` (asks Plug and Play which HID interfaces are 3D
+  mice, so no other device is sent anything).
 - **Errors are `Result<T, E>`** through the crate's error type and `?`. An unfinished feature
   returns an error ("not supported yet: …"); it never panics.
 - **Input-derived numbers are hostile** (command parameters, design files, control-channel
@@ -88,6 +90,14 @@ People trust SolidCraft with their designs; a crash loses their work. **This out
   egui/eframe/winit/wgpu/rfd. **The UI crate is swappable.** Only `crates/kernel` may use `truck`.
 - **The UI is thin**: panels read engine state and act through `app.run(id, params)` /
   `app.start(id)`. Colours come from `theme::Tokens`.
+- **One outer UI container**: all panels, floating sheets, menus, overlays and platform UI
+  windows use `ui_kit::Container` (directly or through `Panel`, `Window`, `Confirm`, `Menu`).
+  Declare the semantic `Surface`; workspace panels use its shared layout policy and chrome.
+  System/report windows use `ui_kit::Window`; its low-level host builder is kit-private.
+  Do not construct raw egui hosts, outer popup/window frames or shadows in feature modules.
+  `cargo xtask ui-containers` recursively checks source/examples in all current and future crates
+  and apps. It runs in the fast repository CI job and `cargo xtask ci`, with no caller allowances.
+  See `docs/ui-container-audit.md` for the inventory and legitimate content/native exceptions.
 - **One set of camera controls**: every page or canvas with a camera (viewport, Render
   preview, future flat pattern or drawing pages) calls `navigation::handle` with its `NavCaps`
   (orbit off for flat 2D pages). New canvases must use `navigation::handle`; never hand-roll

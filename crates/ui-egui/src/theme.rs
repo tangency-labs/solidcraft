@@ -215,44 +215,47 @@ pub fn srgb(c: [f32; 3]) -> Color32 {
 /// the same as when they were literals in the WGSL). The light theme's are the headless default.
 pub use solidcraft_engine::render::AnalysisColors;
 
-/// The colours icons draw of their own (`icons::paint` takes ink, fill and accent from its
-/// caller). Every icon colour is a token so a colour vision mode can reach it.
+/// Colours for native viewport markers and the agent pointer. Command artwork uses the SVG palette.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IconColors {
-    /// Surface sheets: a sheet, a second sheet beside it, a lighter sheet, iso lines and teeth.
-    pub sheet: Color32,
-    pub sheet_2: Color32,
-    pub sheet_light: Color32,
-    pub sheet_line: Color32,
-    /// Highlights (and the white ink of markers and the agent pointer), and the sphere's glint.
     pub highlight: Color32,
-    pub glint: Color32,
-    pub folder: Color32,
-    pub plane: Color32,
-    pub fold: Color32,
-    /// Zebra stripes, and the environment map's sky and floor.
-    pub stripe: Color32,
-    pub sky: Color32,
-    pub floor: Color32,
-    /// Appearance: red, blue and yellow paint dabs.
-    pub paint: [Color32; 3],
-    /// Origin: X, Y and Z arrows.
-    pub axes: [Color32; 3],
-    /// Accessibility: reachable, blocked. Draft: positive, between. Curvature: flat, middle,
-    /// tight.
-    pub access: [Color32; 2],
-    pub draft: [Color32; 2],
-    pub curvature: [Color32; 3],
-    pub interference: Color32,
-    pub warning: Color32,
-    /// The pointer an AI agent moves.
     pub agent: Color32,
-    /// The dark halo under viewport markers (snap points).
     pub marker_halo: Color32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// File/start presentation, with explicit foreground/background pairs.
+    pub file_dim: Color32,
+    pub file_recovery_well: Color32,
+    pub file_action_height: f32,
+    pub file_back_height: f32,
+    pub file_recovery_icon: f32,
+    pub file_grid_gap: f32,
+    pub file_background: Color32,
+    pub file_surface: Color32,
+    pub file_border: Color32,
+    /// Neutral multiplication tint for File-view model thumbnails.
+    pub file_image_tint: Color32,
+    pub file_rail: Color32,
+    pub file_rail_ink: Color32,
+    pub file_rail_hover: Color32,
+    pub file_primary: Color32,
+    pub file_primary_ink: Color32,
+    pub file_primary_border: Color32,
+    pub file_recovery: Color32,
+    pub file_recovery_ink: Color32,
+    pub file_recovery_border: Color32,
+    pub file_nav_width: f32,
+    pub file_nav_height: f32,
+    pub file_tile_height: f32,
+    pub file_tile_icon: f32,
+    pub file_recent_height: f32,
+    pub file_sample_image_height: f32,
+    pub file_content_inset_x: f32,
+    pub file_content_inset_y: f32,
+    pub file_section_gap: f32,
+    pub font_start_title: f32,
     // Shared dimensions in logical pixels; identical in both themes.
     pub space_2: f32,
     pub space_3: f32,
@@ -386,7 +389,6 @@ pub struct Tokens {
     pub error: Color32,
     pub warning: Color32,
     pub icon: Color32,
-    pub icon_fill: Color32,
     pub timeline: Color32,
     pub hover: Color32,
     // ---- viewport selection feedback ----
@@ -462,10 +464,6 @@ pub struct Tokens {
     pub dialog_bg: Color32,
     pub dialog_border: Color32,
     pub chip: Color32,
-    /// Band behind a panel's heading and, lighter, behind its section headings (both set off
-    /// from `dialog_bg`).
-    pub heading_bg: Color32,
-    pub subheading_bg: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
     /// Closed sketch profiles (translucent fill).
@@ -528,8 +526,6 @@ pub struct Tokens {
     pub continuity: [Color32; 4],
     pub analysis: AnalysisColors,
     pub icons: IconColors,
-    /// The application bar's buttons: ink, fill and accent of their icons.
-    pub app_bar_icon: [Color32; 3],
     /// The SolidCraft mark on the application bar: light, mid and dark faces, and its edge.
     pub logo: [Color32; 4],
 }
@@ -626,6 +622,28 @@ pub fn apply(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_view_foreground_pairs_hold_small_text_contrast_without_changing_accent() {
+        for dark in [false, true] {
+            for vision in super::ColorVision::ALL {
+                let t = super::Tokens::themed(dark, vision);
+                for (ink, surface) in [
+                    (t.file_rail_ink, t.file_rail),
+                    (t.file_rail_ink, t.file_rail_hover),
+                    (t.file_primary_ink, t.file_primary),
+                    (t.file_primary_ink, t.file_background),
+                    (t.file_recovery_ink, t.file_recovery),
+                    (t.form_ink, t.file_surface),
+                    (t.file_dim, t.file_surface),
+                    (t.file_dim, t.file_background),
+                    (t.file_dim, t.file_primary),
+                ] {
+                    assert!(super::contrast_ratio(ink, surface) >= 4.5, "dark={dark}: {ink:?} on {surface:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn tab_accents_map_explicit_tokens_without_changing_model() {
         for dark in [false, true] {
@@ -735,15 +753,5 @@ mod tests {
                 });
             }
         });
-    }
-
-    /// Title and section bands stand out from a dialog, the title more than its sections.
-    #[test]
-    fn heading_bands_are_darker_than_the_dialog_in_order() {
-        let luma = |c: egui::Color32| u32::from(c.r()) * 3 + u32::from(c.g()) * 6 + u32::from(c.b());
-        for t in [super::Tokens::light(), super::Tokens::dark()] {
-            assert!(luma(t.heading_bg) < luma(t.subheading_bg), "{t:?}");
-            assert!(luma(t.subheading_bg) < luma(t.dialog_bg), "{t:?}");
-        }
     }
 }

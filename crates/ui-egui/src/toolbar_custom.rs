@@ -119,8 +119,21 @@ pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandS
     }
 }
 
+/// A tab's panels with their commands and default button counts.
+pub type PanelLists = Vec<(&'static str, Vec<&'static CommandSpec>, usize)>;
+
 /// The panels of a tab with their commands and default button counts (what the toolbar draws).
-pub fn panel_lists(tab: &str) -> Vec<(&'static str, Vec<&'static CommandSpec>, usize)> {
+/// Made from the command registry and the ribbon's layout, which never change while the app
+/// runs, so each tab's lists are worked out once: the toolbar asks for them every frame, and
+/// working them out matches every command against every section (about a millisecond a frame).
+pub fn panel_lists(tab: &str) -> PanelLists {
+    static LISTS: std::sync::Mutex<BTreeMap<String, PanelLists>> = std::sync::Mutex::new(BTreeMap::new());
+    let Ok(mut lists) = LISTS.lock() else { return panel_lists_of(tab) };
+    lists.entry(tab.to_string()).or_insert_with(|| panel_lists_of(tab)).clone()
+}
+
+/// [`panel_lists`] worked out from the registry.
+fn panel_lists_of(tab: &str) -> PanelLists {
     let specs = command_specs();
     crate::toolbar::panels(tab)
         .iter()
@@ -337,6 +350,19 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod migration_tests {
     use super::*;
+
+    /// Each tab's panel lists are worked out once and come back the same as worked out anew,
+    /// for every tab the ribbon has (and an unknown one).
+    #[test]
+    fn panel_lists_are_kept_and_match_the_registry() {
+        let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).chain(["NO SUCH TAB"]).collect();
+        let ids = |l: &PanelLists| l.iter().map(|(p, cmds, n)| (*p, cmds.iter().map(|c| c.id).collect::<Vec<_>>(), *n)).collect::<Vec<_>>();
+        for tab in tabs {
+            let fresh = panel_lists_of(tab);
+            assert_eq!(ids(&panel_lists(tab)), ids(&fresh), "{tab}");
+            assert_eq!(ids(&panel_lists(tab)), ids(&fresh), "{tab}, kept");
+        }
+    }
 
     #[test]
     fn legacy_pins_split_merge_and_preserve_removals_and_unknown_keys() {

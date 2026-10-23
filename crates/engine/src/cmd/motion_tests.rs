@@ -15,9 +15,442 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+#[test]
+fn deleted_motion_item_ids_are_not_reused_after_reopening() {
+    for (create, delete, key, params) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]})),
+        ("motion.study", "motion.delete", "study", json!({"name": "Travel", "steps": 10})),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+        }
+        let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
+        let deletion = json!({key: first, "delete": true});
+        run(&mut s, delete, deletion.clone());
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        assert!(second > first, "{create}: deleted item {first} was reused as {second}");
+        assert!(s.execute(delete, &deletion).is_err());
+    }
+}
+
 /// Where B's corner (20, 0, 0) is now.
 fn b_x(s: &Session) -> f64 {
     super::world_point(s, occ(s, "B"), Vec3::new(20.0, 0.0, 0.0)).x
+}
+
+#[derive(Clone, Copy)]
+enum PartAuthoring {
+    RootThenTransfer,
+    RootThenNestedTransfer,
+    InComponent,
+}
+
+#[derive(Clone, Copy)]
+enum JoinSelection {
+    Named,
+    Implicit,
+    All,
+}
+
+/// A boolean authored before a later transfer still reads the bodies in its timeline input,
+/// not their final owners. Explicit targets must not turn every occurrence into an input.
+fn joined_motion_part(authoring: PartAuthoring, selection: JoinSelection) -> Session {
+    let mut s = Session::default();
+    if matches!(authoring, PartAuthoring::InComponent) {
+        run(&mut s, "component.create", json!({"name":"Rotor"}));
+    }
+    run(&mut s, "solid.box", json!({"length":10,"width":8,"height":6,"body_name":"Part","name":"Base"}));
+    run(&mut s, "select.set", json!({"items":[]}));
+    let mut p = json!({"length":6,"width":4,"height":4,"corner":[8,2,1],"operation":"join","name":"Boss"});
+    match selection {
+        JoinSelection::Named => p["targets"] = json!(["Part"]),
+        JoinSelection::All => p["targets"] = json!(["*"]),
+        JoinSelection::Implicit => {}
+    }
+    run(&mut s, "solid.box", p);
+    if !matches!(authoring, PartAuthoring::InComponent) {
+        let parent = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) {
+            run(&mut s, "component.create", json!({"name":"Group","activate":false}));
+            "Group"
+        } else {
+            "root"
+        };
+        run(&mut s, "component.create", json!({"name":"Rotor","parent":parent,"activate":false}));
+        run(&mut s, "component.move_bodies", json!({"bodies":["Part"],"component":"Rotor"}));
+    }
+    let driven = if matches!(authoring, PartAuthoring::RootThenNestedTransfer) { "Group" } else { "Rotor" };
+    attach_motion_rotor(&mut s, driven, "Turn");
+    s
+}
+
+fn attach_motion_rotor(s: &mut Session, component: &str, joint: &str) {
+    run(s, "component.activate", json!({"component":"root"}));
+    run(s, "joint.as_built", json!({"type":"revolute","name":joint,"a":0,"b":component,"at":{"occurrence":0,"point":[0,0,0],"z":[0,0,1]}}));
+}
+
+fn unrelated_motion_rotor(s: &mut Session) {
+    run(s, "component.activate", json!({"component":"root"}));
+    run(s, "component.create", json!({"name":"Unrelated"}));
+    run(s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[100,100,100],"body_name":"Remote"}));
+    attach_motion_rotor(s, "Unrelated", "Other turn");
+}
+
+/// Test work and identity, not elapsed time. Every first visit to an angle must preserve the
+/// definitions and their warm meshes, even across full turns; returning to a cached pose alone
+/// would miss the regression. The world mesh is still in the new physical position.
+fn assert_joint_only_moves(s: &mut Session, joint: &str) {
+    use std::sync::Arc;
+    let definitions = s.model.state();
+    let meshes: Vec<_> = definitions.bodies.iter().map(|b| b.mesh()).collect();
+    for body in &s.world_state().bodies {
+        std::hint::black_box(body.mesh());
+        std::hint::black_box(body.display_plan());
+    }
+    let joints = run(s, "joint.list", json!({"quiet":true}));
+    let base = joints["joints"].as_array().unwrap().iter().find(|j| j["name"] == joint).unwrap()["values"][0]["value"].as_f64().unwrap();
+    for offset in [5., 10., 15., 37., 91., 365., 721., 12418., 12423., 37., 0.] {
+        let angle = base + offset;
+        let r = run(s, "joint.drive", json!({"joint":joint,"value":angle,"quiet":true}));
+        assert_eq!(r["moved"], true, "{r}");
+        assert!(r["stopped_by_loop"].is_null() && r["stopped_by_contact"].is_null(), "{r}");
+        let joints = run(s, "joint.list", json!({"quiet":true}));
+        let actual = joints["joints"].as_array().unwrap().iter().find(|j| j["name"] == joint).unwrap()["values"][0]["value"].as_f64().unwrap();
+        assert!((actual - angle).abs() < 1e-8, "{joint} did not reach {angle}: {actual}");
+        assert_eq!(s.model.last_recomputed, 0, "{joint} at {angle}: unchanged geometry was evaluated again");
+        let current = s.model.state();
+        assert!(Arc::ptr_eq(&definitions, &current), "{joint} at {angle}: definition state replaced");
+        for (b, mesh) in current.bodies.iter().zip(&meshes) {
+            assert!(Arc::ptr_eq(&b.mesh(), mesh), "{}: canonical mesh replaced", b.name);
+        }
+        let world = s.world_state();
+        let (_, work) = crate::kernel::profile::capture(|| {
+            for b in &world.bodies {
+                let local = definitions.body(b.definition_name()).unwrap().mesh();
+                let placed = b.mesh();
+                assert_eq!(placed.triangles, local.triangles);
+                assert_eq!(placed.tri_face, local.tri_face);
+                assert_eq!(placed.positions.len(), local.positions.len());
+                assert_eq!(placed.normals.len(), local.normals.len());
+                for (p, q) in local.positions.iter().zip(&placed.positions) {
+                    assert!(crate::doc::apply_point(&b.source_transform, *p).dist(*q) < 1e-8);
+                }
+                for (n, q) in local.normals.iter().zip(&placed.normals) {
+                    assert!(crate::doc::apply_vector(&b.source_transform, *n).dist(*q) < 1e-8);
+                }
+            }
+        });
+        assert_eq!(work.tessellate_ms, 0., "{joint} at {angle}: reference tessellation ran");
+    }
+}
+
+fn assert_motion_matches_full_rebuild(s: &Session) {
+    let mut full = crate::doc::Model::default();
+    full.no_cache = true;
+    full.evaluate(&s.doc);
+    assert!(full.results.iter().all(|r| r.error.is_none()), "{:?}", full.results.iter().filter_map(|r| r.error.as_ref()).collect::<Vec<_>>());
+    let (cached, fresh) = (s.model.state(), full.state());
+    assert_eq!(cached.bodies.len(), fresh.bodies.len());
+    for (a, b) in cached.bodies.iter().zip(&fresh.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.body.face_count(), b.body.face_count(), "{}", a.name);
+        let (a_bounds, b_bounds) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(a_bounds.min.dist(b_bounds.min) < 1e-8 && a_bounds.max.dist(b_bounds.max) < 1e-8, "{}", a.name);
+        let (a_mass, b_mass) = (crate::kernel::measure(&a.body).unwrap(), crate::kernel::measure(&b.body).unwrap());
+        assert!((a_mass.volume - b_mass.volume).abs() < 1e-6, "{}: {} vs {}", a.name, a_mass.volume, b_mass.volume);
+    }
+}
+
+#[test]
+fn joint_pose_named_union_before_transfer_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_joined_cylinders_keep_mesh_cells_at_unseen_angles() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":8.5,"height":8,"base":[0,32,0],"axis":[0,1,0],"operation":"new","body_name":"Crank"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius":2.8,"height":30,"base":[0,36,0],"axis":[0.981627183447664,0,0.1908089953765448],"operation":"join","targets":["Crank"]}),
+    );
+    run(&mut s, "component.create", json!({"name":"Crank","activate":false}));
+    run(&mut s, "component.move_bodies", json!({"bodies":["Crank"],"component":"Crank"}));
+    run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Crank","a":0,"b":"Crank","at":{"occurrence":0,"point":[0,0,0],"z":[0,1,0]}}));
+    assert_joint_only_moves(&mut s, "Crank");
+}
+
+#[test]
+fn joint_pose_named_union_in_its_component_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_nested_body_transfer_ignores_ancestor_motion() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::RootThenNestedTransfer, JoinSelection::Named), "Turn");
+}
+
+#[test]
+fn joint_pose_second_occurrence_shares_the_definition() {
+    let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named);
+    let second = run(&mut s, "occurrence.copy", json!({"component":"Rotor","translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Copy turn","a":0,"b":second,"at":{"occurrence":0,"point":[40,0,0],"z":[0,0,1]}}));
+    assert_eq!(s.world_state().bodies.len(), 2);
+    assert_joint_only_moves(&mut s, "Copy turn");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_implicit_union_in_its_component_retains_definitions() {
+    assert_joint_only_moves(&mut joined_motion_part(PartAuthoring::InComponent, JoinSelection::Implicit), "Turn");
+}
+
+#[test]
+fn joint_pose_unrelated_part_does_not_invalidate_named_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_future_body_is_not_an_input_of_an_earlier_wildcard_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::All);
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_empty_cache_keeps_unchanged_definition_results() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    *s.model.cache.lock().unwrap() = Default::default();
+    assert_joint_only_moves(&mut s, "Turn");
+}
+
+#[test]
+fn joint_pose_explicit_extrude_targets_ignore_unrelated_motion() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":3,"body_name":"Base"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"BossOutline"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[8,2],"p1":[14,6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"BossOutline","distance":3,"operation":"join","targets":["Base"],"name":"Boss"}));
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+#[test]
+fn joint_pose_combine_ignores_unrelated_motion() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[4,4,9],"body_name":"Boss","operation":"new"}));
+    run(&mut s, "solid.combine", json!({"target":"Base","tools":["Boss"],"operation":"join"}));
+    unrelated_motion_rotor(&mut s);
+    assert_joint_only_moves(&mut s, "Other turn");
+}
+
+/// A fixed tool removes the top 5 mm of the target where x=8..12. Sliding the target
+/// relative to it changes the removed volume from 100 to 200 mm³. Moving the tool together
+/// with the target preserves that volume and must preserve the computed definition too.
+fn cross_component_motion_cut(move_tool_with_target: bool, kind: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"MovingTarget"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    if move_tool_with_target {
+        run(&mut s, "component.create", json!({"name":"Tool"}));
+    }
+    run(&mut s, "solid.box", json!({"length":4,"width":12,"height":6,"corner":[8,-1,5],"operation":"cut","targets":["Target"],"name":"Notch"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let axis = if kind == "slider" { json!([1, 0, 0]) } else { json!([0, 0, 1]) };
+    run(&mut s, "joint.as_built", json!({"type":kind,"name":"Motion","a":0,"b":"MovingTarget","at":{"occurrence":0,"point":[0,0,0],"z":axis}}));
+    if move_tool_with_target {
+        run(&mut s, "joint.rigid_group", json!({"occurrences":["MovingTarget","Tool"]}));
+    }
+    s
+}
+
+fn motion_target_volume(s: &Session) -> f64 {
+    crate::kernel::measure(&s.model.state().body("Target").unwrap().body).unwrap().volume
+}
+
+fn motion_combine_cut(kind: &str, together: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"MovingTarget"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Target"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "component.create", json!({"name":"Tool"}));
+    run(&mut s, "solid.box", json!({"length":4,"width":12,"height":6,"corner":[8,-1,5],"body_name":"Cutter","operation":"new"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(&mut s, "solid.combine", json!({"target":"Target","tools":["Cutter"],"operation":"cut"}));
+    let axis = if kind == "slider" { json!([1, 0, 0]) } else { json!([0, 0, 1]) };
+    run(&mut s, "joint.as_built", json!({"type":kind,"name":"Motion","a":0,"b":"MovingTarget","at":{"occurrence":0,"point":[0,0,0],"z":axis}}));
+    if together {
+        run(&mut s, "joint.rigid_group", json!({"occurrences":["MovingTarget","Tool"]}));
+    }
+    s
+}
+
+#[test]
+fn joint_pose_combine_common_motion_keeps_the_target_frame() {
+    let mut s = motion_combine_cut("revolute", true);
+    assert_joint_only_moves(&mut s, "Motion");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_combine_relative_motion_rebuilds_the_cut() {
+    let mut s = motion_combine_cut("slider", false);
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "Combine must follow relative motion: {volume}");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_target_body_offset_rebuilds_the_cut() {
+    let mut s = cross_component_motion_cut(false, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Target".into(), offset);
+    s.refresh();
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "the input body's offset changes the tool frame: {volume}");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_unrelated_body_offset_keeps_named_union() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    unrelated_motion_rotor(&mut s);
+    let before = s.model.state();
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Remote".into(), offset);
+    s.refresh();
+    assert_eq!(s.model.last_recomputed, 0);
+    assert!(std::sync::Arc::ptr_eq(&before, &s.model.state()));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_implicit_union_reads_its_target_body_offset() {
+    let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Implicit);
+    let volume = |s: &Session| crate::kernel::measure(&s.model.state().body("Part").unwrap().body).unwrap().volume;
+    assert!((volume(&s) - 544.).abs() < 1e-6);
+    let mut offset = crate::doc::IDENTITY;
+    offset[3][0] = 5.;
+    s.doc_mut().body_offsets.insert("Part".into(), offset);
+    s.refresh();
+    assert!((volume(&s) - 480.).abs() < 1e-6, "the join's tool is now entirely inside its target: {}", volume(&s));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_true_relative_target_motion_rebuilds_the_cut() {
+    let mut s = cross_component_motion_cut(false, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    let volume = motion_target_volume(&s);
+    assert!((volume - 800.).abs() < 1e-6, "relative motion should leave 800 mm³, got {volume}");
+    assert!(s.model.last_recomputed > 0, "a target moved relative to its tool");
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_shared_rigid_motion_keeps_the_cut_definition() {
+    let mut s = cross_component_motion_cut(true, "slider");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    let before = s.model.state();
+    run(&mut s, "joint.drive", json!({"joint":"Motion","value":5}));
+    assert_eq!(s.model.last_recomputed, 0, "relative target/tool placement did not change");
+    assert!(std::sync::Arc::ptr_eq(&before, &s.model.state()));
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_shared_rotation_preserves_relative_cut_geometry() {
+    let mut s = cross_component_motion_cut(true, "revolute");
+    assert_joint_only_moves(&mut s, "Motion");
+    assert!((motion_target_volume(&s) - 900.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_primed_ahead_result_does_not_replace_unchanged_geometry() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    let definitions = s.model.state();
+    let mesh = definitions.body("Part").unwrap().mesh();
+    let commands = [("joint.drive".into(), json!({"joint":"Turn","value":5,"quiet":true}))];
+    let evaluated = s.ahead().evaluate(&commands).unwrap();
+    *s.model.cache.lock().unwrap() = Default::default();
+    s.prime(&evaluated);
+    run(&mut s, &commands[0].0, commands[0].1.clone());
+    s.unprime();
+    assert!(std::sync::Arc::ptr_eq(&definitions, &s.model.state()), "computing ahead must not replace an unchanged definition");
+    assert!(std::sync::Arc::ptr_eq(&mesh, &s.model.state().body("Part").unwrap().mesh()));
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_save_and_reopen_keep_definitions_at_new_angles() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    run(&mut s, "joint.drive", json!({"joint":"Turn","value":5}));
+    let directory = std::env::temp_dir().join(format!(
+        "solidcraft-joint-pose-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("part.solidcraft");
+    run(&mut s, "file.save", json!({"path":path,"cache":true,"preview":true}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path":path}));
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&directory).unwrap();
+    assert_motion_matches_full_rebuild(&opened);
+    assert_joint_only_moves(&mut opened, "Turn");
+}
+
+#[test]
+fn joint_pose_undo_and_redo_match_fresh_geometry() {
+    let mut s = joined_motion_part(PartAuthoring::RootThenTransfer, JoinSelection::Named);
+    for angle in [5, 10] {
+        run(&mut s, "joint.drive", json!({"joint":"Turn","value":angle}));
+    }
+    run(&mut s, "edit.undo", json!({}));
+    let joints = run(&mut s, "joint.list", json!({"quiet":true}));
+    assert!((joints["joints"][0]["values"][0]["value"].as_f64().unwrap() - 5.).abs() < 1e-8);
+    assert_motion_matches_full_rebuild(&s);
+    run(&mut s, "edit.redo", json!({}));
+    let joints = run(&mut s, "joint.list", json!({"quiet":true}));
+    assert!((joints["joints"][0]["values"][0]["value"].as_f64().unwrap() - 10.).abs() < 1e-8);
+    assert_motion_matches_full_rebuild(&s);
+}
+
+#[test]
+fn joint_pose_geometry_edit_invalidates_the_warm_definition_mesh() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"span","expression":"10 mm"}));
+    run(&mut s, "component.create", json!({"name":"Rotor"}));
+    run(&mut s, "solid.box", json!({"length":"span","width":8,"height":6,"body_name":"Part"}));
+    attach_motion_rotor(&mut s, "Rotor", "Turn");
+    run(&mut s, "joint.drive", json!({"joint":"Turn","value":5}));
+    let before = s.model.state().body("Part").unwrap().mesh();
+    run(&mut s, "parameters.change", json!({"name":"span","expression":"12 mm"}));
+    let model = s.model.state();
+    let body = model.body("Part").unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&before, &body.mesh()));
+    assert!((crate::kernel::measure(&body.body).unwrap().volume - 576.).abs() < 1e-6);
+    assert_motion_matches_full_rebuild(&s);
 }
 
 /// Cubes A (grounded, x 0…10) and B (x 20…30) on a slider along x: B's −x face on A's +x face
@@ -455,4 +888,113 @@ fn hostile_animation_params_are_refused() {
     });
     assert!(root.join("in.gif").exists() && !dir.join("out").exists());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A grounded Base plate, an Arm turning on it about Z (joint `Pivot`) and a Head fixed to the
+/// arm. The Arm's slot sketch projects the arm's own edge and its axis, the Head's bore sketch
+/// an edge of the arm (they move together). With `in_context`, the slot sketch also projects an
+/// edge of the Base, across the joint.
+fn pivot(in_context: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[0, -20, 10]], "distance": 1}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 8, "height": 5, "corner": [-4, -4, 10], "body_name": "Bar"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Slot"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [20, 4, 15], "body": "Bar"}, "origin"]}));
+    if in_context {
+        run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 20, 10], "body": "Plate"}]}));
+    }
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, -2], "p1": [30, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": -2, "operation": "cut", "name": "SlotCut"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, -4, 15]], "distance": 0.5}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Head"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 12, "height": 6, "corner": [36, -6, 15], "body_name": "Cap"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 21], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Bore"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 4, 15], "body": "Bar"}]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [41, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": -4, "operation": "cut", "name": "BoreCut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (base, arm, head) = (occ(&s, "Base"), occ(&s, "Arm"), occ(&s, "Head"));
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": base, "point": [0, 0, 10]}, "b": {"occurrence": arm, "point": [0, 0, 10]}, "flip": true, "name": "Pivot"}),
+    );
+    run(&mut s, "joint.rigid_group", json!({"occurrences": [arm, head]}));
+    s
+}
+
+/// Every body of `model` and `full` the same: names, faces and where their meshes lie.
+fn same_bodies(model: &solidcraft_doc::ModelState, full: &solidcraft_doc::ModelState) {
+    assert_eq!(model.bodies.len(), full.bodies.len());
+    for (a, b) in model.bodies.iter().zip(&full.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.body.face_count(), b.body.face_count(), "{}", a.name);
+        let (m, n) = (a.mesh().bounds(), b.mesh().bounds());
+        assert!(m.min.dist(n.min) < 1e-9 && m.max.dist(n.max) < 1e-9, "{}: {m:?} vs {n:?}", a.name);
+    }
+}
+
+/// The model `s` shows, evaluated again from nothing.
+fn rebuilt(s: &Session) -> std::sync::Arc<solidcraft_doc::ModelState> {
+    let mut full = solidcraft_doc::Model::default();
+    full.no_cache = true;
+    full.evaluate(&s.doc);
+    full.state()
+}
+
+/// Driving a joint only moves parts: a part that projects its own geometry, or that of a part
+/// moving with it, is not evaluated again (#1989's motion on a finished assembly evaluated the
+/// whole timeline on every drive, and every new pose missed the cache).
+#[test]
+fn driving_a_joint_moves_parts_without_evaluating_them() {
+    let mut s = pivot(false);
+    let model = s.model.state();
+    let head = occ(&s, "Head");
+    let tip = |s: &Session| super::world_point(s, head, Vec3::new(46.0, 0.0, 15.0));
+    let before = tip(&s);
+    for (step, angle) in ["30 deg", "75 deg", "-40 deg", "75 deg"].into_iter().enumerate() {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Pivot", "value": angle}));
+        assert_eq!(r["moved"], true, "{r}");
+        assert_eq!((s.model.last_recomputed, s.model.last_restored), (0, 0), "step {step}: nothing evaluated, nothing taken from the cache");
+        assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()), "the parts' bodies are the ones they were");
+    }
+    // The head went round with the arm: 75° about Z through the origin.
+    let (sin, cos) = 75f64.to_radians().sin_cos();
+    let want = Vec3::new(before.x * cos - before.y * sin, before.x * sin + before.y * cos, before.z);
+    assert!(tip(&s).dist(want) < 1e-6, "{:?} vs {want:?}", tip(&s));
+    same_bodies(&s.model.state(), &rebuilt(&s));
+}
+
+/// A sketch that projects another part's edge is in-context design: it is evaluated again when
+/// that part moves relative to it (and gives what a full rebuild gives), not when the two move
+/// together.
+#[test]
+fn an_in_context_sketch_follows_only_the_parts_it_reads() {
+    let mut s = pivot(true);
+    let slot = s.doc.find_feature("Slot").map(|f| f.id).unwrap();
+    let projected = |s: &Session| s.model.state().sketch(slot).map(|k| k.sketch.clone()).unwrap();
+    let first = projected(&s);
+    run(&mut s, "joint.drive", json!({"joint": "Pivot", "value": "30 deg"}));
+    assert!(s.model.last_recomputed > 0, "the slot sketch reads the base, which turned relative to it");
+    assert_ne!(projected(&s).links, first.links, "the base's edge is where the arm now sees it");
+    same_bodies(&s.model.state(), &rebuilt(&s));
+    // The whole assembly moved as one (both occurrences by the same turn and shift): nothing the
+    // sketch reads moved relative to it.
+    let model = s.model.state();
+    let turn = solidcraft_doc::rigid(Vec3::new(5.0, -3.0, 2.0), Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.3, 0.2, 1.0), 0.7);
+    for o in &mut s.doc_mut().occurrences {
+        o.transform = solidcraft_doc::mat_mul(&turn, &o.transform);
+    }
+    s.refresh();
+    assert_eq!(s.model.last_recomputed, 0);
+    assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    same_bodies(&s.model.state(), &rebuilt(&s));
 }

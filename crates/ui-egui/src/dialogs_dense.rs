@@ -511,7 +511,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 opts.tapped = tap == 1;
             });
             if opts.tapped {
-                enter |= expr_row(ui, "Size", &mut opts.thread);
+                enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
             }
             if *kind == 0 {
                 form_row(ui, "Drill Point", |ui| {
@@ -526,7 +526,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if *kind == 0 && opts.angled {
                 enter |= expr_row(ui, "Tip Angle", &mut opts.tip_angle);
             }
-            enter |= expr_row(ui, "Diameter", diameter);
+            if !opts.tapped {
+                enter |= expr_row(ui, "Diameter", diameter);
+            }
             if *kind == 1 {
                 enter |= expr_row(ui, "Counterbore Ø", cb_diameter);
                 enter |= expr_row(ui, "Counterbore depth", cb_depth);

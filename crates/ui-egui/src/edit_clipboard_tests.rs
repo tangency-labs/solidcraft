@@ -187,7 +187,6 @@ fn contribution_saved_part(file: &ContributionPart) -> crate::SolveApp {
 fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_once() {
     let file = ContributionPart::new();
     let mut app = contribution_saved_part(&file);
-    assert!(super::can_copy(&app));
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
     assert!(super::can_paste(&app));

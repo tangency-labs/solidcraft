@@ -1,0 +1,74 @@
+[
+ {
+  "note": "Animating to Top or Bottom from iso, front or any orbit turns the view smoothly to the end: no frame (the last included) turns it more than 10 degrees."
+ },
+ {
+  "start": "solid.box"
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "view_anim": "top"
+ },
+ {
+  "view_anim": "home"
+ },
+ {
+  "view_anim": "bottom"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "front"
+  }
+ },
+ {
+  "view_anim": "top"
+ },
+ {
+  "call": "ui.view",
+  "params": {
+   "view": "front"
+  }
+ },
+ {
+  "view_anim": "bottom"
+ },
+ {
+  "camera": {
+   "yaw": 2.3,
+   "pitch": 0.35
+  }
+ },
+ {
+  "view_anim": "top"
+ },
+ {
+  "camera": {
+   "yaw": -1.1,
+   "pitch": -0.4
+  }
+ },
+ {
+  "view_anim": "top"
+ },
+ {
+  "camera": {
+   "yaw": 2.3,
+   "pitch": 0.35
+  }
+ },
+ {
+  "view_anim": "bottom"
+ },
+ {
+  "camera": {
+   "yaw": 0.4,
+   "pitch": 1.2
+  }
+ },
+ {
+  "view_anim": "front"
+ }
+]

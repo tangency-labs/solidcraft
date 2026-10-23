@@ -17,6 +17,7 @@
 //!
 //! The control channel's `ui.selectOther` opens, describes and picks from the list.
 
+use crate::ui_kit::{Container, Surface};
 use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -515,7 +516,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let w = crate::context_menu::LIST_W - 10.0;
     // Title, rows up to the scroll height, margins and border.
     let size = vec2(w + 10.0, 30.0 + (p.rows.len() as f32 * 24.0).min(360.0));
-    let resp = crate::frame::area(egui::Id::new("sc_select_other"))
+    let resp = Container::new(ctx, Surface::Popup)
+        .area(egui::Id::new("sc_select_other"))
         .fixed_pos(crate::context_menu::place(p.at, vec2(12.0, 12.0), size, ctx.content_rect()))
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -539,13 +541,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             hovered = Some(i);
                             ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), 4.0, t.hover);
                         }
-                        crate::icons::paint(
+                        crate::icons::paint_icon(
                             ui.painter(),
                             Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(16.0, 16.0)),
                             row.icon,
-                            t.icon,
-                            t.icon_fill,
-                            t.accent,
+                            f32::from(t.icon.a()) / 255.0,
                         );
                         ui.painter().text(
                             pos2(r.left() + 32.0, r.center().y),

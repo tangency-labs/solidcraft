@@ -508,8 +508,8 @@ outer
         doc.set_param("width", "40", Some("mm"), None).unwrap();
         let mesh = solidcraft_doc::MeshData {
             name: "Preview".into(),
-            positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            triangles: vec![0, 1, 2],
+            positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into(),
+            triangles: vec![0, 1, 2].into(),
             color: None,
         };
         let preview = crate::DesignPreview { meshes: vec![mesh] };

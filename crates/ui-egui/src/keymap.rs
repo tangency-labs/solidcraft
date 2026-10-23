@@ -197,23 +197,34 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
-        let filter =
-            ui_kit::search_field(ui, egui::Id::new("sc_keymap_filter"), &mut app.keymap.filter, crate::i18n::tr_label("Filter commands or keys"));
+        let actions = [
+            ui_kit::SearchAction { label: app.tr_label("Reset All"), icon: None, visible: !app.keymap.read_only, tooltip: None },
+            ui_kit::SearchAction { label: app.tr_label("Import…"), icon: Some("import_tray"), visible: !app.keymap.read_only, tooltip: None },
+            ui_kit::SearchAction {
+                label: app.tr_label("Export…"),
+                icon: Some("export_tray"),
+                visible: true,
+                tooltip: Some(app.tr_label("Keys, S box favourites and the toolbar, as a file")),
+            },
+        ];
+        let (filter, toolbar_action) = ui_kit::search_actions_row(
+            ui,
+            egui::Id::new("sc_keymap_filter"),
+            &mut app.keymap.filter,
+            crate::i18n::tr_label("Filter commands or keys"),
+            &actions,
+        );
         crate::scenario::publish_target("keymap:filter", filter.rect);
-        ui.horizontal_wrapped(|ui| {
-            if !app.keymap.read_only && ui_kit::button(ui, app.tr_label("Reset All"), ui_kit::Button::Normal).clicked() {
-                action = Some((String::new(), "reset_all"));
-            }
-            if ui_kit::button(ui, app.tr_label("Export…"), ui_kit::Button::Normal)
-                .on_hover_text(app.tr_label("Keys, S box favourites and the toolbar, as a file"))
-                .clicked()
-            {
-                action = Some((String::new(), "export"));
-            }
-            if !app.keymap.read_only && ui_kit::button(ui, app.tr_label("Import…"), ui_kit::Button::Normal).clicked() {
-                action = Some((String::new(), "import"));
-            }
-        });
+        if let Some(index) = toolbar_action {
+            action = Some((
+                String::new(),
+                match index {
+                    0 => "reset_all",
+                    1 => "import",
+                    _ => "export",
+                },
+            ));
+        }
         if let Some(m) = &app.keymap.message {
             ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
         }
@@ -231,72 +242,87 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
         let q = app.keymap.filter.to_lowercase();
-        egui::ScrollArea::vertical()
-            .id_salt("sc_keymap_scroll")
-            .max_height(crate::theme::Tokens::get().control_height * 14.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                let columns = [
-                    ui_kit::Column::new("Command", 1.5),
-                    ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8),
-                    ui_kit::Column::new("Keyboard Shortcuts", 1.0),
-                    ui_kit::Column::new("", 1.2),
-                ];
-                ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
-                    for c in command_specs() {
-                        let key = effective(app, c.id).unwrap_or_default();
-                        let translated_label = app.tr_label(c.label);
-                        if !q.is_empty() && ![c.label, c.id, key.as_str(), translated_label].iter().any(|s| s.to_lowercase().contains(&q)) {
-                            continue;
-                        }
-                        table.row(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), |row| {
-                            row.cell(|ui| {
-                                ui_kit::text(ui, translated_label, ui_kit::Text::Cell);
-                            });
-                            row.cell(|ui| {
-                                ui_kit::text(ui, c.id, ui_kit::Text::Cell);
-                            });
-                            let capturing = app.keymap.capturing.as_deref() == Some(c.id);
-                            let changed = app.keymap.custom.contains_key(c.id);
-                            let text = if capturing {
-                                app.tr_label("press a key…").to_string()
-                            } else if key.is_empty() {
-                                "—".to_string()
-                            } else {
-                                key.clone()
-                            };
-                            row.cell(|ui| {
-                                if app.keymap.read_only {
-                                    ui_kit::text(ui, &text, ui_kit::Text::Cell);
-                                } else {
-                                    let capture = ui_kit::button(ui, &text, ui_kit::Button::Normal)
-                                        .on_hover_text(app.tr_label("Click, then press the new key"));
-                                    crate::scenario::publish_target(&format!("keymap:capture:{}", c.id), capture.rect);
-                                    if capture.clicked() {
-                                        action = Some((c.id.to_string(), "capture"));
-                                    }
-                                }
-                            });
-                            row.cell(|ui| {
-                                if !app.keymap.read_only {
-                                    ui.horizontal(|ui| {
-                                        let clear = ui_kit::button(ui, app.tr_label("Clear"), ui_kit::Button::Enabled(!key.is_empty()));
-                                        crate::scenario::publish_target(&format!("keymap:clear:{}", c.id), clear.rect);
-                                        if clear.clicked() {
-                                            action = Some((c.id.to_string(), "clear"));
-                                        }
-                                        let reset = ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Enabled(changed));
-                                        crate::scenario::publish_target(&format!("keymap:reset:{}", c.id), reset.rect);
-                                        if reset.clicked() {
-                                            action = Some((c.id.to_string(), "reset"));
-                                        }
-                                    });
-                                }
-                            });
-                        });
+        let commands = command_specs();
+        let t = crate::theme::Tokens::get();
+        let key_width = commands
+            .iter()
+            .map(|c| {
+                let key = effective(app, c.id).unwrap_or_default();
+                ui_kit::ContentWidth::button(ui, &key)
+            })
+            .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
+            .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
+        let action_width = if app.keymap.read_only {
+            t.control_height
+        } else {
+            ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
+        };
+        ui_kit::settings_scroll(ui, "sc_keymap_scroll", |ui| {
+            let columns = [
+                ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
+                ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
+                ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
+                ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
+            ];
+            ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
+                for c in commands {
+                    let key = effective(app, c.id).unwrap_or_default();
+                    let translated_label = app.tr_label(c.label);
+                    if !q.is_empty() && ![c.label, c.id, key.as_str(), translated_label].iter().any(|s| s.to_lowercase().contains(&q)) {
+                        continue;
                     }
-                });
+                    table.row(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), |row| {
+                        row.cell(|ui| {
+                            ui_kit::text(ui, translated_label, ui_kit::Text::Cell);
+                        });
+                        row.cell(|ui| {
+                            ui_kit::text(ui, c.id, ui_kit::Text::Cell);
+                        });
+                        let capturing = app.keymap.capturing.as_deref() == Some(c.id);
+                        let changed = app.keymap.custom.contains_key(c.id);
+                        let text = if capturing {
+                            app.tr_label("press a key…").to_string()
+                        } else if key.is_empty() {
+                            "—".to_string()
+                        } else {
+                            key.clone()
+                        };
+                        row.cell(|ui| {
+                            if app.keymap.read_only {
+                                ui_kit::text(ui, &text, ui_kit::Text::Cell);
+                            } else {
+                                let capture = if key.is_empty() && !capturing {
+                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                                    ui_kit::quiet_icon_button_at(ui, rect, "plus", app.tr_label("Click, then press the new key"))
+                                } else {
+                                    ui_kit::button(ui, &text, ui_kit::Button::Normal).on_hover_text(app.tr_label("Click, then press the new key"))
+                                };
+                                crate::scenario::publish_target(&format!("keymap:capture:{}", c.id), capture.rect);
+                                if capture.clicked() {
+                                    action = Some((c.id.to_string(), "capture"));
+                                }
+                            }
+                        });
+                        row.cell(|ui| {
+                            if !app.keymap.read_only {
+                                ui.horizontal(|ui| {
+                                    let clear = ui_kit::button(ui, app.tr_label("Clear"), ui_kit::Button::Enabled(!key.is_empty()));
+                                    crate::scenario::publish_target(&format!("keymap:clear:{}", c.id), clear.rect);
+                                    if clear.clicked() {
+                                        action = Some((c.id.to_string(), "clear"));
+                                    }
+                                    let reset = ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Enabled(changed));
+                                    crate::scenario::publish_target(&format!("keymap:reset:{}", c.id), reset.rect);
+                                    if reset.clicked() {
+                                        action = Some((c.id.to_string(), "reset"));
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }
             });
+        });
     });
     match action {
         Some((id, "capture")) => {

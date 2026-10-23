@@ -12,7 +12,8 @@ use solidcraft_render::Camera;
 
 use super::super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::super::progress::Stage;
-use super::{Drawing, Line, bounds, clip, key, merge_lines, occluded, overlap, xy};
+use super::super::sketch::Part;
+use super::{Drawing, Line, Path, bounds, clip, key, merge_lines, occluded, overlap, xy};
 
 const TOO_COMPLEX: &str = "view exceeds export work budget; hide bodies or increase tolerance";
 const MAX_LINES: usize = 1_000_000;
@@ -405,12 +406,13 @@ impl Query<'_, '_> {
     }
 }
 
-pub(super) fn drawing(scene: &Scene, cam: &Camera) -> Result<Drawing, &'static str> {
+pub(super) fn drawing(scene: &Scene, sketch: &[Part], cam: &Camera) -> Result<Drawing, &'static str> {
     let start = Instant::now();
     let scale = scene
         .placements
         .iter()
         .filter_map(|p| scene.meshes.get(p.mesh).map(|m| transformed_bounds(m, &p.transform)))
+        .chain(sketch.iter().map(|p| bounds(p.points.iter().copied())))
         .fold(Aabb3::EMPTY, |b, p| b.union(&p))
         .diagonal()
         .max(1.);
@@ -510,7 +512,72 @@ pub(super) fn drawing(scene: &Scene, cam: &Camera) -> Result<Drawing, &'static s
     let work = results.iter().map(|(_, n)| *n).sum();
     let lines = merge_lines(results.into_iter().flat_map(|(lines, _)| lines).collect(), eps);
     progress.check()?;
-    Ok(Drawing { lines, work, segments: segment_count, projection_ms, occlusion_ms: start.elapsed().as_secs_f64() * 1000. })
+    // Shown sketch curves: finished sketches are split where bodies cover them, like body
+    // edges; the active sketch is drawn on top, as in the viewport. Each curve run stays one
+    // path per visible or hidden stretch, so a circle remains one polyline.
+    let progress = Stage::new("dxf_occlusion", sketch.len());
+    let results = parallel(sketch, |part| {
+        progress.check()?;
+        let mut budget = Budget::new(&global, &progress);
+        let mut paths: Vec<Path> = Vec::new();
+        let mut previous: Option<Vec3> = None;
+        for p in &part.points {
+            let b = view.project(*p)?;
+            let Some(a) = previous.replace(b) else { continue };
+            if xy(a).dist(xy(b)) <= eps {
+                continue;
+            }
+            if !claim(&count, 1, MAX_SEGMENTS) {
+                return Err(TOO_COMPLEX);
+            }
+            let mut covered = Coverage::default();
+            if !part.on_top && !instances.nodes.is_empty() {
+                let mut query = Query {
+                    shared: &shared,
+                    scene,
+                    projected: &projected,
+                    instances: &instances,
+                    view: &view,
+                    depth_eps,
+                    a,
+                    b,
+                    bounds: bounds([a, b]),
+                    covered,
+                    budget: &mut budget,
+                };
+                query.instance_node(0)?;
+                covered = query.covered;
+            }
+            let mut cursor = 0.;
+            let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), &'static str> {
+                let (p, q) = (xy(a + (b - a) * lo), xy(a + (b - a) * hi));
+                if p.dist(q) <= eps {
+                    return Ok(());
+                }
+                if let Some(path) = paths.last_mut().filter(|path| path.hidden == hidden && path.points.last().is_some_and(|e| e.dist(p) <= eps)) {
+                    path.points.push(q);
+                } else {
+                    if !claim(&output, 1, MAX_LINES) {
+                        return Err(TOO_COMPLEX);
+                    }
+                    paths.push(Path { points: vec![p, q], hidden });
+                }
+                Ok(())
+            };
+            for (lo, hi) in covered.spans {
+                emit(cursor, lo, false)?;
+                emit(lo, hi, true)?;
+                cursor = hi;
+            }
+            emit(cursor, 1., false)?;
+        }
+        progress.advance(1)?;
+        Ok((paths, budget.spent))
+    })?;
+    let work = results.iter().fold(work, |n: usize, (_, spent)| n.saturating_add(*spent));
+    let sketch = results.into_iter().flat_map(|(paths, _)| paths).collect();
+    progress.check()?;
+    Ok(Drawing { lines, work, segments: count.load(Ordering::Relaxed), projection_ms, occlusion_ms: start.elapsed().as_secs_f64() * 1000., sketch })
 }
 
 #[cfg(test)]
@@ -581,7 +648,7 @@ mod tests {
             for fov in [0., 0.6] {
                 let cam = Camera { target: Vec3::new(4., 3., 1.), yaw, pitch, roll, fov, distance: 100., ..Default::default() };
                 let expected = super::super::reference_drawing(&flat, &cam).unwrap();
-                let actual = drawing(&scene, &cam).unwrap();
+                let actual = drawing(&scene, &[], &cam).unwrap();
                 assert_eq!(canonical(actual.lines), canonical(expected), "yaw={yaw}, pitch={pitch}, fov={fov}");
             }
         }
@@ -619,7 +686,7 @@ mod tests {
         let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0 };
         let mut cam = Camera { target: Vec3::new(95., 55., 0.), fov: 0., distance: 300., ..Default::default() };
         cam.set_view(StandardView::Top);
-        let result = drawing(&scene, &cam).unwrap();
+        let result = drawing(&scene, &[], &cam).unwrap();
         assert_eq!(scene.meshes.len(), 1);
         assert_eq!(result.lines.len(), 240);
         assert!(result.lines.iter().all(|l| !l.hidden));

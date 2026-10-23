@@ -1,23 +1,10 @@
-//! Shared dock dragging, bounded anchors and tokenised surfaces for `ui_kit::Panel`,
-//! plus bounded floating windows for BOM, Messages and 3D mouse calibration.
+//! Dock dragging and bounded anchors. Outer hosts and surfaces live in `ui_kit::Container`.
 
-use egui::{Align2, Pos2, Ui, WidgetText, vec2};
+use egui::{Pos2, Ui};
 
 /// Width limits of a docked command dialog.
 pub const DIALOG_MIN_W: f32 = 260.0;
 pub const DIALOG_MAX_W: f32 = 380.0;
-/// Floating windows: prompts and panels, and those holding a table (Parameters, Keyboard
-/// Shortcuts).
-pub const WINDOW_MAX_W: f32 = 460.0;
-pub const WINDOW_WIDE_MAX_W: f32 = 760.0;
-
-/// How wide a window may get.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Width {
-    Normal,
-    Wide,
-}
-
 /// Which edge of the viewport a docked panel sits against. The Sketch Palette holds the right
 /// edge while a sketch is open, so a dialog started there takes the left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,21 +21,6 @@ impl Side {
             Side::Left => viewport.left(),
         }
     }
-}
-
-/// The window frame of a docked panel: the two corners away from its edge are rounded, and the
-/// shadow falls the same way, so a left dock mirrors a right one.
-pub fn dock_frame(ctx: &egui::Context, side: Side) -> egui::Frame {
-    let t = crate::theme::Tokens::get();
-    let (corner_radius, shadow_x) = match side {
-        Side::Right => (egui::CornerRadius { nw: t.radius_sm, sw: t.radius_sm, ne: 0, se: 0 }, -2),
-        Side::Left => (egui::CornerRadius { nw: 0, sw: 0, ne: t.radius_sm, se: t.radius_sm }, 2),
-    };
-    egui::Frame::window(&ctx.global_style())
-        .fill(t.dialog_bg)
-        .stroke(egui::Stroke::new(1.0, t.dialog_border))
-        .corner_radius(corner_radius)
-        .shadow(egui::Shadow { offset: [shadow_x, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(40) })
 }
 
 /// How far the open docked dialog titled `title` was dragged from its docked place (#1335);
@@ -82,8 +54,8 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 /// `moved` (as last frame left it; `applied` of it is where the dialog is now, after keeping
 /// it on screen). Called before the band's buttons are added, so they keep their clicks.
 pub fn drag_dock(ui: &Ui, band: egui::Rect, title: &str, moved: egui::Vec2, applied: egui::Vec2) {
-    let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
     crate::scenario::publish_handle("dialog:title", band.center());
+    let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
     // The drag runs from where the press started, so no movement is lost while egui decides
     // it is a drag, nor on the frame it ends.
     let base = egui::Id::new("sc_dock_drag_base");
@@ -106,33 +78,6 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, title: &str, moved: egui::Vec2, appl
         // Kept on screen: remember where it is, not where it was dragged off to.
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_offset"), (title.to_string(), applied)));
     }
-}
-
-/// A floating window, centred on the screen unless the caller places it, shrink-wrapped to its
-/// content up to its width limit.
-pub fn window<'a>(ctx: &egui::Context, title: impl Into<WidgetText>, width: Width) -> egui::Window<'a> {
-    let max = match width {
-        Width::Normal => WINDOW_MAX_W,
-        Width::Wide => WINDOW_WIDE_MAX_W,
-    };
-    let c = ctx.content_rect().center();
-    egui::Window::new(title)
-        .enabled(!crate::issue_report::cad_input_blocked())
-        .collapsible(false)
-        .pivot(Align2::CENTER_CENTER)
-        .default_pos(c - vec2(0.0, 60.0))
-        .max_width(max)
-}
-
-/// Floating model controls share the report's read-only drawing boundary with windows.
-pub fn area(id: egui::Id) -> egui::Area {
-    egui::Area::new(id).enabled(!crate::issue_report::cad_input_blocked())
-}
-
-/// Shared rounded surface for floating shell cards.
-pub(crate) fn shell_card(fill: egui::Color32) -> egui::Frame {
-    let t = crate::theme::Tokens::get();
-    egui::Frame::NONE.fill(fill).stroke(egui::Stroke::new(1.0, t.border)).corner_radius(t.radius_lg).shadow(t.shell_shadow())
 }
 
 #[cfg(test)]
@@ -235,22 +180,5 @@ mod tests {
             h.frames(6);
             assert!((h.app.viewport.dialog_rect.unwrap().min - rest.min).length() < 0.01, "a new dialog opens docked");
         }
-    }
-
-    /// Windows are made in this file only, so none can skip the width limits.
-    #[test]
-    fn windows_come_from_ui_kit_panel() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut bad = Vec::new();
-        for e in std::fs::read_dir(&dir).unwrap() {
-            let p = e.unwrap().path();
-            if p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "frame.rs") {
-                let text = std::fs::read_to_string(&p).unwrap();
-                if text.contains("egui::Window::new(") {
-                    bad.push(p.display().to_string());
-                }
-            }
-        }
-        assert!(bad.is_empty(), "use ui_kit::Panel instead of egui::Window::new in {bad:?}");
     }
 }

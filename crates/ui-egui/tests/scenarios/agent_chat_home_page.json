@@ -1,0 +1,11 @@
+[
+  {"note": "With the start page open (as at launch), the agent chat's frame work still runs: agent detection resolves (its \"Looking for agents…\" label goes away) and the Add-agent dialog opens from Settings' AI page."},
+  {"call": "ui.home", "params": {"open": true}},
+  {"expect": {"home": true}},
+  {"call": "ui.prefs", "params": {"open": "AI"}},
+  {"expect": {"home": true, "prefs": {"dialog": "AI"}}},
+  {"until": {"not_shown": "Looking for agents…"}},
+  {"expect": {"shown": "Add agent…"}},
+  {"click": {"handle": "prefs:ai_add"}},
+  {"until": {"shown_handles": ["ai_add:add"], "shown": "Add agent"}}
+]

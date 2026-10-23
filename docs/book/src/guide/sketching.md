@@ -202,7 +202,8 @@ Press D, click what you want to measure and type the value: as soon as the click
 dimension (one line, circle or arc, or the second point or line of a distance or angle), its
 value box takes the keyboard with the measured value selected, so typing replaces it. Numbers,
 units (`1 in`), expressions (`2*width`) and parameter names all work; letters go into the box,
-not to tool shortcuts. While you type, the dimension text follows the cursor, and Enter places
+not to tool shortcuts. `width = 40` defines the user parameter `width` and dimensions with it,
+in one step. While you type, the dimension text follows the cursor, and Enter places
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
 
@@ -240,7 +241,9 @@ You can also start the constraint first and then pick its curves. An incomplete 
 selection leaves the tool ready for ordinary picking.
 
 Coincident accepts an exact selection of two points or a point and a curve. Midpoint
-accepts one point and one line, in either selection order. Symmetry accepts two distinct
+accepts one point and one line, in either selection order, or two lines: the second line
+moves (keeping its length) until its midpoint sits on the first line's midpoint,
+and stays centred there as either line changes. Symmetry accepts two distinct
 points and one symmetry line, regardless of where the line occurs in the selection.
 Successful constraints clear the selection; rejected constraints preserve it.
 

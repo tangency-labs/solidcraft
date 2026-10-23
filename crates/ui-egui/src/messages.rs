@@ -109,19 +109,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let t = Tokens::get();
     let now = crate::now_ms();
-    let mut open = true;
-    crate::frame::window(ctx, tr("messages.title"), crate::frame::Width::Normal)
-        .id(egui::Id::new("sc_messages"))
-        .open(&mut open)
-        .default_size(vec2(460.0, 360.0))
-        .show(ctx, |ui| {
+    let (closed, _) =
+        crate::ui_kit::Window::new(egui::Id::new("sc_messages"), "list", tr("messages.title")).fields().actions("", "", None).show(ctx, true, |ui| {
             ui.horizontal(|ui| {
-                let copy = ui.add_enabled(app.messages.iter().len() > 0, egui::Button::new(tr("messages.copy_all")));
+                let copy = crate::ui_kit::button(ui, tr("messages.copy_all"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:copy", copy.rect.center());
                 if copy.clicked() {
                     ctx.copy_text(app.messages.as_text(now));
                 }
-                let clear = ui.add_enabled(app.messages.iter().len() > 0, egui::Button::new(tr("messages.clear")));
+                let clear = crate::ui_kit::button(ui, tr("messages.clear"), crate::ui_kit::Button::Enabled(app.messages.iter().len() > 0));
                 crate::scenario::publish_handle("messages:clear", clear.rect.center());
                 if clear.clicked() {
                     app.messages.clear();
@@ -132,7 +128,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(RichText::new(tr("messages.none")).color(t.text_dim));
                 return;
             }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
                 for m in app.messages.iter().rev() {
                     ui.horizontal_top(|ui| {
                         ui.add_sized(vec2(70.0, 14.0), egui::Label::new(RichText::new(ago(now, m.at)).small().color(t.text_dim)));
@@ -142,7 +138,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             });
         });
-    if !open {
+    if closed {
         app.messages.open = false;
     }
     // The ages tick on while it is open.

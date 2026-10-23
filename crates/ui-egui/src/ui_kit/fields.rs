@@ -4,6 +4,7 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
 
@@ -257,7 +258,7 @@ mod tests;
 
 /// Stable-ID inline editor for tables. Completion is owned by the caller so Enter can commit
 /// a cell without submitting its panel. Tokens: control_height/fill, form_inset, font_label, text/error.
-pub(crate) fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool) -> Response {
+pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool) -> Response {
     bounded_cell_editor(ui, id, value, hint, invalid, usize::MAX)
 }
 
@@ -485,6 +486,13 @@ fn length_drag<'a>(value: &'a mut f64, units: &str, decimals: u8) -> egui::DragV
         .custom_parser(move |text| crate::prefs::parse_length_mm(text, scale))
 }
 
+/// Small model-anchored value editor. Retains its focus ID and native hit height so it does
+/// not intercept nearby canvas picks; the owner keeps completion and selection handling.
+pub(crate) fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String) -> Response {
+    let t = Tokens::get();
+    ui.add(egui::TextEdit::singleline(value).id(id).desired_width(t.space_24 * 3.0))
+}
+
 /// Placement editor whose owner routes Enter and Tab (including rejected expressions).
 /// Completion remains with the caller. Tokens: cell_editor tokens.
 pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
@@ -534,7 +542,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let library = super::icon_button_at(ui, button, "chevron", "Library");
     scenario::publish_handle("dialog:menu:Library", button.center());
     scenario::publish_rect("dialog:menu:Library", button);
-    let popup = egui::Popup::menu(&library);
+    let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
     popup.show(|ui| super::scope(ui, menu));
     if open {

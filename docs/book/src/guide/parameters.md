@@ -10,7 +10,9 @@ name (`d1`, `d2`, …). Click another driving dimension to use its name: when th
 just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
 cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
 `d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit.
+the expression or **Escape** to cancel the edit. When placing a new dimension, `width = 40` adds
+the user parameter `width` with that value (a bare number is in the design's units) and
+dimensions with it; a name that is already taken is refused.
 Add and edit user parameters through the existing **Change Parameters** command.
 
 In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user and model

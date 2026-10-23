@@ -8,6 +8,7 @@ use solidcraft_engine::geom::{Plane, Vec3};
 
 fn sketch_from(yaw: f64, pitch: f64, name: &str) -> (Harness, Vec3, Plane) {
     let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
     h.app.cam.yaw = yaw;
     h.app.cam.pitch = pitch;
     let eye = h.app.cam.eye();
@@ -72,6 +73,7 @@ fn a_flipped_sketch_extrudes_toward_the_viewer_and_reopens_the_same() {
 #[test]
 fn a_construction_plane_seen_from_below_gets_a_sketch_facing_down() {
     let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
     h.app.run("construct.plane.offset", json!({"base":"XY","offset":"5 mm","name":"P"})).unwrap();
     h.app.cam.yaw = -0.6;
     h.app.cam.pitch = -0.5;

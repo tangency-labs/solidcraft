@@ -67,7 +67,7 @@ fn section_card_and_floating_window_folds_render_down_when_open_right_when_close
                                 crate::frame::Side::Left,
                                 egui::Frame::NONE,
                             )
-                            .window()
+                            .window(&ctx)
                             .show(ui.ctx(), |ui| collapsible_header(ui, "fillet", "Fillet", &mut !open, || {}));
                         }
                     });

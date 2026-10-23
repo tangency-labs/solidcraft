@@ -269,12 +269,14 @@ pub(super) fn clone_assembly(
         return Err(invalid("copy occurrence map points to a missing occurrence"));
     }
     unique_ids(source.assembly.joints.iter().map(|j| j.id))?;
-    let mut joint_id = unique_ids(doc.assembly.joints.iter().map(|j| j.id))?;
+    unique_ids(doc.assembly.joints.iter().map(|j| j.id))?;
     let aux = |a: &Assembly| {
         a.contact_sets.iter().map(|x| x.id).chain(a.studies.iter().map(|x| x.id)).chain(a.exploded.iter().map(|x| x.id)).collect::<Vec<_>>()
     };
     unique_ids(aux(&source.assembly).into_iter())?;
-    let mut auxiliary_id = unique_ids(aux(&doc.assembly).into_iter())?;
+    unique_ids(aux(&doc.assembly).into_iter())?;
+    // Reserve from one persistent counter, committing it only when the entire copy succeeds.
+    let mut item_id = doc.next_item_id()?.saturating_sub(1);
     let mut a = doc.assembly.clone();
     let mut messages = Vec::new();
     let mut origin_names = a.origins.iter().map(|o| o.name.clone()).collect();
@@ -302,7 +304,7 @@ pub(super) fn clone_assembly(
         match (origin(&old.a, occurrences, features, bodies), origin(&old.b, occurrences, features, bodies)) {
             (Some(aa), Some(bb)) => {
                 let mut item = old.clone();
-                item.id = next_id(&mut joint_id)?;
+                item.id = next_id(&mut item_id)?;
                 item.name = unique_name(&old.name, &mut joint_names)?;
                 item.a = aa;
                 item.b = bb;
@@ -354,7 +356,7 @@ pub(super) fn clone_assembly(
         }
         if let Some(ids) = old.occurrences.iter().map(|o| occurrences.get(o).copied()).collect::<Option<Vec<_>>>() {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut contact_names)?;
             item.occurrences = ids;
             a.contact_sets.push(item);
@@ -369,7 +371,7 @@ pub(super) fn clone_assembly(
         }
         if old.keys.iter().all(|k| joints.contains_key(&k.joint)) {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut study_names)?;
             for key in &mut item.keys {
                 key.joint = *joints.get(&key.joint).ok_or_else(|| invalid("missing copied study joint"))?;
@@ -386,7 +388,7 @@ pub(super) fn clone_assembly(
         }
         if old.moves.iter().all(|(o, _)| occurrences.contains_key(o)) {
             let mut item = old.clone();
-            item.id = next_id(&mut auxiliary_id)?;
+            item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut view_names)?;
             for (o, _) in &mut item.moves {
                 *o = *occurrences.get(o).ok_or_else(|| invalid("missing copied exploded occurrence"))?;
@@ -397,6 +399,7 @@ pub(super) fn clone_assembly(
         }
     }
     budget(&a)?;
+    doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;
     doc.assembly = a;
     Ok(messages)
 }

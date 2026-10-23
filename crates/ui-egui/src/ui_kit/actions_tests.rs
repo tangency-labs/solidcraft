@@ -72,3 +72,67 @@ fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
         assert_eq!(frame_cursor(&ctx, cancel, &mut draw), egui::CursorIcon::PointingHand, "Cancel is always enabled");
     }
 }
+
+#[test]
+fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_themes() {
+    use crate::theme::Tokens;
+    use egui::{Pos2, RawInput, Rect, RichText, Shape, vec2};
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for enabled in [false, true] {
+            let ctx = crate::fonts::test_context();
+            crate::theme::apply(&ctx);
+            let rects =
+                [Rect::from_min_size(egui::pos2(20.0, 30.0), vec2(108.0, 32.0)), Rect::from_min_size(egui::pos2(140.0, 30.0), vec2(108.0, 32.0))];
+            let mut clicks = [0_usize; 2];
+            let mut draw = |events| {
+                ctx.run_ui(
+                    RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(320.0, 200.0))), events, focused: true, ..Default::default() },
+                    |ui| {
+                        ui.add_enabled_ui(enabled, |ui| {
+                            for (index, (label, variant)) in [("Recover", Button::Primary), ("Discard", Button::Normal)].into_iter().enumerate() {
+                                let response = button_at(
+                                    ui,
+                                    label,
+                                    rects[index],
+                                    RichText::new(label).font(crate::fonts::semibold(Tokens::get().font_button)),
+                                    variant,
+                                );
+                                assert_eq!(response.rect, rects[index]);
+                                assert_eq!(response.enabled(), enabled);
+                                if response.clicked() {
+                                    clicks[index] += 1;
+                                }
+                            }
+                        });
+                    },
+                )
+            };
+            let output = draw(vec![]);
+            for (index, label) in ["Recover", "Discard"].into_iter().enumerate() {
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        Shape::Text(text) if text.galley.job.text == label => Some(text),
+                        _ => None,
+                    })
+                    .expect("native button label is painted");
+                if enabled && index == 0 {
+                    let ink = text.galley.job.sections.first().expect("primary text format").format.color;
+                    assert!(crate::theme::contrast_ratio(ink, Tokens::get().form_primary) >= 4.5, "primary label remains legible in both themes");
+                }
+                let center = text.pos + text.galley.size() / 2.0;
+                assert!((center.x - rects[index].center().x).abs() <= 1.0, "{label} horizontal center: {center:?}");
+                assert!((center.y - rects[index].center().y).abs() <= 1.0, "{label} vertical center: {center:?}");
+            }
+            for rect in rects {
+                draw(pointer(rect.center(), true));
+                draw(pointer(rect.center(), false));
+            }
+            assert_eq!(clicks, if enabled { [1, 1] } else { [0, 0] });
+        }
+    }
+    crate::theme::set_dark(previous);
+}

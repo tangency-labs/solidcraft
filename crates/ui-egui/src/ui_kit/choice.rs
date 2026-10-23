@@ -5,6 +5,7 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -14,10 +15,12 @@ pub(crate) struct Segments<'a> {
     pub states: &'a [bool],
     pub compact: bool,
     pub primary: bool,
+    pub intrinsic: bool,
+    pub proportional: bool,
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
-    let Segments { states, compact, primary } = config;
+    let Segments { states, compact, primary, intrinsic, proportional } = config;
     let t = Tokens::get();
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;
     let widest = options
@@ -26,18 +29,30 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             ui.painter().layout_no_wrap(crate::i18n::tr_label(option).to_string(), crate::fonts::semibold(t.font_label), t.form_ink).size().x
         })
         .fold(0.0, f32::max);
-    if !compact && widest + 2.0 * t.space_8 > segment_width {
+    if !intrinsic && !proportional && !compact && widest + 2.0 * t.space_8 > segment_width {
         let before = *selected;
         let id = format!("segments_fallback_{}", label(ui));
         dropdown(ui, &id, selected, options);
         return *selected != before;
     }
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
+    let natural: Vec<_> = options
+        .iter()
+        .map(|option| {
+            ui.painter().layout_no_wrap((*option).to_owned(), crate::fonts::semibold(t.font_label), t.form_ink).size().x.ceil() + t.space_16
+        })
+        .collect();
+    let total = natural.iter().sum::<f32>();
+    let desired = if intrinsic { total.min(dimension(ui.available_width())) } else { dimension(ui.available_width()) };
+    let (rect, _) = ui.allocate_exact_size(vec2(desired, row_height()), egui::Sense::hover());
     ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
-    let width = rect.width() / options.len().max(1) as f32;
+    let equal_width = rect.width() / options.len().max(1) as f32;
     let mut clicked = false;
+    let mut x = rect.left();
     for (index, option) in options.iter().enumerate() {
-        let segment = egui::Rect::from_min_size(rect.min + vec2(index as f32 * width, 0.0), vec2(width, rect.height()));
+        let width =
+            if (intrinsic || proportional) && total > 0.0 { natural.get(index).copied().unwrap_or(0.0) * rect.width() / total } else { equal_width };
+        let segment = egui::Rect::from_min_size(egui::pos2(x, rect.top()), vec2(width, rect.height()));
+        x += width;
         let response = ui.interact(segment, ui.make_persistent_id(("segment", index)), egui::Sense::click());
         let on = states.get(index).copied().unwrap_or(*selected == index);
         let rounding = egui::CornerRadius {
@@ -130,7 +145,7 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
         // A square icon area inside the segment: dash gaps and dots need the room to read apart.
         let side = (segment.width().min(segment.height()) - t.space_4).max(t.space_12);
         let icon_rect = egui::Rect::from_center_size(segment.center(), vec2(side, side));
-        crate::icons::paint(ui.painter(), icon_rect, option.icon, t.icon, t.icon_fill, t.form_primary);
+        crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), on, option.key));
         scenario::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
         let response = response.on_hover_text(&option.tip);
@@ -239,7 +254,7 @@ pub(crate) fn tool_choices<'a>(ui: &mut Ui, label: &str, current: &str, choices:
                     .corner_radius(t.sketch_mode_radius)
                     .min_size(vec2(t.sketch_mode_size, t.sketch_mode_size)),
             );
-            crate::icons::paint(ui.painter(), response.rect.shrink(t.space_6), choice.icon, t.icon, t.icon_fill, t.sketch_accent);
+            crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_6), choice.icon, f32::from(t.icon.a()) / 255.0);
             scenario::publish_target(&format!("sketch_palette:feature:{}", choice.key), response.rect);
             response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, choice.label));
             if response.on_hover_text(choice.label).clicked() && enabled {
@@ -257,7 +272,7 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     let t = Tokens::get();
     let response =
         ui.add(egui::Button::new("").selected(*selected).min_size(vec2(t.space_24 + t.space_4, t.control_height)).sense(egui::Sense::CLICK));
-    crate::icons::paint(ui.painter(), response.rect.shrink(t.space_3), icon, t.icon, t.icon_fill, t.form_primary);
+    crate::icons::paint_icon(ui.painter(), response.rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, *selected, crate::i18n::tr_label(label)));
     crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), response.rect.center());
     if response.clone().on_hover_text(crate::i18n::tr_label(label)).clicked() {
@@ -348,7 +363,9 @@ pub(crate) struct PopupOption<'a> {
     pub color: egui::Color32,
 }
 
-/// Focus-neutral suggestion popup. The owner handles navigation and completion semantics.
+/// Focus-neutral suggestion popup. The owner handles navigation and completion semantics. Its
+/// rows take no focus, and where they were drawn is kept under `id.with("rows")`, so an owner
+/// can act on a press before the click lands (#3257).
 /// Tokens: space_2, form_label_width, control_height, text_dim, scope control/font tokens.
 pub(crate) fn popup_list(
     ctx: &egui::Context,
@@ -360,8 +377,10 @@ pub(crate) fn popup_list(
 ) -> Option<usize> {
     let t = crate::theme::Tokens::get();
     let mut chosen = None;
-    let area = crate::frame::area(id).order(egui::Order::Tooltip).fixed_pos(anchor.left_bottom() + egui::vec2(0.0, t.space_2)).show(ctx, |ui| {
-        egui::Frame::popup(ui.style())
+    let mut rows = Vec::with_capacity(options.len());
+    let popup = Container::new(ctx, Surface::Popup).area(id);
+    let area = popup.order(egui::Order::Tooltip).fixed_pos(anchor.left_bottom() + egui::vec2(0.0, t.space_2)).show(ctx, |ui| {
+        Container::popup_frame(ui.style())
             .fill(t.control_fill)
             .stroke(egui::Stroke::new(1.0, t.dialog_border))
             .corner_radius(t.radius_lg)
@@ -370,7 +389,8 @@ pub(crate) fn popup_list(
                 super::scope(ui, |ui| {
                     ui.set_width(anchor.width().max(t.form_card_width - t.space_16 * 2.0 - t.space_2));
                     for (index, option) in options.iter().enumerate() {
-                        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::click());
+                        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::CLICK);
+                        rows.push(rect);
                         let picked = index == selected;
                         if picked || response.hovered() {
                             ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
@@ -413,6 +433,7 @@ pub(crate) fn popup_list(
             });
     });
     crate::scenario::publish_rect("dialog:suggestions", area.response.rect);
+    ctx.data_mut(|d| d.insert_temp(id.with("rows"), rows));
     chosen
 }
 

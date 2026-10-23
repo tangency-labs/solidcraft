@@ -236,12 +236,6 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
     }
 }
 
-/// Install font bytes as fallback for every interface family, retaining its bundled weights.
-/// Returns true if the font was parsed and installed successfully.
-pub fn install_cjk_font(ctx: &egui::Context, bytes: Vec<u8>) -> bool {
-    install_cjk_font_for(ctx, bytes, "ja")
-}
-
 /// Install the downloaded font with the CJK UI's shared mixed-script baseline.
 pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str) -> bool {
     let fonts = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap_or_else(base_font_definitions);
@@ -1009,9 +1003,10 @@ mod tests {
         let chosen = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
         install(&ctx, web_font_definitions(chosen, None));
         // Both installations happen before the first frame, like a fast cached web fetch.
-        assert!(install_cjk_font(
+        assert!(install_cjk_font_for(
             &ctx,
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).to_vec()
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf")).to_vec(),
+            "ja",
         ));
         let installed = ctx.data(|d| d.get_temp::<FontDefinitions>(installed_fonts_id())).unwrap();
         for family in sans_families() {

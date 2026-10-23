@@ -101,10 +101,16 @@ impl GltfImport {
         if let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut self.feature.kind {
             for (m, slot) in meshes.iter_mut().zip(&self.plan.bodies) {
                 let Some(frame) = slot.and_then(|s| world.get(s).copied().flatten()) else { continue };
-                for p in m.positions.as_chunks_mut::<3>().0 {
-                    let q = solidcraft_doc::apply_point(&frame, Vec3::new(p[0], p[1], p[2]));
-                    *p = [q.x, q.y, q.z];
-                }
+                m.positions = m
+                    .positions
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .flat_map(|p| {
+                        let q = solidcraft_doc::apply_point(&frame, Vec3::new(p[0], p[1], p[2]));
+                        [q.x, q.y, q.z]
+                    })
+                    .collect();
             }
         }
         self.plan = MeshPlan::default();

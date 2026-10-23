@@ -28,6 +28,18 @@ impl FeatureKind {
         v
     }
 
+    /// Whether the feature names the feature `name` (the construction plane a plane is built on,
+    /// a patterned or mirrored feature).
+    pub fn names_feature(&self, name: &str) -> bool {
+        let mut found = false;
+        self.walk_refs(&mut |r| {
+            if let Ref::Feature(n) = r {
+                found |= n.as_ref() == name;
+            }
+        });
+        found
+    }
+
     /// Point references to sketches (by id) and features (by name) at their copies, or at a
     /// feature's new name (`timeline.rename`).
     pub fn remap_refs(&mut self, sketches: &BTreeMap<u64, u64>, names: &BTreeMap<String, String>) {

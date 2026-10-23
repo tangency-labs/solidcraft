@@ -280,6 +280,7 @@ mod tests {
         assert_eq!(ja.given_name("Untitled bracket"), "Untitled bracket");
         assert_eq!(ja.given_name("Boss"), "Boss");
     }
+    use proc_macro2::{Delimiter, TokenStream, TokenTree};
     use std::collections::BTreeSet;
 
     fn placeholders(text: &str) -> BTreeSet<&str> {
@@ -436,6 +437,66 @@ mod tests {
                     assert!(ENGLISH.messages().contains_key(id), "missing English message: {id}");
                 }
             }
+        }
+    }
+
+    /// `label()` resolves a literal by its English text (or, failing that, an id); `text()` only
+    /// by id. A literal neither reaches is shown verbatim in every locale and nothing fails, so
+    /// every label and id literal the UI passes is read from the source and checked against the
+    /// English catalog. The source is tokenised with `proc-macro2`, so comments, raw strings,
+    /// escapes and test modules are handled, and calls inside macros count too. UI-kit calls that
+    /// translate their label themselves (`row`, imported as `form_row`, and the rest of
+    /// `KIT_CALLS`) are read at the same argument positions the kit translates.
+    #[test]
+    fn every_ui_label_literal_reaches_an_english_catalog_entry() {
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let ids: BTreeSet<&str> = english.keys().map(String::as_str).collect();
+        let texts: BTreeSet<&str> = english.values().filter(|text| !text.contains('{')).map(String::as_str).collect();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        source_files(&root, &mut files);
+        files.sort();
+        let sources: Vec<(std::path::PathBuf, String)> =
+            files.into_iter().map(|path| (path.clone(), std::fs::read_to_string(&path).unwrap())).collect();
+        let context = Context::new(&sources);
+        // Test code like `*_tests.rs`, and the files a source declares as external test modules
+        // (`#[cfg(test)] mod gallery;`). An inline `#[cfg(test)] mod tests { … }` includes no file
+        // and is skipped in place by the scanner.
+        let test_only: BTreeSet<std::path::PathBuf> = sources.iter().flat_map(|(path, source)| test_module_files(path, source)).collect();
+        let mut missing: Vec<String> = Vec::new();
+        for (path, source) in &sources {
+            if test_only.contains(path) {
+                continue;
+            }
+            let shown = path.strip_prefix(&root).unwrap_or(path).display().to_string();
+            for (literal, id_only) in literals_in(&context, path, source) {
+                // A literal with no letters (`×`, `↑`) has no language: there is nothing to
+                // translate, and no entry to want. An empty literal is a blank spacer cell.
+                if !literal.chars().any(char::is_alphabetic) {
+                    continue;
+                }
+                if !ids.contains(literal.as_str()) && (id_only || !texts.contains(literal.as_str())) {
+                    missing.push(format!("{shown}: `{literal}`"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "{} literal(s) would stay English in every locale because no English catalog entry reaches them:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+
+    /// The mouse mapping picker shows its preset's help through `tr_label`, which the guard above
+    /// can't see: the text sits in a struct field, not in a call. Each one must be the English text
+    /// of its preset's catalog message, or it stays English in every locale.
+    #[test]
+    fn navigation_preset_help_reaches_the_catalog() {
+        let english = Locale::for_language("en");
+        for preset in &crate::prefs::NAV_PRESETS {
+            let id = format!("nav.{}.help", preset.id);
+            assert_eq!(english.text(&id), preset.help, "{id}");
         }
     }
 
@@ -780,5 +841,1066 @@ mod tests {
             assert_eq!(tr("ui.preferences"), "環境設定");
         }
         assert_eq!(tr("ui.preferences"), "Preferences");
+    }
+
+    /// Every `.rs` file under `dir` except test modules (`*_tests.rs`, `tests.rs`).
+    fn source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                source_files(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                if name != "tests.rs" && !name.ends_with("_tests.rs") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    /// A UI-kit call whose label or text argument reaches `tr_label` (shown text) or `tr` (id).
+    /// `args` are zero-based positions without the receiver; `trim` names the positions the kit
+    /// normalises at run time (the row label, whose leading indent it keeps). Only those may be
+    /// matched with their indentation removed.
+    struct KitCall {
+        name: &'static str,
+        args: &'static [usize],
+        id: bool,
+        trim: &'static [usize],
+    }
+
+    /// The kit functions that translate a label or text for display or announcement, read off
+    /// `crates/ui-egui/src/ui_kit/`. Not here: the painters that expect an already translated
+    /// string (`caption`, `summary_row`, `list_row`, `panel::header`, `empty_box`, `checkbox`,
+    /// `tool_choices`), `segmented` (it measures its options with `tr_label` but paints the raw
+    /// option, so a catalog entry could not translate it — a wiring gap of its own) and the
+    /// measurement helpers (`metrics::label_width`, `ContentWidth::*`). The `hint` arguments of
+    /// `hint_field`/`text_field`/`password_field`/`message_field` go raw into
+    /// `TextEdit::hint_text`, so they are not translated labels either.
+    const KIT_CALLS: &[KitCall] = &[
+        // layout.rs: `sized_row` draws `tr_label(text)`, and every row builder reaches it.
+        KitCall { name: "row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "expr_row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "hint_row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "text_row", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "choice_row", args: &[1, 4], id: false, trim: &[1] },
+        KitCall { name: "section", args: &[2], id: false, trim: &[] },
+        KitCall { name: "section_count", args: &[2], id: false, trim: &[] },
+        // fields.rs
+        KitCall { name: "multiline_text_field", args: &[1], id: false, trim: &[1] },
+        KitCall { name: "dropdown", args: &[3], id: false, trim: &[] },
+        KitCall { name: "cell_editor", args: &[3], id: false, trim: &[] },
+        KitCall { name: "bounded_cell_editor", args: &[3], id: false, trim: &[] },
+        KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
+        // actions.rs
+        KitCall { name: "icon_button_at", args: &[3], id: false, trim: &[] },
+        KitCall { name: "icon_button_colored", args: &[3], id: false, trim: &[] },
+        KitCall { name: "footer", args: &[1, 2], id: false, trim: &[] },
+        KitCall { name: "button", args: &[1], id: false, trim: &[] },
+        KitCall { name: "primary_button", args: &[1], id: false, trim: &[] },
+        KitCall { name: "wide_primary_button", args: &[1], id: false, trim: &[] },
+        KitCall { name: "action_menu", args: &[1], id: false, trim: &[] },
+        KitCall { name: "compact_button", args: &[2], id: false, trim: &[] },
+        KitCall { name: "icon_label_button", args: &[1], id: false, trim: &[] },
+        KitCall { name: "command_menu_button", args: &[2], id: false, trim: &[] },
+        // choice.rs
+        KitCall { name: "checkbox_grid", args: &[1], id: false, trim: &[] },
+        KitCall { name: "options", args: &[2], id: false, trim: &[] },
+        KitCall { name: "checkbox_row", args: &[2], id: false, trim: &[] },
+        KitCall { name: "toggle_icon", args: &[2], id: false, trim: &[] },
+        // table.rs
+        KitCall { name: "Column::new", args: &[0], id: false, trim: &[] },
+        KitCall { name: ".add_prompt", args: &[1, 2], id: false, trim: &[] },
+        // every `Window`, `Confirm` and `Panel` action row ends in the kit footer
+        KitCall { name: ".actions", args: &[0, 1, 2], id: false, trim: &[] },
+        KitCall { name: "removable_header", args: &[1], id: false, trim: &[] },
+        KitCall { name: "bin_button", args: &[1], id: false, trim: &[] },
+        // menu.rs and search.rs; `CommandSearch::heading` passes its label to `tr`, an id.
+        KitCall { name: "Menu::heading", args: &[1], id: false, trim: &[] },
+        KitCall { name: "MenuItem::new", args: &[1], id: false, trim: &[] },
+        KitCall { name: "CommandSearch::heading", args: &[1], id: true, trim: &[] },
+    ];
+
+    /// A struct field the kit translates when it draws the value: `Footer { apply }`
+    /// (actions.rs:116), `PairButton { label }` (actions.rs:217), `PopupOption { kind }`
+    /// (choice.rs:379) and `WindowPage { label }` (panel.rs:561, an id).
+    struct KitField {
+        owner: &'static str,
+        field: &'static str,
+        id: bool,
+    }
+
+    const KIT_FIELDS: &[KitField] = &[
+        KitField { owner: "Footer", field: "apply", id: false },
+        KitField { owner: "PairButton", field: "label", id: false },
+        KitField { owner: "PopupOption", field: "kind", id: false },
+        KitField { owner: "WindowPage", field: "label", id: true },
+    ];
+
+    /// A text carrier outside `ui_kit/` that hands its label to the kit: `context_menu::button`
+    /// and `button_enabled` build a `MenuItem`, which draws `tr_label(label)` (menu.rs:210).
+    /// Resolved by the same origin rules as the kit: a `context_menu::…`/`crate::context_menu::…`
+    /// path, a `use` import, or a call inside `context_menu.rs` itself.
+    struct ModuleCall {
+        module: &'static str,
+        name: &'static str,
+        args: &'static [usize],
+    }
+
+    const MODULE_CALLS: &[ModuleCall] = &[
+        ModuleCall { module: "context_menu", name: "button", args: &[1] },
+        ModuleCall { module: "context_menu", name: "button_enabled", args: &[1] },
+    ];
+
+    /// The kit's modules: only these may sit between `ui_kit` and a translated function in a path.
+    const KIT_MODULES: &[&str] =
+        &["layout", "fields", "actions", "choice", "table", "menu", "metrics", "text", "panel", "reports", "search", "status", "radial"];
+
+    /// One leaf or glob of a `use` tree: the path it names (already made absolute against the
+    /// file's module) and, for a leaf, the local name it binds.
+    enum Import {
+        Leaf { path: Vec<String>, local: String, public: bool },
+        Glob { path: Vec<String> },
+    }
+
+    /// How one file's imports name the kit: function bindings, module bindings (`kit::row`,
+    /// `l::row`) and glob imports (`use crate::ui_kit::*`).
+    #[derive(Default)]
+    struct Names {
+        functions: BTreeMap<String, Target>,
+        modules: BTreeMap<String, Vec<String>>,
+        globs: Vec<Vec<String>>,
+    }
+
+    /// What a name or path resolves to: a kit function, or a text carrier in another module.
+    #[derive(Clone, Copy)]
+    enum Target {
+        Kit(&'static str),
+        Module(&'static ModuleCall),
+    }
+
+    /// What the crate's files say about the kit: the names each file imports from it, and the
+    /// public re-exports a module offers another (`dialogs::form_row` → `ui_kit::row`).
+    struct Context {
+        reexports: BTreeMap<Vec<String>, BTreeMap<String, Vec<String>>>,
+        imports: BTreeMap<std::path::PathBuf, Vec<Import>>,
+    }
+
+    impl Context {
+        fn new(files: &[(std::path::PathBuf, String)]) -> Self {
+            let mut imports = BTreeMap::new();
+            let mut reexports: BTreeMap<Vec<String>, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+            for (path, source) in files {
+                let module = module_path(path);
+                let file_imports = parsed_imports(source, &module);
+                for import in &file_imports {
+                    if let Import::Leaf { path: target, local, public: true } = import {
+                        reexports.entry(module.clone()).or_default().insert(local.clone(), target.clone());
+                    }
+                }
+                imports.insert(path.clone(), file_imports);
+            }
+            Self { reexports, imports }
+        }
+
+        /// How this file names the kit: bound functions, bound modules and glob imports.
+        fn names(&self, path: &std::path::Path) -> Names {
+            let mut names = Names::default();
+            for import in self.imports.get(path).into_iter().flatten() {
+                match import {
+                    Import::Leaf { path: target, local, .. } => {
+                        if let Some(found) = resolve_target(target, &self.reexports) {
+                            names.functions.insert(local.clone(), found);
+                        } else {
+                            // Not a function target: the leaf may bind a module (`ui_kit as kit`).
+                            names.modules.insert(local.clone(), target.clone());
+                        }
+                    }
+                    Import::Glob { path } => names.globs.push(path.clone()),
+                }
+            }
+            names
+        }
+
+        fn inside_kit(&self, path: &std::path::Path) -> bool {
+            module_path(path).get(1).is_some_and(|module| module == "ui_kit")
+        }
+    }
+
+    /// The crate module path of a source file (`…/src/ui_kit/mod.rs` → `crate::ui_kit`).
+    fn module_path(path: &std::path::Path) -> Vec<String> {
+        let mut parts: Vec<String> = path.components().filter_map(|part| part.as_os_str().to_str().map(str::to_string)).collect();
+        let start = parts.iter().rposition(|part| part == "src").map_or(0, |at| at + 1);
+        let mut relative: Vec<String> = parts.split_off(start);
+        let file = relative.pop().unwrap_or_default();
+        let stem = file.strip_suffix(".rs").unwrap_or(&file).to_string();
+        let mut out = vec!["crate".to_string()];
+        out.extend(relative);
+        if !matches!(stem.as_str(), "lib" | "main" | "mod") {
+            out.push(stem);
+        }
+        out
+    }
+
+    /// The kit function or module text carrier a path names, following a module's public
+    /// re-exports (`crate::dialogs::form_row` → `crate::ui_kit::row`). Only a path through
+    /// `ui_kit` (or through a listed module) counts, so a same-named function elsewhere
+    /// (`ContentWidth::button`, `other::button`) stays out.
+    fn resolve_target(path: &[String], reexports: &BTreeMap<Vec<String>, BTreeMap<String, Vec<String>>>) -> Option<Target> {
+        let mut path = path.to_vec();
+        for _ in 0..4 {
+            let (name, module) = path.split_last()?;
+            if let Some(at) = module.iter().position(|segment| segment == "ui_kit")
+                && (module.len() == at + 1 || KIT_MODULES.contains(&module[at + 1].as_str()))
+                && let Some(kit) = free_kit(name)
+            {
+                return Some(Target::Kit(kit));
+            }
+            if let Some(call) = module_call(name, module) {
+                return Some(Target::Module(call));
+            }
+            path = reexports.get(module)?.get(name)?.clone();
+        }
+        None
+    }
+
+    /// The module text carrier `name` names, when the last segment of `module` is its module.
+    fn module_call(name: &str, module: &[String]) -> Option<&'static ModuleCall> {
+        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
+    }
+
+    /// Make a `use`/call path absolute against the module of the file it appears in:
+    /// `super::row` in `ui_kit/choice.rs` → `crate::ui_kit::row`, `self::x` → the file's own
+    /// module, `crate::…` unchanged.
+    fn normalize(module: &[String], path: &[String]) -> Vec<String> {
+        match path.first().map(String::as_str) {
+            Some("crate") => path.to_vec(),
+            Some("self") => {
+                let mut out = module.to_vec();
+                out.extend_from_slice(&path[1..]);
+                out
+            }
+            Some("super") => {
+                let supers = path.iter().take_while(|segment| segment.as_str() == "super").count();
+                let mut out = module.to_vec();
+                for _ in 0..supers {
+                    out.pop();
+                }
+                out.extend_from_slice(&path[supers..]);
+                out
+            }
+            _ => path.to_vec(),
+        }
+    }
+
+    /// The target a qualified call names: through a module binding (`kit::row`, `l::row`) or a
+    /// path relative to the file's module (`super::row`, `super::actions::…`).
+    fn resolve_qualified(context: &Context, names: &Names, module: &[String], qualifier: &[String], name: &str) -> Option<Target> {
+        if let Some(bound) = qualifier.first().and_then(|first| names.modules.get(first)) {
+            let mut path = bound.clone();
+            path.extend_from_slice(&qualifier[1..]);
+            path.push(name.to_string());
+            if let Some(target) = resolve_target(&path, &context.reexports) {
+                return Some(target);
+            }
+        }
+        let mut path = normalize(module, qualifier);
+        path.push(name.to_string());
+        resolve_target(&path, &context.reexports)
+    }
+
+    /// A module text carrier called inside its own module (`button` in `context_menu.rs`).
+    fn module_inside(path: &std::path::Path, name: &str) -> Option<&'static ModuleCall> {
+        let module = module_path(path);
+        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
+    }
+
+    fn free_kit(name: &str) -> Option<&'static str> {
+        KIT_CALLS.iter().find(|call| call.name == name).map(|call| call.name)
+    }
+
+    /// A standalone snippet, as if it were the file `src/live.rs`, for the scanner tests.
+    fn literals(source: &str) -> Vec<(String, bool)> {
+        literals_with(source, &[])
+    }
+
+    /// [`literals`] with extra files beside the snippet (a module whose re-exports it imports).
+    fn literals_with(source: &str, extra: &[(&str, &str)]) -> Vec<(String, bool)> {
+        let snippet = std::path::PathBuf::from("src/live.rs");
+        let mut files = vec![(snippet.clone(), source.to_string())];
+        files.extend(extra.iter().map(|(path, source)| (std::path::PathBuf::from(path), (*source).to_string())));
+        literals_in(&Context::new(&files), &snippet, source)
+    }
+
+    /// [`literals`] for a snippet at a given crate path (for a file inside `ui_kit/`).
+    fn literals_at(path: &str, source: &str) -> Vec<(String, bool)> {
+        let path = std::path::PathBuf::from(path);
+        literals_in(&Context::new(&[(path.clone(), source.to_string())]), &path, source)
+    }
+
+    /// Every label and id literal in `source` as `(text, id-only)`.
+    fn literals_in(context: &Context, path: &std::path::Path, source: &str) -> Vec<(String, bool)> {
+        // A file the tokenizer refuses would otherwise pass unchecked.
+        let tokens = source.parse::<TokenStream>().expect("a UI source file tokenizes");
+        // Which `tr` the file means, read from its tokens (no comments) with the spacing removed.
+        let code: String = tokens.to_string().split_whitespace().collect();
+        let label_file = code.contains("fntr(text:&str)->&str") || code.contains("lettr=crate::i18n::tr_label;");
+        let id_file = code.contains("usecrate::i18n::tr;") || code.contains("lettr=crate::i18n::tr;") || imports_i18n_tr(&code);
+        let names = context.names(path);
+        let mut out = Vec::new();
+        scan(tokens.into_iter().collect(), label_file, id_file, &names, context, path, &mut out);
+        out
+    }
+
+    /// Walk `tokens`, recording each call's literal; recurse into groups and skip `#[cfg(test)]`.
+    fn scan(
+        tokens: Vec<TokenTree>,
+        label_file: bool,
+        id_file: bool,
+        names: &Names,
+        context: &Context,
+        path: &std::path::Path,
+        out: &mut Vec<(String, bool)>,
+    ) {
+        let inside_kit = context.inside_kit(path);
+        let module = module_path(path);
+        let mut i = 0;
+        while i < tokens.len() {
+            if cfg_test(&tokens, i) {
+                i = skip_item(&tokens, i + 2);
+                continue;
+            }
+            if let TokenTree::Ident(ident) = &tokens[i] {
+                let written = ident.to_string();
+                let previous = tokens.get(i.wrapping_sub(1));
+                let method = matches!(previous, Some(TokenTree::Punct(p)) if p.as_char() == '.');
+                let qualified = matches!(previous, Some(TokenTree::Punct(p)) if p.as_char() == ':');
+                let definition = matches!(previous, Some(TokenTree::Ident(id)) if id == "fn");
+                if !definition {
+                    if method {
+                        // A receiver's type is unknown here, so a method is read by its name
+                        // alone: a known limit (a foreign `.actions(…)` would be read as well).
+                        kit_method(&written, &tokens, i, out);
+                    } else {
+                        match written.as_str() {
+                            // The dialogs' own `tr` wraps `tr_label`; an imported `i18n::tr` keeps its id semantics.
+                            "tr" if !qualified => push(&tokens, i + 1, &[0], id_file && !label_file, &[], out),
+                            "tr_label" => push(&tokens, i + 1, &[0], false, &[], out),
+                            "SelInput" if is_path(&tokens, i, "new") => push(&tokens, i + 4, &[0], false, &[], out),
+                            "i18n" if is_path(&tokens, i, "tr") => push(&tokens, i + 4, &[0], true, &[], out),
+                            _ => {
+                                // `Column::new`, `Menu::heading`, …: a type path, read by name (the
+                                // same known limit as the methods).
+                                kit_path(&written, &tokens, i, out);
+                                // A free kit function counts from its origin only: called through
+                                // `ui_kit::`, imported from `ui_kit` (or a module re-exporting it),
+                                // or called inside `ui_kit/` itself.
+                                let qualifier = qualifier(&tokens, i);
+                                let resolved = if qualifier.is_empty() {
+                                    names
+                                        .functions
+                                        .get(&written)
+                                        .copied()
+                                        .or_else(|| {
+                                            // `use crate::ui_kit::*;` (or `use super::*;` in the kit)
+                                            // makes the kit's functions callable unqualified.
+                                            names.globs.iter().find_map(|glob| {
+                                                let mut path = glob.clone();
+                                                path.push(written.clone());
+                                                resolve_target(&path, &context.reexports)
+                                            })
+                                        })
+                                        .or_else(|| inside_kit.then(|| free_kit(&written)).flatten().map(Target::Kit))
+                                        .or_else(|| module_inside(path, &written).map(Target::Module))
+                                } else {
+                                    resolve_qualified(context, names, &module, &qualifier, &written)
+                                };
+                                match resolved {
+                                    Some(Target::Kit(kit)) => kit_free(kit, &tokens, i, out),
+                                    Some(Target::Module(call)) => push(&tokens, i + 1, call.args, false, &[], out),
+                                    None => {}
+                                }
+                            }
+                        }
+                    }
+                    kit_fields(&written, &tokens, i, out);
+                }
+            }
+            if let TokenTree::Group(group) = &tokens[i] {
+                scan(group.stream().into_iter().collect(), label_file, id_file, names, context, path, out);
+            }
+            i += 1;
+        }
+    }
+
+    /// Record the label literals of a method call (`.actions`, `.add_prompt`), read by name.
+    fn kit_method(written: &str, tokens: &[TokenTree], i: usize, out: &mut Vec<(String, bool)>) {
+        for call in KIT_CALLS {
+            if let Some(name) = call.name.strip_prefix('.')
+                && written == name
+            {
+                push(tokens, i + 1, call.args, call.id, call.trim, out);
+            }
+        }
+    }
+
+    /// Record the label literals of a type-path call (`Column::new`, `Menu::heading`), read by the
+    /// type's name — the same known limit as the methods.
+    fn kit_path(written: &str, tokens: &[TokenTree], i: usize, out: &mut Vec<(String, bool)>) {
+        for call in KIT_CALLS {
+            if let Some((ty, name)) = call.name.split_once("::")
+                && written == ty
+                && is_path(tokens, i, name)
+            {
+                push(tokens, i + 4, call.args, call.id, call.trim, out);
+            }
+        }
+    }
+
+    /// Record the label literals of a free kit call that `resolve_kit` resolved to `kit`.
+    fn kit_free(kit: &'static str, tokens: &[TokenTree], i: usize, out: &mut Vec<(String, bool)>) {
+        for call in KIT_CALLS.iter().filter(|call| call.name == kit) {
+            push(tokens, i + 1, call.args, call.id, call.trim, out);
+        }
+    }
+
+    /// The translated field of a struct literal the kit draws (`Footer { apply: Some("Apply") }`).
+    fn kit_fields(written: &str, tokens: &[TokenTree], i: usize, out: &mut Vec<(String, bool)>) {
+        let Some(TokenTree::Group(braces)) = tokens.get(i + 1) else { return };
+        if braces.delimiter() != Delimiter::Brace {
+            return;
+        }
+        for spec in KIT_FIELDS.iter().filter(|spec| spec.owner == written) {
+            for member in arguments(braces.stream().into_iter().collect()) {
+                if !matches!(member.first(), Some(TokenTree::Ident(name)) if *name == spec.field)
+                    || !matches!(member.get(1), Some(TokenTree::Punct(p)) if p.as_char() == ':')
+                {
+                    continue;
+                }
+                for literal in argument_literals(&member[2..]) {
+                    out.push((literal, spec.id));
+                }
+            }
+        }
+    }
+
+    /// The module path before a call's name (`crate::ui_kit::row` → `["crate", "ui_kit"]`).
+    fn qualifier(tokens: &[TokenTree], i: usize) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut k = i;
+        while k >= 3
+            && matches!(&tokens[k - 1], TokenTree::Punct(p) if p.as_char() == ':')
+            && matches!(&tokens[k - 2], TokenTree::Punct(p) if p.as_char() == ':')
+        {
+            match &tokens[k - 3] {
+                TokenTree::Ident(segment) => out.push(segment.to_string()),
+                _ => break,
+            }
+            k -= 3;
+        }
+        out.reverse();
+        out
+    }
+
+    /// Record the string literals that are argument `args` of the parenthesised group at `group`;
+    /// `trim` drops the leading indent of the positions the kit normalises at run time.
+    fn push(tokens: &[TokenTree], group: usize, args: &[usize], id_only: bool, trim: &[usize], out: &mut Vec<(String, bool)>) {
+        let Some(TokenTree::Group(g)) = tokens.get(group) else { return };
+        if g.delimiter() != Delimiter::Parenthesis {
+            return;
+        }
+        let arguments = arguments(g.stream().into_iter().collect());
+        for &arg in args {
+            for value in arguments.get(arg).map_or_else(Vec::new, |tokens| argument_literals(tokens)) {
+                out.push((if trim.contains(&arg) { value.trim_start().to_string() } else { value }, id_only));
+            }
+        }
+    }
+
+    /// Split a call's or a struct literal's tokens at its top-level commas. Nested calls, closures,
+    /// blocks and lists are single groups, so their commas stay inside the member they belong to.
+    fn arguments(tokens: Vec<TokenTree>) -> Vec<Vec<TokenTree>> {
+        let mut out = vec![Vec::new()];
+        for token in tokens {
+            if matches!(&token, TokenTree::Punct(p) if p.as_char() == ',') {
+                out.push(Vec::new());
+            } else if let Some(argument) = out.last_mut() {
+                argument.push(token);
+            }
+        }
+        out
+    }
+
+    /// The label literal of one argument: `"A"`, `&"A"`, `&r#"A"#`, `Some("A")`, or every entry
+    /// of a list (`&["A", "B"]`, `&mut [("A", a), ("B", b)]`). Anything else (a `match`, a
+    /// `format!`, a variable) has no single label to read and contributes nothing.
+    fn argument_literals(tokens: &[TokenTree]) -> Vec<String> {
+        let tokens: Vec<&TokenTree> = tokens
+            .iter()
+            .filter(|token| !matches!(token, TokenTree::Punct(p) if p.as_char() == '&') && !matches!(token, TokenTree::Ident(id) if id == "mut"))
+            .collect();
+        match tokens.as_slice() {
+            [TokenTree::Literal(lit)] => string_literal(lit).into_iter().collect(),
+            [TokenTree::Ident(some), TokenTree::Group(group)] if *some == "Some" && group.delimiter() == Delimiter::Parenthesis => {
+                argument_literals(&group.stream().into_iter().collect::<Vec<_>>())
+            }
+            [TokenTree::Group(group)] if group.delimiter() == Delimiter::Bracket => {
+                arguments(group.stream().into_iter().collect()).iter().filter_map(|entry| list_entry_literal(entry)).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// One entry of a label list: `"A"` or the first literal of a tuple (`("A", &mut a)`).
+    fn list_entry_literal(tokens: &[TokenTree]) -> Option<String> {
+        match tokens {
+            [TokenTree::Literal(lit)] => string_literal(lit),
+            [TokenTree::Group(group)] if group.delimiter() == Delimiter::Parenthesis => match group.stream().into_iter().next() {
+                Some(TokenTree::Literal(lit)) => string_literal(&lit),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn string_literal(lit: &proc_macro2::Literal) -> Option<String> {
+        syn::parse_str::<syn::LitStr>(&lit.to_string()).ok().map(|text| text.value())
+    }
+
+    /// Every `use` declaration in `source` as its leaves and globs, with paths made absolute
+    /// against the module `module` of the file.
+    fn parsed_imports(source: &str, module: &[String]) -> Vec<Import> {
+        let mut out = Vec::new();
+        if let Ok(tokens) = source.parse::<TokenStream>() {
+            collect_imports(tokens.into_iter().collect(), module, &mut out);
+        }
+        out
+    }
+
+    fn collect_imports(tokens: Vec<TokenTree>, module: &[String], out: &mut Vec<Import>) {
+        let mut i = 0;
+        while i < tokens.len() {
+            if cfg_test(&tokens, i) {
+                i = skip_item(&tokens, i + 2);
+                continue;
+            }
+            if matches!(&tokens[i], TokenTree::Ident(id) if id == "use") {
+                let public = matches!(tokens.get(i.wrapping_sub(1)), Some(TokenTree::Ident(id)) if id == "pub")
+                    || matches!(tokens.get(i.wrapping_sub(1)), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis)
+                        && matches!(tokens.get(i.wrapping_sub(2)), Some(TokenTree::Ident(id)) if id == "pub");
+                let mut j = i + 1;
+                let mut tree = Vec::new();
+                while j < tokens.len() && !matches!(&tokens[j], TokenTree::Punct(p) if p.as_char() == ';') {
+                    tree.push(tokens[j].clone());
+                    j += 1;
+                }
+                use_tree(&tree, &[], module, public, out);
+                i = j;
+            }
+            if let TokenTree::Group(group) = &tokens[i] {
+                collect_imports(group.stream().into_iter().collect(), module, out);
+            }
+            i += 1;
+        }
+    }
+
+    /// Solve one `use` tree: a path with nested `{…}` groups, `as` aliases and `*` globs.
+    fn use_tree(tokens: &[TokenTree], prefix: &[String], module: &[String], public: bool, out: &mut Vec<Import>) {
+        let mut path = prefix.to_vec();
+        let mut local = None;
+        let mut i = 0;
+        while i < tokens.len() {
+            match &tokens[i] {
+                TokenTree::Ident(id) if id == "as" => {
+                    if let Some(TokenTree::Ident(alias)) = tokens.get(i + 1) {
+                        local = Some(alias.to_string());
+                    }
+                    i += 2;
+                    continue;
+                }
+                TokenTree::Ident(id) => path.push(id.to_string()),
+                TokenTree::Punct(p) if p.as_char() == '*' => {
+                    out.push(Import::Glob { path: normalize(module, &path) });
+                    return;
+                }
+                TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
+                    for part in arguments(group.stream().into_iter().collect()) {
+                        use_tree(&part, &path, module, public, out);
+                    }
+                    return;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if path.is_empty() {
+            return;
+        }
+        let last = path.last().cloned().unwrap_or_default();
+        if last == "self" {
+            // `use crate::ui_kit::{self, …}` binds the module itself.
+            let target = normalize(module, &path[..path.len() - 1]);
+            let local = local.unwrap_or_else(|| target.last().cloned().unwrap_or_default());
+            out.push(Import::Leaf { path: target, local, public });
+        } else {
+            let target = normalize(module, &path);
+            out.push(Import::Leaf { path: target, local: local.unwrap_or(last), public });
+        }
+    }
+
+    /// The files a source file includes as *external* test modules (`#[cfg(test)] mod gallery;`),
+    /// resolved like rustc: `name.rs` or `name/mod.rs` in the module directory, or a `#[path]` file
+    /// relative to the declaring file. An inline `#[cfg(test)] mod tests { … }` includes no file.
+    fn test_module_files(declaring: &std::path::Path, source: &str) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        if let Ok(tokens) = source.parse::<TokenStream>() {
+            collect_test_files(declaring, tokens.into_iter().collect(), &mut out);
+        }
+        out
+    }
+
+    fn collect_test_files(declaring: &std::path::Path, tokens: Vec<TokenTree>, out: &mut Vec<std::path::PathBuf>) {
+        let mut i = 0;
+        while i < tokens.len() {
+            if cfg_test(&tokens, i) {
+                // Only the annotated item counts. Further attributes and a `pub` may sit between
+                // `#[cfg(test)]` and an external `mod name;`; a `fn`, a `struct` or an inline
+                // `mod name { … }` includes no file (and a following `mod panel;` is production).
+                let mut k = i + 2;
+                let mut attribute = None;
+                loop {
+                    if let (Some(TokenTree::Punct(hash)), Some(TokenTree::Group(group))) = (tokens.get(k), tokens.get(k + 1))
+                        && hash.as_char() == '#'
+                        && group.delimiter() == Delimiter::Bracket
+                    {
+                        let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+                        if let [TokenTree::Ident(id), TokenTree::Punct(p), TokenTree::Literal(lit)] = inner.as_slice()
+                            && id == "path"
+                            && p.as_char() == '='
+                            && let Some(text) = string_literal(lit)
+                        {
+                            attribute = Some(text);
+                        }
+                        k += 2;
+                        continue;
+                    }
+                    if let Some(TokenTree::Ident(vis)) = tokens.get(k)
+                        && vis == "pub"
+                    {
+                        k += if matches!(tokens.get(k + 1), Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis) {
+                            2
+                        } else {
+                            1
+                        };
+                        continue;
+                    }
+                    break;
+                }
+                if matches!(tokens.get(k), Some(TokenTree::Ident(id)) if id == "mod")
+                    && let Some(TokenTree::Ident(name)) = tokens.get(k + 1)
+                    && matches!(tokens.get(k + 2), Some(TokenTree::Punct(p)) if p.as_char() == ';')
+                {
+                    out.extend(module_file(declaring, &name.to_string(), attribute.as_deref()));
+                }
+                i = skip_item(&tokens, i + 2);
+                continue;
+            }
+            if let TokenTree::Group(group) = &tokens[i] {
+                collect_test_files(declaring, group.stream().into_iter().collect(), out);
+            }
+            i += 1;
+        }
+    }
+
+    /// The files a `mod name;` declaration may name, from the declaring file.
+    fn module_file(declaring: &std::path::Path, name: &str, attribute: Option<&str>) -> Vec<std::path::PathBuf> {
+        let dir = declaring.parent().unwrap_or(std::path::Path::new("."));
+        if let Some(path) = attribute {
+            // A `#[path]` on a non-inline module is relative to the declaring file's directory.
+            let mut candidates = vec![dir.join(path)];
+            if !path.ends_with(".rs") {
+                candidates.push(dir.join(path).join("mod.rs"));
+            }
+            return candidates;
+        }
+        let file = declaring.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        let module_dir =
+            if matches!(file, "mod.rs" | "lib.rs" | "main.rs") { dir.to_path_buf() } else { dir.join(declaring.file_stem().unwrap_or_default()) };
+        vec![module_dir.join(format!("{name}.rs")), module_dir.join(name).join("mod.rs")]
+    }
+
+    fn is_path(tokens: &[TokenTree], i: usize, name: &str) -> bool {
+        let colon = |k: usize| matches!(tokens.get(k), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+        colon(i + 1) && colon(i + 2) && matches!(tokens.get(i + 3), Some(TokenTree::Ident(id)) if *id == name)
+    }
+
+    /// Whether `tokens[i]` starts the attribute `#[cfg(test)]`.
+    fn cfg_test(tokens: &[TokenTree], i: usize) -> bool {
+        matches!(tokens.get(i), Some(TokenTree::Punct(p)) if p.as_char() == '#')
+            && matches!(tokens.get(i + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket
+                && g.stream().to_string().split_whitespace().collect::<String>() == "cfg(test)")
+    }
+
+    /// Past the item starting at `i`: its first `{…}` body or `;`. `#[cfg(test)]` on a single field,
+    /// array element or expression is not modelled (the UI sources have none).
+    fn skip_item(tokens: &[TokenTree], mut i: usize) -> usize {
+        while i < tokens.len()
+            && !matches!(&tokens[i], TokenTree::Group(g) if g.delimiter() == Delimiter::Brace)
+            && !matches!(&tokens[i], TokenTree::Punct(p) if p.as_char() == ';')
+        {
+            i += 1;
+        }
+        (i + 1).min(tokens.len())
+    }
+
+    /// Whether the file imports `tr` from `crate::i18n` inside a use list, from the use list in
+    /// `code` (spacing removed) under its own name.
+    fn imports_i18n_tr(code: &str) -> bool {
+        code.split_once("usecrate::i18n::{")
+            .is_some_and(|(_, rest)| rest.split_once('}').is_some_and(|(list, _)| list.split(',').any(|name| name == "tr")))
+    }
+
+    /// The names the hand-written kit probes import, exactly as a UI file would.
+    const KIT_IMPORTS: &str = concat!(
+        "use crate::ui_kit::{row, expr_row, hint_row, text_row, choice_row, section, section_count, ",
+        "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, placement_field, ",
+        "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
+        "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
+        "checkbox_grid, options, checkbox_row, toggle_icon, removable_header, bin_button, ",
+        "Column, Menu, MenuItem, CommandSearch};"
+    );
+
+    /// A snippet as a UI file: the kit imports, then the call under test.
+    fn kit(source: &str) -> Vec<(String, bool)> {
+        literals(&format!("{KIT_IMPORTS}\nfn live() {{ {source} }}"))
+    }
+
+    fn texts(found: &[(String, bool)]) -> Vec<&str> {
+        found.iter().map(|(text, _)| text.as_str()).collect()
+    }
+
+    /// One call per kit function, written with the signature it really has. The guard must read
+    /// the label where the kit translates it — including the six `(ui, label, …)` actions whose
+    /// label is the second argument and `choice_row`'s options.
+    #[test]
+    fn every_kit_call_is_read_at_its_real_signature() {
+        let cases: &[(&str, &[&str])] = &[
+            ("row(ui, \"row\", |ui| {})", &["row"]),
+            ("expr_row(ui, \"expr_row\", value)", &["expr_row"]),
+            ("hint_row(ui, \"hint_row\", value, hint)", &["hint_row"]),
+            ("text_row(ui, \"text_row\", value, hint)", &["text_row"]),
+            (
+                "choice_row(ui, \"choice_row\", id, selected, &[\"First option\", \"Second option\"])",
+                &["choice_row", "First option", "Second option"],
+            ),
+            ("section(ui, id, \"section\", true, |ui| {})", &["section"]),
+            ("section_count(ui, id, \"section_count\", true, Some(2), |ui| {})", &["section_count"]),
+            ("multiline_text_field(ui, \"multiline_text_field\", id, value)", &["multiline_text_field"]),
+            ("dropdown(ui, id, selected, &[\"dropdown option\"])", &["dropdown option"]),
+            ("cell_editor(ui, id, value, \"cell_editor\", invalid)", &["cell_editor"]),
+            ("bounded_cell_editor(ui, id, value, \"bounded_cell_editor\", invalid, limit)", &["bounded_cell_editor"]),
+            ("search_field(ui, id, value, \"search_field\")", &["search_field"]),
+            ("placement_field(ui, id, value, \"placement_field\")", &["placement_field"]),
+            ("library_cell(ui, id, value, \"library_cell\", |ui| {})", &["library_cell"]),
+            ("icon_button_at(ui, rect, icon, \"icon_button_at\")", &["icon_button_at"]),
+            ("icon_button_colored(ui, rect, icon, \"icon_button_colored\", None)", &["icon_button_colored"]),
+            ("footer(ui, \"footer ok\", \"footer cancel\", true, Footer::default())", &["footer ok", "footer cancel"]),
+            ("button(ui, \"button\", Button::Normal)", &["button"]),
+            ("primary_button(ui, \"primary_button\")", &["primary_button"]),
+            ("wide_primary_button(ui, \"wide_primary_button\")", &["wide_primary_button"]),
+            ("action_menu(ui, \"action_menu\", |ui| {})", &["action_menu"]),
+            ("compact_button(ui, glyph, \"compact_button\", true, false)", &["compact_button"]),
+            ("icon_label_button(ui, \"icon_label_button\", icon, true, false)", &["icon_label_button"]),
+            ("command_menu_button(ui, id, \"command_menu_button\", icon, shortcut, true)", &["command_menu_button"]),
+            ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
+            ("options(ui, id, &mut [(\"options\", value)])", &["options"]),
+            ("checkbox_row(ui, key, \"checkbox_row\", true)", &["checkbox_row"]),
+            ("toggle_icon(ui, row, \"toggle_icon\", selected, icon)", &["toggle_icon"]),
+            ("Column::new(\"Column::new\", 1.0)", &["Column::new"]),
+            ("table.add_prompt(ui, \"add_prompt\", \"add_prompt tooltip\")", &["add_prompt", "add_prompt tooltip"]),
+            ("window.actions(\"actions ok\", \"actions cancel\", Some(\"actions apply\"))", &["actions ok", "actions cancel", "actions apply"]),
+            ("removable_header(ui, \"removable_header\")", &["removable_header"]),
+            ("bin_button(ui, \"bin_button\")", &["bin_button"]),
+            ("Menu::heading(ui, \"Menu::heading\")", &["Menu::heading"]),
+            ("MenuItem::new(id, \"MenuItem::new\", icon)", &["MenuItem::new"]),
+        ];
+        for (call, expected) in cases {
+            assert_eq!(texts(&kit(call)), *expected, "{call}");
+        }
+        assert_eq!(kit("CommandSearch::heading(ui, \"search.commands\", 3)"), [("search.commands".to_string(), true)]);
+    }
+
+    /// `Footer { apply }` is drawn (and translated) by the kit footer (actions.rs:108–116).
+    #[test]
+    fn a_footer_apply_label_is_found() {
+        let source = "footer(ui, \"OK\", \"Cancel\", true, Footer { apply: Some(\"Review apply\"), ..Default::default() })";
+        assert_eq!(texts(&kit(source)), ["OK", "Cancel", "Review apply"]);
+    }
+
+    /// `PairButton { label }` is drawn translated by `button_pair` (actions.rs:217).
+    #[test]
+    fn a_pair_button_label_is_found() {
+        let source = "button_pair(ui, key, [false, false], [PairButton { key: \"a\", label: \"Look At\", icon: None }, \
+                      PairButton { key: \"b\", label: \"Slice\", icon: None }])";
+        assert_eq!(texts(&kit(source)), ["Look At", "Slice"]);
+    }
+
+    /// `PopupOption { kind }` is drawn translated in the completion popup (choice.rs:379).
+    #[test]
+    fn a_popup_option_kind_is_found() {
+        let source = "popup_list(ctx, id, anchor, 0, &[PopupOption { text: \"t\", detail: \"d\", kind: \"Parameter\", color }], hint)";
+        assert_eq!(kit(source), [("Parameter".to_string(), false)]);
+    }
+
+    /// A preferences page's `label` reaches `tr`, an id (panel.rs:561).
+    #[test]
+    fn a_window_page_label_is_an_id() {
+        let source = "const PAGES: [WindowPage<App>; 1] = [WindowPage { icon: \"settings\", label: \"ui.general\", scroll: true }];";
+        assert_eq!(literals(source), [("ui.general".to_string(), true)]);
+    }
+
+    /// An inline `#[cfg(test)] mod … { … }` is skipped where it stands and excludes no file.
+    #[test]
+    fn an_inline_test_module_does_not_exclude_a_file() {
+        let declaring = std::path::Path::new("/crate/src/ui_kit/mod.rs");
+        assert!(test_module_files(declaring, "#[cfg(test)] mod panel { fn helper() {} }").is_empty());
+        assert_eq!(
+            test_module_files(declaring, "#[cfg(test)] mod gallery;"),
+            [std::path::PathBuf::from("/crate/src/ui_kit/gallery.rs"), std::path::PathBuf::from("/crate/src/ui_kit/gallery/mod.rs")]
+        );
+    }
+
+    /// Only the item `#[cfg(test)]` annotates counts: a following production `mod panel;` is not
+    /// a test file (the old search ran past the test function).
+    #[test]
+    fn a_test_function_does_not_exclude_a_following_module() {
+        let declaring = std::path::Path::new("/crate/src/ui_kit/mod.rs");
+        assert!(test_module_files(declaring, "#[cfg(test)] fn helper() {}\nmod panel;").is_empty());
+    }
+
+    /// A test module with a `#[path]` attribute is still resolved (and excluded).
+    #[test]
+    fn a_test_module_with_a_path_attribute_is_still_excluded() {
+        let files = test_module_files(std::path::Path::new("/crate/src/ui_kit/mod.rs"), "#[cfg(test)] #[path = \"x_tests.rs\"] mod x_tests;");
+        assert_eq!(files, [std::path::PathBuf::from("/crate/src/ui_kit/x_tests.rs")]);
+    }
+
+    /// A `#[path]` attribute resolves relative to the declaring file's directory.
+    #[test]
+    fn a_path_attribute_resolves_beside_the_declaring_file() {
+        let files = test_module_files(std::path::Path::new("/crate/src/ui_kit/layout.rs"), "#[cfg(test)] #[path = \"layout_tests.rs\"] mod tests;");
+        assert_eq!(files, [std::path::PathBuf::from("/crate/src/ui_kit/layout_tests.rs")]);
+    }
+
+    /// `row` reaches the dialogs as `form_row`; the alias must not hide a label.
+    #[test]
+    fn a_kit_function_imported_under_an_alias_is_found() {
+        let source = "use crate::ui_kit::{field, row as form_row}; fn live() { form_row(ui, \"missing\", |ui| {}); }";
+        assert_eq!(literals(source), [("missing".to_string(), false)]);
+    }
+
+    /// A plain `use … as …` binds the kit function too.
+    #[test]
+    fn a_plain_import_alias_is_found() {
+        let source = "use crate::ui_kit::row as custom_row; fn live() { custom_row(ui, \"missing\", |ui| {}); }";
+        assert_eq!(literals(source), [("missing".to_string(), false)]);
+    }
+
+    /// A nested `use` group binds `layout::row` under its alias.
+    #[test]
+    fn a_nested_import_alias_is_found() {
+        let source = "use crate::ui_kit::{layout::{row as r}, field}; fn live() { r(ui, \"missing\", |ui| {}); }";
+        assert_eq!(literals(source), [("missing".to_string(), false)]);
+    }
+
+    /// An alias belongs to its file: the same name in another file is no kit call.
+    #[test]
+    fn an_alias_in_another_file_does_not_apply() {
+        assert_eq!(
+            literals("use crate::ui_kit::row as custom_row; fn live() { custom_row(ui, \"in file\", |ui| {}); }"),
+            [("in file".to_string(), false)]
+        );
+        assert!(literals("fn live() { custom_row(ui, \"other file\", |ui| {}); }").is_empty());
+    }
+
+    /// `dialogs` re-exports `row` as `form_row`; importing that name still names the kit.
+    #[test]
+    fn a_reexported_kit_name_is_followed() {
+        let source = "use crate::dialogs::form_row; fn live() { form_row(ui, \"missing\", |ui| {}); }";
+        assert_eq!(
+            literals_with(source, &[("src/dialogs.rs", "pub(crate) use crate::ui_kit::{field, row as form_row};")]),
+            [("missing".to_string(), false)]
+        );
+    }
+
+    /// A free function of another module is no kit call, even when it is named `row`.
+    #[test]
+    fn a_free_function_from_another_module_is_not_a_kit_call() {
+        assert!(literals("fn live() { other::row(ui, \"Not a kit label\", |ui| {}); }").is_empty());
+    }
+
+    /// `use crate::ui_kit as kit;` keeps the module binding for qualified calls.
+    #[test]
+    fn a_kit_module_import_binds_qualified_calls() {
+        assert_eq!(literals("use crate::ui_kit as kit; fn f() { kit::row(ui, \"Missing\", |ui| {}); }"), [("Missing".to_string(), false)]);
+        assert_eq!(literals("use crate::ui_kit::layout as l; fn f() { l::row(ui, \"Missing\", |ui| {}); }"), [("Missing".to_string(), false)]);
+    }
+
+    /// A glob import of the kit makes its functions callable unqualified.
+    #[test]
+    fn a_kit_glob_import_binds_unqualified_calls() {
+        assert_eq!(literals("use crate::ui_kit::*; fn f() { row(ui, \"Missing\", |ui| {}); }"), [("Missing".to_string(), false)]);
+    }
+
+    /// A relative alias import in a kit file resolves against the file's module path.
+    #[test]
+    fn a_relative_alias_import_is_resolved() {
+        let source = "use super::{row as custom_row}; fn f() { custom_row(ui, \"Missing\", |ui| {}); }";
+        assert_eq!(literals_at("src/ui_kit/choice.rs", source), [("Missing".to_string(), false)]);
+    }
+
+    /// A glob from another module does not make a same-named function a kit call.
+    #[test]
+    fn a_foreign_glob_import_is_not_a_kit_call() {
+        assert!(literals("use crate::other::*; fn f() { row(ui, \"X\", |ui| {}); }").is_empty());
+    }
+
+    /// A call through the kit's own path is a kit call without an import.
+    #[test]
+    fn a_kit_path_through_ui_kit_is_found() {
+        assert_eq!(literals("fn live() { ui_kit::row(ui, \"missing\", |ui| {}); }"), [("missing".to_string(), false)]);
+    }
+
+    /// A call inside `ui_kit/` counts without an import, as `ui_kit/choice.rs` calls `section`.
+    #[test]
+    fn a_call_inside_the_kit_is_found() {
+        let source = "fn options(ui: &mut Ui, id: &str, items: &mut [(&str, &mut bool)]) { section(ui, id, \"missing\", true, |ui| {}); }";
+        assert_eq!(literals_at("src/ui_kit/choice.rs", source), [("missing".to_string(), false)]);
+    }
+
+    /// Only the row label is normalised at run time (`sized_row`); everything else keeps its spaces.
+    #[test]
+    fn only_row_labels_are_trimmed() {
+        assert_eq!(kit("expr_row(ui, \"  Minimum\", value)"), [("Minimum".to_string(), false)]);
+        assert_eq!(literals("fn live() { tr_label(\"  Radius\"); }"), [("  Radius".to_string(), false)]);
+        assert_eq!(kit("dropdown(ui, id, selected, &[\"  Option\"])"), [("  Option".to_string(), false)]);
+        assert_eq!(
+            kit("choice_row(ui, \"  Label\", id, selected, &[\"  Option\"])"),
+            [("Label".to_string(), false), ("  Option".to_string(), false)]
+        );
+    }
+
+    /// The reference cases from the review, kept as tests of the token scanner.
+    #[test]
+    fn ordinary_and_multiline_row_calls_are_found() {
+        assert_eq!(literals("fn live() { row_label(\n ui, \n\"missing\"); }").len(), 0);
+        assert_eq!(kit("row(\n ui, \n\"missing\", |ui| {});").len(), 1);
+    }
+
+    #[test]
+    fn cfg_test_function_with_lifetime_preserves_production() {
+        let found = literals("#[cfg(test)] fn helper<'a>(x: &'a str) { let c = '}'; } fn live() { tr_label(\"missing\"); }");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "missing");
+    }
+
+    #[test]
+    fn multiline_bare_tr_is_found() {
+        let found = literals("use crate::i18n::tr; fn live() { tr(\n\"missing\"); }");
+        assert_eq!(found.len(), 1);
+        assert!(found[0].1, "tr imported from crate::i18n is an id");
+    }
+
+    #[test]
+    fn raw_label_is_found() {
+        assert_eq!(literals(r##"fn live() { tr_label(r#"missing"#); }"##).len(), 1);
+    }
+
+    #[test]
+    fn comments_are_ignored() {
+        assert_eq!(literals("// tr_label(\"missing\")\nfn live() {}").len(), 0);
+    }
+
+    #[test]
+    fn raw_string_in_test_function_preserves_production() {
+        let s = r###"#[cfg(test)] fn helper() { let s = r#"" { "#; } fn live() { tr_label("missing"); }"###;
+        assert_eq!(literals(s).len(), 1);
+    }
+
+    #[test]
+    fn cfg_marker_in_comment_preserves_production() {
+        assert_eq!(literals("// #[cfg(test)]\nfn live() { tr_label(\"missing\"); }").len(), 1);
+    }
+
+    #[test]
+    fn decoded_escape_matches_catalog_text() {
+        assert_eq!(literals(r#"tr_label("Say \"hello\"")"#)[0].0, "Say \"hello\"");
+    }
+
+    #[test]
+    fn a_call_inside_a_macro_is_found() {
+        assert_eq!(literals("fn live() { format!(\"{}\", tr_label(\"missing\")); }").len(), 1);
+    }
+
+    #[test]
+    fn a_row_label_after_a_longer_first_argument_is_found() {
+        assert_eq!(
+            kit("row(&mut ui, \"missing\", |ui| {}); row(self.ui, \"  other\", |ui| {});"),
+            [("missing".to_string(), false), ("other".to_string(), false)]
+        );
+    }
+
+    /// `context_menu::button` hands its label to `MenuItem::new` → `tr_label` (menu.rs:210); all
+    /// three origins count: the `crate::context_menu::…` path, a `use` import and a call inside
+    /// `context_menu.rs` itself.
+    #[test]
+    fn a_context_menu_button_label_is_found() {
+        assert_eq!(
+            literals("fn live() { crate::context_menu::button(ui, \"Add to New Folder\", \"folder\"); }"),
+            [("Add to New Folder".to_string(), false)]
+        );
+        assert_eq!(
+            literals("use crate::context_menu::button; fn live() { button(ui, \"Remove from Folder\", \"folder\"); }"),
+            [("Remove from Folder".to_string(), false)]
+        );
+        assert_eq!(
+            literals_at("src/context_menu.rs", "fn f() { button(ui, \"Roll Back Here\", \"history\"); }"),
+            [("Roll Back Here".to_string(), false)]
+        );
+    }
+
+    /// `context_menu::button_enabled` takes the same label at the same position.
+    #[test]
+    fn a_context_menu_button_enabled_label_is_found() {
+        assert_eq!(
+            literals("fn live() { context_menu::button_enabled(ui, \"Rename Feature\", \"rename\", enabled); }"),
+            [("Rename Feature".to_string(), false)]
+        );
+    }
+
+    /// Another module's `button(…)` is still no text carrier, with or without a qualifier.
+    #[test]
+    fn a_foreign_button_is_still_not_a_text_carrier() {
+        assert!(literals("fn live() { other::button(ui, \"Not a label\", icon); }").is_empty());
+        assert!(literals("fn live() { button(ui, \"Not a label\", icon); }").is_empty());
+    }
+
+    /// `ui_kit::row_label(ui)` only reads the row's accessibility tag: it takes no literal, so the
+    /// guard must not choke on it (the dialogs' own `row_label(ui, text)` is gone).
+    #[test]
+    fn reading_the_row_label_takes_no_literal() {
+        assert_eq!(literals("fn live() { ui_kit::row_label(ui); row_label(ui); }").len(), 0);
+    }
+
+    #[test]
+    fn a_comment_or_spacing_does_not_change_which_tr_a_file_means() {
+        let id = [("Preferences".to_string(), true)];
+        assert_eq!(literals("// fn tr(text: &str) -> &str\nuse crate::i18n::tr;\nfn live() { tr(\"Preferences\"); }"), id);
+        assert_eq!(literals("use crate :: i18n :: tr;\nfn live() { tr(\"Preferences\"); }"), id);
+        assert_eq!(literals("use crate::i18n::{format, tr};\nfn live() { tr(\"Preferences\"); }"), id);
+        assert_eq!(literals("fn live() { let tr = crate::i18n::tr; tr(\"Preferences\"); }"), id);
     }
 }

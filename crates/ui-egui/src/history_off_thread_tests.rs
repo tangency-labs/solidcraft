@@ -59,6 +59,32 @@ fn the_marker_moved_computes_off_the_window_thread_then_moves() {
     assert!((v - (12500.0 - hole)).abs() < 1.0, "{v}");
 }
 
+/// The command runs for real with what was evaluated off the window thread: nothing is
+/// evaluated twice, even once the evaluation cache no longer holds it (a large design's states
+/// are past its budget, and the window thread evaluated the whole command again).
+#[test]
+fn a_command_computed_off_the_thread_is_not_evaluated_again() {
+    let mut h = block_boss_hole();
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    until_settled(&mut h);
+    h.app.session.model.cache = Default::default();
+    h.app.run_heavy("timeline.roll_to", json!({})).unwrap();
+    for _ in 0..500 {
+        if h.app.deferred.as_mut().is_some_and(crate::deferred::Deferred::finished) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // What it evaluated is gone from the cache.
+    h.app.session.model.cache = Default::default();
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None);
+    assert_eq!((h.app.session.model.last_recomputed, h.app.session.model.last_restored), (0, 2), "the boss and the hole as evaluated off the thread");
+    let hole = std::f64::consts::PI * 4.0 * 15.0;
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - (12500.0 - hole)).abs() < 1.0, "{v}");
+}
+
 #[test]
 fn a_marker_moved_again_replaces_the_move_still_waiting() {
     let mut h = block_boss_hole();

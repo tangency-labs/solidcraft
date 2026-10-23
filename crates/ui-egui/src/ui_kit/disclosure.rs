@@ -13,13 +13,26 @@ pub(crate) fn disclosure(painter: &Painter, center: Pos2, open: bool, ink: Color
 /// Fold action in existing chrome. Stable identity across state changes, with the caller's
 /// translated tooltip and scenario handles. Tokens: control_radius, hover, form_ink/dim.
 pub(crate) fn disclosure_button_at(ui: &mut Ui, rect: Rect, open: bool, label: &str) -> Response {
+    disclosure_button_with_hover(ui, rect, open, label, false)
+}
+
+/// Panel fold action with the browser's shared blue hover tint.
+pub(crate) fn panel_disclosure_button_at(ui: &mut Ui, rect: Rect, open: bool, label: &str) -> Response {
+    disclosure_button_with_hover(ui, rect, open, label, true)
+}
+
+fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str, panel: bool) -> Response {
     let t = Tokens::get();
     let response = ui.interact(rect, ui.make_persistent_id("disclosure_button"), egui::Sense::click());
     if response.clicked() {
         response.request_focus();
     }
     if response.hovered() {
-        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+        if panel {
+            super::panel_header_hover(ui.painter(), rect);
+        } else {
+            ui.painter().rect_filled(rect, t.control_radius, t.hover);
+        }
     }
     disclosure(ui.painter(), rect.center(), open, if response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim });
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, ui.is_enabled(), open, label));

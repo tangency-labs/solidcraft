@@ -91,7 +91,7 @@ Palette changes preserve accepted artwork and never update review hashes.
 | `source/` | Rust viewport glyphs, markers, navigation and pointer; not command icons |
 
 `crates/ui-egui/build.rs` embeds SVGs, palette and aliases. `icon_svg.rs` parses and
-rasterises them for `icons::paint`; adding an icon still requires its registry or
+rasterises them for `icons::paint_icon`; adding an icon still requires its registry or
 UI assignment and an application rebuild. Review status never controls rendering.
 
 ## Checks and reports

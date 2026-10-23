@@ -5,6 +5,7 @@
 //! command has its geometry, so typing a number sets the value at once; Enter applies, Tab
 //! moves on, Esc cancels.
 
+use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Stroke, vec2};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
@@ -568,22 +569,26 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
 fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool) {
     let t = Tokens::get();
     let id = egui::Id::new("sc_canvas_value");
-    crate::frame::area(egui::Id::new("sc_canvas_area")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-        egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
-                let r = ui.add(egui::TextEdit::singleline(value).id(id).desired_width(72.0));
-                crate::params_dialog::complete(ui, &r, value);
-                if select_all {
-                    r.request_focus();
-                    let n = value.chars().count();
-                    let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-                    st.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-                    st.store(ui.ctx(), id);
-                }
+    Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new("sc_canvas_area")).fixed_pos(at).order(egui::Order::Foreground).show(
+        ui.ctx(),
+        |ui| {
+            Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                    let r = crate::ui_kit::canvas_value_field(ui, id, value);
+                    crate::params_dialog::complete(ui, &r, value);
+                    if select_all {
+                        r.request_focus();
+                        let n = value.chars().count();
+                        let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                        st.cursor
+                            .set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                        st.store(ui.ctx(), id);
+                    }
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
@@ -1178,9 +1183,13 @@ fn draw_revolve(
     if to_mode {
         // This badge is read-only. Its placement follows the model and can overlap the
         // command dialog, whose buttons must keep receiving clicks.
-        let area = crate::frame::area(egui::Id::new("sc_canvas_area")).fixed_pos(box_at).order(egui::Order::Foreground).interactable(false);
+        let area = Container::new(ui.ctx(), Surface::Canvas)
+            .area(egui::Id::new("sc_canvas_area"))
+            .fixed_pos(box_at)
+            .order(egui::Order::Foreground)
+            .interactable(false);
         area.show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+            Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
                 let text = if extent.curved_to {
                     "To surface".into()
                 } else if extent.sweep.is_finite() {

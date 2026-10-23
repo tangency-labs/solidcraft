@@ -103,7 +103,7 @@ fn window_chrome_renders_in_the_active_language() {
     }
 }
 
-/// The start page's two big buttons had a fixed width, so a translation longer than the English
+/// File-view action tiles must keep translated labels inside their bounds. A translation longer than the English
 /// label ran past the edge ("Nouvelle conception"). Every registered language's label must stay
 /// inside its button.
 #[test]
@@ -127,12 +127,12 @@ fn home_page_buttons_fit_their_translated_labels() {
         let (mut rects, mut texts) = (Vec::new(), Vec::new());
         out.shapes.iter().for_each(|shape| collect(&shape.shape, &mut rects, &mut texts));
         let locale = crate::i18n::Locale::for_language(catalog.id);
-        for id in ["ui.new_design", "home.open"] {
+        for id in ["home.new_mm", "home.new_inches", "home.open", "home.import"] {
             let label = locale.text(id);
             let (_, text) = texts.iter().find(|(t, _)| t == label).unwrap_or_else(|| panic!("{}: {label:?} is not painted", catalog.id));
             let button = rects
                 .iter()
-                .filter(|r| (r.height() - 64.0).abs() < 1.0 && r.contains(text.left_center()))
+                .filter(|r| (r.height() - crate::theme::Tokens::get().file_tile_height).abs() < 1.0 && r.contains(text.left_center()))
                 .min_by(|a, b| a.area().total_cmp(&b.area()))
                 .unwrap_or_else(|| panic!("{}: no button around {label:?}", catalog.id));
             assert!(text.right() <= button.right(), "{}: {label:?} ends at {} past its button's edge {}", catalog.id, text.right(), button.right());
@@ -155,37 +155,15 @@ fn home_page_renders_in_the_active_language() {
     let cases = [
         (
             "it",
-            [
-                "Nuovo progetto",
-                "Apri…",
-                "Documentazione",
-                "Segnala un problema",
-                "Novità",
-                "Scorciatoie da tastiera",
-                "Preferenze",
-                "Recenti",
-                "Esempi",
-                "Piastra di esempio",
-            ],
-            "non presente\nAperto 2 h fa",
+            ["Nuovo progetto", "Apri…", "Scorciatoie da tastiera", "Impostazioni", "Recenti", "Esempi", "Piastra di esempio"],
+            "non presente\n2 h fa",
         ),
         (
             "ja",
-            [
-                "新規デザイン",
-                "開く…",
-                "ドキュメント",
-                "問題を報告",
-                "新機能",
-                "キーボードショートカット",
-                "環境設定",
-                "最近使用した項目",
-                "サンプル",
-                "サンプル プレート",
-            ],
-            "見つかりません\n2 時間前に開きました",
+            ["新しいデザイン", "開く…", "キーボードショートカット", "設定", "最近使用した項目", "サンプル", "サンプル プレート"],
+            "見つかりません\n2 時間前",
         ),
-        ("zh", ["新建设计", "打开…", "文档", "报告问题", "新功能", "键盘快捷键", "首选项", "最近使用", "示例", "示例板"], "文件不存在\n2 小时前打开"),
+        ("zh", ["新建设计", "打开…", "键盘快捷键", "设置", "最近使用", "示例", "示例板"], "文件不存在\n2 小时前"),
     ];
     for (lang, words, missing_recent) in cases {
         let mut h = Harness::new();
@@ -203,9 +181,12 @@ fn home_page_renders_in_the_active_language() {
         let out = crate::test_support::frame(&h.ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| h.app.ui(ui));
         let mut texts = Vec::new();
         out.shapes.iter().for_each(|shape| painted(&shape.shape, &mut texts));
-        for word in words.into_iter().chain([missing_recent]) {
+        for word in words {
             assert!(texts.iter().any(|t| t == word), "{lang}: {word:?} must be painted, got {texts:?}");
         }
+        let (missing, opened) = missing_recent.split_once('\n').unwrap();
+        assert!(texts.iter().any(|text| text.starts_with(&format!("{missing} · "))), "{lang}: missing-file status must remain visible");
+        assert!(texts.iter().any(|text| text == opened), "{lang}: the recent timestamp must remain visible");
         for english in ["New Design", "Open…", "Documentation", "Report an Issue", "What's new", "Recent", "Samples", "Sample Plate"] {
             assert!(!texts.iter().any(|t| t == english), "{lang}: {english:?} is still painted in English");
         }
@@ -310,4 +291,18 @@ fn continuity_gap_and_sheet_metal_gap_are_separate_messages() {
         assert_eq!(locale.text("ui.continuity_gap"), legend, "{lang}");
         assert_eq!(locale.text("ui.sheet_gap"), sheet, "{lang}");
     }
+}
+
+/// The reference labels of the cataloguing fix: a label passed as text (`Cylindrical face`) and an
+/// id (`thread.iso_metric`).
+#[test]
+fn newly_catalogued_dialog_labels_show_in_german() {
+    let mut h = Harness::new();
+    h.app.preferences.language = "de".into();
+    h.app.home.open = false;
+    h.call("ui.start", json!({"command":"solid.thread"}));
+    h.frames(3);
+    assert!(h.widget("Zylindrische Fläche").is_some(), "the Cylindrical face row must be translated");
+    assert!(h.widget("ISO metrisch").is_some(), "the thread.iso_metric label must be translated");
+    assert!(h.widget("ISO metric").is_none(), "the label must not fall back to English");
 }

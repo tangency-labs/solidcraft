@@ -2,7 +2,9 @@
 //! from them opens lying on its back in a Z-up design. After such a file opens, SolidCraft
 //! offers to stand it up: a quarter turn about X (Y → Z) of the component the file came in as
 //! (#1386), so an assembly's parts and instances turn together, in one step that can be undone. Preferences › Design › "Offer to stand up Y-up
-//! files" turns the offer off; with Y up as the default orientation it isn't needed.
+//! files" turns the offer off; with Y up as the default orientation it isn't needed. When the
+//! file's header names an exporter known to save Y up (SolidWorks), Preferences › Design ›
+//! "Stand up Y-up files automatically" stands it up without asking, with Undo in the message.
 
 use serde_json::json;
 
@@ -14,14 +16,38 @@ use crate::ui_kit;
 /// stand them up.
 pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&serde_json::Value>) {
     let io = &solidcraft_engine::io::is_step_path;
-    if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || !app.preferences.offer_stand_up || app.preferences.up_axis != "z" {
+    if !(io(path) || solidcraft_engine::io::is_iges_path(path)) || app.preferences.up_axis != "z" {
+        return;
+    }
+    let text = |k: &str| result.and_then(|r| r.get(k)).and_then(serde_json::Value::as_str);
+    // SolidCraft's own STEP exports already use Z up.
+    if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
     let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
-    if !bodies.is_empty() {
-        app.stand_up = Some(bodies);
-        app.stand_up_occurrence = result.and_then(|r| r.get("occurrence")).and_then(serde_json::Value::as_u64);
+    if bodies.is_empty() {
+        return;
     }
+    let occurrence = result.and_then(|r| r.get("occurrence")).and_then(serde_json::Value::as_u64);
+    // A header that names a Y-up exporter: stand it up now, one undoable step, with Undo in the toast.
+    if text("exporter_up") == Some("y") && app.preferences.auto_stand_up {
+        let exporter = text("exporter").unwrap_or("a Y-up program").to_string();
+        app.stand_up = Some(bodies);
+        app.stand_up_occurrence = occurrence;
+        match stand_up(app) {
+            Ok(()) => {
+                app.set_status(format!("Stood up (exported Y-up by {exporter}) \u{2014} Undo"), false);
+                app.status_undo = true;
+            }
+            Err(e) => app.set_status(e, true),
+        }
+        return;
+    }
+    if !app.preferences.offer_stand_up {
+        return;
+    }
+    app.stand_up = Some(bodies);
+    app.stand_up_occurrence = occurrence;
 }
 
 /// Turn the offered bodies a quarter turn about X (Y up becomes Z up).

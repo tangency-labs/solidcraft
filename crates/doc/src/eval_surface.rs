@@ -304,7 +304,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f.component,
             )?;
-            let (o, d) = revolve_axis(&ss, axis)?;
+            let (o, d) = revolve_axis(&ss, axis, &|name| construction_axis_in(Some(doc), st, name, f.component))?;
             let a = val(vals, angle, Kind::Angle)?;
             let (start, sweep) = match (angle2, symmetric) {
                 (Some(a2), _) => {

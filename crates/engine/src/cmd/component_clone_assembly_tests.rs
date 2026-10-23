@@ -76,12 +76,13 @@ fn documents() -> (Document, Document) {
 #[test]
 fn internal_relationships_receive_independent_ids_and_remapped_typed_references() {
     let (source, mut destination) = documents();
+    destination.next_id = 1000;
     let report =
         clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
             .unwrap();
     let a = &destination.assembly;
     assert_eq!(a.joints.len(), 6);
-    assert_eq!((a.joints[4].id, a.joints[5].id), (5, 6));
+    assert_eq!((a.joints[4].id, a.joints[5].id), (1000, 1001));
     assert_eq!((a.joints[4].a.occurrence, a.joints[4].b.occurrence), (101, 102));
     assert_eq!(a.joints[4].values, source.assembly.joints[0].values);
     assert_eq!(a.joints[4].limits, source.assembly.joints[0].limits);
@@ -90,13 +91,14 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     // Its x reference's face is the copy's too.
     assert!(matches!(&a.origins[3].origin.snap, Snap::FaceCenter { face: Some(face), x: Some(XRef::Face { face: x, .. }), .. }
         if face == "F11:start@F110.2" && x == "F110:side"));
-    assert_eq!((a.links[2].a, a.links[2].b, a.links[2].ratio), (5, 6, -2.0));
-    assert_eq!(a.contact_sets[2].id, 7);
+    assert_eq!((a.links[2].a, a.links[2].b, a.links[2].ratio), (1000, 1001, -2.0));
+    assert_eq!(a.contact_sets[2].id, 1002);
     assert_eq!(a.contact_sets[2].occurrences, vec![101, 102]);
     assert!(a.contact_sets[2].suppressed);
-    assert_eq!(a.studies[2].id, 8);
-    assert_eq!(a.studies[2].keys.iter().map(|k| k.joint).collect::<Vec<_>>(), vec![5, 6]);
-    assert_eq!(a.exploded[2].id, 9);
+    assert_eq!(a.studies[2].id, 1003);
+    assert_eq!(a.studies[2].keys.iter().map(|k| k.joint).collect::<Vec<_>>(), vec![1000, 1001]);
+    assert_eq!(a.exploded[2].id, 1004);
+    assert_eq!(destination.next_id, 1005);
     assert_eq!(a.exploded[2].moves, vec![(101, Vec3::X * 10.0), (102, Vec3::Y * 20.0)]);
     assert_eq!(report.len(), 6);
     for kind in ["joint origin", "joint `Joint3`", "motion link", "contact set", "motion study", "exploded view"] {
@@ -171,9 +173,9 @@ fn malformed_maps_identifier_exhaustion_and_aggregate_budgets_are_atomic() {
     invalid.assembly.links[0].ratio = f64::NAN;
     cases.push((invalid, destination, BTreeMap::from([(1, 101), (2, 102)])));
     for (source, mut destination, occurrences) in cases {
-        let before = destination.assembly.clone();
+        let before = destination.clone();
         assert!(clone_assembly(&mut destination, &source, &occurrences, &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new()).is_err());
-        assert_eq!(destination.assembly, before);
+        assert_eq!(destination, before);
     }
 }
 

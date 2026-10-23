@@ -230,6 +230,35 @@ fn patterns_of_bodies() {
     assert!(s.execute("solid.pattern.rectangular", &json!({"bodies": ["Nope"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 5})).is_err());
 }
 
+/// A construction axis picked in the dialog comes as its name (#2885): the copies turn about it,
+/// and follow it when it is edited.
+#[test]
+fn circular_pattern_about_a_construction_axis_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [40, 0, 0], "body_name": "Cube"}));
+    let axis = |x: f64| json!({"a": {"point": [x, 0, 0]}, "b": {"point": [x, 0, 10]}, "name": "Axis1"});
+    run(&mut s, "construct.axis.two_points", axis(30.0));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Cube"], "axis": "Axis1", "count": 4}));
+    // The x and y extent of the four cubes.
+    let span = |s: &Session| {
+        let st = s.model.state();
+        assert_eq!(st.bodies.len(), 4);
+        let mut out = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+        for b in st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox) {
+            out = [out[0].min(b.min.x), out[1].max(b.max.x), out[2].min(b.min.y), out[3].max(b.max.y)];
+        }
+        out
+    };
+    // About x = 30: the cube at x 40…42 also lands at 18…20, and at y ±(10…12).
+    for (got, want) in span(&s).into_iter().zip([18.0, 42.0, -12.0, 12.0]) {
+        assert!((got - want).abs() < 1e-6, "{got} vs {want}");
+    }
+    run(&mut s, "timeline.redefine", json!({"feature": "Axis1", "command": "construct.axis.two_points", "params": axis(35.0)}));
+    for (got, want) in span(&s).into_iter().zip([28.0, 42.0, -7.0, 7.0]) {
+        assert!((got - want).abs() < 1e-6, "{got} vs {want}");
+    }
+}
+
 #[test]
 fn patterns_of_components_place_occurrences() {
     let mut s = Session::default();

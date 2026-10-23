@@ -7,6 +7,7 @@
 //! right of the viewport, the command palette and a bottom or left-sidebar feature timeline.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+use crate::ui_kit::{Container, Surface};
 
 pub mod access;
 pub mod agent_chat;
@@ -91,6 +92,7 @@ mod material_card_review;
 mod measurement_ui_tests;
 #[cfg(test)]
 mod menu_tests;
+pub(crate) mod mesh_lod;
 pub mod messages;
 #[cfg(test)]
 mod pattern_arrow_tests;
@@ -113,6 +115,16 @@ mod status_tests {
             super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),
             "Shell: offset: must be positive"
         );
+        assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Undo: nothing to undo");
+        {
+            // The label follows the interface language; the engine's words stay English.
+            let _polish = crate::i18n::scope("pl");
+            assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Cofnij: nothing to undo");
+            assert_eq!(
+                super::friendly_error("sketch.dimension", "invalid parameters for `sketch.dimension`: value: `mm` is a unit name"),
+                "Wymiar szkicu: value: `mm` is a unit name"
+            );
+        }
         assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Undo: nothing to undo");
         let mut app = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         app.run("solid.box", serde_json::json!({"length": 5, "width": 5, "height": 5})).unwrap();
@@ -148,7 +160,6 @@ pub mod mouse_gesture;
 pub(crate) mod navigation;
 pub(crate) mod open_meshing;
 pub mod params_dialog;
-pub(crate) mod pick_buffer;
 pub(crate) mod pick_index;
 pub(crate) mod plugins;
 pub mod prefs;
@@ -238,7 +249,7 @@ use std::sync::mpsc::Receiver;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
 
 pub use control::{ControlRequest, ControlResponse};
 
@@ -246,7 +257,7 @@ pub use control::{ControlRequest, ControlResponse};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
-    /// Automation-only shell mode; never persisted in preferences.
+    /// Effective shell mode; automation can override the saved preference for this session.
     pub layout: shell::LayoutMode,
     /// Ribbon tab; SHEET METAL and the contextual SKETCH join the seven design tabs.
     pub tab: String,
@@ -353,10 +364,10 @@ pub struct SolveApp {
     pub ui: UiState,
     pub(crate) shell: shell::State,
     pub cam: Camera,
+    /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
+    pub cam_anim: Option<CameraAnim>,
     /// Seconds since start, as of this frame.
     pub now: f64,
-    /// The view before the current sketch started (Finish Sketch returns to it).
-    pub pre_sketch_cam: Option<Camera>,
     /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
     /// restores it.
     pub pre_sketch_marker: Option<Option<usize>>,
@@ -429,6 +440,8 @@ pub struct SolveApp {
     /// When Esc was last pressed (input time): a second press soon after finishes the sketch.
     pub last_escape: Option<f64>,
     pub status: Option<(String, f64, bool)>,
+    /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
+    pub status_undo: bool,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -521,8 +534,8 @@ impl SolveApp {
             ui: UiState::default(),
             shell: Default::default(),
             cam: Camera::default(),
+            cam_anim: None,
             now: 0.0,
-            pre_sketch_cam: None,
             pre_sketch_marker: None,
             services,
             file_picker: None,
@@ -563,6 +576,7 @@ impl SolveApp {
             esc_handled: false,
             last_escape: None,
             status: None,
+            status_undo: false,
             quit_requested: false,
             autosave: None,
             recoverable: Vec::new(),
@@ -719,6 +733,7 @@ impl SolveApp {
             if !prefs::MSAA.contains(&p.msaa) {
                 p.msaa = prefs::Prefs::default().msaa;
             }
+            self.ui.layout = p.layout;
             self.preferences = p;
         }
         // Saved before the theme was a preference: the Dark/Light flag says which.
@@ -747,6 +762,26 @@ impl SolveApp {
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
         if let Ok(v) = &r {
+            if id == "view.layout" {
+                let layout =
+                    if v.get("mode").and_then(Value::as_str) == Some("compact") { shell::LayoutMode::Docked } else { shell::LayoutMode::Floating };
+                self.preferences.layout = layout;
+                self.ui.layout = layout;
+            }
+            if id == "view.history_layout" {
+                if let Some(width) = v.get("width").and_then(Value::as_f64) {
+                    self.preferences.timeline_left_width = ui_kit::history_snap_width(width as f32);
+                }
+                if let Some(dock) = v.get("dock").and_then(Value::as_str) {
+                    self.preferences.timeline_left = dock != "bottom";
+                    self.preferences.timeline_under_browser = dock == "under_browser";
+                    self.preferences.timeline_collapsed = false;
+                    self.preferences.timeline_left_browser_collapsed = false;
+                }
+                if let Some(collapsed) = v.get("collapsed").and_then(Value::as_bool) {
+                    self.preferences.timeline_collapsed = collapsed;
+                }
+            }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                 if id == "view.graphics_preset" {
@@ -848,6 +883,13 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() {
             return;
         }
+        if id == "view.normal_to" {
+            if self.run(id, json!({"camera": self.cam})).is_ok() {
+                self.follow_view_request(true);
+                self.home.open = false;
+            }
+            return;
+        }
         // A disabled command starts nothing, however it was reached. The toolbar greys its
         // button, but a shortcut, the command palette and the control channel all land here.
         // Its reason goes to the status line, so the refusal is never silent.
@@ -876,6 +918,15 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place.
+        if id == "view.layout" {
+            let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
+            let _ = self.run(id, json!({"mode":mode}));
+            return;
+        }
+        if id == "view.history_layout" {
+            let _ = self.run(id, json!({}));
+            return;
+        }
         if id == "view.ambient_occlusion" {
             let _ = self.run(id, json!({"enabled": !self.preferences.ambient_occlusion}));
             return;
@@ -1065,7 +1116,7 @@ impl SolveApp {
 
     /// Edit a sketch: roll the timeline to just after it (back, so later features don't hide
     /// it, or forward from before it, where it isn't built yet: #2716), turn the camera to face
-    /// it, and remember both so Finish Sketch puts them back. Editing the sketch that is already open does nothing; editing another one
+    /// it, and remember the marker so Finish Sketch puts it back. Editing the sketch that is already open does nothing; editing another one
     /// finishes the current sketch first, so edit sessions never nest.
     pub fn edit_sketch(&mut self, id: u64) {
         if let solidcraft_engine::doc::FaceAttachmentStatus::Lost { message, .. } =
@@ -1086,7 +1137,6 @@ impl SolveApp {
         let Some(idx) = self.session.doc.feature_index(id) else { return };
         let marker = self.session.doc.marker;
         let rolled = marker != Some(idx + 1) && self.run("timeline.roll_to", json!({ "position": idx + 1 })).is_ok();
-        let before = self.cam;
         if self.run("sketch.edit", json!({ "sketch": id })).is_err() {
             if rolled {
                 self.restore_marker(marker);
@@ -1094,12 +1144,11 @@ impl SolveApp {
             return;
         }
         self.pre_sketch_marker = rolled.then_some(marker);
-        self.pre_sketch_cam = Some(before);
         dialogs::look_at_sketch(self);
     }
 
-    /// Finish the active sketch: stop editing, restore the history marker Edit Sketch moved and
-    /// return to the view from before the sketch.
+    /// Finish the active sketch: stop editing and restore the history marker Edit Sketch moved.
+    /// The camera stays where it is, however the sketch is left.
     pub fn finish_sketch(&mut self) {
         sketch_text_move::cancel_drag(self);
         if sketch_text::editing(self) || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::TextMove(_))) {
@@ -1110,9 +1159,6 @@ impl SolveApp {
         let _ = self.run("sketch.finish", json!({}));
         if let Some(marker) = self.pre_sketch_marker.take() {
             self.restore_marker(marker);
-        }
-        if let Some(c) = self.pre_sketch_cam.take() {
-            self.animate_to(c);
         }
     }
 
@@ -1133,16 +1179,23 @@ impl SolveApp {
         v
     }
 
-    /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While Create
-    /// Sketch picks its plane the Origin is always shown, drawn through the model (a plane
-    /// inside a body stays visible), even when the browser hides it.
+    /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While a dialog
+    /// picks a plane ([`SolveApp::picking_plane`]) the Origin is always shown, drawn through the
+    /// model (a plane inside a body stays visible), even when the browser hides it.
     pub fn origin_visible(&self) -> bool {
-        self.ui.show_origin || self.picking_sketch_plane()
+        self.ui.show_origin || self.picking_plane()
     }
 
     /// Is Create Sketch open, waiting for its plane?
     pub fn picking_sketch_plane(&self) -> bool {
         self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Sketch))
+    }
+
+    /// Is a dialog waiting for a plane: Create Sketch, or a dialog whose active input takes origin
+    /// planes (Mirror's plane, Offset Plane, Midplane, the construct tools)? The origin planes are
+    /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
+    pub fn picking_plane(&self) -> bool {
+        self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
     /// Is the view drawn in perspective? The perspective preference, except while a sketch is
@@ -1155,6 +1208,7 @@ impl SolveApp {
         let (text, at) = (s.into(), now_ms());
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
+        self.status_undo = false;
     }
 
     pub fn open_path(&mut self, path: &str) {
@@ -1203,6 +1257,7 @@ impl SolveApp {
     /// (home) and frames the model.
     pub fn set_up_axis(&mut self, up: solidcraft_engine::render::UpAxis) {
         self.ui.up_axis = up;
+        self.cam_anim = None;
         self.cam.up = up;
         self.cam.set_view(StandardView::Iso);
         self.fit_view();
@@ -1222,6 +1277,7 @@ impl SolveApp {
             }
             return;
         }
+        self.cam_anim = None;
         self.viewport.orbit_free = None;
         let bounds = viewport::view_bounds(self);
         self.pending_fit = Some((self.cam, bounds, false));
@@ -1267,19 +1323,31 @@ impl SolveApp {
                 self.animate_to(to);
             } else {
                 self.cam = to;
+                self.cam_anim = None;
             }
             ctx.request_repaint();
         }
     }
 
-    /// Move the camera to `to` at once. Views never animate: nothing is left running that a
-    /// later mouse orbit, pan or zoom could lag behind.
+    /// Move the camera to `to` over half a second (ease in-out, orientation slerped).
     pub fn animate_to(&mut self, to: Camera) {
         self.pending_fit = None;
         self.viewport.orbit_free = None;
-        if to.is_valid() {
-            self.cam = to;
+        if !to.is_valid() {
+            return;
         }
+        // Preferences › Navigation: animated (at a chosen speed) or immediate.
+        if !self.preferences.look_at_anim {
+            self.cam = to;
+            self.cam_anim = None;
+            return;
+        }
+        let mut anim = CameraAnim::new(self.cam, to, self.now);
+        let speed = f64::from(self.preferences.look_at_speed);
+        if speed.is_finite() && speed > 0.0 {
+            anim.duration /= speed;
+        }
+        self.cam_anim = Some(anim);
     }
 
     /// Frame everything shown, keeping the orientation (animated; the selection is ignored).
@@ -1361,9 +1429,10 @@ impl SolveApp {
         }
     }
 
-    /// Drop a pending refit (the user took over the camera).
+    /// Stop any view animation where it is (the user took over the camera).
     pub fn cancel_view_animation(&mut self) {
         self.pending_fit = None;
+        self.cam_anim = None;
     }
 
     /// Hand the view to an external navigation device without a pending mouse orbit or spin
@@ -1372,6 +1441,17 @@ impl SolveApp {
         self.cancel_view_animation();
         self.viewport.orbit_free = None;
         self.viewport.spin = false;
+    }
+
+    fn step_view_animation(&mut self, ctx: &egui::Context) {
+        let Some(anim) = self.cam_anim else { return };
+        let (cam, done) = anim.sample(self.now);
+        self.cam = if cam.is_valid() { cam } else { anim.to };
+        if done {
+            self.cam_anim = None;
+        } else {
+            ctx.request_repaint();
+        }
     }
 
     /// Per-frame logic before layout.
@@ -1403,6 +1483,7 @@ impl SolveApp {
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
         }
+        self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);
         self.follow_view_request(true);
@@ -1508,6 +1589,7 @@ impl SolveApp {
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
+        self.ui.layout.publish(ui.ctx());
         scenario::clear_handles();
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
@@ -1525,32 +1607,45 @@ impl SolveApp {
         if self.home.open {
             home::show(self, ui);
             if self.home.open {
+                // Agent detection runs in the background and is only received by `agent_chat::poll`
+                // Polling here is required for the detection to complete on Home
+                agent_chat::poll(self, ui.ctx());
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
                 return;
             }
         }
-        let floating = self.ui.layout == shell::LayoutMode::Floating;
+        let floating = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
         let show_timeline = self.ui.show_timeline && !render_workspace::active(self);
         let left_timeline = show_timeline && self.preferences.timeline_left;
+        timeline_left::animate_folds(self, ui.ctx());
         if !floating {
             toolbar::toolbar(self, ui);
         }
         theme::TabAccent::publish(self, ui.ctx());
+        if !floating {
+            agent_chat::show(self, ui);
+        }
         if !floating && show_timeline && !left_timeline {
             timeline::timeline(self, ui);
         }
-        // A floating browser keeps the workspace the whole width and covers viewport input.
-        let browser_float = self.ui.show_browser && (self.preferences.browser_float || (floating && !left_timeline));
-        if !browser_float {
+        // Browser hugs its contents in either layout; it never becomes a full-height blank column.
+        if !self.ui.show_browser {
             self.shell.browser = None;
         }
-        self.shell.history = None;
+        if floating || left_timeline || !show_timeline {
+            self.shell.history = None;
+        }
         let full = ui.available_rect_before_wrap();
         if floating {
-            let cards = shell::Cards::new(full, self.ui.layout);
+            let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height(self.preferences.ribbon_labels));
             self.shell.cards = vec![cards.workspace, cards.ribbon];
-            self.shell.history = (show_timeline && !left_timeline).then(|| timeline::floating_rect(full));
+            self.shell.history = if left_timeline {
+                let below_ribbon = egui::Rect::from_min_max(egui::pos2(full.left(), cards.bottom), full.max);
+                Some(timeline_left::floating_rect(self, below_ribbon))
+            } else {
+                show_timeline.then(|| timeline::floating_rect(full))
+            };
             // Draw the scene first, then let the unchanged panel layouts cover it. The
             // viewport keeps its full projection even underneath the browser and cards.
             preview::update(self, ui.ctx());
@@ -1576,48 +1671,38 @@ impl SolveApp {
         if floating && show_timeline && !left_timeline {
             timeline::timeline(self, ui);
         }
-        if self.ui.show_browser && !browser_float {
-            if left_timeline {
-                browser::browser_below_timeline(self, ui);
-            } else {
-                browser::browser(self, ui);
-            }
-        } else if left_timeline {
+        if left_timeline {
             timeline_left::left_panel(self, ui);
         }
         if render_workspace::active(self) {
             render_workspace::panel(self, ui);
         }
-        agent_chat::show(self, ui);
-        if browser_float {
-            // The remaining content starts below the ribbon in either shell layout.
-            let viewport = ui.available_rect_before_wrap();
-            browser::floating(self, ui, viewport);
+        if self.ui.show_browser {
+            browser::browser(self, ui);
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
-            if floating {
+        if floating {
+            agent_chat::show(self, ui);
+        }
+        Container::new(ui.ctx(), Surface::Viewport)
+            .central()
+            .frame(Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT))
+            .show(ui, |ui| {
                 let panel_content = ui.max_rect();
-                let mut content = panel_content;
-                if let Some(history) = self.shell.history {
-                    content.max.y = (history.top() - shell::SHELL_GAP).max(content.top());
+                self.shell.content = Some(shell::workspace_content(self, panel_content));
+                if floating {
+                    self.shell.panels = [
+                        egui::Rect::from_min_max(egui::pos2(full.left(), panel_content.top()), egui::pos2(panel_content.left(), full.bottom())),
+                        egui::Rect::from_min_max(egui::pos2(panel_content.right(), panel_content.top()), full.max),
+                    ]
+                    .into_iter()
+                    .filter(|r| r.is_positive())
+                    .collect();
+                    viewport::refresh_layout(self, ui.ctx().pixels_per_point());
+                } else {
+                    preview::update(self, ui.ctx());
+                    self.show_workspace(ui);
                 }
-                if let Some(browser) = self.shell.browser {
-                    content.min.x = (browser.right() + shell::SHELL_GAP).min(content.right());
-                }
-                self.shell.content = Some(content);
-                self.shell.panels = [
-                    egui::Rect::from_min_max(egui::pos2(full.left(), panel_content.top()), egui::pos2(panel_content.left(), full.bottom())),
-                    egui::Rect::from_min_max(egui::pos2(panel_content.right(), panel_content.top()), full.max),
-                ]
-                .into_iter()
-                .filter(|r| r.is_positive())
-                .collect();
-                viewport::refresh_layout(self, ui.ctx().pixels_per_point());
-            } else {
-                preview::update(self, ui.ctx());
-                self.show_workspace(ui);
-            }
-        });
+            });
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());
@@ -1796,9 +1881,10 @@ pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
 }
 
-/// An engine error with the command's label instead of its id: "Shell: offset must be …".
+/// An engine error with the command's label instead of its id: "Shell: offset must be …". The
+/// label follows the interface language; the engine's sentence stays as the engine wrote it.
 pub fn friendly_error(id: &str, e: &str) -> String {
-    let label = command_label(id);
+    let label = i18n::tr_label(command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
     if msg.starts_with(label) { msg } else { format!("{label}: {msg}") }
 }

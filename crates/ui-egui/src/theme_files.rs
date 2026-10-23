@@ -1,6 +1,6 @@
 //! Colour themes as files (#2255): a `solidcraft-theme/1` JSON file names a base palette (the
 //! built-in Dark or Light) and sets any of its [`Tokens`] by name, so a theme can be a handful of
-//! lines. Built-in themes (the Gruvbox family) are such files under `assets/styles/ui/themes/`;
+//! lines. Built-in themes (Gruvbox and others) are such files under `assets/styles/ui/themes/`;
 //! imported ones are kept in the preferences (`Prefs::custom_themes`), so they also work in the
 //! browser. Colour vision modes still apply on top of a theme (`Tokens::with_vision`).
 //!
@@ -25,6 +25,33 @@ const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_COLORS: usize = 512;
 const MAX_NAME: usize = 80;
 pub const MAX_CUSTOM: usize = 64;
+
+// Older exports contain colours for retired window bands and procedural icons.
+// Discard them at import; they have no token, renderer, or exported setting now.
+const RETIRED_COLORS: &[&str] = &[
+    "icon_fill",
+    "heading_bg",
+    "subheading_bg",
+    "app_bar_icon",
+    "icons.sheet",
+    "icons.sheet_2",
+    "icons.sheet_light",
+    "icons.sheet_line",
+    "icons.glint",
+    "icons.folder",
+    "icons.plane",
+    "icons.fold",
+    "icons.stripe",
+    "icons.sky",
+    "icons.floor",
+    "icons.paint",
+    "icons.axes",
+    "icons.access",
+    "icons.draft",
+    "icons.curvature",
+    "icons.interference",
+    "icons.warning",
+];
 
 /// The palette a theme starts from.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,15 +80,15 @@ pub struct ThemeFile {
 
 /// The settable colours: a key, and where it lives in [`Tokens`]. `one` keys take a colour,
 /// `many` keys a list of exactly as many colours as the token has; `icons.*` are the colours
-/// icons draw of their own. The destructuring below fails to build when a token is added
+/// viewport glyphs draw of their own. The destructuring below fails to build when a token is added
 /// without a key here, so every colour stays themeable.
 macro_rules! theme_keys {
     (one: [$($one:ident),* $(,)?], many: [$($many:ident),* $(,)?],
-     icons_one: [$($ione:ident),* $(,)?], icons_many: [$($imany:ident),* $(,)?] $(,)?) => {
+     icons: [$($ione:ident),* $(,)?] $(,)?) => {
         /// Every key a theme file may set, in the order an export writes them.
         pub fn keys() -> Vec<&'static str> {
             let mut k = vec![$(stringify!($one),)* $(stringify!($many),)*];
-            k.extend([$(concat!("icons.", stringify!($ione)),)* $(concat!("icons.", stringify!($imany)),)*]);
+            k.extend([$(concat!("icons.", stringify!($ione)),)*]);
             k
         }
 
@@ -70,7 +97,6 @@ macro_rules! theme_keys {
                 $(stringify!($one) => Some(std::slice::from_mut(&mut t.$one)),)*
                 $(stringify!($many) => Some(&mut t.$many[..]),)*
                 $(concat!("icons.", stringify!($ione)) => Some(std::slice::from_mut(&mut t.icons.$ione)),)*
-                $(concat!("icons.", stringify!($imany)) => Some(&mut t.icons.$imany[..]),)*
                 _ => None,
             }
         }
@@ -81,6 +107,9 @@ macro_rules! theme_keys {
             let Tokens {
                 $($one: _,)* $($many: _,)*
                 hover_face_lift: _, analysis: _, icons: _,
+                file_action_height: _, file_back_height: _, file_recovery_icon: _, file_grid_gap: _,
+                file_nav_width: _, file_nav_height: _, file_tile_height: _, file_tile_icon: _, file_recent_height: _,
+                file_sample_image_height: _, file_content_inset_x: _, file_content_inset_y: _, file_section_gap: _, font_start_title: _,
                 space_2: _, space_3: _, space_4: _, space_6: _, space_8: _, space_10: _,
                 space_12: _, space_14: _, space_16: _, space_24: _, radius_sm: _, radius_md: _,
                 radius_lg: _, radius_xl: _, font_badge: _, font_micro: _, font_panel: _, font_small: _,
@@ -91,20 +120,22 @@ macro_rules! theme_keys {
                 form_checkbox_height: _, form_button_height: _, sketch_palette_width: _, sketch_mode_size: _, sketch_mode_radius: _, sketch_mode_border: _,
                 sketch_palette_alpha: _, sketch_mode_tint: _, sketch_footer_icon_size: _, font_section_tracking: _,
             } = t;
-            let IconColors { $($ione: _,)* $($imany: _,)* } = &t.icons;
+            let IconColors { $($ione: _,)* } = &t.icons;
         }
     };
 }
 
 theme_keys! {
     one: [
+        file_dim, file_recovery_well, file_background, file_surface, file_border, file_image_tint, file_rail, file_rail_ink, file_rail_hover,
+        file_primary, file_primary_ink, file_primary_border, file_recovery, file_recovery_ink, file_recovery_border,
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
-        icon, icon_fill, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
+        icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
         origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator,
         preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
         viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_locked, dimension, dimension_driven,
-        sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, heading_bg, subheading_bg, section_cap,
+        sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
         sketch_construction, sketch_centerline, bend_up, bend_down, interference,
@@ -113,12 +144,8 @@ theme_keys! {
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [triad, gizmo, continuity, app_bar_icon, logo],
-    icons_one: [
-        sheet, sheet_2, sheet_light, sheet_line, highlight, glint, folder, plane, fold, stripe, sky, floor, interference,
-        warning, agent, marker_halo,
-    ],
-    icons_many: [paint, axes, access, draft, curvature],
+    many: [triad, gizmo, continuity, logo],
+    icons: [highlight, agent, marker_halo],
 }
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
@@ -172,7 +199,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some("light") => Base::Light,
         _ => return Err("`base` must be \"dark\" or \"light\"".into()),
     };
-    let src = match v.get("colors") {
+    let mut src = match v.get("colors") {
         None => serde_json::Map::new(),
         Some(Value::Object(o)) => o.clone(),
         Some(_) => return Err("`colors` must be an object of colour names and values".into()),
@@ -180,6 +207,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
     if src.len() > MAX_COLORS {
         return Err(format!("`colors` has more than {MAX_COLORS} entries"));
     }
+    src.retain(|key, _| !RETIRED_COLORS.contains(&key.as_str()));
     let mut probe = Tokens::light();
     let mut bad = Vec::new();
     for (k, c) in &src {
@@ -240,14 +268,28 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors})
 }
 
-/// The theme files that come with SolidCraft (original files; Gruvbox's palette, MIT).
-const BUILTIN: [(&str, &str); 6] = [
+/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT).
+const BUILTIN: [(&str, &str); 20] = [
     ("gruvbox-dark", include_str!("../../../assets/styles/ui/themes/gruvbox-dark.json")),
     ("gruvbox-dark-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-hard.json")),
     ("gruvbox-dark-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-soft.json")),
     ("gruvbox-light", include_str!("../../../assets/styles/ui/themes/gruvbox-light.json")),
     ("gruvbox-light-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-light-hard.json")),
     ("gruvbox-light-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-light-soft.json")),
+    ("solidcraft-95", include_str!("../../../assets/styles/ui/themes/solidcraft-95.json")),
+    ("platinum-9", include_str!("../../../assets/styles/ui/themes/platinum-9.json")),
+    ("cupertino", include_str!("../../../assets/styles/ui/themes/cupertino.json")),
+    ("green-phosphor", include_str!("../../../assets/styles/ui/themes/green-phosphor.json")),
+    ("amber-phosphor", include_str!("../../../assets/styles/ui/themes/amber-phosphor.json")),
+    ("blueprint", include_str!("../../../assets/styles/ui/themes/blueprint.json")),
+    ("one-dark", include_str!("../../../assets/styles/ui/themes/one-dark.json")),
+    ("tokyo-night", include_str!("../../../assets/styles/ui/themes/tokyo-night.json")),
+    ("solarized-light", include_str!("../../../assets/styles/ui/themes/solarized-light.json")),
+    ("nord", include_str!("../../../assets/styles/ui/themes/nord.json")),
+    ("high-contrast", include_str!("../../../assets/styles/ui/themes/high-contrast.json")),
+    ("graphite", include_str!("../../../assets/styles/ui/themes/graphite.json")),
+    ("nosferatu", include_str!("../../../assets/styles/ui/themes/nosferatu.json")),
+    ("catppuccin-mocha", include_str!("../../../assets/styles/ui/themes/catppuccin-mocha.json")),
 ];
 
 /// The built-in themes, read once (one that fails to read is left out; a test reads them all).
@@ -303,17 +345,9 @@ mod tests {
         for t in builtin() {
             let base = if t.base.is_dark() { Tokens::dark() } else { Tokens::light() };
             assert_ne!(resolve(t), base, "{}", t.id);
-            assert_eq!(t.base.is_dark(), t.id.contains("dark"), "{}", t.id);
-        }
-    }
-
-    /// Title and section bands stand out from a dialog in every built-in theme, as in Dark and
-    /// Light (`heading_bands_are_darker_than_the_dialog_in_order`).
-    #[test]
-    fn built_in_themes_keep_heading_bands_in_order() {
-        let luma = |c: Color32| u32::from(c.r()) * 3 + u32::from(c.g()) * 6 + u32::from(c.b());
-        for t in builtin().iter().map(resolve) {
-            assert!(luma(t.heading_bg) < luma(t.subheading_bg) && luma(t.subheading_bg) < luma(t.dialog_bg), "{t:?}");
+            if t.id.starts_with("gruvbox-") {
+                assert_eq!(t.base.is_dark(), t.id.contains("dark"), "{}", t.id);
+            }
         }
     }
 
@@ -325,6 +359,20 @@ mod tests {
         assert_eq!(p.panel, Color32::from_rgb(0x10, 0x20, 0x30));
         assert_eq!(p.triad[2], Color32::from_rgba_unmultiplied(0, 0, 255, 0x80));
         assert_eq!(p.text, Tokens::light().text);
+    }
+
+    #[test]
+    fn older_exports_keep_active_overrides_without_retired_ui_settings() {
+        let mut file = export("Older theme", Base::Dark, &Tokens::dark());
+        let colors = file.get_mut("colors").and_then(Value::as_object_mut).unwrap();
+        colors.insert("panel".into(), json!("#102030"));
+        for key in RETIRED_COLORS {
+            colors.insert((*key).into(), json!("#abcdef"));
+        }
+        let imported = from_value(&file).unwrap();
+        assert_eq!(resolve(&imported).panel, Color32::from_rgb(0x10, 0x20, 0x30));
+        assert_eq!(imported.colors.len(), keys().len());
+        assert!(RETIRED_COLORS.iter().all(|key| !imported.colors.contains_key(*key)));
     }
 
     #[test]
@@ -379,15 +427,15 @@ mod tests {
         let mk = |name: &str| ThemeFile { id: slug(name), name: name.into(), ..Default::default() };
         assert_eq!(add(&mut custom, mk("Gruvbox Dark")).unwrap(), "custom-gruvbox-dark");
         assert_eq!(add(&mut custom, mk("Dark")).unwrap(), "custom-dark");
-        assert_eq!(add(&mut custom, mk("Nord")).unwrap(), "nord");
-        let again = ThemeFile { base: Base::Light, ..mk("Nord") };
-        assert_eq!(add(&mut custom, again).unwrap(), "nord");
+        assert_eq!(add(&mut custom, mk("Mine")).unwrap(), "mine");
+        let again = ThemeFile { base: Base::Light, ..mk("Mine") };
+        assert_eq!(add(&mut custom, again).unwrap(), "mine");
         assert_eq!(custom.len(), 3);
-        assert_eq!(custom.iter().find(|t| t.id == "nord").map(|t| t.base), Some(Base::Light));
+        assert_eq!(custom.iter().find(|t| t.id == "mine").map(|t| t.base), Some(Base::Light));
         for i in custom.len()..MAX_CUSTOM {
             add(&mut custom, mk(&format!("t{i}"))).unwrap();
         }
         assert!(add(&mut custom, mk("one too many")).is_err());
-        assert!(find("gruvbox-dark", &custom).is_some() && find("nord", &custom).is_some() && find("dark", &custom).is_none());
+        assert!(find("gruvbox-dark", &custom).is_some() && find("mine", &custom).is_some() && find("dark", &custom).is_none());
     }
 }

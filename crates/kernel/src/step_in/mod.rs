@@ -88,6 +88,10 @@ pub struct StepImport {
     pub schema: String,
     /// FILE_NAME originating system.
     pub system: String,
+    /// FILE_NAME preprocessor version.
+    pub preprocessor: String,
+    /// FILE_DESCRIPTION text.
+    pub description: String,
 }
 
 /// A solid the walk found, converted later.
@@ -1318,7 +1322,15 @@ impl StepReading {
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
         }
         let bodies = std::mem::take(&mut rd.bodies);
-        Ok(StepImport { bodies, tree, warnings, schema: ex.schemas.join(", "), system: ex.originating_system.clone() })
+        Ok(StepImport {
+            bodies,
+            tree,
+            warnings,
+            schema: ex.schemas.join(", "),
+            system: ex.originating_system.clone(),
+            preprocessor: ex.preprocessor.clone(),
+            description: ex.description.clone(),
+        })
     }
 
     /// [`Self::finish`], and the import is cached for the next read of the same text.

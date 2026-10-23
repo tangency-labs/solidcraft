@@ -304,9 +304,23 @@ fn is_constant(id: &str) -> bool {
     CONSTANTS.contains(&id)
 }
 
+/// What kind of word the expression language reserves `name` as: `unit`, `constant` or
+/// `function` (None: free for a parameter).
+pub fn reserved_kind(name: &str) -> Option<&'static str> {
+    if unit(name).is_some() {
+        Some("unit")
+    } else if is_constant(name) {
+        Some("constant")
+    } else if FUNCTIONS.iter().any(|(f, _)| *f == name) {
+        Some("function")
+    } else {
+        None
+    }
+}
+
 /// Is this a name the expression language reserves (unit, constant or function)?
 pub fn is_reserved(name: &str) -> bool {
-    unit(name).is_some() || is_constant(name) || FUNCTIONS.iter().any(|(f, _)| *f == name)
+    reserved_kind(name).is_some()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -533,6 +547,24 @@ pub fn is_literal(s: &str) -> bool {
 /// Is the expression a bare number without a unit, like `20` or `-1.5`?
 pub fn is_bare_number(s: &str) -> bool {
     is_literal(s) && s.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+}
+
+/// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
+/// only; whether the name is free or reserved is `Document::param_name_problem`'s business.
+fn is_name_shaped(s: &str) -> bool {
+    let mut cs = s.chars();
+    matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') && cs.all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// A value typed as a definition, `name = expression`: the name and the text after the first
+/// `=`, both trimmed (the text may be empty). `None` for anything else, including text whose
+/// left side is not shaped like a name (`2 = 3`), which stays an ordinary expression and fails
+/// to parse as before. The dimension input defines a user parameter this way (#2916); other
+/// value inputs can take the same form later.
+pub fn definition(s: &str) -> Option<(&str, &str)> {
+    let (name, rhs) = s.split_once('=')?;
+    let name = name.trim();
+    is_name_shaped(name).then(|| (name, rhs.trim()))
 }
 
 /// The length unit of a design with these units: `mm` unless they name another length unit.
@@ -1203,5 +1235,50 @@ mod tests {
         assert!(!is_literal("d1") && !is_literal("2 * 3") && !is_literal("2 width"));
         assert!(is_bare_number(" -1.5 ") && is_bare_number("+2") && !is_bare_number("20 mm") && !is_bare_number("(2)"));
         assert_eq!((length_unit_or_mm(" in "), length_unit_or_mm("deg"), length_unit_or_mm("")), ("in", "mm", "mm"));
+    }
+
+    /// `name = expression` splits at the first `=` when the left side is shaped like a name; the
+    /// right side is any text, checked by whoever evaluates it.
+    #[test]
+    fn definitions_split_on_a_name_and_an_equals_sign() {
+        let splits = [
+            ("w = 20", "w", "20"),
+            ("w=20", "w", "20"),
+            ("  w  =  20 mm ", "w", "20 mm"),
+            ("w = (a + b) / 2", "w", "(a + b) / 2"),
+            ("w = 2 * (3 + sin(45 deg))", "w", "2 * (3 + sin(45 deg))"),
+            ("w = 1 in - 5.4 mm", "w", "1 in - 5.4 mm"),
+            ("_w1 = 1", "_w1", "1"),
+            ("szerokość = 20", "szerokość", "20"),
+            // Reserved names split too: the parameter check names the reason.
+            ("mm = 5", "mm", "5"),
+            // A second `=` stays in the expression, which then fails to evaluate.
+            ("w == 3", "w", "= 3"),
+            ("w = a = 3", "w", "a = 3"),
+            // An empty expression is the caller's error to report.
+            ("w =", "w", ""),
+            ("w = ", "w", ""),
+        ];
+        for (text, name, rhs) in splits {
+            assert_eq!(definition(text), Some((name, rhs)), "{text:?}");
+        }
+        for text in ["20", "20 mm", "width / 2", "= 20", "=", "", "2w = 3", "a b = 3", "a-b = 3", "w.x = 3", "(w) = 3", "-w = 3"] {
+            assert_eq!(definition(text), None, "{text:?}");
+        }
+    }
+
+    /// A reserved name is refused by saying what kind of word it is.
+    #[test]
+    fn a_reserved_name_is_refused_by_its_kind() {
+        assert_eq!(
+            (reserved_kind("mm"), reserved_kind("deg"), reserved_kind("pi"), reserved_kind("sin"), reserved_kind("width")),
+            (Some("unit"), Some("unit"), Some("constant"), Some("function"), None)
+        );
+        let problem = |n: &str| crate::Document::param_name_problem(n).unwrap_or_default();
+        assert_eq!(problem("mm"), "`mm` is a unit name, so it cannot be a parameter name");
+        assert_eq!(problem("sin"), "`sin` is a function name, so it cannot be a parameter name");
+        assert_eq!(problem("pi"), "`pi` is a constant, so it cannot be a parameter name");
+        assert_eq!(crate::Document::param_name_problem("width"), None);
+        assert!(problem("2w").contains("not a valid parameter name"));
     }
 }

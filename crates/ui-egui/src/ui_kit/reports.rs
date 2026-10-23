@@ -72,7 +72,10 @@ pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.control_height * 3.0), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message));
-    let points = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
+    let mut points = super::preferences::rounded_perimeter(rect.shrink(0.5), f32::from(t.radius_lg));
+    if let Some(first) = points.first().copied() {
+        points.push(first);
+    }
     ui.painter().extend(egui::Shape::dashed_line(&points, egui::Stroke::new(1.0, t.control_border), t.space_4, t.space_3));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, message, egui::FontId::proportional(t.font_label), t.form_dim);
     scenario::publish_rect(&format!("dialog:note:{key}"), rect);
