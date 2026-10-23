@@ -179,6 +179,119 @@ fn save_jobs_report_their_own_revision_and_restart_sync_is_idempotent() {
 }
 
 #[test]
+fn confirmed_catalog_survives_lost_checkout_and_old_receipts_cannot_replace_newer_heads() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("confirmed");
+    let host = fixture.host();
+    let first = save(&connection, "parts/bracket", "First publication", None);
+    let first_record = first.record.clone();
+    let second = save(&connection, "parts/bracket", "Latest publication", Some(first.record.id.clone()));
+    let second_record = second.record.clone();
+    for capture in [first, second] {
+        let job = host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap();
+        assert_eq!(published(&job).phase, Phase::Synced);
+    }
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    fs::remove_dir_all(&connection.checkout).unwrap();
+    drop(host);
+    let restarted = fixture.host();
+    let listing = complete(&restarted.submit(Operation::List(connection.clone()), "unavailable-git".into()).unwrap());
+    assert_eq!(listing.phase, Phase::Ready, "{listing:?}");
+    assert_eq!(listing.result.unwrap(), serde_json::json!([second_record.destination]));
+    // Simulate restart after a receipt reached disk but queue removal was interrupted.
+    fixture.outbox(&connection).stage(&save(&connection, "parts/bracket", "First publication", None)).unwrap();
+    let sync = restarted.submit(Operation::Synchronize(connection.clone()), "unavailable-git".into()).unwrap();
+    let status = published(&sync);
+    assert_eq!(status.phase, Phase::Synced, "{status:?}");
+    assert_eq!(status.publications.len(), 1);
+    assert_eq!(status.publications[0].revision, first_record.id);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    let opening = restarted
+        .submit(Operation::Open { connection: connection.clone(), destination: second_record.destination.clone() }, "unavailable-git".into())
+        .unwrap();
+    let status = complete(&opening);
+    assert_eq!(status.phase, Phase::Ready, "{status:?}");
+    assert_eq!(status.revision.as_deref(), Some(second_record.id.as_str()));
+    let snapshot = opening.take_opened().unwrap();
+    assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap().name, "Latest publication");
+    // Reusing the connection identifier for another repository cannot expose this catalog.
+    let mut redirected = connection;
+    redirected.repository = "different/repository".into();
+    let listing = complete(&restarted.submit(Operation::List(redirected), "unavailable-git".into()).unwrap());
+    assert_eq!(listing.phase, Phase::Failed);
+    assert!(listing.message.unwrap().contains("original repository"));
+}
+
+#[test]
+fn confirmed_conflict_copies_reopen_at_their_actual_destinations_after_restart() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("conflicts");
+    let host = fixture.host();
+    let original = save(&connection, "parts/bracket", "Original design", None);
+    let destination = original.record.destination.clone();
+    let job = host.submit(Operation::Save { connection: connection.clone(), save: Box::new(original), synchronize: true }, String::new()).unwrap();
+    assert_eq!(published(&job).phase, Phase::Synced);
+    let competing = save(&connection, "parts/bracket", "Competing design", None);
+    let competing_record = competing.record.clone();
+    let job = host.submit(Operation::Save { connection: connection.clone(), save: Box::new(competing), synchronize: true }, String::new()).unwrap();
+    let status = published(&job);
+    assert_eq!(status.phase, Phase::Synced, "{status:?}");
+    let publication = status.publications.first().unwrap().clone();
+    assert!(publication.conflict);
+    assert_ne!(publication.destination, destination);
+    // Simulate interruption just before the last queue removal. Open/list must use the
+    // receipt's conflict destination, not mistake this capture for the original local head.
+    fixture.outbox(&connection).stage(&save(&connection, "parts/bracket", "Competing design", None)).unwrap();
+    fs::remove_dir_all(&connection.checkout).unwrap();
+    let restarted = fixture.host();
+    let listing = complete(&restarted.submit(Operation::List(connection.clone()), "unavailable-git".into()).unwrap());
+    assert_eq!(listing.phase, Phase::Ready);
+    let entries: Vec<solidcraft_cloud::Destination> = serde_json::from_value(listing.result.unwrap()).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.contains(&destination));
+    assert!(entries.contains(&publication.destination));
+    for (destination, expected) in [(destination, "Original design"), (publication.destination.clone(), "Competing design")] {
+        let opening = restarted.submit(Operation::Open { connection: connection.clone(), destination }, "unavailable-git".into()).unwrap();
+        assert_eq!(complete(&opening).phase, Phase::Ready);
+        let snapshot = opening.take_opened().unwrap();
+        assert_eq!(super::super::open_document(&snapshot.manifest, &snapshot.document, |_| panic!("no assets")).unwrap().name, expected);
+    }
+    let sync = restarted.submit(Operation::Synchronize(connection.clone()), "unavailable-git".into()).unwrap();
+    let status = published(&sync);
+    assert_eq!(status.phase, Phase::Synced);
+    assert_eq!(status.publications[0].destination, publication.destination);
+    assert_eq!(status.publications[0].revision, competing_record.id);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+}
+
+#[test]
+fn newer_or_corrupt_checkout_content_never_silently_opens_a_stale_cached_design() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("schema");
+    let host = fixture.host();
+    let capture = save(&connection, "parts/bracket", "Cached design", None);
+    let destination = capture.record.destination.clone();
+    let job = host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap();
+    assert_eq!(published(&job).phase, Phase::Synced);
+    let path = Path::new(&connection.checkout).join("Robot/parts/bracket/document.json");
+    for bytes in [br#"{"format":"solidcraft/4294967295"}"#.as_slice(), b"corrupt document"] {
+        fs::write(&path, bytes).unwrap();
+        let opening = host.submit(Operation::Open { connection: connection.clone(), destination: destination.clone() }, String::new()).unwrap();
+        let status = complete(&opening);
+        assert_eq!(status.phase, Phase::Failed, "{status:?}");
+        if bytes.starts_with(b"{") {
+            assert!(status.message.unwrap().contains("Upgrade SolidCraft"));
+        }
+        assert!(opening.take_opened().is_err());
+    }
+    let marker = Path::new(&connection.checkout).join("Robot/solidcraft-project.json");
+    fs::write(marker, br#"{"format":"solidcraft-cloud/999"}"#).unwrap();
+    let listing = complete(&host.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert_eq!(listing.phase, Phase::Failed);
+    assert!(listing.message.unwrap().contains("Upgrade SolidCraft"));
+}
+
+#[test]
 fn a_busy_or_damaged_connection_cannot_block_other_queues_or_local_saves() {
     let fixture = Fixture::new();
     let busy = fixture.connection("busy");

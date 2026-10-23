@@ -39,7 +39,43 @@ Desktop Git must preserve credential helpers, SSH agents/configuration, signing,
 
 Browser integration must persist connection metadata and pending saves in IndexedDB, with assets and recovery data in OPFS. Restart recovery must retry the captured snapshot rather than silently substituting later unsaved edits. Quota and credential failures leave the requested save recoverable.
 
-`solidcraft_io::cloud::NativeHost` runs native operations on workers and retains the caller's allowed-folder scope. Give it the app's private cloud recovery directory. Each connection has its own outbox under the SHA-256 of its identifier, preventing case-insensitive filesystem aliases. Save persists its captured objects and queue record before starting Git. Listing combines queued destinations with the checkout; opening prefers the latest queued revision and needs neither connectivity nor a working Git executable for that revision. Competing local tips remain intact and return a conflict rather than opening an arbitrary version. Synchronization retries captured revisions in dependency order; a failed predecessor blocks its children but not unrelated captures. A Save operation reports only its requested capture's publication result. The local queue/process locks are implementation coordination, separate from the future advisory editing leases described in the collaboration plan.
+`solidcraft_io::cloud::NativeHost` runs native operations on workers and retains
+the caller's allowed-folder scope. Give it the app's private cloud recovery
+directory. Each connection has its own outbox under the SHA-256 of its identifier,
+preventing case-insensitive filesystem aliases. Save persists its captured objects
+and queue record before starting Git. Listing combines queued and confirmed local
+destinations with the checkout. Opening prefers the latest queued revision;
+otherwise it reads the checkout, with a confirmed local capture as a fallback
+when the checkout or Git is unavailable. Unsupported or corrupt checkout formats
+return an error instead of silently opening an older cache. Competing local tips
+remain intact and return a conflict rather than opening an arbitrary version.
+
+Synchronization retries captured revisions in dependency order; a failed
+predecessor blocks its children but not unrelated captures. A Save operation
+reports only its requested capture's publication result. The local queue/process
+locks are implementation coordination, separate from the future advisory editing
+leases described in the collaboration plan.
+
+### Native publication catalog
+
+`crates/io/src/cloud/catalog.rs` maintains machine-local `cached/` heads and
+immutable `receipts/` records alongside the native queue. Their
+`solidcraft-native-publication/1` envelopes contain the original capture and the
+repository-confirmed publication, including its actual conflict-copy destination.
+They contain credential identifiers only. None of this metadata enters Git.
+Catalog enumeration is bounded to 10,000 destinations and 128 MiB of metadata;
+asset bytes remain deduplicated in the existing local object store.
+
+After Git confirms publication, the worker atomically writes the cached head,
+then the immutable receipt, then removes the pending record. A separate short
+catalog lock coordinates those writes without network waits. Each interrupted
+boundary is recoverable: an absent receipt retries Git's idempotent publication;
+an existing receipt finishes acknowledgement without Git, credentials, or a
+checkout. Replaying an older receipt preserves a newer cached head. Future cache,
+receipt, or document formats block metadata replacement and retain the queue.
+Confirmed captures remain listable and openable after restart even if their
+checkout is unavailable. Downloads and externally edited checkout snapshots are
+not yet added to this native catalog.
 
 The desktop app installs this worker through `Services::cloud_host`, using its
 private `cloud` data directory. `SolveApp` loads settings through the registered

@@ -432,8 +432,8 @@ mod tests {
             "Bracket"
         );
         let good = GitRepository::open(fixture.connection(), "").unwrap();
-        good.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap();
-        outbox.published(&save.record).unwrap();
+        let published = good.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap();
+        outbox.published(&save.record, &published).unwrap();
         assert!(outbox.pending().unwrap().is_empty());
         let other = Connection { id: "other".into(), credential: "cloud:other".into(), ..fixture.connection() };
         assert!(GitRepository::open(other, "").unwrap().publish(&save.record, Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap()).is_err());

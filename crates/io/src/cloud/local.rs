@@ -35,7 +35,7 @@ impl LocalOutbox {
         Ok(Self { root: fs::canonicalize(root).map_err(storage)? })
     }
 
-    fn path(&self, name: &str) -> Result<PathBuf> {
+    pub(super) fn path(&self, name: &str) -> Result<PathBuf> {
         solidcraft_cloud::check_path(name)?;
         let mut path = self.root.clone();
         for part in name.split('/') {
@@ -48,12 +48,12 @@ impl LocalOutbox {
         Ok(path)
     }
 
-    fn read(&self, name: &str) -> Result<Vec<u8>> {
+    pub(super) fn read(&self, name: &str) -> Result<Vec<u8>> {
         let max = if name.starts_with("objects/") { solidcraft_cloud::CHUNK_BYTES } else { solidcraft_cloud::MAX_MANIFEST_BYTES };
         crate::vfs::read(&self.path(name)?.to_string_lossy(), max).map_err(storage)
     }
 
-    fn store(&self, name: &str, bytes: &[u8]) -> Result<()> {
+    pub(super) fn store(&self, name: &str, bytes: &[u8]) -> Result<()> {
         let path = self.path(name)?;
         if path.exists() {
             if self.read(name)? != bytes {
@@ -108,8 +108,8 @@ impl LocalOutbox {
         save.recover_checked(|p| self.read(p), super::check_document)
     }
 
-    /// Call only after the repository adapter confirms this captured save was published.
-    pub fn published(&self, save: &PendingSave) -> Result<()> {
+    /// The catalog adapter calls this only after its cache and receipt reach disk.
+    pub(super) fn remove_pending(&self, save: &PendingSave) -> Result<()> {
         PendingSave::read(&serde_json::to_vec(save).map_err(storage)?)?;
         let path = self.path(&format!("pending/{}.json", save.id))?;
         if !path.exists() {
@@ -137,7 +137,50 @@ impl LocalOutbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!(
+                "solidcraft-outbox-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            )))
+        }
+
+        fn outbox(&self) -> LocalOutbox {
+            LocalOutbox::new(self.0.clone()).unwrap()
+        }
+
+        fn save(&self, name: &str, parent: Option<String>) -> StagedSave {
+            let save = PendingSave::stage(
+                &Default::default(),
+                "project",
+                "parts/design",
+                parent,
+                super::super::prepare_document(&solidcraft_doc::Document::new(name)).unwrap(),
+            )
+            .unwrap();
+            self.outbox().stage(&save).unwrap();
+            save
+        }
+
+        fn publication(save: &PendingSave) -> solidcraft_cloud::Published {
+            solidcraft_cloud::Published { destination: save.destination.clone(), revision: save.id.clone(), commit: "a".repeat(40), conflict: false }
+        }
+
+        fn catalog_files(&self, folder: &str) -> Vec<PathBuf> {
+            fs::read_dir(self.0.join(folder)).unwrap().map(|entry| entry.unwrap().path()).collect()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn local_save_survives_reopening_until_publication_is_confirmed() {
         let root = std::env::temp_dir().join(format!(
@@ -150,20 +193,162 @@ mod tests {
             "project",
             "parts/design",
             None,
-            Snapshot::prepare(b"{}".to_vec(), BTreeMap::from([("blob".into(), vec![42; 100])])).unwrap(),
+            super::super::prepare_document(&solidcraft_doc::Document::new("Local capture")).unwrap(),
         )
         .unwrap();
         LocalOutbox::new(root.clone()).unwrap().stage(&save).unwrap();
         let reopened = LocalOutbox::new(root.clone()).unwrap();
         let pending = reopened.pending().unwrap();
         assert_eq!(pending.len(), 1);
-        assert_eq!(reopened.recover(&pending[0]).unwrap().document, b"{}");
+        assert_eq!(reopened.recover(&pending[0]).unwrap().document, save.objects[&format!("documents/{}", pending[0].manifest.document_hash)]);
         // A failed or skipped upload leaves the queued record. Retrying stage is idempotent.
         reopened.stage(&save).unwrap();
         assert_eq!(reopened.pending().unwrap().len(), 1);
-        reopened.published(&pending[0]).unwrap();
+        reopened
+            .published(
+                &pending[0],
+                &solidcraft_cloud::Published {
+                    destination: pending[0].destination.clone(),
+                    revision: pending[0].id.clone(),
+                    commit: "a".repeat(40),
+                    conflict: false,
+                },
+            )
+            .unwrap();
         assert!(reopened.pending().unwrap().is_empty());
         assert!(reopened.recover(&pending[0]).is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn confirmation_recovers_each_interrupted_metadata_boundary_and_preserves_optional_receipts() {
+        for boundary in ["cache", "receipt", "removed"] {
+            let fixture = Fixture::new();
+            let staged = fixture.save("Confirmed design", None);
+            let publication = Fixture::publication(&staged.record);
+            let outbox = fixture.outbox();
+            outbox.published(&staged.record, &publication).unwrap();
+            if boundary != "removed" {
+                outbox.stage(&staged).unwrap();
+            }
+            let receipt = fixture.catalog_files("receipts").pop().unwrap();
+            if boundary == "cache" {
+                fs::remove_file(&receipt).unwrap();
+            } else {
+                let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+                value["optional_annotation"] = serde_json::json!("keep on retry");
+                fs::write(&receipt, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            drop(outbox);
+            let reopened = fixture.outbox();
+            let cached = reopened.cached(&staged.record.connection, &staged.record.destination).unwrap().unwrap();
+            assert_eq!(cached.published.revision, staged.record.id);
+            reopened.published(&staged.record, &publication).unwrap();
+            assert!(reopened.pending().unwrap().is_empty());
+            assert_eq!(reopened.receipt(&staged.record).unwrap().unwrap().revision, staged.record.id);
+            assert_eq!(reopened.cached_destinations(&staged.record.connection).unwrap(), vec![staged.record.destination.clone()]);
+            assert_eq!(
+                reopened.recover_document(&cached.save).unwrap().document,
+                staged.objects[&format!("documents/{}", staged.record.manifest.document_hash)]
+            );
+            if boundary != "cache" {
+                let value: serde_json::Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+                assert_eq!(value["optional_annotation"], "keep on retry");
+            }
+        }
+    }
+
+    #[test]
+    fn future_catalog_and_receipt_formats_preserve_pending_captures_and_metadata() {
+        for target in ["cached", "receipts"] {
+            let fixture = Fixture::new();
+            let first = fixture.save("First design", None);
+            let outbox = fixture.outbox();
+            outbox.published(&first.record, &Fixture::publication(&first.record)).unwrap();
+            let next = fixture.save("New edit", Some(first.record.id.clone()));
+            let file = if target == "cached" {
+                fixture.catalog_files("cached").pop().unwrap()
+            } else {
+                fixture.0.join(format!("receipts/{}.json", next.record.id))
+            };
+            let future = br#"{"format":"solidcraft-native-publication/999"}"#;
+            fs::write(&file, future).unwrap();
+            let before_cache = fs::read(fixture.catalog_files("cached").pop().unwrap()).unwrap();
+            let error = outbox.published(&next.record, &Fixture::publication(&next.record)).unwrap_err();
+            assert!(matches!(error, Error::UpgradeRequired(_)));
+            assert_eq!(fs::read(&file).unwrap(), future);
+            assert_eq!(fs::read(fixture.catalog_files("cached").pop().unwrap()).unwrap(), before_cache);
+            assert_eq!(outbox.pending().unwrap()[0].id, next.record.id);
+        }
+    }
+
+    #[test]
+    fn publication_metadata_rejects_wrong_revision_commit_and_destination_before_queue_removal() {
+        let fixture = Fixture::new();
+        let staged = fixture.save("Retained design", None);
+        for setting in ["revision", "commit", "destination", "conflict"] {
+            let mut publication = Fixture::publication(&staged.record);
+            match setting {
+                "revision" => publication.revision = "b".repeat(64),
+                "commit" => publication.commit = "invalid commit".into(),
+                "destination" => publication.destination.file = "parts/unrelated".into(),
+                _ => publication.conflict = true,
+            }
+            assert!(fixture.outbox().published(&staged.record, &publication).is_err());
+            assert_eq!(fixture.outbox().pending().unwrap().len(), 1);
+            assert!(!fixture.0.join("cached").exists());
+            assert!(!fixture.0.join("receipts").exists());
+        }
+    }
+
+    #[test]
+    fn cache_identity_and_document_integrity_are_checked_before_replacement() {
+        let fixture = Fixture::new();
+        let first = fixture.save("First design", None);
+        let outbox = fixture.outbox();
+        outbox.published(&first.record, &Fixture::publication(&first.record)).unwrap();
+        let next = fixture.save("New edit", Some(first.record.id.clone()));
+        let cached = fixture.catalog_files("cached").pop().unwrap();
+        let before = fs::read(&cached).unwrap();
+        let renamed = fixture.0.join(format!("cached/{}.json", "b".repeat(64)));
+        fs::rename(&cached, &renamed).unwrap();
+        assert!(outbox.cached_destinations(&first.record.connection).is_err());
+        fs::rename(&renamed, &cached).unwrap();
+        fs::write(fixture.0.join(format!("documents/{}", first.record.manifest.document_hash)), b"corrupt document").unwrap();
+        assert!(outbox.published(&next.record, &Fixture::publication(&next.record)).is_err());
+        assert_eq!(fs::read(&cached).unwrap(), before);
+        assert!(outbox.receipt(&next.record).unwrap().is_none());
+        assert_eq!(outbox.pending().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn future_cached_document_requires_upgrade_before_confirmation_replaces_metadata() {
+        let fixture = Fixture::new();
+        let staged = fixture.save("Current edit", None);
+        let outbox = fixture.outbox();
+        outbox.published(&staged.record, &Fixture::publication(&staged.record)).unwrap();
+        let cached = fixture.catalog_files("cached").pop().unwrap();
+        let future = PendingSave::stage(
+            &staged.record.connection,
+            "project",
+            "parts/design",
+            None,
+            Snapshot::prepare(br#"{"format":"solidcraft/4294967295"}"#.to_vec(), Default::default()).unwrap(),
+        )
+        .unwrap();
+        outbox.stage(&future).unwrap();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "format": "solidcraft-native-publication/1",
+            "save": future.record,
+            "published": Fixture::publication(&future.record),
+        }))
+        .unwrap();
+        fs::write(&cached, &bytes).unwrap();
+        let next = fixture.save("New edit", Some(staged.record.id));
+        let error = outbox.published(&next.record, &Fixture::publication(&next.record)).unwrap_err();
+        assert!(matches!(error, Error::UpgradeRequired(_)));
+        assert_eq!(fs::read(&cached).unwrap(), bytes);
+        assert!(outbox.receipt(&next.record).unwrap().is_none());
+        assert_eq!(outbox.pending().unwrap().len(), 2);
     }
 }

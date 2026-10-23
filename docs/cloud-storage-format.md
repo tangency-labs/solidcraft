@@ -58,3 +58,12 @@ Readers verify stored bytes, decoded lengths and hashes, the full reconstructed 
 Upload immutable objects first, then publish the document and manifest together in one Git commit. Update the branch without forcing. A changed parent requires checking the target design again; unrelated changes may be retried, while competing design edits must be preserved.
 
 Local and browser queues must retain the requested snapshot until publication is confirmed. A pending record includes its full destination, original connection endpoint (without credentials), and expected prior revision; offline children depend on their captured parent revisions and are published in that order. Credential renewal is allowed, but changing a connection's repository or branch cannot redirect previously queued designs. Queues are isolated by repository connection. Interrupted publication must not be reported as synchronized. A migration creates a new recoverable revision rather than rewriting history. Upgrade recognition begins with the first cloud-capable release.
+
+Publication receipts and offline catalogs are machine-local recovery metadata,
+outside this repository format. Native `solidcraft-native-publication/1` records
+retain the captured snapshot and its confirmed commit and destination. Cache
+replacement precedes the immutable receipt, which precedes queue removal; retries
+recognize completed revisions without republishing or replacing a newer cached
+head. Browser receipts, cache updates and queue removal commit together in one
+IndexedDB transaction. Both adapters reject future local metadata formats before
+replacement. See [the implementation guide](cloud-saves.md#native-publication-catalog).

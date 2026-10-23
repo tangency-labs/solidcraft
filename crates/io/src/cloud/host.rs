@@ -72,9 +72,14 @@ impl NativeHost {
             }
             Operation::List(connection) => {
                 let mut destinations = BTreeMap::new();
+                for destination in outbox.cached_destinations(&connection)? {
+                    destinations.insert(destination.design_path()?, destination);
+                }
                 for save in outbox.pending()? {
                     save.check_connection(&connection)?;
-                    destinations.insert(save.destination.design_path()?, save.destination);
+                    if outbox.receipt(&save)?.is_none() {
+                        destinations.insert(save.destination.design_path()?, save.destination);
+                    }
                 }
                 match GitRepository::open_cancellable(connection, executable, job.clone()).and_then(|repository| repository.list()) {
                     Ok(entries) => {
@@ -82,7 +87,7 @@ impl NativeHost {
                             destinations.insert(destination.design_path()?, destination);
                         }
                     }
-                    Err(error) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
+                    Err(error @ Error::Storage(_)) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
                     Err(error) => return Err(error),
                 }
                 check_cancelled(job)?;
@@ -97,7 +102,13 @@ impl NativeHost {
                 if destination.connection != connection.id {
                     return Err(storage("repository connection mismatch"));
                 }
-                let pending: Vec<_> = outbox.pending()?.into_iter().filter(|save| save.destination == destination).collect();
+                let mut pending = Vec::new();
+                for save in outbox.pending()?.into_iter().filter(|save| save.destination == destination) {
+                    save.check_connection(&connection)?;
+                    if outbox.receipt(&save)?.is_none() {
+                        pending.push(save);
+                    }
+                }
                 // Two local sessions can have made competing offline saves. Neither snapshot
                 // may silently win; retain both and leave selection to conflict resolution.
                 let parents: BTreeSet<_> = pending.iter().filter_map(|save| save.expected_revision.as_deref()).collect();
@@ -112,9 +123,22 @@ impl NativeHost {
                     snapshot
                 } else {
                     // Reading an ordinary checkout needs no connectivity and never fetches.
-                    let snapshot = GitRepository::open_cancellable(connection, executable, job.clone())?.snapshot(&destination)?;
-                    job.update(|status| status.revision = solidcraft_cloud::revision(&snapshot.manifest).map(str::to_owned))?;
-                    snapshot
+                    match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repo| repo.snapshot(&destination)) {
+                        Ok(snapshot) => {
+                            job.update(|status| status.revision = solidcraft_cloud::revision(&snapshot.manifest).map(str::to_owned))?;
+                            snapshot
+                        }
+                        Err(error @ Error::Storage(_)) => {
+                            let Some(cached) = outbox.cached(&connection, &destination)? else { return Err(error) };
+                            let snapshot = outbox.recover_document(&cached.save)?;
+                            job.update(|status| {
+                                status.revision = Some(cached.published.revision);
+                                status.message = Some(error.to_string());
+                            })?;
+                            snapshot
+                        }
+                        Err(error) => return Err(error),
+                    }
                 };
                 check_cancelled(job)?;
                 job.update(|status| status.destination = Some(destination))?;
@@ -143,7 +167,9 @@ impl NativeHost {
             })?;
             return Ok(());
         }
-        let repository = GitRepository::open_cancellable(connection.clone(), executable, job.clone())?;
+        // Completed receipts can acknowledge an interrupted queue removal without Git,
+        // credentials, a checkout, or a second network publication.
+        let mut repository = None;
         job.update(|status| status.phase = Phase::Syncing)?;
         let mut blocked = BTreeSet::new();
         let mut results = Vec::new();
@@ -156,10 +182,18 @@ impl NativeHost {
             }
             let result = save
                 .check_connection(&connection)
-                .and_then(|()| outbox.recover_document(&save))
-                .and_then(|snapshot| repository.publish(&save, snapshot))
+                .and_then(|()| {
+                    if let Some(published) = outbox.receipt(&save)? {
+                        return Ok(published);
+                    }
+                    let snapshot = outbox.recover_document(&save)?;
+                    if repository.is_none() {
+                        repository = Some(GitRepository::open_cancellable(connection.clone(), executable, job.clone())?);
+                    }
+                    repository.as_ref().ok_or_else(|| storage("repository unavailable"))?.publish(&save, snapshot)
+                })
                 .and_then(|published| {
-                    outbox.published(&save)?;
+                    outbox.published(&save, &published)?;
                     Ok(published)
                 });
             match result {

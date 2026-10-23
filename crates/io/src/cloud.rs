@@ -7,6 +7,8 @@ use solidcraft_cloud::{Error, Manifest, Result, Snapshot, digest};
 use solidcraft_doc::Document;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod catalog;
+#[cfg(not(target_arch = "wasm32"))]
 mod git;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
