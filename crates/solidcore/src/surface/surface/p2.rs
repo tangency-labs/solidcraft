@@ -2435,7 +2435,8 @@ impl Surface {
             ),
             // SmCone::GlobalSurfaceIntersect: its special cases, else the base
             // SmSurface::GlobalSurfaceIntersect of this surface
-            SurfaceKind::Cone(c) => c.global_surface_intersect_with(
+            SurfaceKind::Cone(c) => c.global_surface_intersect_on(
+                Some(self),
                 k,
                 uv_domain,
                 crate::surface::cone::p3::IntersectTarget::Surface(other),

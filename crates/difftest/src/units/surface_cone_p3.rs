@@ -14,10 +14,10 @@ use solidcore::geom::vector2d::Vec2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
-use solidcore::surface::cone::p3::IntersectTarget;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p2::SurfaceIntersection;
+use solidcore::surface::surface::Surface;
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_cone_p3 as ffi;
 
@@ -173,22 +173,13 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             i.domains.get(4..).unwrap_or(&[]),
         );
         if i.op == 3 {
-            let out = a.global_surface_intersect_with(
-                &k,
-                &da,
-                IntersectTarget::Cone(b),
-                &db,
-                [true, true],
-                i.tolerance,
-                None,
-                |_| {
-                    // UNPORTED(surface.surface_p2): typed Cone general-intersector adapter.
-                    Err(SolidError::unported(
-                        "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
-                        "surface.surface_p2",
-                    ))
-                },
-            )?;
+            // SmCone::GlobalSurfaceIntersect through the common Surface dispatch: its
+            // special cases, else the base SmSurface::GlobalSurfaceIntersect.
+            let sa = Surface::from(a.clone());
+            let sb = Surface::from(b.clone());
+            let sb = if i.same { &sa } else { &sb };
+            let out =
+                sa.global_surface_intersect(&k, &da, sb, &db, [true, true], i.tolerance, None)?;
             (false, out)
         } else {
             a.intersect_with_cone(&k, &da, b, &db, i.tolerance)?
@@ -203,22 +194,10 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
         );
         let db = domain(b.natural_uv_domain(), i.domains.get(4..).unwrap_or(&[]));
         if i.op == 2 {
-            let out = a.global_surface_intersect_with(
-                &k,
-                &da,
-                IntersectTarget::Plane(&b),
-                &db,
-                [true, true],
-                i.tolerance,
-                None,
-                |_| {
-                    // UNPORTED(surface.surface_p2): typed Cone general-intersector adapter.
-                    Err(SolidError::unported(
-                        "SurfaceKind::Cone (SmSurface::GlobalSurfaceIntersect)",
-                        "surface.surface_p2",
-                    ))
-                },
-            )?;
+            let sa = Surface::from(a.clone());
+            let sb = Surface::from(b);
+            let out =
+                sa.global_surface_intersect(&k, &da, &sb, &db, [true, true], i.tolerance, None)?;
             (false, out)
         } else {
             a.intersect_with_plane(&k, &da, &b, &db, i.tolerance)?

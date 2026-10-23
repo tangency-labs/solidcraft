@@ -622,8 +622,9 @@ impl UnitDiff for Runner {
 /// An `IntersectSurfaceBoundaries` case: coincident surfaces (a flat patch in the
 /// plane z = 0 and that plane, a patch and itself or a shifted copy) or crossing
 /// ones. The other surface is always a patch: an `SmPlane`'s boundary curves are
-/// `SmLine`s upstream, and `Surface::create_iso_boundaries` (unit
-/// `surface.surface_p9`) returns them as B-spline curves (plan/findings.md).
+/// `SmLine`s upstream, which `Surface::create_iso_boundaries` (unit
+/// `surface.surface_p9`) returned as B-spline curves until PR #598 (plan/findings.md);
+/// plane cases are not generated yet.
 fn generate_isb(rng: &mut Rng) -> Option<Value> {
     let scale = if rng.chance(0.1) {
         rng.uniform(1e-3, 1e-2)

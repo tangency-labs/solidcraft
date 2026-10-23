@@ -147,16 +147,6 @@ fn typed_iso_curve(
     Ok((iso_base(&typed)?, typed))
 }
 
-fn iso_curve(
-    k: &Kernel,
-    surface: &Surface,
-    direction: SurfParamType,
-    value: f64,
-    approx_tol: f64,
-) -> Result<BSplineCurve> {
-    Ok(typed_iso_curve(k, surface, direction, value, approx_tol)?.0)
-}
-
 /// `SmIsoCurve(surface, direction, value, left)` (clamped input): over the B-spline
 /// view of `surface`, or over the surface itself for a plane, cone, sphere or torus.
 pub(super) fn implicit_iso(
@@ -223,6 +213,9 @@ fn check_count(n: usize) -> Result<()> {
 impl Surface {
     /// Creates the curves at the minimum and maximum natural-domain boundary in
     /// `direction`. Other enumerators leave both outputs unset, as upstream.
+    /// The curves keep the kind the surface's `CreateIsoParametricCurve` override
+    /// builds (`SmLine` for plane lines and cone rulings, `SmCircle` for revolution
+    /// sweeps): upstream's `SmBSplineCurve*` outputs dispatch on it.
     ///
     /// # Errors
     /// Those of iso-curve construction; `Unported` for unsupported surface kinds.
@@ -231,15 +224,15 @@ impl Surface {
         k: &Kernel,
         direction: SurfParamType,
         tolerance: f64,
-    ) -> Result<Option<(BSplineCurve, BSplineCurve)>> {
+    ) -> Result<Option<(Curve, Curve)>> {
         let domain = self.natural_uv_domain();
         let (min, max) = match direction {
             SurfParamType::U => (domain.min().x, domain.max().x),
             SurfParamType::V => (domain.min().y, domain.max().y),
             _ => return Ok(None),
         };
-        let first = iso_curve(k, self, direction, min, tolerance)?;
-        let second = iso_curve(k, self, direction, max, tolerance)?;
+        let first = typed_iso_curve(k, self, direction, min, tolerance)?.1;
+        let second = typed_iso_curve(k, self, direction, max, tolerance)?.1;
         Ok(Some((first, second)))
     }
 
@@ -1216,8 +1209,8 @@ mod tests {
                 .create_iso_boundaries(&k, direction, 0.01)
                 .unwrap()
                 .unwrap();
-            let a = a.evaluate_point(0.5).unwrap();
-            let b = b.evaluate_point(0.5).unwrap();
+            let a = a.evaluate_point(&k, 0.5).unwrap();
+            let b = b.evaluate_point(&k, 0.5).unwrap();
             if direction == SurfParamType::U {
                 assert_eq!((a.x, b.x), (0.0, 1.0));
             } else {

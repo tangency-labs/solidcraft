@@ -1681,19 +1681,19 @@ fn boundary_curves(
     let (Some((c0, c2)), Some((c1, c3))) = (u, v) else {
         return Err(SolidError::sm_err(OP_ISB));
     };
-    let mut out = vec![Curve::from(c0), Curve::from(c1)];
+    let mut out = vec![c0, c1];
     // (IsClosed of the surface's own kind, default tolerance, no continuity)
     if !surface
         .is_closed(k, uv_domain, SurfParamType::U, None, false)?
         .0
     {
-        out.push(Curve::from(c2));
+        out.push(c2);
     }
     if !surface
         .is_closed(k, uv_domain, SurfParamType::V, None, false)?
         .0
     {
-        out.push(Curve::from(c3));
+        out.push(c3);
     }
     Ok(out)
 }
@@ -1707,7 +1707,8 @@ impl Surface {
     /// that drop distance.
     ///
     /// Dispatch: `CreateIsoBoundaries`, `IsClosed` and `DropPoint` of each surface's
-    /// kind; the boundary curves are B-spline curves.
+    /// kind; the boundary curves keep the kind of the surface's iso curves (lines,
+    /// circles or B-splines).
     ///
     /// # Errors
     ///

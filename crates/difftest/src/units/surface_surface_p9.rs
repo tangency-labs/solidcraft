@@ -198,7 +198,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 if let Some((a, b)) = curves {
                     for curve in [a, b] {
                         for n in 0..=4 {
+                            // (virtual EvaluatePoint of the iso curve's own kind)
                             let p = curve.evaluate_point(
+                                &k,
                                 curve.natural_interval().evaluate(f64::from(n) / 4.0),
                             )?;
                             out.extend([p.x, p.y, p.z]);
