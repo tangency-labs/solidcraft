@@ -17574,3 +17574,22 @@ a status-only or vacuous pass.
   `approx_tol_3d` to the general intersector without the `SmApproxTol3d` conversion. Only a
   negative (or `SM_USE_DEFAULT`) tolerance is affected; a generated negative-tolerance case
   in those runners would show whether they diverge.
+## primitive.primitive_creation_p2: fixture face keys hid the trimmed surface cache (2026-10-23)
+
+- **What.** The p2 runner's one-B-rep fixture gave new faces object keys from its own
+  namespace (`FACE_TYPE`, `100000 + 97 * index`). The B-rep caches of the shell ray fire
+  (`StitchAndOrient` -> region split -> `FindInfiniteRegion` -> `SmShell::RayFire`) cannot
+  resolve those keys to a face, so the faces' surfaces were solved as untrimmed, which is
+  the shortcut `SurfaceCache::get_tree` refuses for a face-owned surface. 12 cases
+  (`pipe_sweep_curved_path` and 11 generated pipe/skin/planar-path cases) matched C++
+  only because the record compares status and list sizes, not geometry.
+- **How found.** With the same fixture, only the face keys changed to the production
+  `notify_ref` formula, those 12 cases defer at `TrimSrfCache::build_tree_with_face for a
+  face-owned surface` (passes 196 -> 184, `surface.trim_srf_cache` deferrals 6 -> 18).
+- **Now.** The runner uses the production `PrimitiveModel`: 194 passes (the 10 cases that
+  waited for `SmBrep::SmBrep` pass, the 12 above defer honestly), 0 failed, 114 deferred.
+  The p3 fixture (#617) keys faces the same way; #615 moves p3 to the production adapter
+  and reports the same 295 passes, so no p3 comparison depended on it.
+- **Follow-up.** `PrimitiveModel::new_merge` still returns `Unported(SmMerge::SmMerge,
+  boolean.merge_p2)` although the unit is ported (34 taper cases); `SweepStore` has the
+  merge services.

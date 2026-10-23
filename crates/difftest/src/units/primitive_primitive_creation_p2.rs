@@ -9,24 +9,18 @@
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcore::curve::composite_curve::{OffsetCornerType, OffsetMapAttribute};
+use solidcore::curve::composite_curve::OffsetCornerType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::{Result, SolidError};
-use solidcore::geom::attribute::TagData;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::geom::context::MarkType;
 use solidcore::kernel::Kernel;
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{
-    p1::PrimitiveCreation, p2::PrimitiveCreationAccess, p3::PrimitiveAccess, SweepOptions,
+    model::PrimitiveModel, p1::PrimitiveCreation, SweepOptions,
 };
-use solidcore::sweep::topology_sweep::{
-    access::{EdgeRef, FaceRef, SweepAccess, SweepMergeId},
-    SweepEntity,
-};
-use solidcore::topology::brep::p10::TrimType;
-use solidcore::topology::{Brep, BrepId, FaceId, Region, RegionId};
+use solidcore::sweep::topology_sweep::access::SweepAccess;
+use solidcore::topology::{Brep, BrepId, Region, RegionId};
 use solidcore_ffi::units::primitive_primitive_creation_p2 as ffi;
 
 /// Differential runner.
@@ -91,226 +85,25 @@ fn options(f: &[f64]) -> SweepOptions {
     }
 }
 
-// The native fixture is a fresh B-rep with only its infinite region. This adapter
-// resolves exactly that state. New B-reps need the unported constructor; every other
-// unsupported service fails explicitly if a case unexpectedly reaches it, so no
-// topology is faked.
-struct EmptyModel {
-    k: Kernel,
-    notification_records: std::collections::BTreeMap<
-        solidcore::geom::attribute::ObjectKey,
-        solidcore::topology::topology::Topology,
-    >,
-    notification_attributes: solidcore::geom::attribute::AttributeStore,
-    // `SmAObject` tag attributes of the swept topology (none on the fresh B-rep).
-    tags: std::collections::BTreeMap<SweepEntity, TagData>,
-    b: Brep,
+// The native fixture is a fresh B-rep with only its infinite region. The entry points
+// run on it through the production adapter (`PrimitiveModel`), which also makes the
+// scratch B-reps (`new SmBrep()`) and copies faces between them; the calls it cannot
+// resolve yet fail as `Unported` with their unit.
+fn fixture_brep(editing: bool) -> Result<Brep> {
+    let mut b = Brep::new();
+    let region = b.add_region_record(Region {
+        in_brep: true,
+        ..Default::default()
+    })?;
+    b.set_infinite_region(Some(region));
+    b.set_editing_enabled(editing);
+    Ok(b)
 }
 fn unavailable<T>() -> Result<T> {
     Err(SolidError::invalid_input(
         "primitive_p2_fixture",
         "fixture has no topology/service for this call",
     ))
-}
-impl EmptyModel {
-    fn new(editing: bool) -> Result<Self> {
-        let mut b = Brep::new();
-        let region = b.add_region_record(Region {
-            in_brep: true,
-            ..Default::default()
-        })?;
-        b.set_infinite_region(Some(region));
-        b.set_editing_enabled(editing);
-        Ok(Self {
-            k: Kernel::default(),
-            notification_records: std::collections::BTreeMap::default(),
-            notification_attributes: solidcore::geom::attribute::AttributeStore::default(),
-            tags: std::collections::BTreeMap::default(),
-            b,
-        })
-    }
-}
-impl SweepAccess for EmptyModel {
-    fn brep(&self, _: BrepId) -> Result<&Brep> {
-        Ok(&self.b)
-    }
-    fn brep_mut(&mut self, _: BrepId) -> Result<&mut Brep> {
-        Ok(&mut self.b)
-    }
-    fn kernel(&self, _: BrepId) -> Result<&Kernel> {
-        Ok(&self.k)
-    }
-    fn kernel_mut(&mut self, _: BrepId) -> Result<&mut Kernel> {
-        Ok(&mut self.k)
-    }
-    fn with_brep_mut<T>(
-        &mut self,
-        id: BrepId,
-        body: impl FnOnce(
-            &mut Kernel,
-            &mut Brep,
-            &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
-            &mut solidcore::topology::edge::NotifyEnv<'_>,
-        ) -> Result<T>,
-    ) -> Result<T> {
-        if id != BrepId::from_index(0) {
-            return unavailable();
-        }
-        // As primitive.primitive_creation_p3's fixture: this fixture owns the face-key
-        // namespace, including future allocations.
-        let face_objects = |face: FaceId| solidcore::geom::object::ObjectRef {
-            type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
-            key: solidcore::geom::attribute::ObjectKey(100_000 + u64::from(face.index()) * 97),
-        };
-        let key_of = |entity: solidcore::EntityRef| {
-            if let solidcore::EntityRef::Face(face) = entity {
-                face_objects(face)
-            } else {
-                super::boolean_topology_intersector_p1::p9_entity_ref(entity)
-            }
-        };
-        let mut notifications = solidcore::topology::edge::NotifyEnv {
-            records: &mut self.notification_records,
-            attributes: &mut self.notification_attributes,
-            context: None,
-            key_of: &key_of,
-        };
-        body(&mut self.k, &mut self.b, &face_objects, &mut notifications)
-    }
-    fn with_breps_mut<T>(
-        &mut self,
-        _source: BrepId,
-        _destination: BrepId,
-        _body: impl FnOnce(
-            &mut Kernel,
-            &mut Brep,
-            &mut Brep,
-            &dyn Fn(solidcore::EntityRef) -> solidcore::geom::object::ObjectRef,
-            &dyn Fn(FaceId) -> solidcore::geom::object::ObjectRef,
-            Option<&mut solidcore::geom::context::Context>,
-            &mut solidcore::topology::edge::NotifyEnv<'_>,
-        ) -> Result<T>,
-    ) -> Result<T> {
-        // This fixture has one B-rep; no distinct pair can be resolved.
-        unavailable()
-    }
-    fn with_brep_notifications<T>(
-        &mut self,
-        id: BrepId,
-        body: impl FnOnce(&mut Brep, &mut solidcore::topology::edge::NotifyEnv<'_>) -> Result<T>,
-    ) -> Result<T> {
-        if id != BrepId::from_index(0) {
-            return unavailable();
-        }
-        // The same face-key namespace as with_brep_mut (primitive.primitive_creation_p3's fixture).
-        let key_of = |entity: solidcore::EntityRef| {
-            if let solidcore::EntityRef::Face(face) = entity {
-                solidcore::geom::object::ObjectRef {
-                    type_code: solidcore::geom::assert_array::labels::FACE_TYPE,
-                    key: solidcore::geom::attribute::ObjectKey(
-                        100_000 + u64::from(face.index()) * 97,
-                    ),
-                }
-            } else {
-                super::boolean_topology_intersector_p1::p9_entity_ref(entity)
-            }
-        };
-        let mut env = solidcore::topology::edge::NotifyEnv {
-            records: &mut self.notification_records,
-            attributes: &mut self.notification_attributes,
-            context: Some(&mut self.k.context),
-            key_of: &key_of,
-        };
-        body(&mut self.b, &mut env)
-    }
-    fn retain_hcr(&mut self, _: BrepId, _: solidcore::blend::hcr::Hcr) -> Result<BrepId> {
-        unavailable()
-    }
-    fn hcr_session(&self, _: BrepId) -> Result<&solidcore::blend::hcr::Hcr> {
-        unavailable()
-    }
-    fn new_brep(&mut self, _: BrepId) -> Result<BrepId> {
-        // UNPORTED(topology.brep_p3): SmBrep::SmBrep
-        Err(SolidError::unported("SmBrep::SmBrep", "topology.brep_p3"))
-    }
-    fn delete_brep(&mut self, _: BrepId) {}
-    fn new_merge(&mut self, _: BrepId, _: BrepId, _: BrepId, _: f64, _: f64) -> Result<SweepMergeId> { unavailable() }
-    fn merge_operands(&self, _: SweepMergeId) -> Result<(BrepId, BrepId)> { unavailable() }
-    fn merge_relations(&mut self, _: SweepMergeId) -> Result<&mut solidcore::boolean::topology_intersector::p1::Relations> { unavailable() }
-    fn copy_faces(&mut self, _: BrepId, _: &[FaceId], _: BrepId, _: SweepMergeId, _: &mut solidcore::sweep::topology_sweep::access::BTreeEdgeMap) -> Result<()> { unavailable() }
-    fn piecewise_merge(&mut self, _: SweepMergeId, _: bool, _: bool) -> Result<BrepId> { unavailable() }
-    fn union(&mut self, _: SweepMergeId) -> Result<BrepId> { unavailable() }
-    fn delete_merge(&mut self, _: SweepMergeId) {}
-    fn tag(&self, e: SweepEntity) -> Result<Option<TagData>> {
-        Ok(self.tags.get(&e).copied())
-    }
-    fn add_tag(&mut self, e: SweepEntity, tag: TagData) -> Result<()> {
-        self.tags.insert(e, tag);
-        Ok(())
-    }
-    fn curve_tag(&self, edge: EdgeRef) -> Result<Option<TagData>> {
-        // The fixture's curves carry no tag attributes.
-        self.brep(edge.0)?
-            .edge(edge.1)?
-            .curve
-            .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("primitive_p2_fixture"))?;
-        Ok(None)
-    }
-    fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {
-        let previous = self.b.editing_enabled();
-        self.b.set_editing_enabled(value);
-        Ok(previous)
-    }
-    fn lock_mark(&mut self, _: BrepId, _: i32) -> Result<MarkType> {
-        unavailable()
-    }
-    fn unlock_mark(&mut self, _: BrepId, _: MarkType) -> Result<()> {
-        unavailable()
-    }
-    fn is_marked(&self, _: SweepEntity, _: MarkType) -> Result<bool> {
-        unavailable()
-    }
-    fn mark(&mut self, _: SweepEntity, _: MarkType) -> Result<()> {
-        unavailable()
-    }
-    fn collect_faces(&mut self, _: FaceRef, _: MarkType, _: &mut Vec<FaceId>) -> Result<()> {
-        unavailable()
-    }
-}
-impl PrimitiveAccess for EmptyModel {
-    fn delete_primitive_faces(&mut self, _: BrepId, _: &[FaceId]) -> Result<()> {
-        unavailable()
-    }
-    fn with_primitive_brep<T>(
-        &mut self,
-        _: BrepId,
-        body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
-    ) -> Result<T> {
-        body(&mut self.k, &mut self.b)
-    }
-}
-impl PrimitiveCreationAccess for EmptyModel {
-    fn copy_faces_into(&mut self, _: BrepId, _: &[FaceId], _: BrepId) -> Result<()> {
-        unavailable()
-    }
-    fn attach_offset_map(&mut self, _: FaceRef, _: OffsetMapAttribute) -> Result<()> {
-        unavailable()
-    }
-    fn offset_map(&self, _: FaceRef) -> Result<Option<OffsetMapAttribute>> {
-        unavailable()
-    }
-    fn project_and_trim(
-        &mut self,
-        _: BrepId,
-        _: &BSplineCurve,
-        _: Vec3,
-        _: Point3,
-        _: TrimType,
-        _: f64,
-    ) -> Result<()> {
-        unavailable()
-    }
 }
 
 /// Run one entry point on the fixture and build its record.
@@ -322,7 +115,8 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
     let mut ends = Vec::new();
     let mut extra = Vec::new();
     if i.op == 9 {
-        let mut model = EmptyModel::new(false)?;
+        let mut k = Kernel::default();
+        let mut model = PrimitiveModel::new(&mut k, fixture_brep(false)?);
         let profile_count = d[4] as usize;
         let profiles = curves(&d[6..6 + 7 * profile_count])?;
         let paths = curves(&d[6 + 7 * profile_count..])?;
@@ -344,7 +138,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
         return Ok(vec![
             result.as_ref().err().map_or(0., error),
             0.,
-            f64::from(model.k.context.doing_boolean()),
+            f64::from(model.kernel(b)?.context.doing_boolean()),
             0.,
             0.,
             0.,
@@ -355,7 +149,8 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
             f64::from(result.is_ok()),
         ]);
     }
-    let mut model = EmptyModel::new(d[0] != 0.)?;
+    let mut k = Kernel::default();
+    let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.)?);
     let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
     let result = match i.op {
         1 => primitive.create_partial_cone(
@@ -478,8 +273,8 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
     }
     let mut record = vec![
         result.as_ref().err().map_or(0., error),
-        f64::from(model.b.editing_enabled()),
-        f64::from(model.k.context.doing_boolean()),
+        f64::from(model.brep(b)?.editing_enabled()),
+        f64::from(model.kernel(b)?.context.doing_boolean()),
         primitive.maps.to_same.len() as f64,
         primitive.maps.to_higher.len() as f64,
         primitive.maps.from_same.len() as f64,

@@ -30,15 +30,24 @@ Every record compares, on both sides:
 
 ## What is deferred (not certified)
 
-Every case that builds topology reaches a dependency that is not ported yet, and the
-Rust side defers (no value is compared):
+The Rust side runs every entry point through the production adapter
+(`primitive::primitive_creation::model::PrimitiveModel`), which makes the scratch and
+piece B-reps (`new SmBrep()`), copies faces between them and keys faces as the B-rep
+caches resolve them. Cases that build topology go on until a call that is not ported
+yet and defer there (no value is compared):
 
 | Entry point | First unported call | Blocking unit |
 | --- | --- | --- |
-| skin (two or more profiles), taper extrude, planar path | the scratch / piece B-rep (`SmBrep::SmBrep`) | `topology.brep_p3` |
-| partial cone, sphere and torus (valid input) | p3's rotational sweep: planar faces of the profile | `topology.brep_p8` |
-| pipe sweep | p3's curve sweep: the profile's placement (`SmBrep::Notify` inside `SmBrep::Transform`) or the faces of the sweep surface | `topology.brep_p2`, `topology.brep_p8` |
-| full-turn primitives (valid input) | p1's analytic face | `topology.brep_p8` |
+| skin, pipe sweep, planar path, some partial solids and tapers | the shell ray fire of `StitchAndOrient`'s region split reaches a face's trimmed surface cache | `surface.trim_srf_cache` |
+| taper extrude | the merge of its pieces (`SmMerge::SmMerge`; the model keeps this deferral, `SweepStore` owns the merge services) | `boolean.merge_p2` |
+| partial cone, sphere and torus | `SmFace::FindVertexSector`, a face handle of a surface's face, `SmFace::EdgeCurveOnClassify` | `topology.face_p4`, `topology.face_p2`, `query.face_p1` |
+| a few of each | an opaque curve handle's `SmCurve::GetNaturalInterval` | `curve.curve_p2` |
+
+Before the production adapter, a one-B-rep fixture keyed faces in its own namespace,
+which the B-rep caches cannot resolve to a face: the ray fire then treated the faces'
+surfaces as untrimmed and 12 pipe, skin and planar-path cases matched C++'s status on
+that path. With the production keys they reach the trimmed cache like C++ and defer
+(see `plan/findings.md`).
 
 The upstream skin (`TestSmCreateSkinPrimitive`), draft sweep (`TestSmCreateDraftSweep`),
 taper (`TestSmTaperExtrude`) and pipe (`TestSmPipeSweep`) cases run the real C++ and
