@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Trim/Extend</title>
+  <path d="M33.54 15.86L43.18 21.42L43.18 52.59L33.54 47.03Z" fill="#b8c3cf"/>
+  <path d="M52.82 15.86L43.18 21.42L43.18 52.59L52.82 47.03Z" fill="#8e9faf"/>
+  <path d="M43.18 10.29L52.82 15.86L43.18 21.42L33.54 15.86Z" fill="#e2e8ef"/>
+  <path d="M43.18 10.29L52.82 15.86L52.82 47.03L43.18 52.59L33.54 47.03L33.54 15.86Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.54 15.86L43.18 21.42L52.82 15.86" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.18 21.42L43.18 52.59" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.18 31.44L23.89 42.58L23.89 53.71L43.18 42.58Z" fill="#328bd3"/>
+  <path d="M33.54 25.88L43.18 31.44L23.89 42.58L14.25 37.01Z" fill="#b9ddf8"/>
+  <path d="M14.25 37.01L23.89 42.58L23.89 53.71L14.25 48.14ZM15.54 39.24L22.61 43.32L22.61 51.48L15.54 47.4Z" fill="#b8c3cf" fill-rule="evenodd"/>
+  <defs><clipPath id="ft_hole"><path d="M15.54 39.24L22.61 43.32L22.61 51.48L15.54 47.4Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#ft_hole)">
+  <path d="M15.54 39.24L22.61 43.32L22.61 51.48L15.54 47.4Z" fill="#236ead"/>
+  <path d="M15.54 39.24L15.54 47.4L19.39 45.17L19.39 37.01Z" fill="#328bd3"/>
+  <path d="M15.54 47.4L22.61 51.48L26.46 49.25L19.39 45.17Z" fill="#b9ddf8"/>
+  </g>
+  <path d="M15.54 39.24L22.61 43.32L22.61 51.48L15.54 47.4Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.54 25.88L43.18 31.44L43.18 42.58L23.89 53.71L14.25 48.14L14.25 37.01Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14.25 37.01L23.89 42.58L43.18 31.44" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.89 42.58L23.89 53.71" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.54 25.88L43.18 31.44L43.18 42.58" fill="none" stroke="#236ead" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.64 43.87L12.9 48.92" fill="none" stroke="#ffffff" stroke-width="4.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.64 43.87L12.9 48.92" fill="none" stroke="#236ead" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="12.9" cy="48.92" r="3" fill="#236ead"/>
+</svg>
