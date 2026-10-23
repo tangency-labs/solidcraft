@@ -243,6 +243,8 @@ pub struct Session {
     pub redo: Vec<Snapshot>,
     /// Sketch feature being edited (sketch mode).
     pub active_sketch: Option<u64>,
+    /// Sketch temporarily shown while editing a feature that consumes it. View state only.
+    pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
     pub path: Option<String>,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
@@ -417,6 +419,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             active_sketch: None,
+            feature_edit_sketch: None,
             selection: Vec::new(),
             path: None,
             open_preview: None,
@@ -951,6 +954,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             active_sketch: self.active_sketch,
+            feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
             path: None,
             open_preview: None,

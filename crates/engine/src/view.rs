@@ -648,12 +648,13 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
     sketch_drawn(s, id, true)
 }
 
-/// Is a sketch drawn, with sketches shown (`folder`) or hidden? The sketch being edited always
-/// is; otherwise not when hidden, nor in a hidden component, Sketches folder or group (even one
-/// shown on its own), and one used by a feature only when shown on its own.
+/// Is a sketch drawn, with sketches shown (`folder`) or hidden? The sketch being edited, or
+/// used by the feature being edited, always is; otherwise not when hidden, nor in a hidden
+/// component, Sketches folder or group (even one shown on its own), and one used by a feature
+/// only when shown on its own.
 pub fn sketch_drawn(s: &Session, id: u64, folder: bool) -> bool {
     let v = &s.visibility;
-    if s.active_sketch == Some(id) {
+    if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
         return true;
     }
     if !folder || v.hidden_sketches.contains(&id) || !sketch_component_visible(s, id) || s.feature_folder_hidden(id, "sketches") {

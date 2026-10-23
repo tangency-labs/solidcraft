@@ -1108,6 +1108,38 @@ mod tests {
     }
 
     #[test]
+    fn the_sketch_of_an_edited_feature_is_shown_without_changing_visibility() {
+        for (command, params) in [("solid.extrude", json!({"distance": 5})), ("solid.revolve", json!({"axis": "y"}))] {
+            let mut s = Session::default();
+            let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 0], "p1": [4, 3]}));
+            run(&mut s, "sketch.finish", json!({}));
+            // Another sketch between them: the marker of the edit is not on the edited one's sketch.
+            run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 0], "p1": [4, 3]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut params = params;
+            params["sketch"] = json!(sketch);
+            run(&mut s, command, params);
+            run(&mut s, "timeline.roll_to", json!({"position": 2}));
+            for explicitly in [None, Some(true), Some(false)] {
+                if let Some(visible) = explicitly {
+                    run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": visible}));
+                }
+                let before = crate::view::sketch_shown(&s, sketch);
+                assert_eq!(before, explicitly == Some(true), "{command} {explicitly:?}");
+                let visibility = s.visibility.clone();
+                s.feature_edit_sketch = Some(sketch);
+                assert!(crate::view::sketch_shown(&s, sketch), "{command} {explicitly:?}");
+                assert!(crate::view::sketch_shown(&s.scratch(), sketch), "{command} {explicitly:?}");
+                s.feature_edit_sketch = None;
+                assert_eq!(crate::view::sketch_shown(&s, sketch), before, "{command} {explicitly:?}");
+                assert_eq!(s.visibility, visibility);
+            }
+        }
+    }
+
+    #[test]
     fn helper_sketches_hide_and_show() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));

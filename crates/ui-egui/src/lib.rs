@@ -1662,6 +1662,8 @@ impl SolveApp {
         if floating || left_timeline || !show_timeline {
             self.shell.history = None;
         }
+        // The model draws next: a dialog the toolbar closed last frame no longer shows its sketch.
+        dialogs::sync_feature_edit_sketch(self);
         let full = ui.available_rect_before_wrap();
         if floating {
             let cards = shell::Cards::new(full, self.ui.layout, toolbar::ribbon_height(self.preferences.ribbon_labels));

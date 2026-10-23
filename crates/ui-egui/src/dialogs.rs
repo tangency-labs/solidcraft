@@ -2260,10 +2260,21 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
     Some(crate::smart_extrude::picked_direction(crate::smart_extrude::view_ray(&app.cam, at), normal, false))
 }
 
+/// Show the sketch of the Extrude or Revolve the open dialog edits, and only while it is open:
+/// whichever way the dialog closed (OK, Cancel, another tool, another design), the sketch
+/// returns to its own visibility.
+pub(crate) fn sync_feature_edit_sketch(app: &mut SolveApp) {
+    app.session.feature_edit_sketch = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
+        FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => Some(**sketch),
+        _ => None,
+    });
+}
+
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
 /// view, sized to its content. The right edge is its place, except while a sketch is open: the
 /// Sketch Palette keeps the right there, and the dialog takes the left so both stay on screen.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    sync_feature_edit_sketch(app);
     if app.tree.redefine.is_none() {
         app.viewport.dialog_rect = None;
     }
@@ -2578,6 +2589,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.applying = None;
     }
     if !keep || cancel {
+        app.session.feature_edit_sketch = None;
         crate::dialogs_motion::closed(app, &mut d, applied);
         if let Kind::Text(k) = &mut d.kind {
             crate::sketch_text::closed(app, k, applied);
@@ -2605,6 +2617,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    app.session.feature_edit_sketch = None;
     app.applying = None;
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
@@ -4938,6 +4951,55 @@ mod refused_ok_tests {
             ],
         );
         h
+    }
+
+    /// A sketch, a second sketch after it, and `command` made from the first; the edit dialog
+    /// of that feature open, so the history marker sits on the second sketch.
+    fn edit_dialog(command: &str, params: Value) -> (Harness, u64) {
+        let mut h = Harness::new();
+        let mut sketches = Vec::new();
+        for plane in ["XY", "XZ"] {
+            let created = h.app.run("sketch.create", json!({"plane": plane})).unwrap();
+            sketches.push(created["sketch"].as_u64().unwrap());
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [2, 0], "p1": [4, 3]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        let mut params = params;
+        params["sketch"] = json!(sketches[0]);
+        h.app.run(command, params).unwrap();
+        let feature = h.app.session.doc.features.last().unwrap().id;
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketches[0]));
+        h.app.edit_feature(feature);
+        h.frames(1);
+        assert_eq!(h.app.session.feature_edit_sketch, Some(sketches[0]), "{command}");
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketches[0]), "{command}");
+        (h, sketches[0])
+    }
+
+    #[test]
+    fn editing_shows_the_sketch_until_the_dialog_closes() {
+        let closes: [(&str, fn(&mut Harness)); 5] = [
+            ("OK", |h| steps(h, &[json!({"key": "Enter"})])),
+            ("Esc", |h| steps(h, &[json!({"key": "Escape"})])),
+            ("Cancel", |h| cancel(&mut h.app)),
+            ("another tool", |h| steps(h, &[json!({"start": "solid.box"})])),
+            ("new design", |h| {
+                h.app.run("file.new", json!({})).unwrap();
+            }),
+        ];
+        for (command, params) in [("solid.extrude", json!({"distance": 5})), ("solid.revolve", json!({"axis": "y"}))] {
+            for (how, close) in closes {
+                let (mut h, sketch) = edit_dialog(command, params.clone());
+                close(&mut h);
+                h.frames(1);
+                assert!(h.app.dialog.as_ref().is_none_or(|d| d.editing.is_none()), "{command} {how}");
+                assert_eq!(h.app.session.feature_edit_sketch, None, "{command} {how}");
+                // A new design has no such sketch; in the edited one it is hidden again.
+                if h.app.session.doc.feature(sketch).is_some() {
+                    assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{command} {how}");
+                }
+            }
+        }
     }
 
     fn set_depth(h: &mut Harness, depth: &str) {
