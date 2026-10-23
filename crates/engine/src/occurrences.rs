@@ -32,6 +32,25 @@ pub(crate) struct VisibilityCache {
     bodies: std::collections::BTreeSet<String>,
 }
 
+/// [`Session::occurrence_bodies`] answers for one document, evaluated model and set of pending
+/// moves. The document and model are kept alive with the answers, so neither a new document nor
+/// a later allocation at the same address can reuse them.
+pub(crate) struct OccurrenceBodiesCache {
+    doc: std::sync::Arc<solidcraft_doc::Document>,
+    model: std::sync::Arc<solidcraft_doc::ModelState>,
+    pending_moves: std::collections::BTreeMap<u64, Mat>,
+    bodies: std::collections::HashMap<(Vec<u64>, bool), std::sync::Arc<[String]>>,
+}
+
+/// How many placements' answers [`OccurrenceBodiesCache`] keeps before it starts again.
+const OCCURRENCE_BODIES_CACHED: usize = 256;
+
+impl OccurrenceBodiesCache {
+    fn matches(&self, session: &Session, model: &std::sync::Arc<solidcraft_doc::ModelState>) -> bool {
+        std::sync::Arc::ptr_eq(&self.doc, &session.doc) && std::sync::Arc::ptr_eq(&self.model, model) && self.pending_moves == session.pending_moves
+    }
+}
+
 /// [`Session::body_removed_later`] for one revision, sketch and history marker.
 pub(crate) struct RemovedLaterCache {
     revision: u64,
@@ -121,6 +140,38 @@ impl Session {
 
     /// Bounded descendant expansion. Never return an incomplete selection or bounds list.
     pub fn occurrence_bodies(&self, path: &[u64], descendants: bool) -> Result<Vec<String>> {
+        Ok(self.occurrence_bodies_shared(path, descendants)?.to_vec())
+    }
+
+    /// [`Self::occurrence_bodies`], shared and remembered until the document, the evaluated
+    /// model or the pending moves change: a nested placement's subtree is walked once, not on
+    /// every frame that lights it (a browser row under the pointer, the active placement; #3892).
+    pub fn occurrence_bodies_shared(&self, path: &[u64], descendants: bool) -> Result<std::sync::Arc<[String]>> {
+        let model = self.model.state();
+        let key = (path.to_vec(), descendants);
+        if let Ok(cache) = self.occurrence_bodies_cache.lock()
+            && let Some(bodies) = cache.as_ref().filter(|c| c.matches(self, &model)).and_then(|c| c.bodies.get(&key))
+        {
+            return Ok(bodies.clone());
+        }
+        let bodies: std::sync::Arc<[String]> = self.expand_occurrence_bodies(path, descendants)?.into();
+        if let Ok(mut cache) = self.occurrence_bodies_cache.lock() {
+            if cache.as_ref().is_none_or(|c| !c.matches(self, &model) || c.bodies.len() >= OCCURRENCE_BODIES_CACHED) {
+                *cache = Some(OccurrenceBodiesCache {
+                    doc: self.doc.clone(),
+                    model,
+                    pending_moves: self.pending_moves.clone(),
+                    bodies: std::collections::HashMap::new(),
+                });
+            }
+            if let Some(cache) = cache.as_mut() {
+                cache.bodies.insert(key, bodies.clone());
+            }
+        }
+        Ok(bodies)
+    }
+
+    fn expand_occurrence_bodies(&self, path: &[u64], descendants: bool) -> Result<Vec<String>> {
         let mut stack = vec![self.occurrence_placement(path)?];
         let mut out = Vec::new();
         let mut count = 0;

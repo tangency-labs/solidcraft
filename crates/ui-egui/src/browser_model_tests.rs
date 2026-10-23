@@ -81,3 +81,38 @@ fn body_index_and_placements_follow_geometry_undo_and_document_identity() {
     assert!(super::model_children(&h.app, 0).is_empty());
     assert!(super::entries(&h.app, component, "bodies").is_empty());
 }
+
+/// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not
+/// on every frame the pointer stays on the row (#3892: a nested STEP assembly cost a frame per
+/// thousand placements while the pointer was over the tree, even with the rows collapsed).
+#[test]
+fn hovering_a_collapsed_nested_placement_walks_its_subtree_once() {
+    let mut h = crate::scenario::Harness::new();
+    let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
+    let (sub_component, sub_occurrence) = (sub["component"].as_u64().unwrap(), sub["occurrence"].as_u64().unwrap());
+    let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("component.activate", json!({"component":sub_component})).unwrap();
+    for i in 1..6 {
+        h.app.run("occurrence.copy", json!({"component":leaf,"translate":[i as f64 * 20.0, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.run("occurrence.copy", json!({"component":sub_component,"translate":[0, 40, 0]})).unwrap();
+    let path = vec![sub_occurrence];
+    h.app.tree.collapsed.insert(super::occurrence_key(&path));
+    h.frames(3);
+    let at = crate::scenario::handle_at(&format!("row:occurrence:{sub_occurrence}")).unwrap();
+    h.call("ui.move", json!({"x":at.x,"y":at.y}));
+    let walked = h.app.session.occurrence_bodies_shared(&path, true).unwrap();
+    assert_eq!(walked.len(), 6, "{walked:?}");
+    assert_eq!(h.app.viewport.hover_bodies, walked.to_vec(), "the row lights its placement's bodies and every one below it");
+    h.frames(10);
+    assert_eq!(h.app.viewport.hover_bodies, walked.to_vec());
+    assert!(Arc::ptr_eq(&walked, &h.app.session.occurrence_bodies_shared(&path, true).unwrap()), "frames on the same row walk nothing again");
+    // An edit is a new model: the row lights the subtree that is there now.
+    h.app.run("component.activate", json!({"component":sub_component})).unwrap();
+    h.app.run("occurrence.copy", json!({"component":leaf,"translate":[0, 80, 0]})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.call("ui.move", json!({"x":at.x,"y":at.y + 1.0}));
+    assert_eq!(h.app.viewport.hover_bodies.len(), 7);
+}

@@ -267,6 +267,7 @@ pub struct Session {
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
+    occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
     /// Pairs `inspect.clearance` measured, by the bodies' geometry where they stood (shared with
     /// scratch copies): a body that did not change or move is not measured again.
     clearance_cache: std::sync::Arc<std::sync::Mutex<cmd::clearance::PairCache>>,
@@ -428,6 +429,7 @@ impl Session {
             world_cache: Default::default(),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
+            occurrence_bodies_cache: Default::default(),
             clearance_cache: Default::default(),
             body_renames: Vec::new(),
             contact_meshes: Default::default(),
@@ -961,6 +963,7 @@ impl Session {
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             occurrence_visibility_cache: Default::default(),
             removed_later_cache: Default::default(),
+            occurrence_bodies_cache: Default::default(),
             clearance_cache: self.clearance_cache.clone(),
             body_renames: Vec::new(),
             contact_meshes: self.contact_meshes.clone(),

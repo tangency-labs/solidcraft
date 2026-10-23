@@ -2341,19 +2341,31 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // Timeline modifiers light only their resulting faces; browser rows light whole bodies.
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
-    for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
-        let whole = hovered.iter().any(|x| matches!(x, Sel::Body { name } if name == &b.name));
-        let faces: Vec<_> = if whole {
-            (0..b.body.face_count()).collect()
-        } else {
-            hovered
-                .iter()
-                .filter_map(|x| match x {
-                    Sel::Face { body, index, .. } if body == &b.name => Some(*index),
-                    _ => None,
-                })
-                .collect()
-        };
+    // Looked up by body name: a browser row of a large placement lights thousands of bodies,
+    // and scanning the hovered list once per body made that quadratic (#3892).
+    let mut whole_bodies = std::collections::HashSet::new();
+    let mut hovered_faces_of: std::collections::HashMap<&str, Vec<usize>> = std::collections::HashMap::new();
+    for x in &hovered {
+        match x {
+            Sel::Body { name } => {
+                whole_bodies.insert(name.as_str());
+            }
+            Sel::Face { body, index, .. } => hovered_faces_of.entry(body.as_str()).or_default().push(*index),
+            _ => {}
+        }
+    }
+    let selected_bodies: std::collections::HashSet<&str> = sel
+        .iter()
+        .filter_map(|x| match x {
+            Sel::Body { name } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let lights_bodies = !whole_bodies.is_empty() || !hovered_faces_of.is_empty();
+    for b in st.bodies.iter().filter(|b| lights_bodies && app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+        let whole = whole_bodies.contains(b.name.as_str());
+        let faces: Vec<_> =
+            if whole { (0..b.body.face_count()).collect() } else { hovered_faces_of.get(b.name.as_str()).cloned().unwrap_or_default() };
         if faces.is_empty() {
             continue;
         }
@@ -2361,7 +2373,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         let c = body_rgb(app, &b.name);
         let m = drawn_mesh(app, b);
         let lit = shown(b);
-        let selected_body = sel.iter().any(|x| matches!(x, Sel::Body { name } if name == &b.name));
+        let selected_body = selected_bodies.contains(b.name.as_str());
         if !selected_body {
             let selected_faces: std::collections::HashSet<usize> = sel
                 .iter()
