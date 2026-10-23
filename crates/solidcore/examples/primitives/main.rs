@@ -26,6 +26,14 @@
 //!
 //! `corpus.models` stays empty until a corpus of real models is chosen.
 //!
+//! `-- --wire <path>` writes the wireframe of every primitive that builds, for drawing
+//! pictures of the solids: each edge's 3D curve sampled at 48 parameters across its
+//! interval (edges whose curve fails to evaluate are left out):
+//!
+//! ```text
+//! [ { "name", "edges": [ [ [x, y, z], ... ], ... ] }, ... ]
+//! ```
+//!
 //! No STL is written: upstream's open SMLib has no B-rep face tessellation to a mesh
 //! (only `SmApiTessellateBoundaries`), so there is nothing faithful to export.
 
@@ -38,10 +46,16 @@ use std::fmt::Write as _;
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let mut json_path = None;
+    let mut wire_path = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--json" => json_path = Some(args.next().ok_or("--json needs a path")?),
-            _ => return Err(format!("unknown argument {a:?} (usage: [--json <path>])")),
+            "--wire" => wire_path = Some(args.next().ok_or("--wire needs a path")?),
+            _ => {
+                return Err(format!(
+                    "unknown argument {a:?} (usage: [--json <path>] [--wire <path>])"
+                ))
+            }
         }
     }
     let mut failed = 0;
@@ -74,18 +88,52 @@ fn main() -> Result<(), String> {
     }
     println!("STL: not written (no B-rep mesh tessellation in upstream SMLib)");
     if let Some(path) = json_path {
-        let p = std::path::Path::new(&path);
-        if let Some(dir) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        std::fs::write(p, to_json(&results)).map_err(|e| format!("{path}: {e}"))?;
+        write_file(&path, &to_json(&results))?;
         println!("JSON: {path}");
+    }
+    if let Some(path) = wire_path {
+        let mut wires = Vec::new();
+        for (spec, _) in &results {
+            if let Some(w) = checks::wireframe(spec, WIRE_SAMPLES) {
+                wires.push(wire_json(spec.name, &w));
+            }
+        }
+        write_file(&path, &format!("[\n{}\n]\n", wires.join(",\n")))?;
+        println!("wireframe: {path}");
     }
     if failed == 0 {
         Ok(())
     } else {
         Err(format!("{failed} primitive(s) failed"))
     }
+}
+
+/// Parameters sampled along each edge by `--wire`.
+const WIRE_SAMPLES: usize = 48;
+
+/// Writes `text` to `path`, creating its directory.
+fn write_file(path: &str, text: &str) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    if let Some(dir) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(p, text).map_err(|e| format!("{path}: {e}"))
+}
+
+/// One primitive's `--wire` entry.
+fn wire_json(name: &str, edges: &[Vec<Point3>]) -> String {
+    let edges: Vec<String> = edges
+        .iter()
+        .map(|e| {
+            let pts: Vec<String> = e.iter().map(|p| point(*p)).collect();
+            format!("[{}]", pts.join(", "))
+        })
+        .collect();
+    format!(
+        "  {{\"name\": {}, \"edges\": [\n    {}\n  ]}}",
+        string(name),
+        edges.join(",\n    ")
+    )
 }
 
 fn num(x: f64) -> String {

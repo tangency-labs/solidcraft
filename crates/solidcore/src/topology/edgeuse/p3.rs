@@ -1927,8 +1927,10 @@ pub fn evaluate_binormal_uv(
         // only below)
         face_surface_cache(k, b, f)?;
 
-        // (the surface cache flags are not modelled; module docs). Use surface's
-        // domain instead of Face's domain.
+        // Turn off point testing so GlobalPointSolve() will keep all point solutions
+        // without classifying the solution point against the trim boundaries
+        // (`global_point_solve_point_test_off`; the boundary-curve flag is not
+        // modelled, module docs). Use surface's domain instead of Face's domain.
         let srf_domain = surface.natural_uv_domain();
 
         // This 'turns off point testing' when GPS does not use the cache (a copy of
@@ -1937,7 +1939,7 @@ pub fn evaluate_binormal_uv(
         let _ = solve_surface.set_owner(None::<ObjectRef>);
 
         // Find Surface sUV point for EdgePoint
-        let mut solutions = solve_surface.global_point_solve::<NoObject>(
+        let mut solutions = solve_surface.global_point_solve_point_test_off::<NoObject>(
             k,
             Some(NoObject),
             &srf_domain,
@@ -1950,7 +1952,7 @@ pub fn evaluate_binormal_uv(
         if solutions.is_empty() {
             // try again with a bigger tolerance
             tol *= 1000.0;
-            solutions = solve_surface.global_point_solve::<NoObject>(
+            solutions = solve_surface.global_point_solve_point_test_off::<NoObject>(
                 k,
                 Some(NoObject),
                 &srf_domain,

@@ -44,7 +44,12 @@ use solidcore::geom::tol::zone_tol3d;
 use solidcore::intersect::curve_class::{
     self as cc_mod, CurveClassification, CurveInterval, PartialCoincidence,
 };
-use solidcore::intersect::point_class::{ClassObjectKind, PointClassType};
+use solidcore::geom::vector3d::Vec3;
+use solidcore::intersect::point_class::{ClassGeometry, ClassObjectKind, PointClassType};
+use solidcore::surface::surface::Surface;
+use solidcore::surface::volume::Volume;
+use solidcore::topology::Brep;
+use solidcore::EntityRef;
 use solidcore::kernel::Kernel;
 use solidcore_ffi::units::intersect_curve_class_p1::kind;
 use solidcore_ffi::units::intersect_curve_class_p7::{self as ffi, op};
@@ -248,6 +253,61 @@ fn shim_accepts(s: &Script) -> bool {
 
 // ---- Rust side --------------------------------------------------------------------------
 
+/// The pool as seen by the classification: [`Pool`], plus the bare stand-ins of a script
+/// that also has a real B-rep. [`Pool`] resolves only the B-rep's handles then; the vertex,
+/// edge and face objects of the script stay in the shim's bare state there as well (the
+/// shim builds them the same way with or without the face), so they resolve to their
+/// [`BareTopology`](super::intersect_curve_class_p1::BareTopology) records, a B-rep of their
+/// own (connected to nothing in the face's).
+struct Geo<'a>(&'a Pool);
+
+impl Geo<'_> {
+    /// The bare record of a script object when the pool also has a real B-rep.
+    fn bare_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.0.topo.as_ref()?;
+        self.0.bare.entity(o.0)
+    }
+}
+
+impl ClassGeometry<H> for Geo<'_> {
+    fn curve(&self, o: H) -> Option<&Curve> {
+        self.0.curve(o)
+    }
+    fn surface(&self, o: H) -> Option<&Surface> {
+        self.0.surface(o)
+    }
+    fn volume(&self, o: H) -> Option<&Volume> {
+        self.0.volume(o)
+    }
+    fn point(&self, o: H) -> Option<Vec3> {
+        self.0.point(o)
+    }
+    fn classification_vertex_point(&self, o: H) -> Option<Vec3> {
+        self.0.classification_vertex_point(o).or_else(|| {
+            self.0.topo.as_ref()?;
+            self.0.bare.vertex_point(o.0)
+        })
+    }
+    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+        self.0.topology_zone_tol_3d(o).or_else(|| {
+            self.0.topo.as_ref()?;
+            self.0.bare.zone_tol_3d(o.0)
+        })
+    }
+    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+        self.0.topology_entity(o).or_else(|| self.bare_entity(o))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<H> {
+        self.0.topology_handle(e)
+    }
+    fn topology_handle_in(&self, brep: &Brep, e: EntityRef) -> Option<H> {
+        if self.0.topo.is_some() && core::ptr::eq(brep, &raw const self.0.bare.brep) {
+            return self.0.handles.get(self.0.bare.index_of(e)?).copied();
+        }
+        self.0.topology_handle(e)
+    }
+}
+
 /// The handle the fillet data of a classification names (its partner).
 const OTHER_CC: H = H(usize::MAX, ClassObjectKind::Other);
 
@@ -303,6 +363,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
         add_face(&k, &mut pool, face)?;
     }
     let mut ccs = [build_cc(&k, &pool, &s.cc[0])?, build_cc(&k, &pool, &s.cc[1])?];
+    let geo = Geo(&pool);
     let mut o: Vec<f64> = Vec::new();
     for x in &s.ops {
         let (code, t) = x.code_t();
@@ -319,7 +380,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 put_pc(&mut o, pc);
             }
             OpIn::Mate { j, .. } => {
-                let mate = must(cc.point_class_mate_by_index(&k, &pool, *j))?;
+                let mate = must(cc.point_class_mate_by_index(&k, &geo, *j))?;
                 let at = mate.map_or(-1.0, |m| {
                     cc.intervals()
                         .iter()
@@ -329,7 +390,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 o.extend([0.0, at]);
             }
             OpIn::Collapse { j, .. } => {
-                let r = cc.collapse_interval(&k, &pool, *j);
+                let r = cc.collapse_interval(&k, &geo, *j);
                 o.push(st(r)?.err().unwrap_or(0.0));
             }
             OpIn::Touches { targets, .. } => {
@@ -337,7 +398,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                     .iter()
                     .map(|&i| pool.handle(Some(i)).map(|h| h.ok_or_else(|| harness("no target"))))
                     .collect::<Result<Result<Vec<H>, _>, _>>()??;
-                let touches = must(cc.point_classifies_connected_to(&pool, &hs))?;
+                let touches = must(cc.point_classifies_connected_to(&geo, &hs))?;
                 o.extend([0.0, touches.len() as f64]);
                 for tch in &touches {
                     o.extend([
@@ -357,19 +418,19 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 }
             }
             OpIn::FindVertex { target, .. } => {
-                let r = must(cc.find_vertex_objects(&pool, pool.handle(*target)?))?;
+                let r = must(cc.find_vertex_objects(&geo, pool.handle(*target)?))?;
                 o.extend([0.0, r.vertices.len() as f64]);
                 o.extend(r.vertices.iter().map(|h| h.0 as f64));
                 o.push(r.params.len() as f64);
                 o.extend(r.params.iter().copied());
             }
             OpIn::FindEdge { target, flag, .. } => {
-                let r = must(cc.find_edge_objects(&pool, pool.handle(*target)?, *flag))?;
+                let r = must(cc.find_edge_objects(&geo, pool.handle(*target)?, *flag))?;
                 o.extend([0.0, r.len() as f64]);
                 o.extend(r.iter().map(|h| h.0 as f64));
             }
             OpIn::CrossedByEdge { .. } => {
-                let r = must(cc.is_crossed_by_edge(&pool))?;
+                let r = must(cc.is_crossed_by_edge(&geo))?;
                 o.extend([0.0, b(r)]);
             }
             OpIn::CrossingFace { face, .. } => {
@@ -377,24 +438,24 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 o.extend([0.0, b(r)]);
             }
             OpIn::NearMisses { b: x, .. } => {
-                let r = must(cc.has_near_misses(&k, &pool, *x))?;
+                let r = must(cc.has_near_misses(&k, &geo, *x))?;
                 o.extend([0.0, b(r)]);
             }
             OpIn::CoinMaybe { j, own, report, .. } => {
                 let partner = if *own { cc.clone() } else { other.clone() };
-                let (verdict, pos) = must(cc.are_coincident_maybe(&k, &pool, &partner, *j, *report))?;
+                let (verdict, pos) = must(cc.are_coincident_maybe(&k, &geo, &partner, *j, *report))?;
                 o.extend([0.0, f64::from(verdict.code()), f64::from(pos.code())]);
             }
             OpIn::ClassifyFace {
                 j, do_point, face, old, uv_ok, ..
             } => {
                 let f = pool.handle(*face)?.ok_or_else(|| harness("no face"))?;
-                let r = cc.classify_face_interval(&k, &pool, *j, *do_point, f, pool.handle(*old)?, *uv_ok, None);
+                let r = cc.classify_face_interval(&k, &geo, *j, *do_point, f, pool.handle(*old)?, *uv_ok, None);
                 o.push(st(r)?.err().unwrap_or(0.0));
             }
             OpIn::Partial { own, .. } => {
                 let partner = if *own { cc.clone() } else { other.clone() };
-                match st(cc.test_for_partial_coincident_edges(&k, &pool, &partner))? {
+                match st(cc.test_for_partial_coincident_edges(&k, &geo, &partner))? {
                     Ok(PartialCoincidence {
                         max_partial_coin_gap,
                         new_curve_to_test,
@@ -408,7 +469,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                 }
             }
             OpIn::Fillet { j, todo, .. } => {
-                let r = cc_mod::set_do_filleting_geometry(&k, &pool, *j, cc, Some(&other), *todo);
+                let r = cc_mod::set_do_filleting_geometry(&k, &geo, *j, cc, Some(&other), *todo);
                 o.push(st(r)?.err().unwrap_or(0.0));
             }
         }

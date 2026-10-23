@@ -15,6 +15,7 @@
 //! | [`Grid::add_element`], [`ElementSource`] | `SmGrid::AddElement`, `SmGridElementType`      |
 //! | [`Grid::add_hierarchy_element`]        | `SmGrid::AddHierarchyElement`                    |
 //! | [`Grid::expand_hierarchy`]             | `SmSurfaceHierarchyElement::ExpandHierarchy`     |
+//! | [`Grid::expand_hierarchy_with`]        | `SmSurfaceHierarchyElement::ExpandHierarchy` over a caller-held surface cache tree |
 //! | [`Grid::setup_3ddda`]                  | `SmGrid::Setup3DDDA`                             |
 //! | `AxisStep` (private)                   | one axis of `SmGrid::Setup3DDDA`                 |
 //! | [`Grid::step_3ddda`], [`StepHits`]     | `SmGrid::Step3DDDA`                              |
@@ -49,10 +50,15 @@
 //! - Surface elements need the surface subdivision caches, pseudo boxes and polar
 //!   boxes of units not ported yet: `SmSurfaceGridElement::Init` (reached through
 //!   [`Grid::add_element`] with [`ElementSource::Surface`]) and
-//!   `SmSurfaceHierarchyElement::ExpandHierarchy` return [`SolidError::Unported`]
-//!   (see the `UNPORTED` markers). [`SurfaceGridElement`] (co-ported by
-//!   `intersect.ray_tracer`) holds only the data members; [`Grid::add_surface_element`]
-//!   adds a leaf whose data the caller filled in.
+//!   `SmSurfaceHierarchyElement::ExpandHierarchy` on a bare handle return
+//!   [`SolidError::Unported`] (the grid holds surface handles, not surfaces or their
+//!   caches). [`Grid::expand_hierarchy_with`] runs `ExpandHierarchy` over the
+//!   subdivision tree of a surface cache the caller holds, with
+//!   `SmSurfaceGridElement::Init` as a caller closure (`intersect::ray_tracer`'s
+//!   `surface_leaf` reads the patch's domain, pseudo box and polar box from the
+//!   cache). [`SurfaceGridElement`] (co-ported by `intersect.ray_tracer`) holds only
+//!   the data members; [`Grid::add_surface_element`] adds a leaf whose data the
+//!   caller filled in.
 //!   `ExpandHierarchy` on a plain [`HierarchyElement::new`] is upstream's base-class
 //!   "pure virtual" body: `SM_ERR`.
 //! - `Step3DDDA` returns [`SolidError::InvalidInput`] after more than
@@ -83,7 +89,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
-use crate::geom::tree::NodeId;
+use crate::geom::tree::{AuxDataType, NodeClass, NodeData, NodeId, Tree};
 use crate::limits::try_filled;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 
@@ -768,6 +774,66 @@ impl<O: Copy> Grid<O> {
         })
     }
 
+    /// `SmSurfaceHierarchyElement::ExpandHierarchy` over the subdivision `tree` of
+    /// the element's surface cache (the `smsurf_GetSurfaceCache(m_pSurface)->GetTree()`
+    /// the caller holds): for every node in `GetAllTreeNodes` order that is the
+    /// lowest `SM_AD_BEZIER_SURFACE` node (its first child, if any, is not one) and
+    /// not classified outside, adds a surface element made by `init`
+    /// (`SmSurfaceGridElement::Init` of that node, given the element's surface) over
+    /// the node box grown by the expansion tolerance. A base-class element fails
+    /// with `SM_ERR`, as [`Grid::expand_hierarchy`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an unknown id; `SM_ERR` for a base-class element;
+    /// `SM_ERR_NULL_POINTER` for a Bezier node without subdivision data (upstream
+    /// `NER`); those of `init` and of the voxel lookup.
+    pub fn expand_hierarchy_with<T: Copy + PartialEq>(
+        &mut self,
+        id: HierarchyId,
+        tree: &Tree<T>,
+        mut init: impl FnMut(O, NodeId) -> Result<SurfaceGridElement<O>>,
+    ) -> Result<()> {
+        const OP: &str = "geom::grid::Grid::expand_hierarchy_with";
+        let element = self.hierarchy.get(id.0).ok_or_else(|| bad_id(OP))?;
+        let surface = element.surface.ok_or(SolidError::sm_err(OP))?;
+        let expansion_tolerance = element.expansion_tolerance;
+
+        // For every Surface subdivision tree node
+        for node_id in tree.all_tree_nodes() {
+            let node = tree.node(node_id)?;
+
+            // skip non-leaf nodes: add the lowest SM_AD_BEZIER_SURFACE node
+            let child_is_bezier = match node.child1 {
+                Some(c) => tree.node(c)?.aux_type == AuxDataType::BezierSurface,
+                None => false,
+            };
+            if node.aux_type != AuxDataType::BezierSurface || child_is_bezier {
+                continue;
+            }
+
+            // skip leaf-nodes classified outside of associated trim boundaries
+            let node_class = match &node.data {
+                NodeData::Surface(a) => a.node_class,
+                NodeData::None | NodeData::ObjectList(_) | NodeData::Curve(_) => {
+                    return Err(SolidError::null_pointer(OP));
+                }
+            };
+            if node_class == NodeClass::Outside {
+                continue;
+            }
+
+            // expand leaf-node bounding box by tolerance
+            let mut bbox = node.bbox;
+            bbox.expand_absolute(expansion_tolerance);
+
+            // AddElement(pNode, SM_GE_SURFACE, sBBox)
+            let leaf = init(surface, node_id)?;
+            self.add_surface_element(leaf, &bbox)?;
+        }
+        Ok(())
+    }
+
     /// Starts a 3DDDA walk of the ray `start + t * vector` (`Setup3DDDA`): finds
     /// the first voxel and the plane steps, and increments the current mark.
     ///
@@ -1100,6 +1166,86 @@ mod tests {
             g.add_element(ElementSource::Surface(NodeId(0)), &b),
             Err(SolidError::Unported { .. })
         ));
+    }
+
+    #[test]
+    fn expand_hierarchy_over_a_tree() {
+        use crate::geom::tree::{SurfaceAux, TreeNode};
+        let mut g = unit_grid(4);
+        let mut t: Tree<u32> = Tree::new(None);
+        let mk = |t: &mut Tree<u32>, parent, aux_type, class, bbox| {
+            t.add_node(TreeNode {
+                parent,
+                aux_type,
+                bbox,
+                data: NodeData::Surface(SurfaceAux {
+                    node_class: class,
+                    ..SurfaceAux::default()
+                }),
+                ..TreeNode::new()
+            })
+        };
+        let left = Extent3d::from_bounds(0.1, 0.1, 0.1, 0.2, 0.2, 0.2);
+        let right = Extent3d::from_bounds(0.6, 0.6, 0.6, 0.7, 0.7, 0.7);
+        let all = Extent3d::from_bounds(0.1, 0.1, 0.1, 0.7, 0.7, 0.7);
+        let root = mk(
+            &mut t,
+            None,
+            AuxDataType::BezierSurface,
+            NodeClass::Unknown,
+            all,
+        );
+        let a = mk(
+            &mut t,
+            Some(root),
+            AuxDataType::BezierSurface,
+            NodeClass::Inside,
+            left,
+        );
+        let b = mk(
+            &mut t,
+            Some(root),
+            AuxDataType::BezierSurface,
+            NodeClass::Outside,
+            right,
+        );
+        t.node_mut(root).unwrap().child1 = Some(a);
+        t.node_mut(root).unwrap().child2 = Some(b);
+        t.set_top_node(Some(root));
+
+        let base = g
+            .add_hierarchy_element(HierarchyElement::new(0.0), &all)
+            .unwrap();
+        assert!(g
+            .expand_hierarchy_with(base, &t, |_, _| unreachable!())
+            .is_err());
+
+        let h = g
+            .add_hierarchy_element(HierarchyElement::new_surface(9, 0.05), &all)
+            .unwrap();
+        let mut seen = Vec::new();
+        g.expand_hierarchy_with(h, &t, |s, n| {
+            seen.push((s, n));
+            Ok(SurfaceGridElement {
+                surface: s,
+                uv_domain: Extent2d::default(),
+                bbox: left,
+                pseudo_box: PseudoBox::default(),
+                polar_box: PolarBox::default(),
+                mid_point: Vec3::ZERO,
+                mid_du: Vec3::ZERO,
+                mid_dv: Vec3::ZERO,
+                mid_normal: Vec3::ZERO,
+            })
+        })
+        .unwrap();
+        // the root has a Bezier first child, the right leaf is outside
+        assert_eq!(seen, vec![(9, a)]);
+        let mut grown = left;
+        grown.expand_absolute(0.05);
+        let e = g.voxel([0, 0, 0]).unwrap().grid_elements().unwrap();
+        let last = *e.last().unwrap();
+        assert_eq!(g.element(last).unwrap().bounding_box(), &grown);
     }
 
     #[test]

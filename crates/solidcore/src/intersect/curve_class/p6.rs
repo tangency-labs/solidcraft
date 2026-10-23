@@ -323,6 +323,25 @@ impl<O: ClassObject> CurveClassification<O> {
         index: usize,
         vertices_only: bool,
     ) -> Result<MergeIntervalOutput<O>> {
+        self.merge_interval_with(k, geometry, index, vertices_only, None)
+    }
+
+    /// [`Self::merge_interval`] with the classification that
+    /// [`Self::other_classification`] names (`GetOtherClassification()`), which the
+    /// fillet geometry step (`sm_SetDoFilletingGeometry`) reads. Without it, a
+    /// classification doing fillets with an other classification defers that step.
+    ///
+    /// # Errors
+    /// Those of [`Self::merge_interval`]; [`SolidError::Unported`] from the fillet
+    /// geometry step (whose other statuses upstream ignores).
+    pub fn merge_interval_with(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        index: usize,
+        vertices_only: bool,
+        other: Option<&CurveClassification<O>>,
+    ) -> Result<MergeIntervalOutput<O>> {
         let ivl = self.at(index)?;
         if ivl.mid.point_class() == Pc::Unknown && !vertices_only {
             return Ok(MergeIntervalOutput::default());
@@ -331,12 +350,25 @@ impl<O: ClassObject> CurveClassification<O> {
             && ivl.mid.point_class() == Pc::Edge
             && ivl.end.point_class() == Pc::Vertex
         {
+            // When DoingFillets with FilletData
             if self.doing_fillets() && self.other_classification().is_some() {
-                // UNPORTED(intersect.curve_class_p7): sm_SetDoFilletingGeometry
-                return Err(SolidError::unported(
-                    "sm_SetDoFilletingGeometry",
-                    "intersect.curve_class_p7",
-                ));
+                let Some(other) = other else {
+                    // the caller did not supply the classification the handle names
+                    return Err(SolidError::unported(
+                        "SmCurveClassification::GetOtherClassification",
+                        "intersect.curve_class_p7",
+                    ));
+                };
+                // Make sure to use the FilletGeometry and not the OriginalBrep Geometry
+                // (1 | 2 | 4: start vertex, end vertex and mid edge; status ignored)
+                crate::error::ignored(super::p7::set_do_filleting_geometry(
+                    k,
+                    geometry,
+                    index,
+                    self,
+                    Some(other),
+                    7,
+                ))?;
             }
             return Ok(MergeIntervalOutput::default());
         }

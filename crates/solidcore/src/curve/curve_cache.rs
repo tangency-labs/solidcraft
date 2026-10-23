@@ -1122,7 +1122,7 @@ fn curve_ref<O: Copy + PartialEq>(tree: &Tree<O>, id: NodeId) -> Result<CurveSpa
 /// without owner.
 fn curve_approx_tol_3d(k: &Kernel, curve: &Curve) -> Result<f64> {
     if curve.owner().is_some() {
-        // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
+        // DISPATCH GAP: SmTol::GetZoneTol3d(const SmObject*) (geom.tol, green) on an opaque handle. Every
         // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
         // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
         // receives the owning B-rep

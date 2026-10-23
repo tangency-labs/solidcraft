@@ -11,6 +11,7 @@ use solidcore::primitive::api_primitives as api;
 use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::edge as el;
 use solidcore::topology::face::p2 as fl;
 use solidcore::topology::Brep;
 use std::f64::consts::PI;
@@ -508,4 +509,34 @@ pub fn report(ev: &Evaluation) -> Result<Report, String> {
         Some(c) => Err(c.message.clone()),
         None => Ok(r),
     }
+}
+
+/// Builds `spec` and samples the 3D curve of each of its edges at `samples` parameters
+/// spread evenly over the edge's interval (both ends included). An edge without a curve,
+/// or whose curve fails to evaluate anywhere, is skipped. `None` when the build fails.
+#[allow(dead_code)] // the example's `--wire` export; the test does not use it
+pub fn wireframe(spec: &Spec, samples: usize) -> Option<Vec<Vec<Point3>>> {
+    let mut k = Kernel::default();
+    let b = (spec.build)(&mut k).ok()?;
+    let Ok(edges) = bl::edges(&b, None) else {
+        return Some(Vec::new());
+    };
+    let n = samples.max(2);
+    let mut wire = Vec::new();
+    for e in edges {
+        let (Ok(Some(curve)), Ok(ivl)) = (el::curve(&b, e), el::interval(&b, e)) else {
+            continue;
+        };
+        let (t0, t1) = (ivl.min(), ivl.max());
+        let points: Option<Vec<Point3>> = (0..n)
+            .map(|i| {
+                let t = t0 + (t1 - t0) * i as f64 / (n - 1) as f64;
+                curve.evaluate_point(&k, t).ok()
+            })
+            .collect();
+        if let Some(points) = points {
+            wire.push(points);
+        }
+    }
+    Some(wire)
 }

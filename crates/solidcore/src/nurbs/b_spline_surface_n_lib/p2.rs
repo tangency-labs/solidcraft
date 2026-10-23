@@ -43,8 +43,13 @@
 //!   failure, because upstream accessors ignore that failure and read the output.
 //! - **Tangent fields** are [`TangentField`]s of `SmCurve` views of the B-spline
 //!   curves (the same data, not a copy-constructed curve).
-//! - **Unported callees** return [`SolidError::Unported`]:
-//!   `SmCrvOnSurf::ApproximateCurve` (`curve.crv_on_surf`). (`SmSurface::EvaluateNormalSection`
+//! - **Tangent-field approximation.** `SmTangentField::ApproximateCurve` is the
+//!   inherited `SmCrvOnSurf::ApproximateCurve`, which on the new field's empty cache
+//!   runs `SmCurve::ApproximateCurve` with the field as the virtual curve.
+//!   [`crate::curve::crv_on_surf::CrvOnSurf`] and `Curve::approximate_curve_base` take
+//!   a [`crate::curve::curve::p2::Curve`], which has no tangent-field kind, so that
+//!   body (and `sm_TestSpanAccuracy`) is repeated here over the field, same order and
+//!   bounds (`approximate_tangent_field`). (`SmSurface::EvaluateNormalSection`
 //!   is `surface::surface::p3`'s, `SmSurface::EvaluateNormal`
 //!   is `surface::surface::p7`'s, `Evaluate1stDerivatives` `surface::surface::p1`'s.) Upstream ignores the status of
 //!   most of these calls; an unported one still stops the port.
@@ -61,15 +66,24 @@
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
 //!   `GetKnots`, `N_CrvElevateDegree`, `SetMinMax`).
 
+use crate::curve::curve::p1::{SpanAccuracy, MAX_APPROX_SPANS};
 use crate::curve::curve::p2::Curve as SmCurve;
+use crate::curve::curve::p2::{
+    add_to_curve, flush_crv, pop_stack, push_point, stack_look, CurveEvaluate, CurveKind,
+};
+use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p4::is_degenerate_base;
+use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector2d::Point2;
+use crate::geom::vector3d::Point3;
 use crate::geom::vector3d::Vec3;
-use crate::math::{min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, UNDEF_DOUBLE};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{
     BSplineCurve, BSplineCurveForm, BoundingBoxRequest, CanonicalData, KnotType,
 };
@@ -204,7 +218,7 @@ impl Default for SkinnedSurfaceOptions<'_> {
     }
 }
 
-// ---- unported callees -------------------------------------------------------------------
+// ---- tangent-field callees --------------------------------------------------------------
 
 /// `curve` as an `SmCurve` (the same object upstream: the NURB and flags as they are,
 /// without the copy constructor's knot fix-up).
@@ -219,18 +233,310 @@ fn as_sm_curve(curve: &BSplineCurve) -> SmCurve {
     })
 }
 
-/// `SmTangentField::ApproximateCurve(ctx, knots, ang_tol, max_gap, curve, TRUE, FALSE,
-/// FALSE)` (inherited from `SmCrvOnSurf`).
+/// The operation path of [`approximate_tangent_field`].
+const OP_APPROX_FIELD: &str = "nurbs::b_spline_surface_n_lib::p2::approximate_tangent_field";
+
+/// A tangent field seen as an `SmCurve` (its virtual `Evaluate`, `EvaluatePoint`,
+/// `GetNaturalInterval` and `GetDim` as `SmCurve::ApproximateCurve` reaches them).
+struct FieldCurve<'f, 'a>(&'f TangentField<'a, BSplineSurface>);
+
+impl CurveEvaluate for FieldCurve<'_, '_> {
+    fn dim(&self) -> u64 {
+        // SmCrvOnSurf: always 3D
+        3
+    }
+
+    fn natural_interval(&self) -> Extent1d {
+        self.0.natural_interval()
+    }
+
+    fn evaluate(
+        &self,
+        k: &crate::kernel::Kernel,
+        t: f64,
+        num_derivs: usize,
+        _from_left: bool,
+        _non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        self.0.evaluate(k, t, num_derivs)
+    }
+
+    fn evaluate_point(&self, k: &crate::kernel::Kernel, t: f64) -> Result<Point3> {
+        self.0.evaluate_point(k, t)
+    }
+}
+
+/// `Evaluate(t, pv, 1, bFromLeft, bNonZeroTangents)` into a position/tangent pair.
+fn field_eval2(
+    k: &crate::kernel::Kernel,
+    curve: &FieldCurve<'_, '_>,
+    t: f64,
+    from_left: bool,
+) -> Result<[Vec3; 2]> {
+    let v = curve.evaluate(k, t, 1, from_left, true)?;
+    let mut out = [Vec3::UNDEF; 2];
+    for (d, s) in out.iter_mut().zip(v) {
+        *d = s;
+    }
+    Ok(out)
+}
+
+/// Maximum adaptive Hermite subdivisions in one approximation, as
+/// `curve::curve::p1`'s `SmCurve::ApproximateCurve` (see its deviations).
+const MAX_APPROXIMATION_SUBDIVISIONS: usize = 8192;
+
+/// `sm_TestSpanAccuracy` on a tangent field (the body of
+/// [`crate::curve::curve::p1::test_span_accuracy`], whose curve is the field).
+fn field_span_accuracy(
+    k: &crate::kernel::Kernel,
+    curve: &FieldCurve<'_, '_>,
+    last_t: f64,
+    last_pv: [Point3; 2],
+    curr_t: f64,
+    curr_pv: [Point3; 2],
+    approx_tol: f64,
+    match_parameterization: bool,
+) -> Result<SpanAccuracy> {
+    // init output
+    let mut out = SpanAccuracy {
+        passes: false,
+        max_dist: 0.0,
+    };
+
+    // locals
+    let mut force_pass = false;
+    let this_span = curr_t - last_t;
+    let t_scale = 1.0 + curr_t.abs();
+    let ivl = curve.natural_interval();
+    let min_step = 1500.0;
+    let mut num_test_points: u32 = 3;
+
+    // when span is getting very small - just pass it
+    if this_span < EFF_ZERO * t_scale {
+        force_pass = true;
+    }
+
+    // Don't let the interval get too small
+    if this_span < (ivl.length()) / min_step {
+        force_pass = true;
+    }
+
+    // hermite cuve between interval end points
+    let hermite = HermiteCurve::new(
+        last_pv[0],
+        last_pv[1] * this_span,
+        curr_pv[0],
+        curr_pv[1] * this_span,
+        3,
+    );
+    let hermite_curve = SmCurve::from(hermite);
+
+    if force_pass {
+        // get a better error value if we're going to keep this step.
+        num_test_points = 7;
+    }
+
+    for ii in 0..num_test_points {
+        let normalized_param = (f64::from(ii) + 1.0) / (f64::from(num_test_points) + 1.0);
+        let crv_param = last_t + normalized_param * this_span;
+
+        // Evaluate the curve.  Then, if we're matching parameterization,
+        // evaluate the Hermite curve at the same (relative) parameter,
+        // else find the closest point on the Hermite curve.
+        let crv_pnt = curve.evaluate_point(k, crv_param)?;
+
+        let approx_dist = if match_parameterization {
+            // Approx dist = DistanceBetween(Curve(param), Hermite(param))
+            let herm_pnt = hermite.evaluate_point(normalized_param);
+            herm_pnt.distance(crv_pnt)
+        } else {
+            // Approx dist = DistanceBetween(Curve(param), NearestPointOnHermite)
+            let hermite_domain = Extent1d::from_min_max(0.0, 1.0);
+            let r = hermite_curve.local_point_solve::<()>(
+                k,
+                &hermite_domain,
+                SolverOperation::Minimize,
+                crv_pnt,
+                &PointSolveOptions::default(),
+                normalized_param,
+            );
+            // save nearest distance (when drop point failed - load a big distance to
+            // quit testing)
+            match ignored(r)? {
+                Some((true, sol)) => sol.start.solution_value,
+                _ => 2.0 * approx_tol,
+            }
+        };
+
+        // When ApproxDist is too big
+        if approx_dist > approx_tol && !force_pass {
+            // set output and quit testing
+            out.passes = false;
+            return Ok(out);
+        }
+        out.max_dist = max2(out.max_dist, approx_dist);
+    }
+
+    // when bForcePass == TRUE
+    out.passes = true;
+    Ok(out)
+}
+
+/// `SmCrvOnSurf::ApproximateCurve(ctx, knots, ang_tol, max_gap, curve, TRUE, FALSE,
+/// FALSE)` on a new tangent field (inherited): its `GetOrCreateBSApproxPointer` with
+/// the given breaks and `bMatchParam = FALSE` on an empty cache runs
+/// `SmCurve::ApproximateCurve(ctx, breaks, tol, gap, approx, TRUE, FALSE, FALSE)` and
+/// copies the result. The body is that of
+/// [`crate::curve::curve::p1`]'s `Curve::approximate_curve_base` with the field as the
+/// virtual curve (a tangent field is no B-spline, so neither the copy shortcut nor
+/// the "input curve is better" copy applies).
 fn approximate_tangent_field(
-    _field: &TangentField<'_, BSplineSurface>,
-    _knots: &[f64],
-    _ang_tol: f64,
+    k: &crate::kernel::Kernel,
+    field: &TangentField<'_, BSplineSurface>,
+    breaks: &[f64],
+    approx_tol_3d: f64,
 ) -> Result<BSplineCurve> {
-    // UNPORTED(curve.crv_on_surf): SmCrvOnSurf::ApproximateCurve
-    Err(SolidError::Unported {
-        upstream: "SmCrvOnSurf::ApproximateCurve",
-        unit: "curve.crv_on_surf",
-    })
+    let curve = FieldCurve(field);
+    let create_analytics = true;
+    let match_parameterization = false;
+
+    // need 2 breakpoints to define the curve interval
+    let (Some(&first), Some(&last)) = (breaks.first(), breaks.last()) else {
+        return Err(SolidError::sm_err(OP_APPROX_FIELD));
+    };
+    if breaks.len() < 2 {
+        return Err(SolidError::sm_err(OP_APPROX_FIELD));
+    }
+
+    // low work - degenerate curves
+    if is_degenerate_base(k, &curve, EFF_ZERO, None)? {
+        let pnt = curve.evaluate_point(k, first)?;
+        let degenerate = BSplineCurve::create_degenerate_curve(curve.dim(), pnt)?;
+        let mut c = SmCurve::from(degenerate);
+        let ivl = Extent1d::from_min_max(first, last);
+        // (status ignored)
+        ignored(c.edit_parameterization(k, &ivl))?;
+        let CurveKind::BSpline(bs) = c.into_kind() else {
+            return Err(SolidError::invalid_input(
+                OP_APPROX_FIELD,
+                "the approximation is not an SmBSplineCurve",
+            ));
+        };
+        return Ok(bs.copy());
+    }
+
+    // locals
+    let mut stack: Vec<f64> = Vec::with_capacity(256 * 4 * 2);
+    let mut ctrl_poly: Vec<Point3> = Vec::with_capacity(256);
+    let mut knots: Vec<f64> = Vec::with_capacity(256);
+    let mut subdivisions = 0;
+
+    // for every interval defined by input BreakParams array
+    for w in breaks.windows(2) {
+        let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else {
+            continue;
+        };
+        let mut last_t = a;
+        let mut curr_t = b;
+
+        // interval start position and tangent (Last)
+        let mut last_pv = field_eval2(k, &curve, last_t, true)?; // NonZeroTangent values
+        {
+            // walk to a nonZero Tangent evaluation
+            let mut step = 0.0001;
+            while last_pv[1].length_squared() < EFF_ZERO_SQ * 100000.0 {
+                let tmp = last_pv[0];
+                last_pv = field_eval2(k, &curve, last_t + step * (curr_t - last_t), true)?;
+                last_pv[0] = tmp;
+                step *= 2.0;
+                if step > 0.5 {
+                    break;
+                }
+            }
+        }
+
+        // interval end position and tangent (Curr)
+        let mut curr_pv = field_eval2(k, &curve, curr_t, false)?; // NonZeroTangent values
+        {
+            let mut step = 0.0001;
+            while curr_pv[1].length_squared() < EFF_ZERO_SQ * 100000.0 {
+                let tmp = curr_pv[0];
+                curr_pv = field_eval2(k, &curve, curr_t - step * (curr_t - last_t), true)?;
+                curr_pv[0] = tmp;
+                step *= 2.0;
+                if step > 0.5 {
+                    break;
+                }
+            }
+        }
+
+        // Place Curr Point [param, posXYZ, tanXYZ] on sStack
+        push_point(curr_t, curr_pv, &mut stack);
+
+        // For each span subdivide until our approximating curve is accurate enough.
+        while !stack.is_empty() {
+            // get last point's param, pos, and tan from stack - leave stack unmodified
+            (curr_t, curr_pv) = stack_look(&stack)?;
+
+            // Test if HermiteSpan is within ApproxTol of thisCurve interval
+            let acc = field_span_accuracy(
+                k,
+                &curve,
+                last_t,
+                last_pv,
+                curr_t,
+                curr_pv,
+                approx_tol_3d,
+                match_parameterization,
+            )?;
+
+            // When Span passes test (or If step size gets real small just accept it)
+            if acc.passes || (last_t - curr_t).abs() < EFF_ZERO {
+                // (not upstream) bound the growing curve: see MAX_APPROX_SPANS
+                if knots.len() > MAX_APPROX_SPANS {
+                    return Err(SolidError::invalid_input(
+                        OP_APPROX_FIELD,
+                        "approximation needs more than MAX_APPROX_SPANS spans",
+                    ));
+                }
+
+                // Append Hermite interval to end of growing piecewise cubic bezier
+                add_to_curve(last_pv, curr_pv, last_t, curr_t, &mut ctrl_poly, &mut knots)?;
+
+                // for next iteration - move Curr param, pos, and tan to Last
+                last_t = curr_t;
+                last_pv = curr_pv;
+
+                // for next iteration - pop stack
+                pop_stack(&mut stack)?;
+            } else {
+                if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
+                    return Err(SolidError::sm_err(OP_APPROX_FIELD));
+                }
+                subdivisions += 1;
+
+                // get param mid point and associated curve pos and tan
+                let mid_t = (last_t + curr_t) / 2.0;
+                if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
+                    return Err(SolidError::sm_err(OP_APPROX_FIELD));
+                }
+                let mid_pv = field_eval2(k, &curve, mid_t, true)?; // NonZeroTangent values
+                curr_t = mid_t;
+                curr_pv = mid_pv;
+
+                // push midPoint onto stach
+                push_point(curr_t, curr_pv, &mut stack);
+            }
+        }
+    }
+
+    // create pBSC curve from control polygon
+    let bsc = flush_crv(approx_tol_3d, &mut ctrl_poly, &mut knots, create_analytics)?.ok_or(
+        SolidError::invalid_input(OP_APPROX_FIELD, "no approximating curve built"),
+    )?;
+
+    // pBSCurve->Copy(crContext, rpNewBSplineCurve)
+    Ok(bsc.copy())
 }
 
 /// `SmTangentField::Create(ctx, tol, boundary, uv, surface, start, t0, SAME, end, t1,
@@ -270,12 +576,13 @@ fn tangent_field_curve(
 
     // build an approximate piecewise hermite curve to the crossTangent curve
     let knots = unique_knots(boundary);
-    approximate_tangent_field(&field, &knots, ang_tol)
+    approximate_tangent_field(k, &field, &knots, ang_tol)
 }
 
 /// `new SmTangentField(uv, surface, SM_INTERPOLATE_DIR, start, end)` followed by its
 /// `ApproximateCurve(knots, ang_tol, ..)`.
 fn interpolated_tangent_field_curve(
+    k: &crate::kernel::Kernel,
     uv_curve: &BSplineCurve,
     surface: &BSplineSurface,
     start: Vec3,
@@ -292,7 +599,7 @@ fn interpolated_tangent_field_curve(
         end,
         None,
     )?;
-    approximate_tangent_field(&field, knots, ang_tol)
+    approximate_tangent_field(k, &field, knots, ang_tol)
 }
 
 /// `SmSurface::EvaluateNormal(uv, TRUE, TRUE, normal)`.
@@ -1781,6 +2088,7 @@ fn corner_blend_n(
         // use pCurr knot vector and build a curve approximation to the tangent field
         let knots = unique_knots(curr);
         let tan_curve = interpolated_tangent_field_curve(
+            k,
             curr_uv,
             curr_srf,
             start_tf,

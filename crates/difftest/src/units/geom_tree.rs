@@ -13,8 +13,9 @@
 //!
 //! Outputs: `ints` (statuses, flags, node indices in allocation order, object
 //! ids; `-1` = null) and `floats` (boxes). `first_patch` on a path that needs
-//! `SmBezierPatch` or a subdivision surface is deferred on the Rust side (the
-//! shim does not run it). Every run has at least [`MIN_GENERATED`] generated
+//! `SmBezierPatch` or a subdivision surface reports `-2` (not run) on both sides:
+//! the shim builds neither, and the Rust resolvers answer the same; those reads
+//! are compared by `surface.surface_cache_p1`. Every run has at least [`MIN_GENERATED`] generated
 //! cases.
 
 use serde::{Deserialize, Serialize};
@@ -417,8 +418,20 @@ fn run_subdiv_rust(nodes: &[NodeDesc], ops: &[DOp]) -> solidcore::Result<Vec<i64
                 }
             }
             DOp::FirstPatch { node } => {
-                let p = t.first_bezier_patch(NodeId(*node as usize))?;
-                o.push(i64::from(p.is_some()));
+                // The shim builds no SmBezierPatch and no subdivision surface, so it
+                // reports -2 (not run) where the walk would read one; the resolvers
+                // do the same here. The patch reads themselves are compared by
+                // surface.surface_cache_p1 (SurfaceCache::first_bezier_patch).
+                let p = t.first_bezier_patch(
+                    NodeId(*node as usize),
+                    |_| Ok(Some(-2_i64)),
+                    |_| Ok(Some(-2_i64)),
+                )?;
+                o.push(match p {
+                    None => 0,
+                    Some(-2) => -2,
+                    Some(_) => 1,
+                });
             }
             DOp::OwnerObject { node } => {
                 o.push(i64::from(

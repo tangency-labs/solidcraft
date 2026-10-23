@@ -20,6 +20,7 @@
 //! | [`CurveClassification::interval_min_uv`]                    | `SmCurveInterval::GetMinUV`                           |
 //! | [`CurveClassification::interval_max_uv`]                    | `SmCurveInterval::GetMaxUV`                           |
 //! | [`refine_cci_to_surfaces`], [`RefineCci`]                   | `sm_RefineCCIToSurfaces`                              |
+//! | [`refine_cci_to_surfaces_in`]                               | `sm_RefineCCIToSurfaces`, through an adapter          |
 //!
 //! Deviations:
 //! - **Handles.** As in part 1, every object is a caller handle `O` resolved through a
@@ -48,12 +49,17 @@
 //!   index, which is now the stale slot past `m_lSize` (a copy of the last interval, as
 //!   `RemoveAt` leaves it), and its `CollapseInterval` then fails (status ignored). This
 //!   port reads the copy of the last interval the same way.
-//! - **`sm_RefineCCIToSurfaces`** is ported up to its first topology call: everything
-//!   after the entry checks starts with `SmEdge::GetCurve` (unit `topology.edge`) and
-//!   then walks the edge's faces, edge uses and Boolean mate. That remainder (the
-//!   surf/surf/surf, surface/edge and edge/surface refinements) is to be ported with the
-//!   `UNPORTED(topology.edge)` site below; it recurses through upstream's own counter
-//!   (`lRecursionCount`, at most 5 levels), which [`RefineCci::recursion_count`] carries.
+//! - **`sm_RefineCCIToSurfaces`** is ported through its no-work gate:
+//!   [`refine_cci_to_surfaces_in`] resolves the edge, its faces, edge uses, UV trim
+//!   curves and Boolean mate through the adapter (`sm_GetCCIGeometry`), measures the
+//!   gaps (`sm_GetCCISurfaceGaps`) and returns unchanged when they are within the edge
+//!   zone tolerance / 2000 or a point fails to drop, as upstream. The large-gap tail
+//!   (the surf/surf/surf, surface/edge and edge/surface refinements, which rewrite the
+//!   classification curve, the edge curve and its UV trim curves and then recurse)
+//!   needs the mutable B-rep and stays `UNPORTED(intersect.curve_class_p2)`; it recurses
+//!   through upstream's own counter (`lRecursionCount`, at most 5 levels), which
+//!   [`RefineCci::recursion_count`] carries. [`refine_cci_to_surfaces`], which has no
+//!   adapter, still defers at the edge.
 //! - **Topology callees** return [`SolidError::Unported`]: `SmEdge::GetCurve`
 //!   (`topology.edge`) and `SmFace::GetSurface` (`topology.face_p2`) are called on
 //!   opaque edge / face handles that carry no B-rep the port can reach (as in part 3
@@ -882,9 +888,106 @@ pub fn refine_cci_to_surfaces<O: ClassObject, S: Copy>(
     if edge.is_none() {
         return Err(SolidError::invalid_input(OP_CC, "no edge"));
     }
-    // UNPORTED(topology.edge): SmEdge::GetCurve (the rest of sm_RefineCCIToSurfaces walks
-    // the edge's faces, edge uses and Boolean mate; port it when wiring this site)
+    // this entry point has no adapter to resolve the edge ([`refine_cci_to_surfaces_in`]
+    // has one)
+    // UNPORTED(topology.edge): SmEdge::GetCurve
     Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
+}
+
+/// [`refine_cci_to_surfaces`] with an adapter: the edge, its faces, edge uses, UV trim
+/// curves and Boolean mate resolve through `geometry`
+/// ([`get_cci_geometry_in`](super::p1::get_cci_geometry_in)). When the classification
+/// curve, the edge curve and their surfaces already meet within the no-work tolerance
+/// (edge zone tolerance / 2000), or a point does not drop to a connected surface,
+/// nothing changes, as upstream.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] when the gaps are large: upstream then moves the point to a
+/// surf/surf/surf intersection and rewrites the classification curve, the edge curve
+/// and its UV trim curves, which needs the mutable B-rep
+/// (`UNPORTED(intersect.curve_class_p2)`); those of
+/// [`get_cci_geometry_in`](super::p1::get_cci_geometry_in) and
+/// [`get_cci_surface_gaps`](super::p1::get_cci_surface_gaps);
+/// [`SolidError::InvalidInput`] for a classification without a curve or an edge
+/// without one (upstream dereferences them).
+pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    solution: &Solution<S>,
+    edge: O,
+    sss_point: Point3,
+    recursion_count: u64,
+) -> Result<RefineCci> {
+    // init outputs
+    let out = RefineCci {
+        sss_point_flag: false,
+        sss_point,
+        deviation: 0.0,
+        recursion_count: recursion_count.saturating_add(1),
+    };
+
+    if recursion_count > MAX_REFINE_RECURSION {
+        return Ok(out); // just return with no changes.
+    }
+
+    // no work case - Not an intersection curve point solution
+    let point_solution = solution.solution_type == SolutionType::SingleValue
+        || are_same(solution.start.param(0)?, solution.end.param(0)?)
+        || are_same(solution.start.param(1)?, solution.end.param(1)?);
+    if !point_solution || classification.surface1().is_none() || classification.surface2().is_none()
+    {
+        return Ok(out);
+    }
+
+    // get ClassCurve and EdgeCurve xsect points
+    let src_curve = classification.curve_geometry(geometry)?;
+    let edge_curve = super::p3::edge_curve(geometry, edge)?
+        .ok_or(SolidError::invalid_input(OP_CC, "edge without a curve"))?;
+
+    let edge_zone_tol_3d =
+        crate::intersect::point_class::object_zone_tol_3d(k, geometry, Some(edge))?;
+    let no_work_xsect_tol_3d = edge_zone_tol_3d / 2000.0; // usually about 1e-8 = ApproxTol/1000 (2 gets ApproxTol)
+
+    // (the statuses of both evaluations are ignored upstream)
+    let src_curve_pt =
+        ignored(src_curve.evaluate_point(k, solution.start.param(0)?))?.unwrap_or(Vec3::UNDEF);
+    let edge_curve_pt =
+        ignored(edge_curve.evaluate_point(k, solution.start.param(1)?))?.unwrap_or(Vec3::UNDEF);
+
+    // get cci connected geometry and topology (sm_GetCCIGeometry always succeeds)
+    let cci = super::p1::get_cci_geometry_in(geometry, classification, edge)?;
+
+    // get CurvePoint/EdgePoint, CurvePoint/Surface, and EdgePoint/Surface gaps
+    let gaps = super::p1::get_cci_surface_gaps(
+        k,
+        src_curve_pt,
+        edge_curve_pt,
+        solution,
+        &cci.surfaces,
+        &cci.uv_curves,
+        cci.edge_surface_count,
+    )?;
+
+    // no work case - gaps are fine or current solution failed to project to all surfaces
+    if !gaps.success
+        || (gaps.curve_edge_gap < no_work_xsect_tol_3d
+            && gaps.curve_surface_gap < no_work_xsect_tol_3d
+            && gaps.edge_surface_gap < no_work_xsect_tol_3d)
+    {
+        return Ok(out);
+    }
+
+    // Part 2 - Fix Large Gaps: moves the point to a surf/surf/surf or surface/edge
+    // intersection and rewrites the classification curve, the edge curve and its UV trim
+    // curves (sm_ApplyPointSolution, SmEdgeuse::SetUVTrimCurve), then recurses.
+    // UNPORTED(intersect.curve_class_p2): sm_RefineCCIToSurfaces (large-gap refinement
+    // of the mutable B-rep's curves)
+    Err(SolidError::unported(
+        "sm_RefineCCIToSurfaces (large-gap refinement)",
+        "intersect.curve_class_p2",
+    ))
 }
 
 #[cfg(test)]

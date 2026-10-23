@@ -19,8 +19,17 @@
 //! edge/face gap is set, not its length (a B-rep read with `rebuild` has it set), so the
 //! distance `GetOrCreateUVTrimCurve` reports for an existing curve is not compared then.
 //! `EvaluateBinormal` builds the face's trimmed surface cache; on the tiny adversarial
-//! surfaces that tree passes the port's `MAX_SUBDIVISION_NODES` bound (upstream subdivides
-//! on), and those cases are deferred to `surface.surface_cache_p3`.
+//! surfaces that tree grows to about 2 million nodes on both sides (2 014 255 in the C++
+//! for the `1e-4`-scale faces), below the port's `MAX_SUBDIVISION_NODES` bound; a case
+//! past that bound would be deferred to `surface.surface_cache_p3`.
+//!
+//! Known mismatches (`known_mismatches.toml`): `EvaluateBinormal` with `bUse3DOnly` on
+//! `Endcap.smb` (a file without UV trim curves). `SmBrep::ReadFromFile`'s healer leaves
+//! an `SmTrimSrfCache` without a tree on each face's surface; `EvaluateBinormal`
+//! reuses it, and its tree is built later with the surface's owner cleared
+//! (`GlobalPointSolve`), so no `CreateUVTrimCurves` runs. The Rust B-rep keeps no
+//! per-surface cache, so the port builds the face's trimmed cache and attaches the UV
+//! trim curves. The graph export does not carry the cache's existence.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -386,7 +395,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             match e {
                 // the port's bound on the surface cache tree (`MAX_SUBDIVISION_NODES`),
                 // reached through the face's trimmed surface cache that `EvaluateBinormal`
-                // builds; upstream subdivides on (plan/findings.md, surface.surface_cache_p3)
+                // builds; upstream subdivides on (no fixture reaches it since the bound
+                // became 2^22; plan/findings.md, surface.surface_cache_p3)
                 SolidError::InvalidInput { operation, reason }
                     if operation == SUBDIVIDE_OP && reason.contains("MAX_SUBDIVISION_NODES") =>
                 {

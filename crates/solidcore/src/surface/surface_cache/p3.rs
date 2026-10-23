@@ -49,7 +49,11 @@
 //!   default tolerances) is split into millions of patches, which upstream allocates for
 //!   minutes and Rust aborts on (a 3.5 GB patch array in a `surface.surface_p11` run).
 //!   The port refuses to split a node once the tree holds [`MAX_SUBDIVISION_NODES`]
-//!   nodes, with [`SolidError::InvalidInput`].
+//!   nodes, with [`SolidError::InvalidInput`]. The bound is `2^22` on 64-bit targets,
+//!   twice the largest tree an upstream fixture reaches (2 014 255 nodes, the trimmed
+//!   cache of a `1e-4`-scale face in the `topology.edgeuse_p3` adversarial fixtures,
+//!   measured on the C++ build), and `2^20` on 32-bit targets (wasm32), whose 4 GB
+//!   address space cannot hold a larger patch array.
 //! - **Cyclic trees.** `FindUVNodes` walks the child links of a tree whose links form a
 //!   cycle forever (its stack grows without bound): the port stops after more node
 //!   visits than a tree of that size has (twice the node count plus one) with
@@ -129,8 +133,16 @@ const OP_GET: &str = "surface::surface_cache::p3::SurfaceCache::get_tree";
 pub const MAX_SUBDIVISION_DEPTH: u32 = 512;
 
 /// Most tree nodes `SubdivideToTolerances` splits up to (see the module deviations):
-/// `2^20`, about 1.7 GB of Bezier patches (a generated `surface.surface_p1` case at
-/// `1e-4` scale needs more than `2^18`).
+/// `2^22` on 64-bit targets, twice the 2 014 255 nodes upstream makes for the trimmed
+/// cache of a `1e-4`-scale face in the `topology.edgeuse_p3` fixtures (a generated
+/// `surface.surface_p1` case at `1e-4` scale needs more than `2^18`).
+#[cfg(target_pointer_width = "64")]
+pub const MAX_SUBDIVISION_NODES: usize = 1 << 22;
+
+/// Most tree nodes `SubdivideToTolerances` splits up to (see the module deviations):
+/// `2^20` on 32-bit targets (wasm32), about 1.7 GB of Bezier patches, as much as a
+/// 4 GB address space holds.
+#[cfg(not(target_pointer_width = "64"))]
 pub const MAX_SUBDIVISION_NODES: usize = 1 << 20;
 
 /// `SM_SS_UMIN` .. `SM_SS_VMAX`: the singular sides of a surface.
