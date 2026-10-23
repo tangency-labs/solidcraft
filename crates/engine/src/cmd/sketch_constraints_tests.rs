@@ -888,3 +888,29 @@ fn undoing_a_defining_dimension_removes_the_parameter_too() {
     assert_eq!(param_row(&mut s, "w")["expression"], "20");
     assert!((line_length(&s, "la") - 20.0).abs() < 1e-6);
 }
+
+/// #754: an arc and one of its end points, in either order, dimension the arc's length (the
+/// pair was refused). A line's end that meets the arc's end counts too; another point does not.
+#[test]
+fn an_arc_and_its_end_point_dimension_the_arc_length() {
+    let arc_length = |s: &Session, a: &str| {
+        let sk = sketch(s);
+        match sk.segs(sk.curve_index(a).unwrap())[0] {
+            solidcraft_geom::Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            _ => f64::NAN,
+        }
+    };
+    for (entities, value) in [(json!(["a1", "a1.end"]), 20.0), (json!(["a1.start", "a1"]), 18.0), (json!(["a1", "l1.start"]), 25.0)] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10], "id": "a1"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 10], [-15, 10]], "ids": ["l1"]}));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": entities, "value": value}));
+        assert_eq!(r["type"], "ArcLengthDimension", "{entities}: {r}");
+        assert!((arc_length(&s, "a1") - value).abs() < 1e-6, "{entities}: {}", arc_length(&s, "a1"));
+    }
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10], "id": "a1"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p9"}));
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a1", "p9"]})).map(|v| v["type"].clone());
+    assert!(!matches!(e, Ok(ref t) if t == "ArcLengthDimension"), "a point off the arc's ends is not an arc length: {e:?}");
+}

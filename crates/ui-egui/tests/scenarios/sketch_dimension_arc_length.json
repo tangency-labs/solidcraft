@@ -1,0 +1,16 @@
+[
+ {"note": "#754: with the Dimension tool, an arc and then one of its end points dimension the arc's length."},
+ {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+ {"call": "engine.execute", "params": {"command": "sketch.arc.center_point", "params": {"center": [0, 0], "start": [10, 0], "end": [0, 10], "id": "a1"}}},
+ {"call": "ui.view", "params": {"view": "top"}},
+ {"call": "ui.view", "params": {"view": "fit"}},
+ {"start": "sketch.dimension"},
+ {"click": {"sketch": [7.0710678, 7.0710678]}},
+ {"click": {"sketch": [0, 10]}},
+ {"text": "20"},
+ {"key": "Enter"},
+ {"key": "Escape"},
+ {"expect": {"errors": 0}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 1, "type"], "value": "arc_length"}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 1, "value"], "value": 20}}}
+]

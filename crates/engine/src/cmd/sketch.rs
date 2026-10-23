@@ -115,7 +115,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them), id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them is the distance between them, above or below them horizontal, beside them vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs], type?: auto|distance|horizontal|vertical|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them is the distance between them, above or below them horizontal, beside them vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -1895,6 +1895,13 @@ fn symmetric_about_point(sk: &mut Sketch, a: usize, b: usize, c: usize, cmd: &st
     add_c(sk, ConstraintKind::Midpoint { p: c, l })
 }
 
+/// Is point `q` an end of arc `c`: one of its end points, or a point where one of them is?
+fn arc_end(sk: &Sketch, c: usize, q: usize) -> bool {
+    let Some(CurveKind::Arc { a, b, .. }) = sk.curves.get(c).map(|x| &x.kind) else { return false };
+    let at = |i: usize| sk.point(i);
+    *a == q || *b == q || at(q).is_some_and(|pq| [*a, *b].iter().any(|e| at(*e).is_some_and(|pe| pe.dist(pq) < 1e-9)))
+}
+
 fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.symmetry";
     let (ids, info) = edit(s, p, cmd, true, |sk, _| {
@@ -2194,6 +2201,11 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 } else {
                     (ConstraintKind::PointLineDistance { p: q, l, value: d }, d)
                 }
+            }
+            // An arc and one of its own end points (or a point on that end): its length (#754).
+            ((Some(q), None), Some((None, Some(c)))) | ((None, Some(c)), Some((Some(q), None))) if arc_end(sk, c, q) => {
+                let len = arc_len(sk, c).ok_or_else(|| bad(cmd, "arc length needs an arc"))?;
+                (ConstraintKind::ArcLength { c, value: len }, len)
             }
             ((None, Some(a)), Some((None, Some(b)))) if ty == "overall_length" => {
                 let current = sk

@@ -194,8 +194,8 @@ Scripts use the same command, with a midpoint reference in the `points` array:
 The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom analysis). Constraints:
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
-aligned, horizontal, vertical, point-to-line, line-to-circle, radius, diameter and angle
-dimensions. Each is a parameter
+aligned, horizontal, vertical, point-to-line, line-to-circle, radius, diameter, arc length and
+angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 Press D, click what you want to measure and type the value: as soon as the click settles the
