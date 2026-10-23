@@ -1108,6 +1108,11 @@ preference_settings! {
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_INTERFACE;
+    /// Drawing sheet strip placement; independent of Design's feature history.
+    drawing_sheet_dock: String = "top".into(), PAGE_INTERFACE;
+    /// Drawing properties use the same left/right, resizable panel pattern as Assistant.
+    drawing_panel_side: String = "right".into(), PAGE_INTERFACE;
+    drawing_panel_width: f32 = 320.0, PAGE_INTERFACE, accept(240.0..=560.0);
     /// Fold the shared-column history to its header.
     timeline_collapsed: bool = false, PAGE_INTERFACE;
     /// The browser's share of the column's height when History sits under it, which the user
@@ -3444,6 +3449,12 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
+    if !accepted::drawing_panel_width(&new)
+        || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
+        || !["left", "right"].contains(&new.drawing_panel_side.as_str())
+    {
+        return Err("Drawing preferences require a valid docking position and panel width of 240…560".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

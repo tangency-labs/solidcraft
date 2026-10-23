@@ -541,15 +541,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     match method {
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
-            if let Some(workspace) = s("workspace") {
-                if !matches!(workspace, "design" | "render") {
-                    return err("workspace must be design or render");
-                }
-                if let Err(e) = crate::render_workspace::enter(app, workspace == "render") {
-                    return err(e);
-                }
+            if let Some(workspace) = s("workspace")
+                && let Err(e) = crate::workspace::enter(app, workspace)
+            {
+                return err(e);
             }
-            ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+            ok(
+                json!({"workspace":if crate::drawing_workspace::active(app) {"drawing"} else if crate::render_workspace::active(app) {"render"} else {"design"}}),
+            )
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
@@ -709,10 +708,24 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                             v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                         }
                     }
-                    if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
-                        && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
+                    let destination = if crate::workspace::drawing_tab(&u.tab) {
+                        "drawing"
+                    } else if crate::workspace::render_tab(&u.tab) {
+                        "render"
+                    } else {
+                        "design"
+                    };
+                    let current = if crate::drawing_workspace::active(app) {
+                        "drawing"
+                    } else if crate::render_workspace::active(app) {
+                        "render"
+                    } else {
+                        "design"
+                    };
+                    if destination != current
+                        && let Err(error) = crate::workspace::enter(app, destination)
                     {
-                        return err(e);
+                        return err(error);
                     }
                     u.ribbon_context = app.ui.ribbon_context.clone();
                     app.ui = u;
@@ -723,6 +736,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
         }
         "ui.view" => {
+            if crate::drawing_workspace::active(app) {
+                if crate::dialogs_sheet::flat_active(app) && matches!(s("view").unwrap_or("home"), "fit" | "home") {
+                    app.flat_view.fitted = false;
+                    return ok(json!({"flat_pattern":true,"fitted":false}));
+                }
+                return err("Drawing has no sheet renderer or camera yet");
+            }
             let v = s("view").unwrap_or("home");
             app.viewport.orbit_free = None;
             if p.get("animate").and_then(Value::as_bool).unwrap_or(false) {

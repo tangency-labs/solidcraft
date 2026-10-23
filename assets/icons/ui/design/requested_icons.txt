@@ -178,6 +178,7 @@ pattern_rect	false
 perforate	false
 perspective	false
 pipe	false
+placeholder	true
 plane	false
 plane_along_path	false
 plane_angle	false
