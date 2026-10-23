@@ -135,6 +135,11 @@ type V3 = solidcraft_engine::geom::Vec3;
 /// sketch's world normal, the direction the view turned to look from, and the new body's bounds.
 fn sketched_and_extruded(start: impl FnOnce(&mut Harness)) -> (V3, V3, solidcraft_engine::geom::Aabb3) {
     let mut h = opened_from("'SolidWorks 2021','SolidWorks 2021'", |h| h.app.preferences.look_at_anim = false);
+    // Stand it up through the offer when one is waiting (a SolidWorks file is offered, not turned silently).
+    if h.app.stand_up.is_some() {
+        solidcraft_ui_egui::stand_up::stand_up(&mut h.app).unwrap();
+        h.frames(2);
+    }
     assert!((height(&h) - 40.0).abs() < 1e-6, "stood up: {}", height(&h));
     assert_ne!(h.app.session.active_component, 0, "the import's component is the one worked in");
     let before: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
