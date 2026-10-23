@@ -358,7 +358,10 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
         let mut background = ui.painter().clone();
         background.set_opacity(if ui.is_visible() { 1.0 } else { 0.0 });
-        background.rect_filled(slider, 0.0, t.dialog_body);
+        // At the top of the range egui's own handle reaches `slider.right()` exactly, and a fill
+        // that stops there leaves its last column showing beside the editor (#5708). The gap
+        // before the editor is `item_spacing.x`, so a pixel past the edge covers nothing else.
+        background.rect_filled(slider.with_max_x(slider.right() + 1.0), 0.0, t.dialog_body);
         // Match egui's native input range (handle_radius = thickness / 2.5), so the
         // painted thumb stays under the pointer even at the two ends of the range.
         let input_radius = ui.text_style_height(&egui::TextStyle::Body).max(ui.spacing().interact_size.y) / 2.5;
