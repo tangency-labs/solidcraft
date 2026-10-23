@@ -675,6 +675,11 @@ impl TopologyObjects<Obj> for Scene {
         }
     }
 
+    fn edge_tolerance(&self, _edge: Obj) -> solidcore::Result<f64> {
+        // only the face solves read it, and the scene has no faces
+        Err(not_found("no edge tolerances in the scene"))
+    }
+
     fn surface_face(&self, _surface: Obj) -> solidcore::Result<Option<Obj>> {
         Err(not_found("no surfaces in the scene"))
     }

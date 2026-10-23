@@ -495,13 +495,16 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                     }
                     continue;
                 }
-                let src_tol = p1::object_zone_tol_3d(
-                    self.curve_edge
-                        .or(self.curve_face)
-                        .or(self.curve.map(|c| c.handle)),
-                )?;
+                let src_tol = if let Some(edge) = self.curve_edge {
+                    ts.objects.edge_tolerance(edge)?
+                } else if let Some(face) = self.curve_face {
+                    ts.objects.face_tolerance(face)?
+                } else {
+                    p1::curve_zone_tol_3d(ts.kernel, ts.objects, self.curve.map(|c| c.handle))?
+                };
                 let uv = Vec2::new(solution.start.param(1)?, solution.start.param(2)?);
-                if p1::face_point_classify(face, uv, src_tol, false, false)? == POINT_CLASS_UNKNOWN
+                if p1::face_point_classify(ts.kernel, ts.objects, face, uv, src_tol, false, false)?
+                    == POINT_CLASS_UNKNOWN
                 {
                     continue;
                 }

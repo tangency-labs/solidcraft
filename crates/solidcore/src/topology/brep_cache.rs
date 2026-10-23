@@ -557,6 +557,12 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
         };
         Ok(self.brep.edge(e)?.interval)
     }
+    fn edge_tolerance(&self, object: CacheObject) -> Result<f64> {
+        let CacheObject::Edge(e) = object else {
+            return Err(SolidError::invalid_input(OP, "expected edge handle"));
+        };
+        Ok(self.brep.edge(e)?.tolerance)
+    }
     fn surface_face(&self, object: CacheObject) -> Result<Option<CacheObject>> {
         let owner = self.surface(object)?.face()?;
         owner
@@ -595,6 +601,12 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             return Err(SolidError::invalid_input(OP, "expected face handle"));
         };
         Ok(self.brep.face(f)?.tolerance)
+    }
+    fn face_entity(&self, object: CacheObject) -> Option<(&Brep, FaceId)> {
+        match object {
+            CacheObject::Face(f) => Some((self.brep, f)),
+            _ => None,
+        }
     }
     fn surface_owner(&self, object: CacheObject) -> Result<Option<CacheObject>> {
         self.surface(object)?

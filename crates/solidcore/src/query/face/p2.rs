@@ -1332,7 +1332,7 @@ fn intersect_edges<O: ClassObject>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::curve::curve::Curve;
     use crate::curve::line::{BoundedLineOptions, Line};
@@ -1346,7 +1346,7 @@ mod tests {
     };
 
     /// A unit-square planar face over `[0, 1]^2` with UV trim lines.
-    fn square(b: &mut Brep) -> FaceId {
+    pub(crate) fn square(b: &mut Brep) -> FaceId {
         let s = b.add_shell().unwrap();
         let o = Point3::new(0.0, 0.0, 0.0);
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);

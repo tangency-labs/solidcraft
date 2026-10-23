@@ -233,6 +233,10 @@ impl TopologyObjects<StaticHandle> for StaticScene {
         self.edge_curve(edge)?;
         Ok(Extent1d::from_min_max(0.0, 1.0))
     }
+    fn edge_tolerance(&self, edge: StaticHandle) -> SolidResult<f64> {
+        self.edge_curve(edge)?;
+        Ok(1e-5)
+    }
     fn surface_face(&self, surface: StaticHandle) -> SolidResult<Option<StaticHandle>> {
         match surface.0 {
             2002 => Ok(Some(StaticHandle(2000))),

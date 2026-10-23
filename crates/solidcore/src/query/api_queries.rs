@@ -858,6 +858,9 @@ mod tests {
         fn edge_interval(&self, _: Object) -> Result<Extent1d> {
             Ok(self.curve.natural_interval())
         }
+        fn edge_tolerance(&self, _: Object) -> Result<f64> {
+            Ok(1e-5)
+        }
         fn surface_face(&self, _: Object) -> Result<Option<Object>> {
             Ok(None)
         }

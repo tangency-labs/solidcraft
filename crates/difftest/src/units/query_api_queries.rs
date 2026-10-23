@@ -520,6 +520,12 @@ impl TopologyObjects<Object> for Objects<'_> {
         };
         Ok(self.b(o)?.edge(e)?.interval)
     }
+    fn edge_tolerance(&self, o: Object) -> Result<f64> {
+        let CacheObject::Edge(e) = o.1 else {
+            return Err(SolidError::sm_err("edge handle"));
+        };
+        Ok(self.b(o)?.edge(e)?.tolerance)
+    }
     fn surface_face(&self, o: Object) -> Result<Option<Object>> {
         let Some(owner) = self.surface(o)?.face()? else {
             return Ok(None);
@@ -563,6 +569,12 @@ impl TopologyObjects<Object> for Objects<'_> {
             return Err(SolidError::sm_err("face handle"));
         };
         Ok(self.b(o)?.face(f)?.tolerance)
+    }
+    fn face_entity(&self, o: Object) -> Option<(&Brep, FaceId)> {
+        let CacheObject::Face(f) = o.1 else {
+            return None;
+        };
+        Some((self.b(o).ok()?, f))
     }
     fn surface_owner(&self, o: Object) -> Result<Option<Object>> {
         self.surface_face(o)
