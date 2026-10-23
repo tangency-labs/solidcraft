@@ -1084,8 +1084,8 @@ pub struct Model {
     pub no_cache: bool,
     /// Results kept besides the cache ([`Model::keep`]).
     kept: KeptSlot,
-    /// The imported texts' digests the last `evaluate` fingerprinted the features with.
-    step_digests: StepDigests,
+    /// Embedded imports' content digests from the last evaluation.
+    import_digests: ImportDigests,
     /// The address of the shared document whose fingerprints the results were last given in
     /// full, with [`fingerprints_digest`] of them then ([`Model::pinned_prefix`]). Only an
     /// address: a reference to the document would make every in-place edit of it a copy.
@@ -1124,7 +1124,7 @@ fn param_names(f: &Feature) -> Vec<String> {
     names
 }
 
-fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool, steps: &StepDigests) -> u64 {
+fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool, steps: &ImportDigests) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
@@ -1145,34 +1145,73 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     h.finish()
 }
 
-/// The digests of the Import features' STEP texts, by feature id, with the text each was taken
-/// from. Every evaluation fingerprints every feature, and writing out a design's imported files
-/// each time made every command as slow as the files are large: a text is shared (`Arc`), so
-/// its digest is taken once and kept while the feature holds that same text.
+/// Content digests for embedded imports. Shared, unchanged arrays/text are read once;
+/// feature metadata is still fingerprinted on every evaluation. Rebuilding this map prunes
+/// removed features and never trusts an address without retaining and checking its Arc.
 #[derive(Clone, Debug, Default)]
-struct StepDigests(std::collections::HashMap<u64, (Arc<str>, u64)>);
+struct ImportDigests {
+    steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
+    meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
+}
 
-impl StepDigests {
-    /// The digests of `doc`'s imported texts, reusing `known` for texts it has seen.
-    fn of(doc: &Document, known: &StepDigests) -> StepDigests {
-        let texts = doc.features.iter().filter_map(|f| match &f.kind {
-            FeatureKind::Import { step, .. } => Some((f.id, step)),
-            _ => None,
-        });
-        StepDigests(
-            texts
-                .map(|(id, step)| {
-                    let digest = known.get(id, step).unwrap_or_else(|| step_text_digest(step));
-                    (id, (step.clone(), digest))
-                })
-                .collect(),
-        )
+#[derive(Clone, Debug)]
+struct MeshDigest {
+    positions: Arc<[f64]>,
+    triangles: Arc<[u32]>,
+    digest: u64,
+}
+
+impl MeshDigest {
+    fn matches(&self, mesh: &crate::MeshData) -> bool {
+        Arc::ptr_eq(&self.positions, &mesh.positions) && Arc::ptr_eq(&self.triangles, &mesh.triangles)
+    }
+}
+
+impl ImportDigests {
+    fn of(doc: &Document, known: &ImportDigests) -> ImportDigests {
+        let mut out = ImportDigests::default();
+        for f in &doc.features {
+            match &f.kind {
+                FeatureKind::Import { step, .. } => {
+                    let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
+                    out.steps.insert(f.id, (step.clone(), digest));
+                }
+                FeatureKind::MeshImport { meshes, .. } => {
+                    let digests = meshes
+                        .iter()
+                        .enumerate()
+                        .map(|(index, mesh)| {
+                            let digest = known.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh));
+                            MeshDigest { positions: mesh.positions.clone(), triangles: mesh.triangles.clone(), digest }
+                        })
+                        .collect();
+                    out.meshes.insert(f.id, digests);
+                }
+                _ => {}
+            }
+        }
+        out
     }
 
-    /// The digest of `step`, when it is the text feature `id` was last seen with.
     fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
-        self.0.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
+        self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
+
+    fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
+        self.meshes.get(&id)?.get(index).filter(|cached| cached.matches(mesh)).map(|cached| cached.digest)
+    }
+}
+
+fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
+    #[cfg(test)]
+    cost_tests::count(|c| c.mesh_digested += 1);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    mesh.positions.len().hash(&mut h);
+    for coordinate in mesh.positions.iter() {
+        coordinate.to_bits().hash(&mut h);
+    }
+    mesh.triangles.hash(&mut h);
+    h.finish()
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -1208,12 +1247,12 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
 }
 
 /// A feature as fingerprinted: its definition, a sketch's stored solve quantized, an imported
-/// file's text by its digest.
+/// file's text or mesh payload by its content digest.
 /// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
 /// design built command by command almost all of them are the same as last time: the text of a
 /// feature is kept (by id) with the feature it was written from, and written again only when the
-/// feature differs. An Import's text also depends on its STEP digest, so it is written each time
-/// as before.
+/// feature differs. Embedded imports also depend on their content digests, so their small
+/// metadata-and-digest representation is written each time without comparing large arrays.
 ///
 /// The texts are shared by every thread: a command evaluated ahead runs on a new worker thread
 /// each time (the desktop's deferred commands and delete checks, the control channel's ahead
@@ -1221,10 +1260,10 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
 /// feature again. The lock is held only to look up or store an entry, never while a feature is
 /// compared or written; an entry is the same whichever thread wrote it, since the text is a
 /// function of the feature alone.
-fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
+fn hash_feature_json(f: &Feature, steps: &ImportDigests, h: &mut impl Hasher) {
     type Written = std::collections::HashMap<u64, Arc<(Feature, String)>>;
     static WRITTEN: std::sync::LazyLock<std::sync::Mutex<Written>> = std::sync::LazyLock::new(Default::default);
-    if matches!(f.kind, FeatureKind::Import { .. }) {
+    if matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }) {
         feature_json(f, steps).hash(h);
         return;
     }
@@ -1247,7 +1286,21 @@ fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
     written.insert(f.id, entry);
 }
 
-fn feature_json(f: &Feature, steps: &StepDigests) -> String {
+fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
+    if matches!(&f.kind, FeatureKind::MeshImport { .. }) {
+        let mut g = f.clone();
+        let mut digests = Vec::new();
+        if let FeatureKind::MeshImport { meshes, .. } = &mut g.kind {
+            for (index, mesh) in meshes.iter_mut().enumerate() {
+                digests.push(steps.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh)));
+                mesh.positions = Arc::from([]);
+                mesh.triangles = Arc::from([]);
+            }
+        }
+        // Keep the complete definition (including mesh order, names and colors) without
+        // writing the large numeric arrays out again. Equal content in fresh Arcs hashes alike.
+        return serde_json::to_string(&(g, digests)).unwrap_or_default();
+    }
     if let FeatureKind::Import { step, .. } = &f.kind {
         let mut g = f.clone();
         if let FeatureKind::Import { step: text, .. } = &mut g.kind {
@@ -1344,7 +1397,7 @@ fn chain_fingerprint(
     f: &Feature,
     prev: u64,
     rolled_back: bool,
-    steps: &StepDigests,
+    steps: &ImportDigests,
     st: Option<&ModelState>,
 ) -> u64 {
     let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f, st);
@@ -1422,7 +1475,7 @@ fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     for f in doc.features.iter().filter(|f| {
         matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
     }) {
-        fingerprint(doc, 0, f, vals, false, &StepDigests::default()).hash(&mut h);
+        fingerprint(doc, 0, f, vals, false, &ImportDigests::default()).hash(&mut h);
     }
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
@@ -1915,7 +1968,7 @@ impl Model {
         }
         // The fingerprints from the first stored sketch on.
         let vals = evaluation_values(doc).0;
-        let steps = StepDigests::of(doc, &self.step_digests);
+        let steps = ImportDigests::of(doc, &self.import_digests);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
@@ -1965,7 +2018,7 @@ impl Model {
             return false;
         }
         let vals = evaluation_values(doc).0;
-        let steps = StepDigests::of(doc, &self.step_digests);
+        let steps = ImportDigests::of(doc, &self.import_digests);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
@@ -2030,7 +2083,7 @@ impl Model {
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
-        self.step_digests = StepDigests::of(doc, &self.step_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests);
         let primed = self.primed.as_ref().filter(|(context, _)| !self.no_cache && *context == ctx).map(|(_, results)| results.clone());
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
@@ -2065,7 +2118,7 @@ impl Model {
             };
             // Opening was cancelled: the rest is skipped and the result discarded.
             let cancelled = watched.step(i);
-            let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.step_digests, Some(&state));
+            let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
             prev_fp = fp;
             let current = |old: &&FeatureResult| old.id == f.id && old.fingerprint == fp && !old.stale;
             // A state the saved model did not keep is evaluated again from the one before it; the
@@ -2141,7 +2194,7 @@ impl Model {
             }
             // The same feature on the same inputs: its earlier result.
             let key =
-                cache_key(f, fp, fingerprint(doc, 0, f, &vals, false, &self.step_digests) ^ placement_digest(doc, f, Some(&state)), ctx, &state);
+                cache_key(f, fp, fingerprint(doc, 0, f, &vals, false, &self.import_digests) ^ placement_digest(doc, f, Some(&state)), ctx, &state);
             let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
             if !self.no_cache
                 && let Some(c) = self
@@ -2495,7 +2548,7 @@ impl Model {
     pub(crate) fn refingerprint_from(&mut self, doc: &Document, start: usize) {
         self.placement_inputs = None;
         self.fingerprinted = None;
-        self.step_digests = StepDigests::of(doc, &self.step_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests);
         let start = start.min(self.results.len()).min(doc.features.len());
         if start == self.results.len().min(doc.features.len()) {
             return;
@@ -2507,7 +2560,7 @@ impl Model {
         // Each feature's fingerprint reads the model it starts from, as evaluating does.
         let mut before = last.map_or_else(|| Arc::new(ModelState::default()), |r| r.state.clone());
         for (i, (r, f)) in self.results.iter_mut().zip(&doc.features).enumerate().skip(start) {
-            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &self.step_digests, Some(&before));
+            prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before));
             r.fingerprint = prev;
             before = r.state.clone();
         }
