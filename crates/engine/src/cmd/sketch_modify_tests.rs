@@ -1871,3 +1871,17 @@ fn fillet_refuses_an_offsets_corners_until_its_association_is_broken() {
         assert!((sk.radius(ai).unwrap() - 2.0).abs() < 1e-7);
     }
 }
+
+#[test]
+fn fillet_refuses_3d_lines_with_an_unsupported_message() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let wires = ids(&run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[20,0,0],[20,0,20]]}))["curves"]);
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[0,20]],"ids":["side"]}));
+    let before = s.doc.to_json();
+    for (a, b) in [(wires[1].as_str(), wires[0].as_str()), (wires[0].as_str(), "side"), ("side", wires[1].as_str())] {
+        let error = s.execute("sketch.fillet", &json!({"a":a,"b":b,"radius":"2 mm"})).unwrap_err().to_string();
+        assert!(error.contains("not supported yet: filleting 3D sketch lines"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}

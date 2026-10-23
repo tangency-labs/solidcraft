@@ -222,6 +222,12 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } if *sketch != active => None,
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { chamfer: false, .. })) => {
+            let state = session.world_state();
+            let sk = &state.sketch(active)?.sketch;
+            sk.curve_index(id)?;
+            d.active_input()?.accepts(hit, |_, _| false)
+        }
         _ => d.active_input()?.accepts(hit, |_, _| false),
     }
 }

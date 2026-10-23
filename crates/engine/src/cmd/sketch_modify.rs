@@ -995,6 +995,12 @@ fn kept_json(kept: Vec<CornerKept>) -> (Vec<String>, Vec<String>) {
 /// Round one corner (`point` or `a`, `b`) with an arc of radius `r` tangent to both curves:
 /// the arc, the tangent constraints and what became of the corner point.
 fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize, Vec<String>, CornerKept)> {
+    if ["a", "b"]
+        .iter()
+        .any(|key| str_(p, key).and_then(|id| sk.wire_index(id)).and_then(|i| sk.wires.get(i)).is_some_and(|wire| wire.fit.len() == 2))
+    {
+        return Err(bad(cmd, "not supported yet: filleting 3D sketch lines"));
+    }
     refuse_infinite_corner(sk, p, cmd)?;
     refuse_offset_corner(sk, p, cmd)?;
     weld_corner(sk, p);
