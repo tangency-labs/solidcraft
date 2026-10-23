@@ -336,13 +336,18 @@ pub(crate) fn primary_button(ui: &mut Ui, label: &str) -> Response {
     response
 }
 
-/// Accent action across the full width of its container, for the bottom of a panel. Tokens:
-/// `form_primary, on_accent, form_button_height, font_label`.
+/// Accent action across its container inside `button_pair`'s inset, label centred. Tokens:
+/// `form_primary, on_accent, form_button_height, font_label, control_radius, space_6/10`.
 pub(crate) fn wide_primary_button(ui: &mut Ui, label: &str) -> Response {
     let t = Tokens::get();
     let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.on_accent);
-    let size = vec2(ui.available_width(), t.form_button_height);
-    let response = ui.add(egui::Button::new(crate::fonts::RichTextExt::bold_face(text)).fill(t.form_primary).min_size(size));
+    let response = egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8))
+        .show(ui, |ui| {
+            let button = egui::Button::new(text.bold_face()).fill(t.form_primary).stroke(egui::Stroke::NONE).corner_radius(t.control_radius);
+            ui.add_sized(vec2(dimension(ui.available_width()), t.form_button_height), button)
+        })
+        .inner;
     pointer_on_hover(ui, &response);
     response
 }

@@ -610,7 +610,12 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let at = crate::scenario::handle_at("sketch_palette:finish").expect("the palette ends in Finish Sketch");
-        assert!(crate::scenario::rect_of("sketch_palette:look_at").is_some(), "Look At | Slice stay");
+        let look = crate::scenario::rect_of("sketch_palette:look_at").expect("Look At | Slice stay");
+        let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
+        let finish = crate::scenario::rect_of("sketch_palette:finish").unwrap();
+        assert_eq!((finish.left(), finish.right()), (look.left(), slice.right()), "Finish {finish:?} shares the pair's inset");
+        assert_eq!(finish.height(), Tokens::get().form_button_height);
+        assert_eq!(look.top() - finish.bottom(), 2.0 * Tokens::get().space_6, "same spacing as the pair");
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());
