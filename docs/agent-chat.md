@@ -57,7 +57,11 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   model list, or an endpoint's `/models`), a model drop-down shows the one in use and changes it;
   SolidCraft remembers the last choice for each agent and puts it back on the next session. An
   endpoint's agent also keeps it as its default model. An agent that reports no models shows no
-  drop-down.
+  drop-down. When the models come from more than one provider (Hermes and OpenCode name each
+  model `Provider · model`, or say `Provider: …` in its description), a provider drop-down comes
+  first and the model drop-down lists only that provider's models, without the provider in front.
+  It opens on the provider of the model in use; picking another provider changes nothing until one
+  of its models is chosen. Models with no provider named are listed under *Other*.
 
 Messages use right-aligned user bubbles and plain assistant text. Consecutive tool calls share
 an activity group: click a row to inspect its output; failed calls have an error tint. Approval

@@ -1038,8 +1038,12 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             |e| e.name.clone(),
         );
         let models = models_shown(app);
-        let w =
-            (ui.available_width() - if app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 }).clamp(90.0, 260.0);
+        let providers = if models { model_providers(app) } else { Vec::new() };
+        let w = (ui.available_width()
+            - if app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 }
+            - if models { 146.0 } else { 0.0 }
+            - if providers.is_empty() { 0.0 } else { 146.0 })
+        .clamp(90.0, 260.0);
         let mut picked: Option<String> = None;
         let mut add = false;
         let combo = ui
@@ -1100,17 +1104,47 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 set_mode(app, &m);
             }
         }
+        // Models from several providers: pick the provider first, then one of its models.
+        if let Some(shown) = shown_provider(app).filter(|_| !providers.is_empty()) {
+            let mut pick: Option<String> = None;
+            let width = picker_width(ui, &shown);
+            let r = ui
+                .allocate_ui(vec2(width, t.control_height), |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    ui_kit::dropdown_menu(ui, "sc_agent_provider", &shown, |ui| {
+                        for (name, count) in &providers {
+                            let row = ui_kit::list_picker(ui, &format!("provider:{name}"), name, *name == shown)
+                                .on_hover_text(trf("ui.agent_chat_provider_models", &[("count", &count.to_string())]));
+                            crate::scenario::publish_handle(&format!("agent_chat:provider:{name}"), row.rect.center());
+                            if row.clicked() {
+                                pick = Some(name.clone());
+                            }
+                        }
+                    })
+                })
+                .inner;
+            crate::scenario::publish_rect("agent_chat:provider", r.rect);
+            crate::scenario::publish_handle("agent_chat:provider", r.rect.center());
+            r.on_hover_text(tr("ui.agent_chat_provider_tip"));
+            if let Some(p) = pick {
+                set_model_provider(app, &p);
+            }
+        }
         // The agent's models (ACP `models`, or an endpoint's list): shown only when it reports some.
         if models {
-            let list = app.agent_chat.models.clone();
-            let cur = list.iter().find(|m| m.id == app.agent_chat.model).map_or_else(|| app.agent_chat.model.clone(), |m| m.name.clone());
+            let list = listed_models(app);
+            let cur = list.iter().find(|(m, _)| m.id == app.agent_chat.model).map_or_else(
+                || if providers.is_empty() { app.agent_chat.model.clone() } else { tr("ui.agent_chat_choose_model").to_string() },
+                |(_, name)| name.clone(),
+            );
             let mut pick: Option<String> = None;
+            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
             let r = ui
-                .allocate_ui(vec2(t.form_label_width, t.control_height), |ui| {
+                .allocate_ui(vec2(width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     ui_kit::dropdown_menu(ui, "sc_agent_model", &cur, |ui| {
-                        for m in &list {
-                            let row = ui_kit::list_picker(ui, &m.id, &m.name, m.id == app.agent_chat.model);
+                        for (m, name) in &list {
+                            let row = ui_kit::list_picker(ui, &m.id, name, m.id == app.agent_chat.model);
                             let row = if m.description.is_empty() { row } else { row.on_hover_text(&m.description) };
                             crate::scenario::publish_handle(&format!("agent_chat:model:{}", m.id), row.rect.center());
                             if row.clicked() {
@@ -1170,6 +1204,17 @@ pub(super) fn no_agents(ui: &mut egui::Ui) {
         }
         ui_kit::text(ui, FLATPAK_OVERRIDE, ui_kit::Text::Report("flatpak_override", false));
     }
+}
+
+/// The width of a provider or model picker: its label's, from the usual picker width up to 200
+/// points and never wider than the panel, so a short name is read whole and a long one truncates.
+#[cfg(not(target_arch = "wasm32"))]
+fn picker_width(ui: &egui::Ui, label: &str) -> f32 {
+    let t = Tokens::get();
+    let label: String = label.chars().take(64).collect();
+    let text = ui.painter().layout_no_wrap(label, egui::FontId::proportional(t.font_label), t.text).size().x + 34.0;
+    let most = ui.max_rect().width().clamp(t.form_label_width, 200.0);
+    text.clamp(t.form_label_width, most)
 }
 
 /// Before the first connection: what's installed, how to install the rest, and Add agent.
@@ -1995,8 +2040,14 @@ mod tests {
         });
         app.agent_chat.modes = vec![("edit".into(), "A provider mode with a long descriptive label".into())];
         app.agent_chat.mode = "edit".into();
-        app.agent_chat.models =
-            vec![acp::ModelInfo { id: "model".into(), name: "A model with a long descriptive label".into(), description: String::new() }];
+        app.agent_chat.models = vec![
+            acp::ModelInfo {
+                id: "model".into(),
+                name: "A provider with a long name · A model with a long descriptive label".into(),
+                description: String::new(),
+            },
+            acp::ModelInfo { id: "other".into(), name: "Another provider · model".into(), description: String::new() },
+        ];
         app.agent_chat.model = "model".into();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(296.0, 720.0))), ..Default::default() };
         crate::scenario::clear_handles();
@@ -2005,7 +2056,7 @@ mod tests {
             ui_kit::scope(ui, |ui| switcher(&mut app, ui));
         });
         output.textures_delta.clear();
-        let rects: Vec<_> = ["switcher", "mode", "model"]
+        let rects: Vec<_> = ["switcher", "mode", "provider", "model"]
             .into_iter()
             .map(|name| {
                 let rect = crate::scenario::rect_of(&format!("agent_chat:{name}")).expect("picker retained");
