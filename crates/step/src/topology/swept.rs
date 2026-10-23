@@ -237,6 +237,14 @@ fn whole(c: &Curve) -> R<Option<BCurve>> {
 /// The middle parameter of a TRIMMED_CURVE trimmed by parameters (on a closed conic, the
 /// middle of the arc its sense runs over).
 fn trimmed_middle(c: &Curve) -> Option<f64> {
+    let (a, b) = trimmed_range(c)?;
+    let m = 0.5 * (a + b);
+    m.is_finite().then_some(m)
+}
+
+/// A trimmed profile's range on its basis, low end first, where both trims are parameters: on
+/// a closed basis (a circle, an ellipse) the way round `sense` gives.
+fn trimmed_range(c: &Curve) -> Option<(f64, f64)> {
     let Curve::Trimmed { basis, trim_1, trim_2, sense, .. } = c else { return None };
     let param = |t: &[crate::geom::Trim]| {
         t.iter().find_map(|x| match x {
@@ -248,8 +256,8 @@ fn trimmed_middle(c: &Curve) -> Option<f64> {
     if is_closed(basis) {
         b = if *sense { a + (b - a).rem_euclid(TAU) } else { a - (a - b).rem_euclid(TAU) };
     }
-    let m = 0.5 * (a + b);
-    m.is_finite().then_some(m)
+    let (lo, hi) = (a.min(b), a.max(b));
+    (lo.is_finite() && hi.is_finite() && lo < hi).then_some((lo, hi))
 }
 
 fn is_closed(c: &Curve) -> bool {
@@ -309,7 +317,12 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
             // The profile's side of the axis where the face is.
             let mid = ts.get(ts.len() / 2).copied().ok_or("a face without boundary points")?;
             let e = probe(mid).map(radial).and_then(|r| r.normalized()).unwrap_or(e);
-            let s = span(&ts, &seam, is_closed(c))?;
+            // A trimmed profile is the file's range of its basis exactly; otherwise the face's
+            // reach along it.
+            let s = match trimmed_range(profile) {
+                Some(r) => Span::Open { inner: r, outer: r },
+                None => span(&ts, &seam, is_closed(c))?,
+            };
             // Stop where the profile crosses the axis outside the face.
             let side = |t: f64| probe(t).map(|q| (q - o).dot(e));
             let s = match s {
@@ -394,7 +407,11 @@ fn extrusion(profile: &Curve, direction: P3, magnitude: f64, ext: &Extent) -> R<
                 return Err(unsupported("an extrusion along its profile's plane"));
             }
             let seam: Vec<f64> = ext.seam.iter().filter_map(|q| onto(*q)).collect();
-            bounded(c, span(&ts, &seam, is_closed(c))?)?
+            let s = match trimmed_range(profile) {
+                Some(r) => Span::Open { inner: r, outer: r },
+                None => span(&ts, &seam, is_closed(c))?,
+            };
+            bounded(c, s)?
         }
     };
     let (knots, homogeneous, rational) = match curve {

@@ -965,34 +965,47 @@ impl<'b, 'a> Builder<'b, 'a> {
         // Which loop index in `face.loops` each edge loop is.
         let positions: Vec<usize> = face.loops.iter().enumerate().filter(|(_, l)| matches!(l, LoopB::Edges(_))).map(|(i, _)| i).collect();
         let tol = self.tol;
-        // The face's pcurves on `on`, each edge on its NURBS form when `formed`.
-        let pcurves_on = |on: &BSurface, formed: bool| -> R<Vec<Vec<Curve2>>> {
+        // The face's pcurves on `on`, each edge on its NURBS form.
+        let pcurves_on = |on: &BSurface, domain: Option<[[f64; 2]; 2]>| -> R<Vec<Vec<Curve2>>> {
             let mut uses = Vec::with_capacity(edge_loops.len());
             for l in &edge_loops {
                 let mut u = Vec::with_capacity(l.len());
                 for &(e, forward) in l {
                     let edge = self.edges.get(e as usize).ok_or("edge reference")?;
                     let (curve, interval) = match &edge.form {
-                        Some((c, i)) if formed => (c, *i),
+                        Some((c, i)) => (c, *i),
                         _ => (&edge.curve, edge.interval),
                     };
                     u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: 0.0, given: None });
                 }
                 uses.push(u);
             }
-            pcurve::pcurves(on, &uses, tol).map_err(|e| e.to_string())
+            pcurve::pcurves_within(on, &uses, tol, domain).map_err(|e| e.to_string())
         };
-        // A cylinder, cone, sphere or torus on its NURBS form, over the extent its label's pcurves
-        // give; then every pcurve on the forms.
+        // A cylinder, cone, sphere, torus or revolution on its NURBS form, over the extent of its
+        // boundary on its label; then every pcurve on the forms.
         let form = match brep::form::frame_of(&label) {
             Some(_) => {
-                let extent = face_domain(&label, &pcurves_on(&label, false)?)?;
-                Some(brep::form::surface(&label, extent).ok_or_else(|| unsupported("a face of more than one turn"))?.0)
+                let mut boundary = Vec::with_capacity(edge_loops.len());
+                for l in &edge_loops {
+                    let mut b = Vec::with_capacity(l.len());
+                    for &(e, forward) in l {
+                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                        b.push((&edge.curve, edge.interval, forward));
+                    }
+                    boundary.push(b);
+                }
+                let extent = brep::form::extent(&label, &boundary).ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
+                Some(brep::form::surface(&label, extent).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };
+        let (form, box_on_form) = match form {
+            Some((f, d)) => (Some(f), Some(d)),
+            None => (None, None),
+        };
         let surface = form.clone().unwrap_or(label);
-        let pcs = pcurves_on(&surface, true)?;
+        let pcs = pcurves_on(&surface, box_on_form)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
         // Each use starts near where the one before it ends, along a bounded direction that
