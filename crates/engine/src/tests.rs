@@ -3759,6 +3759,32 @@ fn a_pattern_of_a_reduced_fillet_rounds_each_copy_alike() {
     assert!(rel(volume(&mut s), expect) < 2e-4, "{} vs {expect}", volume(&mut s));
 }
 
+#[test]
+fn extrude_taper_help_explains_both_signs() {
+    let mut s = Session::default();
+    let help = run(&mut s, "engine.describe", json!({"command": "solid.extrude"}));
+    for text in [help["params"].as_str().unwrap(), help["input"]["properties"]["taper"]["description"].as_str().unwrap()] {
+        assert!(text.contains("positive: outward") && text.contains("negative: inward"), "{text}");
+    }
+}
+
+#[test]
+fn extrude_taper_sign_sets_far_face_size() {
+    for angle in [5.0_f64, -5.0] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10, "taper": format!("{angle} deg"), "body_name": "Tapered"}));
+        let faces = run(&mut s, "model.faces", json!({"body": "Tapered"}));
+        let far = faces["faces"].as_array().unwrap().iter().find(|f| (f["centroid"][2].as_f64().unwrap() - 10.0).abs() < 1e-6).unwrap();
+        let width = 10.0 + 20.0 * angle.to_radians().tan();
+        let area = far["area"].as_f64().unwrap();
+        assert!((area - width * width).abs() < 1e-6, "{angle} deg: {far}");
+        assert_eq!(area > 100.0, angle > 0.0);
+    }
+}
+
 /// A taper on a profile of lines and an arc (#546). The D profile (back 9.2, sides 7.4, a
 /// half-round front R 4.6 tangent to them) grows by d = z · tan 5° with mitred corners:
 /// A(d) = A₀ + P·d + (2 + π/2)·d², integrated over the 10 mm height.

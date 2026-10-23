@@ -18,6 +18,12 @@ Extruding into existing material selects **Cut**. In an empty component it selec
 choose **New Body** explicitly to keep an addition separate. Changing the default does not alter
 operations already saved in a design.
 
+A positive extrude taper slopes the side walls outward, so the profile grows along the
+extrusion direction and the far end is larger; a negative taper slopes them inward, making
+the far end smaller. For example, a 10 × 10 mm square extruded 10 mm with `taper: "5 deg"`
+has an approximately 11.75 × 11.75 mm far face; with `taper: "-5 deg"`, it is approximately
+8.25 × 8.25 mm.
+
 A taper slopes the sides of any profile, sketch text included: lines, arcs and spline or conic
 curves move in or out together, and a flat tip shorter than the taper closes to a point. On
 spline and conic sides the slope is approximate: the moved outline is a curve of the same kind

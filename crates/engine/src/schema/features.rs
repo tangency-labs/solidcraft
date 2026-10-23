@@ -93,7 +93,8 @@ pub struct ExtrudeParams {
     /// `"through_all"`, the same as `through_all: true`.
     #[serde(default)]
     pub extent: Option<ExtentKeyword>,
-    /// Draft angle of the side walls.
+    /// Draft angle of the side walls (positive: outward, so the far end is larger along the
+    /// extrusion direction; negative: inward, so the far end is smaller).
     #[serde(default)]
     pub taper: Option<AngleExpr>,
     /// Which way to extrude. Default: positive.
