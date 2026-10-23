@@ -36,11 +36,13 @@ pub fn check_document(bytes: &[u8]) -> Result<()> {
         return Err(invalid("document metadata too large"));
     }
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(invalid)?;
-    let version = value
-        .get("format")
-        .and_then(serde_json::Value::as_str)
-        .and_then(solidcraft_doc::format::version_of)
-        .ok_or_else(|| invalid("missing or invalid document format"))?;
+    let format = value.get("format").and_then(serde_json::Value::as_str).ok_or_else(|| invalid("missing document format"))?;
+    // Drawings have a separate schema and session kind (#3890). Never deserialize one as
+    // a design: serde's defaults could otherwise turn it into an empty, writable model.
+    if format.starts_with("solidcraft-drawing/") {
+        return Err(Error::UpgradeRequired(format!("drawing schema {format}")));
+    }
+    let version = solidcraft_doc::format::version_of(format).ok_or_else(|| invalid("missing or invalid document format"))?;
     if version > solidcraft_doc::format::FORMAT {
         return Err(Error::UpgradeRequired(format!("document schema solidcraft/{version}")));
     }
@@ -128,6 +130,14 @@ mod document_tests {
     fn newer_document_schema_requires_upgrade_before_assets_are_read() {
         let snapshot = Snapshot::prepare(br#"{"format":"solidcraft/4294967295"}"#.to_vec(), BTreeMap::new()).unwrap();
         assert!(matches!(open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not fetch assets")), Err(Error::UpgradeRequired(_))));
+    }
+
+    #[test]
+    fn separate_drawings_cannot_be_opened_as_empty_designs() {
+        let snapshot = Snapshot::prepare(br#"{"format":"solidcraft-drawing/1","sheets":[]}"#.to_vec(), BTreeMap::new()).unwrap();
+        let error = open_document(&snapshot.manifest, &snapshot.document, |_| panic!("must not fetch drawing resources")).unwrap_err();
+        assert!(matches!(error, Error::UpgradeRequired(_)));
+        assert!(error.to_string().starts_with("Upgrade SolidCraft to open or save this design"));
     }
 }
 

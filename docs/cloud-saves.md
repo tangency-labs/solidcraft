@@ -27,6 +27,7 @@ Detailed comparisons, primary-source citations, exact versions, and probe limits
 
 SolidCraft-specific code remains responsible for project layout, version compatibility, destination selection, capture-before-upload, durable acknowledgement, conflict copies, and reconciliation after an uncertain upload. General API or retry libraries do not decide those rules.
 
+See [drawing and collaboration integration](cloud-collaboration.md) for compatibility with separate drawing files (#3890) and the existing seams for later collaborative work.
 
 ## Integration contract
 

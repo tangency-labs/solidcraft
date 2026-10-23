@@ -41,6 +41,8 @@ Readers inspect the storage marker and required capabilities before parsing evol
 
 The document retains its own `solidcraft/N` version and migrations. A cloud-storage version does not replace document validation. Native exports continue through the native container writer.
 
+This payload is currently a design. Separate drawings planned in [#3890](https://github.com/tangency-labs/solidcraft/issues/3890) keep their own `solidcraft-drawing/N` schema; they must not be passed through a design decoder. Supporting another file kind requires an explicit required capability or a new envelope version, including an explicit payload path when it differs from `document.json`. Optional metadata cannot change file semantics. See the [integration plan](cloud-collaboration.md) for relative links, consistent source revisions, and future saves spanning several files.
+
 ## Assets and chunks
 
 An asset records its SHA-256, decoded byte count, and ordered chunks. Package names are relative paths without empty, dot, parent, or backslash components. An asset is at most 512 MiB; the total decoded asset budget is 768 MiB. There are at most 10,000 assets. Document and manifest input are each limited to 16 MiB.
