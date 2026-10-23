@@ -365,12 +365,7 @@ pub const SECTIONS: &[Section] = &[
             "manufacture.modify.move_entry",
         ],
     },
-    Section {
-        tab: "MANUFACTURE",
-        panel: "POST",
-        promoted: 3,
-        ids: &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"],
-    },
+    Section { tab: "MANUFACTURE", panel: "POST", promoted: 3, ids: &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"] },
     Section {
         tab: "MANUFACTURE",
         panel: "INSPECT",
