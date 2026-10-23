@@ -141,7 +141,7 @@ fn in_quad(p: Pos2, q: &Ring<Pos2>) -> bool {
 }
 
 /// Where the view ray through `pos` meets the plane through `o` with normal `n`.
-fn on_plane(proj: &Proj, pos: Pos2, o: Vec3, n: Vec3) -> Option<Vec3> {
+pub(crate) fn on_plane(proj: &Proj, pos: Pos2, o: Vec3, n: Vec3) -> Option<Vec3> {
     let (ro, rd) = proj.ray(pos);
     let den = rd.dot(n);
     if den.abs() < 1e-9 {

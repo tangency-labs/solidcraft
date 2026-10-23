@@ -50,4 +50,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         setting::offer_stand_up(app, ui);
         ui_kit::text(ui, app.tr("prefs.stand_up_note"), ui_kit::Text::Hint("stand_up"));
     });
+    ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
+        setting::placement_handles(app, ui);
+    });
 }

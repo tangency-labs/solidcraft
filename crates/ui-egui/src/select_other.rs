@@ -413,7 +413,9 @@ pub fn track_hold(
         && !is_open(app)
         && app.dialog.as_ref().is_none_or(|d| d.wants_picks())
         && app.viewport.point_drag.is_none();
-    if pressed && inside && free && !navigating {
+    // A press on a canvas handle (a manipulator) drags it, and a still hold there is someone
+    // thinking about where to drag, not asking for the overlapping-pick list.
+    if pressed && inside && free && !navigating && !hover.is_some_and(|p| crate::canvas::owns_pointer(app, proj, p)) {
         app.viewport.select_other.hold = hover.map(|p| (p, now));
     }
     let mut opened = false;
