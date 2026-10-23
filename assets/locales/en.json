@@ -590,6 +590,8 @@
   "cam.roller": "Roller",
   "cam.roller_pick": "Roller (optional)",
   "cam.tip_pick": "Tip (optional)",
+  "canvas.decal_place_hint": "Click a face to place the decal",
+  "canvas.place_hint": "Click a plane or face to place the canvas",
   "cmd.appearance_assign": "Appearance",
   "cmd.appearance_library": "Appearance Library",
   "cmd.appearance_list": "List Appearances",

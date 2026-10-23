@@ -602,6 +602,11 @@ pub fn tool_for(id: &str) -> Option<Tool> {
     })
 }
 
+/// A successful image placement consumes the selected file and ends its tool.
+pub fn image_placement_finished(tool: &Tool) -> bool {
+    matches!(tool.cmd, "canvas.insert" | "canvas.decal") && IMAGE.with(|image| image.borrow().is_none())
+}
+
 pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
@@ -615,8 +620,8 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => "Canvas: click a plane or a planar face where the image's centre goes",
-            "canvas.decal" => "Decal: click a planar face where the image's centre goes",
+            "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
+            "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
             "sketch.trim" => "Trim: click the piece of a curve to remove, or drag across the pieces to remove",
             "sketch.extend" => "Extend: click a curve near the end to extend",
             "sketch.break" => "Break: click a curve where it should split",

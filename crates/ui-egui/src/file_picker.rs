@@ -365,4 +365,68 @@ mod tests {
         finish(&mut h.app, &answer, None);
         assert!(h.app.tool.is_none(), "cancelling does not resume the old placement");
     }
+
+    fn placement_hint_painted(h: &mut crate::scenario::Harness, hint: &str) -> bool {
+        fn contains(shape: &egui::Shape, hint: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.job.text == hint,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, hint)),
+                _ => false,
+            }
+        }
+        let out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() },
+            |ui| h.app.ui(ui),
+        );
+        out.shapes.iter().any(|shape| contains(&shape.shape, hint))
+    }
+
+    fn image_placement(command: &str) -> (crate::scenario::Harness, &'static str) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        if command == "canvas.decal" {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            h.app.fit_view();
+        } else {
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        }
+        let path = h.dir.join("image.png");
+        let png = solidcraft_engine::render::png(1, 1, vec![255, 0, 0, 255]).unwrap();
+        std::fs::write(&path, png).unwrap();
+        let answer = picker(&mut h.app, false);
+        h.app.start(command);
+        h.frames(2);
+        assert!(h.app.tool.is_none());
+        finish(&mut h.app, &answer, Some(path.to_string_lossy().into_owned()));
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some(command));
+        let hint = if command == "canvas.decal" { "Click a face to place the decal" } else { "Click a plane or face to place the canvas" };
+        assert!(placement_hint_painted(&mut h, hint), "{command}: placement instruction is visible");
+        // An expired ordinary status must not dismiss the active placement instruction.
+        h.app.status = Some(("Old status".into(), crate::now_ms() - 7000.0, false));
+        assert!(placement_hint_painted(&mut h, hint));
+        (h, hint)
+    }
+
+    #[test]
+    fn image_placement_hint_clears_after_placement() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let (mut h, hint) = image_placement(command);
+            let point = if command == "canvas.decal" { json!([5, 5, 10]) } else { json!([4, 3, 0]) };
+            h.step(&json!({"click":{"world":point}})).unwrap();
+            assert_eq!(h.app.session.doc.canvases.len(), 1, "{command}: {:?}", h.app.status);
+            assert!(h.app.tool.is_none());
+            assert!(!placement_hint_painted(&mut h, hint));
+        }
+    }
+
+    #[test]
+    fn image_placement_hint_clears_on_escape() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let (mut h, hint) = image_placement(command);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert!(h.app.tool.is_none());
+            assert!(h.app.session.doc.canvases.is_empty());
+            assert!(!placement_hint_painted(&mut h, hint));
+        }
+    }
 }
