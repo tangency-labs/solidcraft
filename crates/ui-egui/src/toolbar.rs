@@ -2068,16 +2068,22 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
     }
 }
 
+/// A group heading inside a panel drop-down (Edges, Faces…; Line, Rectangle…), in the list and
+/// the grid: a step below the drop-down's own header (`font_caption`) and written as named, not
+/// in capitals, so it reads as part of the menu rather than above it.
+fn group_heading_font() -> FontId {
+    crate::fonts::semibold(Tokens::get().font_micro)
+}
+
+/// A group heading's text: its name in the interface language, as written.
+fn group_heading_text(label: &str) -> String {
+    crate::i18n::tr_label(label).to_string()
+}
+
 fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
-    ui.painter().text(
-        rect.left_center() + vec2(6.0, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr_label(label).to_uppercase(),
-        crate::fonts::semibold(crate::theme::Tokens::get().font_small),
-        t.text_dim,
-    );
+    ui.painter().text(rect.left_center() + vec2(6.0, 0.0), Align2::LEFT_CENTER, group_heading_text(label), group_heading_font(), t.text_dim);
 }
 
 /// The note under a panel drop-down on how pinning works: `message` is its catalog id.
@@ -2424,17 +2430,11 @@ fn dropdown_grid(
         let origin = area.left_top() + vec2(inset, 0.0);
         let t = Tokens::get();
         for (at, w, heading) in &layout.headings {
-            let text = crate::i18n::tr_label(heading).to_uppercase();
+            let text = group_heading_text(heading);
             let clip = ui.clip_rect().intersect(Rect::from_min_size(origin + at.to_vec2(), vec2(*w, GRID_HEADING)));
             let painter = ui.painter().with_clip_rect(clip);
             // Centred over its group's icons.
-            painter.text(
-                origin + at.to_vec2() + vec2(w / 2.0, GRID_HEADING / 2.0),
-                Align2::CENTER_CENTER,
-                text,
-                crate::fonts::semibold(t.font_small),
-                t.text_dim,
-            );
+            painter.text(origin + at.to_vec2() + vec2(w / 2.0, GRID_HEADING / 2.0), Align2::CENTER_CENTER, text, group_heading_font(), t.text_dim);
         }
         // A line between groups side by side, as between the ribbon's sections.
         for x in &layout.separators {
@@ -3915,6 +3915,15 @@ mod dropdown_tests {
         assert_eq!(step(Some(5), GridKey::Up), Some(3), "from the first row Up wraps to the last, nearest column");
         assert_eq!(step(Some(1), GridKey::Up), Some(3));
         assert_eq!(grid_step(&cells, &[], None, GridKey::Down), None);
+    }
+
+    /// Group headings sit below the drop-down's own header in the hierarchy: a smaller font than
+    /// the header's, and written as named rather than in capitals (list and grid alike).
+    #[test]
+    fn group_headings_are_smaller_than_the_drop_down_header() {
+        let t = Tokens::get();
+        assert!(group_heading_font().size < t.font_caption, "{} vs the header's {}", group_heading_font().size, t.font_caption);
+        assert_eq!(group_heading_text("Edges"), "Edges", "written as named, not in capitals");
     }
 
     /// Every panel's drop-down of every tab, and Sketch › Create's families, is at most
