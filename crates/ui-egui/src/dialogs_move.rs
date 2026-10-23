@@ -58,6 +58,8 @@ pub fn type_row(d: &mut Dialog, ui: &mut egui::Ui) {
             i.items = bodies;
         }
         d.extra.remove("pivot");
+        d.extra.remove("p2p_len");
+        d.extra.remove("drag0");
         d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
     }
 }
@@ -208,8 +210,14 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             p["angle"] = json!(angle);
         }
         POINT_TO_POINT => {
-            let (from, to) = (need_point(1, "the point to move from")?, need_point(2, "the point to move to")?);
-            p["translate"] = num(to - from);
+            let from = need_point(1, "the point to move from")?;
+            let mut delta = need_point(2, "the point to move to")? - from;
+            if let Some(len) = d.extra.get("p2p_len").and_then(|v| v.as_f64()).filter(|l| l.is_finite())
+                && let Some(dir) = delta.normalized()
+            {
+                delta = dir * len.max(0.0);
+            }
+            p["translate"] = num(delta);
         }
         _ => {
             let from = need_point(1, "the point to move")?;
@@ -238,42 +246,131 @@ fn axis_line(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     e.iter().all(|p| (*p - a).cross(dir).len() < 1e-6 * (1.0 + (b - a).len())).then_some((a, dir))
 }
 
-/// Where the triad sits: the pivot carried by the move so far (Free Move and Translate only).
+/// Where the triad sits for modes that use it.
 pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     let Kind::Move { mode, x, y, z, .. } = &d.kind else { return None };
-    if !matches!(*mode, FREE | TRANSLATE) || bodies_empty(d) {
+    if bodies_empty(d) {
         return None;
     }
-    let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
-    Some(gizmo::Triad { center: pivot(app, d)? + t, translate: true, rotate: *mode == FREE })
+    match *mode {
+        FREE | TRANSLATE => {
+            let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
+            Some(gizmo::Triad {
+                center: pivot(app, d)? + t,
+                translate: true,
+                rotate: *mode == FREE,
+                ring_axis: None,
+                translate_u: None,
+                translate_v: None,
+            })
+        }
+        ROTATE => {
+            let (o, a) = items(d, 1).first().and_then(|s| axis_line(app, s))?;
+            Some(gizmo::Triad { center: o, translate: false, rotate: true, ring_axis: Some(a), translate_u: None, translate_v: None })
+        }
+        POINT_TO_POSITION if sel_point(items(d, 1).first()).is_some() => {
+            let at = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
+            Some(gizmo::Triad { center: at, translate: true, rotate: false, ring_axis: None, translate_u: None, translate_v: None })
+        }
+        POINT_TO_POINT if sel_point(items(d, 1).first()).is_some() && sel_point(items(d, 2).first()).is_none() => Some(gizmo::Triad {
+            center: sel_point(items(d, 1).first())?,
+            translate: true,
+            rotate: false,
+            ring_axis: None,
+            translate_u: None,
+            translate_v: None,
+        }),
+        _ => None,
+    }
+}
+
+/// Point-to-point arrow when both picks exist.
+pub fn line_drag(_app: &SolveApp, d: &Dialog) -> Option<gizmo::LineDrag> {
+    let Kind::Move { mode, .. } = &d.kind else { return None };
+    if *mode != POINT_TO_POINT || bodies_empty(d) {
+        return None;
+    }
+    let from = sel_point(items(d, 1).first())?;
+    let to = sel_point(items(d, 2).first())?;
+    let delta = to - from;
+    let dir = delta.normalized()?;
+    let length = d.extra.get("p2p_len").and_then(|v| v.as_f64()).filter(|l| l.is_finite() && *l > 1e-9).unwrap_or_else(|| delta.len());
+    Some(gizmo::LineDrag { start: from, dir, length })
 }
 
 /// Apply a triad drag to the dialog's values (added to the values when the drag began).
 pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
-    let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
+    let Kind::Move { mode, x, y, z, rx, ry, rz, angle, .. } = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
-        let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));
+        let v: Vec<f64> = match *mode {
+            ROTATE => vec![ang(app, angle).unwrap_or(0.0)],
+            POINT_TO_POSITION => {
+                let at = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
+                vec![at.x, at.y, at.z]
+            }
+            _ => [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0)).into(),
+        };
         d.extra.insert("drag0".into(), json!(v));
     }
-    let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
-    let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
-    match g.change {
-        Change::Translate(t) => {
-            *x = mm(v0[0] + t.x);
-            *y = mm(v0[1] + t.y);
-            *z = mm(v0[2] + t.z);
+    let v0: Vec<f64> = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    let Kind::Move { mode, x, y, z, rx, ry, rz, angle, .. } = &mut d.kind else { return };
+    match (*mode, g.change) {
+        (ROTATE, Change::RotateAbout { angle: th, .. }) | (ROTATE, Change::Rotate { angle: th, .. }) => {
+            *angle = deg(v0.first().copied().unwrap_or(0.0) + th);
         }
-        Change::Rotate { axis, angle } => {
+        (POINT_TO_POSITION, Change::Translate(t)) => {
+            *x = mm(v0.first().copied().unwrap_or(0.0) + t.x);
+            *y = mm(v0.get(1).copied().unwrap_or(0.0) + t.y);
+            *z = mm(v0.get(2).copied().unwrap_or(0.0) + t.z);
+        }
+        (FREE | TRANSLATE, Change::Translate(t)) => {
+            *x = mm(v0.first().copied().unwrap_or(0.0) + t.x);
+            *y = mm(v0.get(1).copied().unwrap_or(0.0) + t.y);
+            *z = mm(v0.get(2).copied().unwrap_or(0.0) + t.z);
+        }
+        (FREE, Change::Rotate { axis, angle: th }) => {
             let slot = match axis {
                 0 => rx,
                 1 => ry,
                 _ => rz,
             };
-            *slot = deg(v0.get(3 + axis.min(2)).copied().unwrap_or(0.0) + angle);
+            *slot = deg(v0.get(3 + axis.min(2)).copied().unwrap_or(0.0) + th);
         }
+        _ => {}
     }
     if g.done {
         d.extra.remove("drag0");
+    }
+}
+
+/// Apply a point-to-point arrow drag (span along the pick direction).
+pub fn drag_line(d: &mut Dialog, g: Drag) {
+    let Kind::Move { mode, .. } = &d.kind else { return };
+    if *mode != POINT_TO_POINT {
+        return;
+    }
+    let Change::Translate(t) = g.change else { return };
+    let from = match sel_point(items(d, 1).first()) {
+        Some(p) => p,
+        None => return,
+    };
+    let to = match sel_point(items(d, 2).first()) {
+        Some(p) => p,
+        None => return,
+    };
+    let dir = match (to - from).normalized() {
+        Some(d) => d,
+        None => return,
+    };
+    if g.started || !d.extra.contains_key("p2p_len0") {
+        let len = d.extra.get("p2p_len").and_then(|v| v.as_f64()).unwrap_or_else(|| (to - from).len());
+        d.extra.insert("p2p_len0".into(), json!(len));
+    }
+    let v0 = d.extra.get("p2p_len0").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let along = t.dot(dir);
+    d.extra.insert("p2p_len".into(), json!((v0 + along).max(0.0)));
+    if g.done {
+        d.extra.remove("p2p_len0");
     }
 }
 

@@ -276,7 +276,7 @@ fn move_inputs(h: &Harness) -> Vec<SelInput> {
 /// A fresh Move window's values, with one field replaced. Functional record update (`..base`)
 /// is a struct feature, so an enum variant has to spell every field out.
 fn moved(x: &str, y: &str, angle: &str) -> Mod {
-    Mod::Move { x: x.into(), y: y.into(), angle: angle.into(), copy: false }
+    Mod::Move { mode: 0, x: x.into(), y: y.into(), angle: angle.into(), copy: false }
 }
 
 #[test]
@@ -308,10 +308,28 @@ fn the_context_menu_item_fills_the_window_from_the_selection() {
 }
 
 #[test]
+fn point_to_point_move_uses_the_vector_between_the_two_picks() {
+    let h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(sid).unwrap().sketch;
+    let at_origin = sk.points.iter().find(|p| p.pos.x.abs() < 1e-6 && p.pos.y.abs() < 1e-6).expect("corner at origin");
+    let far = sk.points.iter().find(|p| (p.pos.x - 20.0).abs() < 1e-6 && (p.pos.y - 10.0).abs() < 1e-6).expect("far corner");
+    let mut inputs = crate::sketch_modify_ui::move_inputs(crate::sketch_move_ui::POINT_TO_POINT);
+    inputs[0].items = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+    inputs[1].items = vec![Sel::SketchPoint { id: at_origin.id.clone() }];
+    inputs[2].items = vec![Sel::SketchPoint { id: far.id.clone() }];
+    let k = Mod::Move { mode: crate::sketch_move_ui::POINT_TO_POINT, x: "0 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false };
+    let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(out[0].1["translate"], json!([20.0, 10.0]));
+    assert!(out[0].1.get("center").is_none());
+}
+
+#[test]
 fn the_typed_distances_and_angle_reach_the_command() {
     let h = rectangle();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false };
+    let k = Mod::Move { mode: 0, x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].0, "sketch.move");
@@ -327,7 +345,7 @@ fn an_expression_and_a_bare_angle_are_evaluated() {
     let mut h = rectangle();
     h.app.run("parameters.add", json!({"name": "step", "expression": "7 mm", "unit": "mm"})).unwrap();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false };
+    let k = Mod::Move { mode: 0, x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out[0].1["translate"], json!([14.0, 0.0]));
     assert!((out[0].1["angle"].as_f64().unwrap() - 45.0).abs() < 1e-9, "{}", out[0].1["angle"]);
@@ -353,7 +371,7 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: true });
+        d.kind = Kind::SketchModify(Mod::Move { mode: 0, x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: true });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -387,7 +405,7 @@ fn a_plain_move_takes_the_geometry_with_it() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "0 mm".into(), y: "5 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move { mode: 0, x: "0 mm".into(), y: "5 mm".into(), angle: "0 deg".into(), copy: false });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -426,21 +444,20 @@ fn escape_leaves_the_sketch_exactly_as_it_was() {
 }
 
 #[test]
-fn the_x_distance_gets_a_drag_arrow_along_the_sketch_x_axis() {
+fn a_profile_fill_expands_to_its_boundary_curves_for_move() {
     let mut h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
     h.step(&json!({"start": "sketch.move"})).unwrap();
-    // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = picks;
+        d.inputs[0].items = vec![Sel::Profile { sketch: sid, index: 0 }];
+        d.kind = Kind::SketchModify(Mod::Move { mode: 0, x: "5 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
     }
-    let sid = h.app.session.active_sketch.unwrap();
-    let x = h.app.session.world_state().sketch(sid).unwrap().plane.x;
-    let d = h.app.dialog.as_ref().unwrap();
-    let (_, dir) = crate::canvas::anchor(&h.app, d).expect("a picked sketch curve anchors the manipulator");
-    let dir = dir.expect("a sketch move's X Distance has a direction to drag along");
-    assert!((dir - x).len() < 1e-9, "{dir:?} is not the sketch x axis {x:?}");
+    h.frames(2);
+    let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds[0].0, "sketch.move");
+    let entities: Vec<&str> = cmds[0].1["entities"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(entities.len(), 4, "the profile fill moves all four rectangle edges: {entities:?}");
 }
 
 /// A sketch holding one circle, with the window for `cmd` open on it.
