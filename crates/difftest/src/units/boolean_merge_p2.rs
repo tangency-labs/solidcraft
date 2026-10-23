@@ -32,6 +32,7 @@ use solidcore::geom::object::{NotifyOperation, ObjectRef};
 use solidcore::heal::stitch::p1::{DefaultStitchCallback, Stitch};
 use solidcore::kernel::Kernel;
 use solidcore::topology;
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::topology::Topology;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{
@@ -637,6 +638,14 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
             let edge_dest = |e: EdgeId| key(2_000_000, edge::TYPE, e.index());
             let face_source = |f: FaceId| key(5_000_000, face::p2::TYPE, f.index());
             let face_dest = |f: FaceId| key(4_000_000, face::p2::TYPE, f.index());
+            // The operands' edges and faces own their curves and surfaces under these
+            // names, as the library names them (`MakeFace`'s infinite-region rays solve
+            // on a B-rep cache whose trees hold only geometry owned under them).
+            let brep = Some(arena_identity(CacheObject::Brep));
+            crate::util::own_edge_curves(&mut a, &edge_dest, brep);
+            crate::util::own_face_surfaces(&mut a, &face_dest);
+            crate::util::own_edge_curves(b, &edge_source, brep);
+            crate::util::own_face_surfaces(b, &face_source);
             let mut copy = TopologyCopy {
                 vertices: VertexCopy {
                     records: &mut records,
