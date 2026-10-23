@@ -20,6 +20,7 @@
 use super::eval::{CurveEval, SurfaceEval};
 use super::{Budget, Curve, Curve2, Surface, curve, curve_natural, interval, surface};
 use crate::Vec3;
+use crate::bspline::{HPoint, segment};
 use crate::tess::uv::{self, Domain};
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
@@ -66,6 +67,9 @@ const START_SPANS: usize = 4;
 const MAX_USES: usize = 100_000;
 /// Lift checks of an exact pcurve: evenly spaced, plus one inside each of its spans up to this.
 const CHECKS: usize = 16;
+/// How close, against the geometry's size, a closed-form pcurve must lift onto its edge to be
+/// taken as exact (rounding, well inside any tolerance).
+const EXACT: f64 = 1e-9;
 
 /// For each loop of a face on `surface`, the pcurve of each of its edge uses, in order, within
 /// `tolerance` mm (or the use's own edge tolerance where larger) of the edge when lifted onto
@@ -148,6 +152,24 @@ fn own_pcurve(c: &Curve2, [t0, t1]: [f64; 2], budget: &mut Budget) -> Result<Cur
     Ok(c.clone())
 }
 
+/// `c` cut exactly to `[t0, t1]` where that is less than its knot interval.
+fn cut(c: Curve2, [t0, t1]: [f64; 2]) -> Result<Curve2> {
+    let Some([a, b]) = c.interval() else { return Err(Error::Invalid("pcurve: no interval".into())) };
+    if a == t0 && b == t1 {
+        return Ok(c);
+    }
+    let (knots, h): (&[f64], Vec<HPoint>) = match &c {
+        Curve2::Spline { knots, points } => (knots, points.iter().map(|p| HPoint { x: p[0], y: p[1], z: 0.0, w: 1.0 }).collect()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: 0.0, w: p[2] }).collect()),
+    };
+    let degree = knots.len().checked_sub(h.len() + 1).ok_or_else(|| Error::Invalid("pcurve degree".into()))?;
+    let (knots, h) = segment(degree, knots, &h, t0, t1).map_err(|e| Error::Invalid(format!("pcurve cut to [{t0}, {t1}]: {e:?}")))?;
+    Ok(match c {
+        Curve2::Spline { .. } => Curve2::Spline { knots, points: h.iter().map(|p| [p.x, p.y]).collect() },
+        Curve2::RationalSpline { .. } => Curve2::RationalSpline { knots, homogeneous: h.iter().map(|p| [p.x, p.y, p.w]).collect() },
+    })
+}
+
 /// A face's surface: its evaluator and parameter box, and the grid a point's parameters on it
 /// are searched from, made once for all the face's points.
 struct On {
@@ -224,20 +246,21 @@ impl On {
                         knots.push(t1);
                         Some(Curve2::Spline { knots, points: ts.iter().map(|t| map(at(*t)?)).collect::<Result<_>>()? })
                     }
-                    Curve::Spline { knots, points } if curve_natural(record) == super::Natural::Range(t0, t1) => {
-                        Some(Curve2::Spline { knots: knots.clone(), points: points.iter().map(|p| map(Vec3::from(*p))).collect::<Result<_>>()? })
+                    // The control points through the plane's affine parameters (exact), cut to the
+                    // edge's interval where it covers part of its curve (a form).
+                    Curve::Spline { knots, points } => {
+                        let points = points.iter().map(|p| map(Vec3::from(*p))).collect::<Result<_>>()?;
+                        Some(cut(Curve2::Spline { knots: knots.clone(), points }, [t0, t1])?)
                     }
-                    Curve::RationalSpline { knots, homogeneous } if curve_natural(record) == super::Natural::Range(t0, t1) => {
-                        Some(Curve2::RationalSpline {
-                            knots: knots.clone(),
-                            homogeneous: homogeneous
-                                .iter()
-                                .map(|h| {
-                                    let [u, v] = map(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))?;
-                                    Ok([u * h[3], v * h[3], h[3]])
-                                })
-                                .collect::<Result<_>>()?,
-                        })
+                    Curve::RationalSpline { knots, homogeneous } => {
+                        let homogeneous = homogeneous
+                            .iter()
+                            .map(|h| {
+                                let [u, v] = map(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))?;
+                                Ok([u * h[3], v * h[3], h[3]])
+                            })
+                            .collect::<Result<_>>()?;
+                        Some(cut(Curve2::RationalSpline { knots: knots.clone(), homogeneous }, [t0, t1])?)
                     }
                     _ => None,
                 }
@@ -275,8 +298,30 @@ impl On {
                 let u = b.atan2(a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
+            (SurfaceEval::Eval(..), _) => self.along(curve, [t0, t1]),
             _ => None,
         })
+    }
+
+    /// On a spline face (a NURBS form, or another spline), the edge's pcurve where it runs along
+    /// the face's parameters at its own parameter's pace: a straight line in (u, v), between the
+    /// ends' parameters, or with u (or v) the edge's parameter itself (a rim of a revolved form on
+    /// the same quarter grid, whose two ends are one point on the seam). A candidate is taken only
+    /// where it lifts onto the edge to within rounding, so it is the exact pcurve; none is fitted.
+    fn along(&self, curve: &CurveEval, [t0, t1]: [f64; 2]) -> Option<Curve2> {
+        let (p0, p1, pm) = (curve.point(t0)?, curve.point(t1)?, curve.point(0.5 * (t0 + t1))?);
+        let size = [p0, p1, pm].iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1.0, f64::max);
+        let exact = EXACT * size;
+        let line = |a: [f64; 2], b: [f64; 2]| Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![a, b] };
+        let mut candidates = Vec::with_capacity(3);
+        if let (Some(a), Some(b)) = (self.project(p0, None, exact), self.project(p1, None, exact)) {
+            candidates.push(line(a, b));
+        }
+        if let Some([u, v]) = self.project(pm, None, exact) {
+            candidates.push(line([t0, v], [t1, v]));
+            candidates.push(line([u, t0], [u, t1]));
+        }
+        candidates.into_iter().find(|pc| self.lifts(pc, curve, [t0, t1], exact))
     }
 
     /// Whether `pc` lifts onto `curve` within `target` along `range` (evenly, and inside its
