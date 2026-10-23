@@ -66,6 +66,9 @@ encoding_rs = "0.8"
 # glTF 2.0 import (MIT OR Apache-2.0): the document model and GLB container only; buffers are
 # read by crates/io itself, so no image decoding or file access comes with it.
 gltf = { version = "1.4", default-features = false, features = ["names"] }
+# The computer's name in a design's "open elsewhere" lock file (MIT OR Apache-2.0; already in the
+# tree through x11rb).
+gethostname = "1"
 
 # FreeCAD and Rhino import (Apache-2.0, pure Rust apart from zstd; native builds only).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default

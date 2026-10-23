@@ -167,6 +167,26 @@ Design properties are first saved in format 21. Inserting or linking another des
 copy its properties; Save As keeps them. A command script of the design
 (`timeline.export_script`) sets them in one step.
 
+## Designs in shared or synced folders
+
+A design kept on a network share or in a synced folder (Dropbox, OneDrive, Syncthing, Google
+Drive) can be open on two computers at once. The desktop app watches for two writers:
+
+- **Open elsewhere.** While a design is open, SolidCraft keeps a small lock file next to it,
+  `.~<file>.lock` (computer, user, SolidCraft version, when it was opened), refreshes it every
+  minute and removes it when the design closes. Opening a design that another SolidCraft has open
+  says so: **Open Read-Only** (look at it; Save asks for a new file), **Open Anyway** or
+  **Cancel**. A lock not refreshed for three minutes (left by a crash or a lost connection) is
+  ignored. Lock files never show in Open or the recent lists, and a design in a folder you can't
+  write to still opens.
+- **Changed on disk.** SolidCraft remembers the file's size and modification time when it opens
+  or saves a design. If another program or computer wrote the file since, Save asks first:
+  **Save a Copy** (the default), **Overwrite** or **Cancel**.
+
+Scripts, the CLI and the control channel never get these questions. `doc.open` opens the design
+and reports `open_elsewhere` in its result (`read_only: true` opens it read-only), and `file.save`
+over a file that changed on disk fails with an error until it is given `overwrite: true`.
+
 ## Saving in the web app
 
 In Chrome, Edge and Opera, **Save As** opens your browser's save dialog and writes the

@@ -158,6 +158,7 @@ mod file_load_ui_tests;
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
 pub(crate) mod navigation;
+pub mod open_elsewhere;
 pub(crate) mod open_meshing;
 pub mod params_dialog;
 pub(crate) mod pick_index;
@@ -445,6 +446,12 @@ pub struct SolveApp {
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
+    /// Lock files next to the open designs (the desktop app turns them on; #5467).
+    pub locks: Option<open_elsewhere::Locks>,
+    /// Opens waiting for "this design is open elsewhere" to be answered, first asked first.
+    pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
+    /// A Save waiting for "the file changed on disk" to be answered.
+    pub disk_prompt: bool,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
@@ -579,6 +586,9 @@ impl SolveApp {
             status_undo: false,
             quit_requested: false,
             autosave: None,
+            locks: None,
+            lock_prompts: Vec::new(),
+            disk_prompt: false,
             recoverable: Vec::new(),
             stand_up: None,
             stand_up_occurrence: None,
@@ -1494,6 +1504,7 @@ impl SolveApp {
             toolbar::shortcuts(self, ctx);
         }
         recovery_ui::tick(self);
+        open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the agent chat attach to its next message instead.
@@ -1594,6 +1605,7 @@ impl SolveApp {
         file_load::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        open_elsewhere::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).

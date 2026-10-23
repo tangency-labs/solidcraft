@@ -28,8 +28,10 @@ encoding_rs = { workspace = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
-# FreeCAD and Rhino import. Not in the browser build: it compiles the zstd C library.
+# FreeCAD and Rhino import (not in the browser build: it compiles the zstd C library), and the
+# computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }
+gethostname = { workspace = true }

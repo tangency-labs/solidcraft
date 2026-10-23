@@ -4287,6 +4287,7 @@ dependencies = [
  "cadmpeg-registry",
  "chardetng",
  "encoding_rs",
+ "gethostname",
  "gltf",
  "log",
  "quick-xml",

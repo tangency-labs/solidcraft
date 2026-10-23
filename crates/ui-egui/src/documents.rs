@@ -75,6 +75,11 @@ impl Documents {
         self.slots.iter_mut().filter_map(Option::as_mut)
     }
 
+    /// The designs in the tabs not shown.
+    pub(crate) fn background(&self) -> impl Iterator<Item = &Session> {
+        self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)
+    }
+
     /// Number of open designs (at least the active one).
     pub fn count(&self) -> usize {
         self.slots.len().max(1)
@@ -400,7 +405,8 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
 
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all` or `quit`; `answer`:
-/// save | dont_save | cancel answers "save changes?".
+/// save | dont_save | cancel answers "save changes?"; `open_elsewhere`: read_only | anyway |
+/// cancel and `changed_on_disk`: save_copy | overwrite | cancel answer those questions (#5467).
 pub fn control(app: &mut SolveApp, p: &Value) -> Value {
     let i = p.get("index").and_then(Value::as_u64).map(|x| x as usize);
     match p.get("action").and_then(Value::as_str) {
@@ -424,8 +430,30 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
     if let Some(a) = answer {
         answer_prompt(app, a);
     }
+    use crate::open_elsewhere::{DiskAnswer, LockAnswer, answer_disk, answer_lock};
+    match p.get("open_elsewhere").and_then(Value::as_str) {
+        Some("read_only") => answer_lock(app, LockAnswer::ReadOnly),
+        Some("anyway") => answer_lock(app, LockAnswer::Anyway),
+        Some("cancel") => answer_lock(app, LockAnswer::Cancel),
+        _ => {}
+    }
+    match p.get("changed_on_disk").and_then(Value::as_str) {
+        Some("save_copy") => answer_disk(app, DiskAnswer::SaveCopy),
+        Some("overwrite") => answer_disk(app, DiskAnswer::Overwrite),
+        Some("cancel") => answer_disk(app, DiskAnswer::Cancel),
+        _ => {}
+    }
     let tabs: Vec<Value> = tabs_info(app).into_iter().map(|(name, dirty)| json!({"name": name, "dirty": dirty})).collect();
-    json!({"documents": tabs, "active": app.docs.active, "closing": app.docs.closing, "quitting": app.docs.quitting.is_some(), "batch": app.docs.batch})
+    json!({
+        "documents": tabs,
+        "active": app.docs.active,
+        "closing": app.docs.closing,
+        "quitting": app.docs.quitting.is_some(),
+        "batch": app.docs.batch,
+        "read_only": app.session.read_only,
+        "open_elsewhere": app.lock_prompts.len(),
+        "changed_on_disk": app.disk_prompt,
+    })
 }
 
 /// The document tabs in the application bar, from `x0` to `x1`: click to switch, × to close,

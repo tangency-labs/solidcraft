@@ -8,6 +8,7 @@
 
 pub mod catalog;
 mod design;
+pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;

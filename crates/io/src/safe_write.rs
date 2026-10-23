@@ -189,6 +189,40 @@ pub fn stale_temps(path: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    /// #5467: a lock is someone else's while it is refreshed; one left by a crash goes stale, and
+    /// this app's own lock never counts as the design being open elsewhere. Writing a design's
+    /// file changes its stamp.
+    #[test]
+    fn a_fresh_lock_from_another_app_holds_the_design_and_a_stale_or_own_one_does_not() {
+        use crate::design_lock as lock;
+        let d = dir("design-lock");
+        let design = d.join("Bracket.solidcraft");
+        std::fs::write(&design, b"one").unwrap();
+        assert_eq!(lock::lock_path(&design), d.join(".~Bracket.solidcraft.lock"));
+        assert!(!crate::is_design_path(&lock::lock_path(&design).to_string_lossy()), "never listed as a design");
+
+        let now = lock::now_secs();
+        let theirs = lock::Lock { host: "WORKSHOP-PC".into(), pid: std::process::id().wrapping_add(1), ..lock::Lock::mine(now - 600) };
+        lock::write(&design, &lock::Lock { refreshed: now - 30, ..theirs.clone() }).unwrap();
+        assert_eq!(lock::held_elsewhere(&design, now).map(|l| l.host), Some("WORKSHOP-PC".into()));
+        // Not refreshed for longer than three refreshes: left behind, ignored.
+        lock::write(&design, &lock::Lock { refreshed: now - lock::STALE_SECS - 1, ..theirs.clone() }).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_none());
+        lock::remove(&design);
+        assert!(lock::lock_path(&design).exists(), "another app's lock is left alone");
+        // This app's own lock: not "elsewhere", and removed on close.
+        lock::write(&design, &lock::Lock::mine(now)).unwrap();
+        assert!(lock::held_elsewhere(&design, now).is_none());
+        lock::remove(&design);
+        assert!(!lock::lock_path(&design).exists());
+
+        let known = lock::stamp(&design.to_string_lossy()).unwrap();
+        assert!(!lock::changed_since(&design.to_string_lossy(), &known));
+        std::fs::write(&design, b"written elsewhere").unwrap();
+        assert!(lock::changed_since(&design.to_string_lossy(), &known));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn create_does_not_replace_an_existing_destination() {
         let d = dir("create");

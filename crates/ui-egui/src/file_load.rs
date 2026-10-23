@@ -239,16 +239,24 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if app.file_load.queued.len() >= crate::documents::MAX_OPEN {
-            let e = "too many queued files".to_string();
-            app.set_status(e.clone(), true);
-            request.answer(Err(e.clone()));
-            return Err(e);
-        }
-        app.file_load.queued.push_back(request);
-        start(app);
-        Ok(())
+        // A design open in another SolidCraft asks first (#5467).
+        let Some(request) = crate::open_elsewhere::check_open(app, request) else { return Ok(()) };
+        queue(app, request)
     }
+}
+
+/// Queue a file operation and start it when nothing runs (the desktop app).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn queue(app: &mut SolveApp, request: Request) -> Result<(), String> {
+    if app.file_load.queued.len() >= crate::documents::MAX_OPEN {
+        let e = "too many queued files".to_string();
+        app.set_status(e.clone(), true);
+        request.answer(Err(e.clone()));
+        return Err(e);
+    }
+    app.file_load.queued.push_back(request);
+    start(app);
+    Ok(())
 }
 
 /// A control-channel (MCP) `doc.open` or STEP/mesh import runs like File > Open: off the window
@@ -825,7 +833,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     recovered(app, request);
                 } else {
                     app.set_status(
-                        if let Some(w) = warnings.filter(|w| !w.is_empty()) {
+                        if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
+                            crate::i18n::tr("document.opened_read_only").to_string()
+                        } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             format!("{} done", if request.insert() { "Insert" } else { "Open" })
