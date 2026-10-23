@@ -15,3 +15,33 @@
 unit = "blend.fillet_intersector"
 case = "rv_next_clipped_step"
 why = "StepSolve clipped branch differs by a few ULP from C++; suspected p3 evaluating offset-surface copies vs the solver's own objects; pre-existing, newly reachable via #212 (plan/findings.md: blend.fillet_intersector rv_next_clipped_step)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_0.1"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_-0.05"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_toruswvy_0.1"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "gen0138"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "gen0164"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "gen0241"
+why = "TurnToNURBS tracker: upstream curves/surfaces notify their own SM_NO_PRE_EDIT/SM_NO_POST_EDIT edits, the port's geometry sends none (plan/findings.md: topology.face_p1 SetSurface SM_NO_CHANGE_GEOMETRY wired (PR #637), 'Still deferred: geometry edit notifications')"

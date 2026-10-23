@@ -17738,3 +17738,13 @@ cases stay deferred. It adds only `StaticScene::object_zone_tol_3d`, which turns
   - The fix is to give geometry edits notifications in the curve and surface units: an
     identity slot plus a context at each edit. This is a cross-unit job and has not
     been started.
+- **Update (PR #661, 2026-10-23): known mismatches, not a C++-output deferral.** The
+  runner no longer reads the C++ tracker to choose a deferral: `geometry_edit_deferral`
+  and the `TurnToNURBS` tracker-offset trailer are removed, since difftest must not pick
+  a deferral from the reference output. The six cases above now compare and fail on the
+  tracker. They are listed in `crates/difftest/known_mismatches.toml`, so they still run
+  and report as `known_mismatch`, and `topology.brep_p3` stays `partial`.
+  - The real fix is unchanged: port the curve and surface `SM_NO_PRE_EDIT` /
+    `SM_NO_POST_EDIT` notifications (an identity slot plus a context at each geometry
+    edit). This is queued as follow-up work. When it lands, remove the six
+    `known_mismatches.toml` entries (a listed case that passes fails the unit).

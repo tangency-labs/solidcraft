@@ -1248,11 +1248,6 @@ fn run_rust_op(
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         out.extend(destroyed.iter().map(|&n| n as f64));
     }
-    if matches!(op, OpIn::TurnNurbs | OpIn::TurnNurbsOffset { .. }) {
-        // (where the tracker's values start, for `geometry_edit_deferral`; taken off
-        // again by `run_rust`, the shim writes no trailer)
-        out.push(tracker_at as f64);
-    }
     if matches!(op, OpIn::Orient { .. }) {
         // the shim's trailer: each pre-op face's SmFace::SwapUV POST_EDIT count, the
         // face count and where the tracker's values start (see split_orient)
@@ -1543,63 +1538,10 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     match run_rust_op(&mut k, &mut b, second.as_mut(), &i.op, &args) {
         Ok(out) if matches!(i.op, OpIn::Orient { .. }) => Ok(split_orient(out)),
-        Ok(mut out) if matches!(i.op, OpIn::TurnNurbs | OpIn::TurnNurbsOffset { .. }) => {
-            let tracker_at = out.pop().map_or(usize::MAX, |x| x as usize);
-            if let Some(o) = geometry_edit_deferral(i, tracker_at)? {
-                return Ok(o);
-            }
-            Ok(Output::new().values("out", out))
-        }
         Ok(out) => Ok(Output::new().values("out", out)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),
     }
-}
-
-/// `TurnToNURBS` notifies the geometry it edits (`SmCurve` / `SmSurface`
-/// `Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT, this, owner, NULL)`, e.g. on the curves
-/// `CreateUVTrimCurves` builds), which the tracker records (and, through the
-/// geometry's owner, turns into a `Chg` of its edge or face). The port's geometry types
-/// send no edit notifications, so a case whose C++ tracker shows one cannot agree on the
-/// tracker: it is deferred (`plan/findings.md`, `topology.brep_p3` "geometry edit
-/// notifications"). The C++ tracker is read where the Rust one starts (`tracker_at`);
-/// when it does not parse there the outputs differ before the tracker and the case is
-/// compared (and fails) as usual.
-fn geometry_edit_deferral(i: &Inputs, tracker_at: usize) -> Result<Option<Output>, HarnessError> {
-    let cpp = run_cpp(i)?;
-    let Some(v) = cpp.values.get("out") else {
-        return Ok(None);
-    };
-    let Some(mut rest) = v.get(tracker_at..) else {
-        return Ok(None);
-    };
-    // the Rm / Add / Chg lists: a count, then two values per entry
-    for _ in 0..3 {
-        let Some((&n, tail)) = rest.split_first() else {
-            return Ok(None);
-        };
-        let Some(tail) = tail.get(2 * (n as usize)..) else {
-            return Ok(None);
-        };
-        rest = tail;
-    }
-    // the events: a count, then the operation and four (code, index) pairs each
-    let Some((&n, events)) = rest.split_first() else {
-        return Ok(None);
-    };
-    if events.len() != 9 * (n as usize) {
-        return Ok(None);
-    }
-    let edits_geometry = events.chunks(9).any(|e| {
-        matches!(e.first(), Some(&op) if op == 10.0 || op == 11.0)
-            && matches!(e.get(1), Some(&code) if code == -20.0 || code == -21.0 || code == -30.0)
-    });
-    Ok(edits_geometry.then(|| {
-        Output::deferred(
-            "unmodelled:geometry-edit-notify",
-            "SmCurve/SmSurface::Notify(SM_NO_PRE_EDIT/SM_NO_POST_EDIT)",
-        )
-    }))
 }
 
 // ---- generation ---------------------------------------------------------------------------
