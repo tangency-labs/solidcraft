@@ -61,6 +61,13 @@ fn quarters([a0, a1]: [f64; 2]) -> Option<(f64, usize)> {
     (n <= 5).then_some((q0, n))
 }
 
+/// The form parameters of an angle interval on the quarters `quarters` chose for it (its ends kept
+/// on them: an end within rounding past a quarter's end stays in that quarter).
+fn params([a0, a1]: [f64; 2], (q0, n): (f64, usize)) -> [f64; 2] {
+    let end = q0 + n as f64;
+    [param(a0).clamp(q0, end), param(a1).clamp(q0, end)]
+}
+
 /// Quarter arcs from quarter `q0`, `n` of them: their knot vector (in form parameter) and their
 /// control points (as `(cos, sin)` factors on the unit circle's plane) with weights.
 fn arcs(q0: f64, n: usize) -> (Vec<f64>, Vec<([f64; 2], f64)>) {
@@ -111,19 +118,19 @@ pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
 
 fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     let (o, x, y, _) = axes(frame)?;
-    let (q0, n) = quarters(t)?;
-    let (knots, pts) = arcs(q0, n);
+    let grid = quarters(t)?;
+    let (knots, pts) = arcs(grid.0, grid.1);
     let homogeneous = pts.iter().map(|([c, s], w)| hom(o + x * (rx * c) + y * (ry * s), *w)).collect();
-    Some((Curve::RationalSpline { knots, homogeneous }, [param(t[0]), param(t[1])]))
+    Some((Curve::RationalSpline { knots, homogeneous }, params(t, grid)))
 }
 
 /// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (in the label's
 /// parameters: angles, and the height along the axis of a cylinder or cone) and the domain in the
 /// form's parameters; `None` for another kind, or a domain of more than one turn.
 pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]; 2])> {
-    let (q0, n) = quarters(u)?;
-    let (u_knots, ring) = arcs(q0, n);
-    let fu = [param(u[0]), param(u[1])];
+    let grid = quarters(u)?;
+    let (u_knots, ring) = arcs(grid.0, grid.1);
+    let fu = params(u, grid);
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
     // frame: a rational tensor product, its weights the products.
     let net = |f: &Frame, profile: &[([f64; 2], f64)], at: &dyn Fn([f64; 2]) -> (f64, f64)| -> Option<Vec<Vec<[f64; 4]>>> {
@@ -155,17 +162,36 @@ pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
             Some((Surface::RationalSpline { u_knots, v_knots: vec![v[0], v[0], v[1], v[1]], homogeneous }, [fu, v]))
         }
         Surface::Sphere { frame, radius } => {
-            let (p0, m) = quarters(v)?;
-            let (v_knots, meridian) = arcs(p0, m);
+            let vgrid = quarters(v)?;
+            let (v_knots, meridian) = arcs(vgrid.0, vgrid.1);
             let homogeneous = net(frame, &meridian, &|[c, s]| (radius * c, radius * s))?;
-            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, [param(v[0]), param(v[1])]]))
+            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
         }
         Surface::Torus { frame, major_radius, minor_radius } => {
-            let (p0, m) = quarters(v)?;
-            let (v_knots, tube) = arcs(p0, m);
+            let vgrid = quarters(v)?;
+            let (v_knots, tube) = arcs(vgrid.0, vgrid.1);
             let homogeneous = net(frame, &tube, &|[c, s]| (major_radius + minor_radius * c, minor_radius * s))?;
-            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, [param(v[0]), param(v[1])]]))
+            Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
         }
         _ => None,
     }
+}
+
+/// A circle edge labelled on another frame about the same axis: the same circle, its angle
+/// measured from `frame`'s x axis (its y axis taken so the circle keeps its own direction), and
+/// its interval shifted to match, so its form lies on `frame`'s quarter grid. `None` when the
+/// circle is not about `frame`'s axis (centre on it, normal along it, within `tol`).
+pub fn on_frame(c: &Curve, [t0, t1]: [f64; 2], frame: &Frame, tol: f64) -> Option<(Curve, [f64; 2])> {
+    let Curve::Circle { frame: own, radius } = c else { return None };
+    let (o, x, _, z) = axes(own)?;
+    let (fo, fx, _, fz) = axes(frame)?;
+    let d = o - fo;
+    if !((d - fz * d.dot(fz)).len() <= tol && (z.dot(fz).abs() - 1.0).abs() <= 1e-9) {
+        return None;
+    }
+    let nx = (fx - z * fx.dot(z)).normalized()?;
+    let ny = z.cross(nx);
+    let shift = x.dot(ny).atan2(x.dot(nx));
+    let relabel = Frame { origin: [o.x, o.y, o.z], x_axis: [nx.x, nx.y, nx.z], y_axis: [ny.x, ny.y, ny.z] };
+    Some((Curve::Circle { frame: relabel, radius: *radius }, [t0 + shift, t1 + shift]))
 }
