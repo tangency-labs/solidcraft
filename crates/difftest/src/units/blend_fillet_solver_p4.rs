@@ -22,9 +22,10 @@
 //!   when nothing has) and the case's [`Kernel::fillet_point_step`] is seeded with it, so
 //!   both sides step with the same value whatever ran earlier in the process (ND-3).
 //! - `calc_geom`: `CalcFilletGeom` on a rectangle sheet's edge (see the ffi module):
-//!   a non-B-spline (`SmHermiteCurve`) edge curve, and a B-spline edge curve with a bare
-//!   fillet geometry (no rails; G1 knots and split flag optional), which stops at the first
-//!   rail at the latest. Compared: status, solver status, extension flags, the G1 knots
+//!   a non-B-spline (`SmHermiteCurve`) edge curve, and a B-spline edge curve with the
+//!   solver's bare fillet geometry (the one the `SmFilletSolver` constructor adds; no
+//!   rails; G1 knots and its split flag optional), which stops at the first rail at the
+//!   latest. Compared: status, solver status, extension flags, the G1 knots
 //!   after the call and the knots given. The Rust solver replays `SetExtensionFlags` (the
 //!   C++ override) and imports the rectangle exported by the shim. With `uv_curves` the
 //!   shim makes the face's UV trim curves first (`SmFace::CreateUVTrimCurves`), so both
@@ -764,6 +765,8 @@ fn rust_calc_case(c: &CalcCase) -> Result<Output, Fail> {
     inner.solver.g1_knots.clone_from(&knots_in);
     let mut fb = FilletBrep::new();
     if c.geom {
+        // the constructor's fillet geometry (`m_vFilletGeoms[0]`, whose split flag the
+        // shim sets), with the solver's offset surfaces (`FinishConstruction`)
         let mut g = setup(
             FilletGeom::new(
                 &k,

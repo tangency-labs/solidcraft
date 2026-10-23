@@ -27,11 +27,6 @@ case = "cyl_bspline_uv_trim_own"
 why = "out[2] C++ 9.1e-17 vs Rust 0 on the B-spline cylinder UV trim, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, topology.face_p3)"
 
 [[mismatch]]
-unit = "blend.fillet_solver_p4"
-case = "gen0512"
-why = "Rust makes 1 fillet geometry where C++ makes 0, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, blend.fillet_solver_p4)"
-
-[[mismatch]]
 unit = "boolean.merge_p2"
 case = "make_faceuse_sphere"
 why = "merged topology len C++ 278 vs Rust 274, reachable since DropCurve was wired (plan/findings.md: PR #463 newly reachable mismatches, boolean.merge_p2)"

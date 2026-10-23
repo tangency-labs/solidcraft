@@ -5,10 +5,14 @@
 // SmConstantRadiusFS (surface-only constructor over the face's surface for both rails) whose
 // only override is SetExtensionFlags (the base dereferences the executive, unset here; the
 // override sets the given flags), its edge uses on one edge of the sheet, its G1 knots,
-// optionally an SmHermiteCurve in place of the edge's curve, optionally one bare
-// SmFilletGeom (no rails) with its split flag. Without rails, CalcFilletGeom stops at the
-// first rail (`NER(pThisRail)`) at the latest; without a fillet geometry it is only run on a
-// non-B-spline edge curve (it returns before reading m_vFilletGeoms[0]).
+// optionally an SmHermiteCurve in place of the edge's curve, and the split flag of its bare
+// SmFilletGeom (no rails). The SmFilletSolver constructor always adds that geometry
+// (`m_vFilletGeoms.Add(new SmFilletGeom(this))`, offset surfaces installed by
+// FinishConstruction), so `geom` sets the split flag of m_vFilletGeoms[0], the geometry
+// CalcFilletGeom reads (appending a second geometry would leave the split flag unread).
+// Without rails, CalcFilletGeom stops at the first rail (`NER(pThisRail)`) at the latest;
+// without `geom` it is only run on a non-B-spline edge curve (it returns before reading
+// m_vFilletGeoms[0]).
 //
 // Entry points (layouts in crates/solidcore-ffi/src/units/blend_fillet_solver_p4.rs, which
 // validates every input; reads are bounds checked here as well):
@@ -100,12 +104,8 @@ struct CalcFS : SmConstantRadiusFS
         m_pEdgeuses[0] = a;
         m_pEdgeuses[1] = b;
     }
-    void add_geom(SmBoolean split)
-    {
-        SmFilletGeom* g = new SmFilletGeom(this, SM_FG_DEFAULT);
-        g->SetSplitFlag(split);
-        m_vFilletGeoms.Add(g);
-    }
+    // the constructor's fillet geometry, m_vFilletGeoms[0], gets the split flag
+    void set_split(SmBoolean split) { m_vFilletGeoms[0]->SetSplitFlag(split); }
     SmTArray<double>& g1() { return m_vG1Knots; }
     SmBoolean before() const { return m_bExtendBefore; }
     SmBoolean after() const { return m_bExtendAfter; }
@@ -218,7 +218,7 @@ SC_EXPORT int32_t sc_blend_fillet_solver_p4_calc_geom(const double* in, int64_t 
             for (double k : knots_in)
                 fs.g1().Add(k);
             if (geom)
-                fs.add_geom(split);
+                fs.set_split(split);
             SmStatus stt = fs.CalcFilletGeom();
             o.push_back(st(stt));
             o.push_back((double)fs.status());
