@@ -1280,7 +1280,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Item::Notice { text, error } => {
                 ui_kit::assistant_banner(ui, if *error { ui_kit::AssistantTone::Error } else { ui_kit::AssistantTone::Neutral }, |ui| {
-                    ui.label(RichText::new(text).color(if *error { t.error } else { t.text_dim }));
+                    ui.add(egui::Label::new(RichText::new(text).color(if *error { t.error } else { t.text_dim })).wrap());
                 });
             }
         }

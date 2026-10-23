@@ -34,6 +34,8 @@ pub enum PromptPart {
 pub enum Event {
     /// Whether the agent takes documents (PDFs) in a message; sent before [`Event::Ready`].
     Documents(bool),
+    /// Whether SolidCraft tools were offered by the backend.
+    ToolsAvailable(bool),
     /// Ready for a message. `agent`: its name and version; `images`: it takes pictures.
     Ready { agent: String, images: bool },
     /// Text it streams (`thought`: its reasoning, shown dimmed).

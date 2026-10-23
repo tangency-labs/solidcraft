@@ -246,6 +246,10 @@ struct Turn {
     changes: u32,
     requests: u32,
     limit_told: bool,
+    tools_available: bool,
+    tool_called: bool,
+    replied: bool,
+    edit_requested: bool,
     label: String,
 }
 
@@ -371,6 +375,9 @@ pub struct AgentChat {
     running_endpoint: String,
     backend: Option<Box<dyn ChatBackend>>,
     turn: Option<Turn>,
+    tools_available: Option<bool>,
+    /// The latest completed turn's notice; older notices remain in the transcript.
+    turn_warning: Option<String>,
     held: Vec<Held>,
     next_approval: u64,
     /// The chat's control endpoint: the port, and its requests.
@@ -518,6 +525,7 @@ impl AgentChat {
     fn on_event(&mut self, e: Event) -> Option<Outcome> {
         match e {
             Event::Documents(documents) => self.documents = documents,
+            Event::ToolsAvailable(available) => self.tools_available = Some(available),
             Event::Ready { agent, images } => {
                 self.agent = agent;
                 self.images = images;
@@ -533,6 +541,12 @@ impl AgentChat {
                 }
             }
             Event::Text { thought, text } => {
+                if !thought
+                    && !text.trim().is_empty()
+                    && let Some(turn) = self.turn.as_mut()
+                {
+                    turn.replied = true;
+                }
                 if let Some(Item::Agent { thought: t, text: last }) = self.items.last_mut()
                     && *t == thought
                 {
@@ -542,6 +556,9 @@ impl AgentChat {
                 }
             }
             Event::Tool { id, title, kind, status, output } => {
+                if let Some(turn) = self.turn.as_mut() {
+                    turn.tool_called = true;
+                }
                 let existing = self.items.iter_mut().rev().find(|i| matches!(i, Item::Tool { id: x, .. } if *x == id));
                 if let Some(Item::Tool { title: t, kind: k, status: s, output: o, .. }) = existing {
                     if let Some(v) = title {
@@ -773,6 +790,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         chat.notice(tr("ui.agent_chat_no_cli"), true);
     }
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
+    chat.tools_available = Some(bridge.is_some());
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
@@ -965,6 +983,7 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    chat.turn_warning = None;
     chat.gallery = None;
     chat.pending.clear();
     chat.attachments.clear();
@@ -1045,8 +1064,19 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     // The undo step is named after the message, or its first file when it has no words.
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
-    app.agent_chat.turn =
-        Some(Turn { start_doc: app.session.doc.clone(), start_undo: app.session.undo.len(), changes: 0, requests: 0, limit_told: false, label });
+    app.agent_chat.turn_warning = None;
+    app.agent_chat.turn = Some(Turn {
+        start_doc: app.session.doc.clone(),
+        start_undo: app.session.undo.len(),
+        changes: 0,
+        requests: 0,
+        limit_told: false,
+        label,
+        tools_available: app.agent_chat.tools_available.unwrap_or(app.agent_chat.tools_port.is_some()),
+        tool_called: false,
+        replied: false,
+        edit_requested: requests_edit(&text),
+    });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
@@ -1258,11 +1288,43 @@ fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
     }
 }
 
+/// Recognise only explicit English edit requests; informational questions stay quiet.
+/// This checks the user's opening words, never interprets the model's prose as a call.
+fn requests_edit(text: &str) -> bool {
+    let opening: String = text.trim().chars().take(160).collect::<String>().to_ascii_lowercase();
+    let mut words = opening.as_str();
+    for prefix in ["please ", "can you ", "could you ", "would you ", "please "] {
+        if let Some(rest) = words.strip_prefix(prefix) {
+            words = rest;
+        }
+    }
+    [
+        "add", "create", "make", "change", "rename", "move", "rotate", "delete", "remove", "sketch", "extrude", "round", "fillet", "chamfer",
+        "scale", "cut", "drill",
+    ]
+    .iter()
+    .any(|verb| words.strip_prefix(*verb).is_some_and(|rest| rest.starts_with(char::is_whitespace)))
+}
+
 /// The message is answered: its changes become one undo step, and what still waits is declined.
 fn end_turn(app: &mut SolveApp) {
     decline_all(app, "the message ended");
     let Some(turn) = app.agent_chat.turn.take() else { return };
     let steps = merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    if app.agent_chat.ended.as_deref() == Some("")
+        && !app.agent_chat.stopped
+        && turn.tools_available
+        && !turn.tool_called
+        && turn.requests == 0
+        && turn.changes == 0
+        && steps == 0
+        && Arc::ptr_eq(&app.session.doc, &turn.start_doc)
+        && (!turn.replied || turn.edit_requested)
+    {
+        let warning = tr("ui.agent_chat_no_tool_call").to_string();
+        app.agent_chat.turn_warning = Some(warning.clone());
+        app.agent_chat.notice(warning, false);
+    }
     if steps > 0 {
         let doc = app.session.doc.clone();
         app.agent_chat.push(Item::Changes { steps, doc, undone: false });
@@ -1726,6 +1788,7 @@ pub fn status(app: &SolveApp) -> Value {
         "loading": c.loading.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
         "stopped": c.stopped,
         "turn": c.turn.as_ref().map(|t| json!({"changes": t.changes, "requests": t.requests})),
+        "turnWarning": c.turn_warning,
         "detection": detection,
         "items": items,
     })

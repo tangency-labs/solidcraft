@@ -1721,3 +1721,68 @@ fn add_agent_opens_its_dialog_from_home() {
     assert!(h.app.agent_chat.settings.add.is_some(), "Add agent opened its dialog");
     assert!(handle_at("ai_add:add").is_some(), "the dialog is drawn over Home");
 }
+
+#[test]
+fn no_tool_turn_reports_empty_reply_and_unperformed_edit() {
+    for (prompt, reply) in [
+        ("Hello", ""),
+        ("Hello", "   "),
+        ("Make a box", "Here is how to make a box."),
+        ("Can you rename the body?", "I cannot rename bodies."),
+        ("Could you please make a change to the current shape", "Here is the command."),
+        ("Sketch a rectangle", r#"{"name":"batch","arguments":{"commands":[]}}"#),
+    ] {
+        let (mut app, _, _) = app_with_script();
+        app.agent_chat.tools_port = Some(12345);
+        start_turn(&mut app, prompt.into(), false, None, vec![]);
+        if !reply.is_empty() {
+            app.agent_chat.on_event(Event::Text { thought: false, text: reply.into() });
+        }
+        app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+        end_turn(&mut app);
+        let expected = tr("ui.agent_chat_no_tool_call");
+        assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: false } if text == expected)), "{prompt}");
+        assert_eq!(status(&app)["turnWarning"], expected);
+        assert!(app.session.undo.is_empty());
+        start_turn(&mut app, "What is a fillet?".into(), false, None, vec![]);
+        assert!(status(&app)["turnWarning"].is_null());
+        assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == expected)));
+        new_chat(&mut app);
+        assert!(status(&app)["turnWarning"].is_null());
+        assert!(app.agent_chat.items.is_empty());
+    }
+}
+
+#[test]
+fn no_tool_turn_warning_does_not_follow_a_tool_call() {
+    let (mut app, _, _) = app_with_script();
+    app.agent_chat.tools_port = Some(12345);
+    start_turn(&mut app, "Make a box".into(), false, None, vec![]);
+    app.agent_chat.on_event(Event::Tool { id: "t".into(), title: Some("batch".into()), kind: None, status: Some(ToolStatus::Failed), output: None });
+    app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+    end_turn(&mut app);
+    assert!(status(&app).get("turnWarning").is_some());
+    assert!(status(&app)["turnWarning"].is_null());
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { .. })));
+}
+
+#[test]
+fn no_tool_turn_warning_leaves_answers_and_incomplete_turns_quiet() {
+    for (prompt, reply, reason, tools) in [
+        ("What is a fillet?", "A fillet rounds an edge.", "", true),
+        ("How do I make a box?", "Use the Box command.", "", true),
+        ("Make a box", "", "cancelled", true),
+        ("Make a box", "", "error", true),
+        ("Make a box", "", "", false),
+    ] {
+        let (mut app, _, _) = app_with_script();
+        app.agent_chat.tools_port = tools.then_some(12345);
+        start_turn(&mut app, prompt.into(), false, None, vec![]);
+        app.agent_chat.on_event(Event::Text { thought: false, text: reply.into() });
+        app.agent_chat.on_event(Event::TurnEnded { reason: reason.into() });
+        end_turn(&mut app);
+        assert!(status(&app).get("turnWarning").is_some());
+        assert!(status(&app)["turnWarning"].is_null(), "{prompt}: {reason}");
+        assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == tr("ui.agent_chat_no_tool_call"))));
+    }
+}

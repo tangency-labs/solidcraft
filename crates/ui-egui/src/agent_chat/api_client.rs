@@ -161,6 +161,7 @@ impl Worker {
         if let Err(e) = self.start_mcp() {
             self.emit(Event::Error(e));
         }
+        self.emit(Event::ToolsAvailable(!self.tools.is_empty()));
         self.history.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
         self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
         // The endpoint's models for the picker; an endpoint that does not list them shows none.
@@ -605,7 +606,8 @@ mod tests {
             events.extend(b.poll());
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(matches!(events.first(), Some(Event::Ready { .. })), "{events:?}");
+        assert_eq!(events.first(), Some(&Event::ToolsAvailable(false)));
+        assert!(events.iter().any(|e| matches!(e, Event::Ready { .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Tool { status: Some(ToolStatus::Failed), .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
