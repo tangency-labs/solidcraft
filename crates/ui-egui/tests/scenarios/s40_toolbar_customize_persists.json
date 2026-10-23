@@ -15,7 +15,7 @@
  {
   "expect": {
    "shown_handles": [
-    "toolbar:solid.extrude",
+    "toolbar:solid.fillet",
     "toolbar:solid.revolve"
    ],
    "hidden_handles": [
@@ -77,7 +77,7 @@
     "handle": "toolbar:solid.draft"
    },
    {
-    "handle": "toolbar:solid.extrude"
+    "handle": "toolbar:solid.fillet"
    }
   ],
   "steps": 12
@@ -86,7 +86,7 @@
   "expect": {
    "handle_order": [
     "toolbar:solid.draft",
-    "toolbar:solid.extrude"
+    "toolbar:solid.fillet"
    ]
   }
  },
@@ -107,7 +107,7 @@
   "expect": {
    "handle_order": [
     "toolbar:solid.draft",
-    "toolbar:solid.extrude"
+    "toolbar:solid.fillet"
    ]
   }
  },

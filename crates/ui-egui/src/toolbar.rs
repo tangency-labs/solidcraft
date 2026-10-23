@@ -1246,12 +1246,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
                     && d.id != c.id
+                    && crate::toolbar_custom::accepts_drop(&tab, d.id, panel)
                 {
                     painter
                         .line_segment([pos2(br.left() - 1.0, br.top() + 2.0), pos2(br.left() - 1.0, br.bottom() - 2.0)], Stroke::new(2.0, t.accent));
                 }
                 if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
                     && d.id != c.id
+                    && crate::toolbar_custom::accepts_drop(&tab, d.id, panel)
                 {
                     drop = Some((d.id, *panel, Some(c.id)));
                 }
@@ -1359,6 +1361,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
                         && d.id != c.id
+                        && crate::toolbar_custom::accepts_drop(&tab, d.id, panel)
                     {
                         drop = Some((d.id, *panel, Some(c.id)));
                     }
@@ -1421,7 +1424,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     rect.contains(p)
                 })
             });
-            if !over_button && ui.rect_contains_pointer(panel_rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
+            if !over_button
+                && ui.rect_contains_pointer(panel_rect)
+                && let Some(d) = egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx())
+                && crate::toolbar_custom::accepts_drop(&tab, d.id, panel)
+            {
                 painter.line_segment([pos2(px + width - 4.0, top + 4.0), pos2(px + width - 4.0, top + 38.0)], Stroke::new(2.0, t.accent));
                 if ui.input(|input| input.pointer.any_released())
                     && let Some(d) = egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())
@@ -2728,12 +2735,42 @@ mod panel_drop_tests {
     }
 
     #[test]
-    fn panel_label_drop_moves_a_button_between_panels() {
+    fn cross_panel_drops_leave_buttons_and_preferences_unchanged() {
+        for (source, destination) in [
+            ("button:solid.fillet", "button:solid.revolve"),
+            ("button:solid.fillet", "panel:MODEL:CREATE"),
+            ("button:solid.extrude", "button:solid.fillet"),
+            ("button:solid.extrude", "panel:MODEL:MODIFY"),
+            ("dropdown:solid.torus", "button:solid.fillet"),
+            ("dropdown:solid.torus", "panel:MODEL:MODIFY"),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            let prefs = h.app.toolbar_custom.prefs();
+            if source.starts_with("dropdown:") {
+                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+            }
+            h.step(&json!({"drag":[{"handle":source},{"handle":destination}],"steps":12})).unwrap();
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert_eq!(h.app.toolbar_custom.prefs(), prefs, "{source} -> {destination}");
+            let expected = json!({"expect":{
+                "handle_order":["button:solid.extrude","button:solid.revolve","button:solid.hole","button:solid.fillet","button:solid.chamfer"],
+                "hidden_handles":["button:solid.torus"],"tool":null,"dialog":null,"errors":0
+            }});
+            h.step(&expected).unwrap();
+            h.step(&json!({"restart":"close"})).unwrap();
+            h.step(&expected).unwrap();
+        }
+    }
+
+    #[test]
+    fn reorder_rejects_other_panels_before_mutating_preferences() {
         let mut h = crate::scenario::Harness::new();
-        h.step(&json!({"drag":[{"handle":"button:solid.extrude"},{"handle":"panel:MODEL:MODIFY"}],"steps":12})).unwrap();
-        h.step(&json!({"expect":{"handle_order":["button:solid.fillet","button:solid.chamfer","button:solid.shell","button:solid.extrude"],"tool":null,"dialog":null,"errors":0}})).unwrap();
-        h.step(&json!({"restart":"close"})).unwrap();
-        h.step(&json!({"expect":{"handle_order":["button:solid.shell","button:solid.extrude"]}})).unwrap();
+        let app = &mut h.app;
+        let prefs = app.toolbar_custom.prefs();
+        for id in ["solid.fillet", "solid.draft"] {
+            crate::toolbar_custom::reorder(app, "MODEL", id, "CREATE", Some("solid.revolve"));
+            assert_eq!(app.toolbar_custom.prefs(), prefs);
+        }
     }
 }
 
