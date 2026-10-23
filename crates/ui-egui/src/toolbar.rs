@@ -2241,8 +2241,10 @@ fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon:
 /// A grid drop-down's cell (#4739): the icon twice the size of a list row's, with room around it.
 const GRID_CELL: f32 = 48.0;
 const GRID_ICON: f32 = 32.0;
-/// Columns at most; a panel with fewer commands is as wide as it needs.
+/// Columns a grid fills before a second row; a panel with fewer commands is as wide as it needs.
 const GRID_COLUMNS: usize = 5;
+/// Rows at most: a bigger menu grows to the right instead (unless the window is too narrow).
+const GRID_ROWS: usize = 3;
 
 /// The height of a group's heading in a grid drop-down.
 const GRID_HEADING: f32 = 24.0;
@@ -2259,11 +2261,12 @@ struct GridLayout {
     size: egui::Vec2,
 }
 
-/// Lay out a grid drop-down. A menu of two or more headed groups (Sketch › Create's families,
-/// Model › Modify's Edges, Faces…) puts the groups side by side, each heading over a column of
-/// its icons, at most [`GROUP_COLUMNS`] across, when that fits in `room` (wide); any other menu,
-/// or one too wide for the window, fills rows of up to [`GRID_COLUMNS`] icons, a heading starting
-/// a new row.
+/// Lay out a grid drop-down, at most [`GRID_ROWS`] high, growing to the right. A menu of two or
+/// more headed groups (Sketch › Create's families, Model › Modify's Edges, Faces…) puts the
+/// groups side by side, each heading over a column of its icons, [`GROUP_COLUMNS`] across (more
+/// for a group too big for three rows), when that fits in `room` (wide). Any other menu, or one
+/// too wide for the window, fills rows: [`GRID_COLUMNS`] across, more when that would take over
+/// three rows, fewer when the window is narrower; a heading starts a new row.
 fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], room: f32) -> GridLayout {
     let mut groups: Vec<(Option<&'static str>, Vec<usize>)> = Vec::new();
     for (i, (heading, _)) in grouped.iter().enumerate() {
@@ -2274,33 +2277,39 @@ fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::Com
             items.push(i);
         }
     }
+    let group_columns = |n: usize| n.div_ceil(GRID_ROWS).max(GROUP_COLUMNS);
     let headed = groups.iter().filter(|(h, _)| h.is_some()).count();
-    let side_by_side = headed >= 2 && (groups.len() * GROUP_COLUMNS) as f32 * GRID_CELL <= room;
+    let side_columns: usize = groups.iter().map(|(_, items)| group_columns(items.len())).sum();
+    let side_by_side = headed >= 2 && side_columns as f32 * GRID_CELL <= room;
     let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
     let mut headings = Vec::new();
     let mut separators = Vec::new();
     let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(GRID_CELL, GRID_CELL));
     let size = if side_by_side {
-        let width = GROUP_COLUMNS as f32 * GRID_CELL;
+        let (mut first_column, mut rows) = (0, 0);
         for (g, (heading, items)) in groups.iter().enumerate() {
-            let x = g as f32 * width;
+            let columns = group_columns(items.len());
+            let x = first_column as f32 * GRID_CELL;
             if g > 0 {
                 separators.push(x);
             }
             if let Some(h) = heading {
-                headings.push((pos2(x, 0.0), width, *h));
+                headings.push((pos2(x, 0.0), columns as f32 * GRID_CELL, *h));
             }
             for (k, i) in items.iter().enumerate() {
-                let (row, column) = (k / GROUP_COLUMNS, k % GROUP_COLUMNS);
+                let (row, column) = (k / columns, k % columns);
                 if let Some(slot) = cells.get_mut(*i) {
-                    *slot = (cell(x + column as f32 * GRID_CELL, GRID_HEADING + row as f32 * GRID_CELL), (row, g * GROUP_COLUMNS + column));
+                    *slot = (cell(x + column as f32 * GRID_CELL, GRID_HEADING + row as f32 * GRID_CELL), (row, first_column + column));
                 }
             }
+            rows = rows.max(items.len().div_ceil(columns));
+            first_column += columns;
         }
-        let rows = groups.iter().map(|(_, items)| items.len().div_ceil(GROUP_COLUMNS)).max().unwrap_or(0);
-        vec2(groups.len() as f32 * width, GRID_HEADING + rows as f32 * GRID_CELL)
+        vec2(first_column as f32 * GRID_CELL, GRID_HEADING + rows as f32 * GRID_CELL)
     } else {
-        let columns = grouped.len().clamp(1, GRID_COLUMNS);
+        let n = grouped.len();
+        let fit = ((room / GRID_CELL).floor() as usize).max(1);
+        let columns = n.div_ceil(GRID_ROWS).max(n.min(GRID_COLUMNS)).min(fit).max(1);
         let (mut y, mut first_row) = (0.0, 0);
         for (heading, items) in &groups {
             if let Some(h) = heading {
@@ -3873,10 +3882,11 @@ mod dropdown_tests {
             (Some("Other"), c("solid.extrude")),
             (None, c("solid.revolve")),
         ];
-        // Too narrow for the groups side by side: rows of up to five, a heading starting a row.
+        // Too narrow for the groups side by side (two icons wide): rows as wide as the window, a
+        // heading starting a row.
         let rows = grid_layout(&grouped, 100.0);
         let at = |l: &GridLayout| l.cells.iter().map(|(_, at)| *at).collect::<Vec<_>>();
-        assert_eq!(at(&rows), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
+        assert_eq!(at(&rows), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1)]);
         assert_eq!(rows.headings.len(), 2);
         // Room enough: each group a column of two under its heading, the groups side by side.
         let side = grid_layout(&grouped, 1000.0);
@@ -3906,6 +3916,32 @@ mod dropdown_tests {
         assert_eq!(grid_step(&cells, &[], None, GridKey::Down), None);
     }
 
+    /// Every panel's drop-down of every tab, and Sketch › Create's families, is at most
+    /// GRID_ROWS high in the grid when the window is wide enough: big menus grow to the right.
+    #[test]
+    fn every_grid_menu_is_at_most_three_rows_high() {
+        let rows = |l: &GridLayout| l.cells.iter().map(|(r, _)| r.top().round() as i32).collect::<std::collections::BTreeSet<_>>().len();
+        let tabs: std::collections::BTreeSet<&str> = crate::workspace::SECTIONS.iter().map(|s| s.tab).collect();
+        for tab in tabs {
+            for (panel, cmds, _) in crate::toolbar_custom::panel_lists(tab) {
+                let grouped = crate::workspace::grouped_commands(tab, panel, &cmds);
+                let layout = grid_layout(&grouped, 4000.0);
+                assert!(rows(&layout) <= GRID_ROWS, "{tab} {panel}: {} rows", rows(&layout));
+                if tab == "SKETCH" && panel == "CREATE" {
+                    let families = grid_layout(&sketch_create_grouped(&cmds), 4000.0);
+                    assert!(rows(&families) <= GRID_ROWS, "Sketch › Create families: {} rows", rows(&families));
+                }
+            }
+        }
+        // A window too narrow for the width wraps into more rows instead of running off it.
+        let c = |id| solidcraft_engine::find_command(id).unwrap();
+        let many: Vec<_> = solidcraft_engine::command_specs().into_iter().take(30).map(|c| (None, c)).collect();
+        let narrow = grid_layout(&many, 4.0 * GRID_CELL);
+        assert!(narrow.size.x <= 4.0 * GRID_CELL && rows(&narrow) > GRID_ROWS);
+        let few = [(None, c("solid.box")), (None, c("solid.sphere"))];
+        assert_eq!(grid_layout(&few, 4000.0).size, vec2(2.0 * GRID_CELL, GRID_CELL), "a small menu is one row");
+    }
+
     /// With `ribbon_icon_grid` on, a panel's drop-down shows the same commands as its list, as
     /// large icons in rows of at most five; arrow keys move across and down; a click starts the
     /// command, and a drag pins it, as from the list (#4739).
@@ -3929,13 +3965,14 @@ mod dropdown_tests {
         let (menu, grid) = open(&mut h);
         let ids = |rows: &[(String, egui::Pos2)]| rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&grid), ids(&list), "the grid shows the list's commands in its order");
-        assert!(grid.len() > GRID_COLUMNS, "MODEL CREATE fills more than one row: {grid:?}");
+        assert!(grid.len() > GRID_COLUMNS * GRID_ROWS, "MODEL CREATE is a big menu: {grid:?}");
         for (id, at) in &grid {
             assert!(menu.contains(*at), "{id} at {at:?} is outside the drop-down {menu:?}");
         }
-        let xs: std::collections::BTreeSet<i32> = grid.iter().map(|(_, at)| at.x.round() as i32).collect();
-        assert!(xs.len() > 1 && xs.len() <= GRID_COLUMNS, "laid out in at most {GRID_COLUMNS} columns: {xs:?}");
-        assert!(menu.width() <= GRID_COLUMNS as f32 * GRID_CELL + 40.0, "no wider than its columns: {menu:?}");
+        let ys: std::collections::BTreeSet<i32> = grid.iter().map(|(_, at)| at.y.round() as i32).collect();
+        assert_eq!(ys.len(), GRID_ROWS, "laid out in {GRID_ROWS} rows, growing to the right: {ys:?}");
+        let columns = grid.len().div_ceil(GRID_ROWS);
+        assert!(menu.width() <= columns as f32 * GRID_CELL + 40.0, "no wider than its columns: {menu:?}");
 
         let hot = |h: &mut crate::scenario::Harness, key: &str| {
             h.step(&json!({"key": key})).unwrap();
