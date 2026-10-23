@@ -122,6 +122,35 @@ fn plane_at_angle_about_a_cylinder_axis_follows_it() {
 }
 
 #[test]
+fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
+    // The top face, turned 45° about its front edge (y = 0, along X).
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({"base": {"face": [5, 5, 20]}, "axis": {"edge": [20, 0, 20]}, "angle": "45 deg", "name": "Slanted"}),
+    );
+    let feature = s.doc.find_feature("Slanted").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AtAngle { base, line, .. } } = &feature.kind else {
+        panic!("at_angle plane: {:?}", feature.kind)
+    };
+    assert!(matches!(base.as_ref(), solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. }), "{base:?}");
+    assert!(line.is_some(), "the edge is kept as a model reference");
+    let plane = |s: &Session| construction_planes(s).into_iter().find(|p| p.1 == "Slanted").map(|p| p.2).unwrap();
+    let half = 0.5_f64.sqrt();
+    let pl = plane(&s);
+    assert!(pl.height(Vec3::new(20.0, 0.0, 20.0)).abs() < 1e-6, "through the edge: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "45° to the top: {pl:?}");
+    // A taller box: the face and the edge both move up.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "30 mm"}));
+    let pl = plane(&s);
+    assert!(pl.height(Vec3::new(20.0, 0.0, 30.0)).abs() < 1e-6, "follows the edge: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9, "{pl:?}");
+}
+
+#[test]
 fn the_axis_keeps_its_turn_whichever_way_the_edge_runs() {
     // The top and bottom rims run opposite ways round the shaft; a quarter turn about either
     // lands in the same place.
