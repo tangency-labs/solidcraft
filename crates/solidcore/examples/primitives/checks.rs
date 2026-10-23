@@ -178,18 +178,122 @@ fn rel_ok(a: f64, b: f64, scale: f64) -> bool {
     (a - b).abs() <= REL_TOL * scale
 }
 
-/// Builds `spec` and checks it; `Err` names the first failed check.
-pub fn check(spec: &Spec) -> Result<Report, String> {
-    let mut k = Kernel::default();
-    let b = (spec.build)(&mut k).map_err(|e| format!("build failed: {e:?}"))?;
-    let err = |e: solidcore::SolidError| format!("{e:?}");
-    let faces = bl::faces(&b, None).map_err(err)?;
-    let edges = bl::edges(&b, None).map_err(err)?;
-    let vertices = bl::vertices(&b, None).map_err(err)?;
-    let mut loops = 0;
-    for f in &faces {
-        loops += fl::loops(&b, *f, false, None).map_err(err)?.len();
+/// A value one check compared.
+#[derive(Debug, Clone, Copy)]
+pub enum Value {
+    /// A yes/no property.
+    Bool(bool),
+    /// An integer (Euler-Poincare characteristic).
+    Int(i64),
+    /// A real quantity (volume, area).
+    Num(f64),
+    /// (faces, edges, vertices).
+    Counts(usize, usize, usize),
+    /// Bounding box (min, max).
+    BBox(Point3, Point3),
+}
+
+/// One check of a built primitive.
+#[derive(Debug, Clone)]
+pub struct Check {
+    /// Short id: `manifold`, `euler`, `counts`, `volume`, `area` or `bbox`.
+    pub name: &'static str,
+    /// Whether it passed.
+    pub pass: bool,
+    /// Analytic value.
+    pub expected: Value,
+    /// Measured value; `None` when measuring it failed.
+    pub actual: Option<Value>,
+    /// Relative error of a real-valued check (bbox: largest corner deviation over the
+    /// analytic diagonal).
+    pub rel_err: Option<f64>,
+    /// Why it failed; empty when it passed.
+    pub message: String,
+}
+
+/// What measuring a built primitive returned, one result per measurement.
+#[derive(Debug)]
+pub struct Measured {
+    /// Faces, edges, vertices, loops.
+    pub counts: solidcore::Result<(usize, usize, usize, usize)>,
+    /// `is_manifold_solid`.
+    pub manifold_solid: solidcore::Result<bool>,
+    /// Integrated volume.
+    pub volume: solidcore::Result<f64>,
+    /// Integrated area.
+    pub area: solidcore::Result<f64>,
+    /// Bounding box (min, max).
+    pub bbox: solidcore::Result<(Point3, Point3)>,
+}
+
+/// Everything [`evaluate`] found out about one primitive.
+#[derive(Debug)]
+pub struct Evaluation {
+    /// The build's error, if it failed (then `measured` is `None`).
+    pub build_error: Option<solidcore::SolidError>,
+    /// Measurements of the built solid.
+    pub measured: Option<Measured>,
+    /// Every check, in order; empty when the build failed.
+    pub checks: Vec<Check>,
+}
+
+impl Evaluation {
+    /// Built and every check passed.
+    pub fn pass(&self) -> bool {
+        self.build_error.is_none() && !self.checks.is_empty() && self.checks.iter().all(|c| c.pass)
     }
+
+    /// The first error met, build first, then measurements in [`check`]'s order.
+    pub fn first_error(&self) -> Option<&solidcore::SolidError> {
+        if let Some(e) = &self.build_error {
+            return Some(e);
+        }
+        let m = self.measured.as_ref()?;
+        m.counts
+            .as_ref()
+            .err()
+            .or(m.bbox.as_ref().err())
+            .or(m.manifold_solid.as_ref().err())
+            .or(m.volume.as_ref().err())
+            .or(m.area.as_ref().err())
+    }
+
+    /// `(unit, upstream symbol)` of the first unported call that stopped this primitive.
+    pub fn blocker(&self) -> Option<(&'static str, &'static str)> {
+        let first = self
+            .build_error
+            .iter()
+            .chain(self.measured.iter().flat_map(|m| {
+                [
+                    m.counts.as_ref().err(),
+                    m.bbox.as_ref().err(),
+                    m.manifold_solid.as_ref().err(),
+                    m.volume.as_ref().err(),
+                    m.area.as_ref().err(),
+                ]
+                .into_iter()
+                .flatten()
+            }));
+        for e in first {
+            if let solidcore::SolidError::Unported { upstream, unit } = e {
+                return Some((unit, upstream));
+            }
+        }
+        None
+    }
+}
+
+fn measure(k: &Kernel, b: &Brep) -> Measured {
+    let counts = (|| {
+        let faces = bl::faces(b, None)?;
+        let edges = bl::edges(b, None)?;
+        let vertices = bl::vertices(b, None)?;
+        let mut loops = 0;
+        for f in &faces {
+            loops += fl::loops(b, *f, false, None)?.len();
+        }
+        Ok((faces.len(), edges.len(), vertices.len(), loops))
+    })();
     let store = AttributeStore::new();
     let key_of = |_| ObjectKey(0);
     let attributes = PropertyAttributes {
@@ -201,53 +305,207 @@ pub fn check(spec: &Spec) -> Result<Report, String> {
         tight: true,
         expand_by_zone_tol_3d: false,
     };
-    let ext = calculate_bounding_box(&k, &b, opts).map_err(err)?;
-    let r = Report {
-        counts: (faces.len(), edges.len(), vertices.len(), loops),
-        manifold_solid: is_manifold_solid(&b).map_err(err)?,
-        volume: brep_volume(&k, &b, ACCURACY, &attributes).map_err(err)?,
-        area: brep_area(&k, &b, ACCURACY).map_err(err)?,
-        bbox: (
+    let bbox = calculate_bounding_box(k, b, opts).map(|ext| {
+        (
             Point3::new(ext.min_at(0), ext.min_at(1), ext.min_at(2)),
             Point3::new(ext.max_at(0), ext.max_at(1), ext.max_at(2)),
-        ),
+        )
+    });
+    Measured {
+        counts,
+        manifold_solid: is_manifold_solid(b),
+        volume: brep_volume(k, b, ACCURACY, &attributes),
+        area: brep_area(k, b, ACCURACY),
+        bbox,
+    }
+}
+
+fn real_check(name: &'static str, got: &solidcore::Result<f64>, want: f64) -> Check {
+    let (actual, rel_err, pass, message) = match got {
+        Ok(v) => {
+            let pass = rel_ok(*v, want, want.abs());
+            let msg = if pass {
+                String::new()
+            } else {
+                format!("{name} {v} vs analytic {want}")
+            };
+            (
+                Some(Value::Num(*v)),
+                Some((v - want).abs() / want.abs()),
+                pass,
+                msg,
+            )
+        }
+        Err(e) => (None, None, false, format!("{e:?}")),
     };
-    let (f, e, v, lo) = r.counts;
-    if !r.manifold_solid {
-        return Err(format!("not a closed manifold solid: {r:?}"));
+    Check {
+        name,
+        pass,
+        expected: Value::Num(want),
+        actual,
+        rel_err,
+        message,
     }
-    // Euler-Poincare for one closed shell of genus g: V - E + F - (L - F) = 2 - 2g. With
-    // one loop per face (no rings) this is V - E + F.
-    let chi = v as i64 - e as i64 + f as i64 - (lo as i64 - f as i64);
-    if chi != spec.euler {
-        return Err(format!(
-            "Euler-Poincare V-E+F-(L-F) = {chi}, expected {}: {r:?}",
-            spec.euler
-        ));
+}
+
+fn unmeasured(name: &'static str, expected: Value, e: &solidcore::SolidError) -> Check {
+    Check {
+        name,
+        pass: false,
+        expected,
+        actual: None,
+        rel_err: None,
+        message: format!("{e:?}"),
     }
-    if let Some(c) = spec.counts {
-        if (f, e, v) != c || lo != f {
-            return Err(format!(
-                "counts {:?}, expected {c:?} with one loop per face",
-                r.counts
-            ));
+}
+
+/// Builds `spec`, measures it and runs every check (none stops the others).
+pub fn evaluate(spec: &Spec) -> Evaluation {
+    let mut k = Kernel::default();
+    let b = match (spec.build)(&mut k) {
+        Ok(b) => b,
+        Err(e) => {
+            return Evaluation {
+                build_error: Some(e),
+                measured: None,
+                checks: Vec::new(),
+            }
+        }
+    };
+    let m = measure(&k, &b);
+    let mut checks = Vec::new();
+    checks.push(match &m.manifold_solid {
+        Ok(ok) => Check {
+            name: "manifold",
+            pass: *ok,
+            expected: Value::Bool(true),
+            actual: Some(Value::Bool(*ok)),
+            rel_err: None,
+            message: if *ok {
+                String::new()
+            } else {
+                "not a closed manifold solid".to_string()
+            },
+        },
+        Err(e) => unmeasured("manifold", Value::Bool(true), e),
+    });
+    match &m.counts {
+        Ok((f, e, v, lo)) => {
+            // Euler-Poincare for one closed shell of genus g: V - E + F - (L - F) =
+            // 2 - 2g. With one loop per face (no rings) this is V - E + F.
+            let chi = *v as i64 - *e as i64 + *f as i64 - (*lo as i64 - *f as i64);
+            checks.push(Check {
+                name: "euler",
+                pass: chi == spec.euler,
+                expected: Value::Int(spec.euler),
+                actual: Some(Value::Int(chi)),
+                rel_err: None,
+                message: if chi == spec.euler {
+                    String::new()
+                } else {
+                    format!(
+                        "Euler-Poincare V-E+F-(L-F) = {chi}, expected {}",
+                        spec.euler
+                    )
+                },
+            });
+            if let Some(c) = spec.counts {
+                let pass = (*f, *e, *v) == c && lo == f;
+                checks.push(Check {
+                    name: "counts",
+                    pass,
+                    expected: Value::Counts(c.0, c.1, c.2),
+                    actual: Some(Value::Counts(*f, *e, *v)),
+                    rel_err: None,
+                    message: if pass {
+                        String::new()
+                    } else {
+                        format!(
+                            "counts {:?}, expected {c:?} with one loop per face",
+                            (f, e, v, lo)
+                        )
+                    },
+                });
+            }
+        }
+        Err(err) => {
+            checks.push(unmeasured("euler", Value::Int(spec.euler), err));
+            if let Some(c) = spec.counts {
+                checks.push(unmeasured("counts", Value::Counts(c.0, c.1, c.2), err));
+            }
         }
     }
-    if !rel_ok(r.volume, spec.volume, spec.volume.abs()) {
-        return Err(format!("volume {} vs analytic {}", r.volume, spec.volume));
-    }
-    if !rel_ok(r.area, spec.area, spec.area.abs()) {
-        return Err(format!("area {} vs analytic {}", r.area, spec.area));
-    }
-    let size = (spec.bbox.1 - spec.bbox.0).length();
-    for (got, want) in [(r.bbox.0, spec.bbox.0), (r.bbox.1, spec.bbox.1)] {
-        let d: Vec3 = got - want;
-        if !(rel_ok(d.x, 0.0, size) && rel_ok(d.y, 0.0, size) && rel_ok(d.z, 0.0, size)) {
-            return Err(format!(
-                "bounding box {:?} vs analytic {:?}",
-                r.bbox, spec.bbox
-            ));
+    checks.push(real_check("volume", &m.volume, spec.volume));
+    checks.push(real_check("area", &m.area, spec.area));
+    let want = Value::BBox(spec.bbox.0, spec.bbox.1);
+    checks.push(match &m.bbox {
+        Ok(got) => {
+            let size = (spec.bbox.1 - spec.bbox.0).length();
+            let mut pass = true;
+            let mut dev = 0.0_f64;
+            for (g, w) in [(got.0, spec.bbox.0), (got.1, spec.bbox.1)] {
+                let d: Vec3 = g - w;
+                if !(rel_ok(d.x, 0.0, size) && rel_ok(d.y, 0.0, size) && rel_ok(d.z, 0.0, size)) {
+                    pass = false;
+                }
+                dev = dev.max(d.x.abs()).max(d.y.abs()).max(d.z.abs());
+            }
+            Check {
+                name: "bbox",
+                pass,
+                expected: want,
+                actual: Some(Value::BBox(got.0, got.1)),
+                rel_err: Some(dev / size),
+                message: if pass {
+                    String::new()
+                } else {
+                    format!("bounding box {got:?} vs analytic {:?}", spec.bbox)
+                },
+            }
         }
+        Err(e) => unmeasured("bbox", want, e),
+    });
+    Evaluation {
+        build_error: None,
+        measured: Some(m),
+        checks,
     }
-    Ok(r)
+}
+
+/// Builds `spec` and checks it; `Err` names the first failed check.
+#[allow(dead_code)] // the primitives_solid test's entry point; the example uses `report`
+pub fn check(spec: &Spec) -> Result<Report, String> {
+    report(&evaluate(spec))
+}
+
+/// [`check`]'s verdict on an [`Evaluation`]: the measurements, or the first failure.
+pub fn report(ev: &Evaluation) -> Result<Report, String> {
+    if let Some(e) = &ev.build_error {
+        return Err(format!("build failed: {e:?}"));
+    }
+    if let Some(e) = ev.first_error() {
+        return Err(format!("{e:?}"));
+    }
+    let r = match &ev.measured {
+        Some(Measured {
+            counts: Ok(counts),
+            manifold_solid: Ok(manifold_solid),
+            volume: Ok(volume),
+            area: Ok(area),
+            bbox: Ok(bbox),
+        }) => Report {
+            counts: *counts,
+            manifold_solid: *manifold_solid,
+            volume: *volume,
+            area: *area,
+            bbox: *bbox,
+        },
+        _ => return Err("not measured".to_string()),
+    };
+    match ev.checks.iter().find(|c| !c.pass) {
+        // The manifold and Euler messages carry the measurements, as before.
+        Some(c) if matches!(c.name, "manifold" | "euler") => Err(format!("{}: {r:?}", c.message)),
+        Some(c) => Err(c.message.clone()),
+        None => Ok(r),
+    }
 }

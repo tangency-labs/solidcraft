@@ -3,6 +3,7 @@
 //! and bounding box.
 
 #[path = "../examples/primitives/checks.rs"]
+#[allow(dead_code)] // the example also uses its per-check detail (--json)
 mod checks;
 
 #[test]

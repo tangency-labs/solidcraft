@@ -54,6 +54,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-reports.sh || echo "no reports; unit pages will say so"
+      - name: Fetch main's solids report
+        if: steps.gate.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch-solids.sh || echo "no solids report; the Solids page will say so"
       - name: Build site
         if: steps.gate.outputs.build == 'true'
         run: python3 site/build.py --out _site

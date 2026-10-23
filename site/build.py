@@ -7,6 +7,7 @@
 Standard library only (Python 3.11+ for tomllib). Every number comes from the repo:
 plan/units/*.toml, plan/PROGRESS.md (claims), harness/callgraph/units.json,
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
+reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
 reports/ssi-corpus.json, plan/upstream-issues.md, the
 module file headers under crates/solidcore/src and git history (timeline). Output is
 deterministic: sorted, and the only date is the commit date of HEAD.
@@ -188,6 +189,159 @@ def load_reports():
     return reports
 
 
+SOLIDS_SCHEMA = 1
+
+
+def load_solids():
+    """The primitives example's report (reports/solids/solids.json), or None.
+
+    Not committed; CI fetches main's latest with scripts/fetch-solids.sh. A missing or
+    unreadable file, or another schema version, means "no data yet".
+    """
+    p = ROOT / "reports/solids/solids.json"
+    try:
+        d = json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or d.get("schema") != SOLIDS_SCHEMA:
+        return None
+    return d
+
+
+def solids_counts(sol):
+    """(total, built, passed) over the primitives."""
+    prims = sol.get("primitives", []) if sol else []
+    return (len(prims), sum(1 for x in prims if x.get("built")),
+            sum(1 for x in prims if x.get("pass")))
+
+
+def fmt_num(x):
+    """A measured or analytic value, compactly."""
+    if x is None:
+        return "–"
+    if isinstance(x, bool):
+        return "yes" if x else "no"
+    if isinstance(x, int):
+        return str(x)
+    if isinstance(x, float):
+        return f"{x:.10g}"
+    if isinstance(x, list):
+        return "(" + ", ".join(fmt_num(v) for v in x) + ")"
+    if isinstance(x, dict) and "min" in x:
+        return f"{fmt_num(x.get('min'))} – {fmt_num(x.get('max'))}"
+    return str(x)
+
+
+SOLID_CHECKS = [("manifold", "Closed manifold"), ("euler", "Euler"), ("counts", "F, E, V"),
+                ("volume", "Volume"), ("area", "Area"), ("bbox", "Bounding box")]
+
+
+def solids_body(sol, depth=0):
+    """The Solids page body (also says "no data yet" when `sol` is None)."""
+    up = "../" * depth
+    corpus = (sol or {}).get("corpus") or {}
+    models = corpus.get("models") or []
+    if models:
+        cpass = sum(1 for m in models if m.get("pass"))
+        crows = "".join(
+            f'<tr><td>{esc(str(m.get("name", "")))}</td>'
+            f'<td><span class="v v-{"PASS" if m.get("pass") else "FAIL"}">{"PASS" if m.get("pass") else "FAIL"}</span></td>'
+            + "".join(f'<td class=num>{esc(fmt_num((m.get("actual") or {}).get(k)))}'
+                      f'<div class="small">expected {esc(fmt_num((m.get("expected") or {}).get(k)))}</div></td>'
+                      for k in ("volume", "area", "center_of_mass"))
+            + "</tr>" for m in models)
+        corpus_html = (f'<p>{cpass} / {len(models)} models pass.</p><div class="scroll"><table><thead><tr>'
+                       '<th>Model</th><th>Result</th><th>Volume</th><th>Area</th><th>Centre of mass</th>'
+                       f'</tr></thead><tbody>{crows}</tbody></table></div>')
+    else:
+        corpus_html = """<p class="warn">Placeholder: pass rate TBD, waiting on the choice of a corpus of real models.</p>
+<p class="muted">Each model will be read, its mass properties computed, and the result compared with the
+reference: per model the JSON's <code>corpus.models[]</code> records <code>name</code>, <code>source</code>,
+<code>built</code>, <code>pass</code>, <code>blocker</code>, and <code>expected</code> vs <code>actual</code>
+<code>volume</code>, <code>area</code> and <code>center_of_mass</code> with their <code>rel_err</code>.</p>"""
+    corpus_section = f'<h2 id="corpus">Corpus (real models)</h2>\n{corpus_html}'
+    intro = f"""<h1>Solids</h1>
+<p class="muted">Units passing difftest says the port matches the C++ function by function; this page says
+whether whole solids come out. The <code>primitives</code> example
+(<a href="{REPO_URL}/tree/main/crates/solidcore/examples/primitives"><code>crates/solidcore/examples/primitives</code></a>)
+builds each primitive through the public API in pure Rust and checks that it is a closed manifold solid with the
+analytic Euler-Poincare characteristic, volume, area and bounding box (relative tolerance
+{esc(fmt_num((sol or {}).get("rel_tol", 1e-9)))}). A primitive that stops at code not ported yet names the
+unit and upstream symbol it is blocked on.</p>"""
+    if not sol:
+        return (intro + '<p class="warn">No data yet: <code>reports/solids/solids.json</code> is missing. CI uploads it '
+                'from every push to <code>main</code> (<code>scripts/fetch-solids.sh</code>); locally, run '
+                '<code>cargo run -p solidcore --example primitives -- --json reports/solids/solids.json</code>.</p>\n'
+                + corpus_section)
+    total, built, passed = solids_counts(sol)
+    prims = sol.get("primitives", [])
+    blockers = collections.Counter((x.get("blocker") or {}).get("unit") for x in prims if x.get("blocker"))
+    rows = []
+    for x in prims:
+        blk = x.get("blocker")
+        if x.get("pass"):
+            st = '<span class="badge s-green">passes</span>'
+        elif x.get("built"):
+            st = '<span class="badge s-partial">built, fails</span>'
+        else:
+            st = '<span class="badge s-blocked">blocked</span>'
+        if blk:
+            btxt = (f'<a href="{up}units/{esc(str(blk.get("unit", "")))}.html"><code>{esc(str(blk.get("unit", "")))}</code></a>'
+                    f'<div class="small"><code>{esc(str(blk.get("upstream", "")))}</code>'
+                    f'{" (while measuring)" if blk.get("stage") == "measure" else ""}</div>')
+        elif x.get("error"):
+            btxt = f'<div class="small"><code>{esc(str(x["error"]))}</code></div>'
+        else:
+            btxt = '<span class="muted">none</span>'
+        checks = {c.get("name"): c for c in x.get("checks", [])}
+        an = x.get("analytic") or {}
+        expected_of = {"manifold": True, "euler": an.get("euler"), "counts": an.get("counts"),
+                       "volume": an.get("volume"), "area": an.get("area"), "bbox": an.get("bbox")}
+        cells = []
+        for key, _ in SOLID_CHECKS:
+            c = checks.get(key)
+            if c is None:
+                exp = expected_of.get(key)
+                cells.append('<td><span class="muted">–</span>' + (
+                    f'<div class="small">expected {esc(fmt_num(exp))}</div>' if exp is not None else "") + "</td>")
+                continue
+            if c.get("actual") is None:
+                verdict = '<span class="v v-DEFERRED">not measured</span>'
+            elif c.get("pass"):
+                verdict = '<span class="v v-PASS">PASS</span>'
+            else:
+                verdict = '<span class="v v-FAIL">FAIL</span>'
+            detail = f'{esc(fmt_num(c.get("actual")))}' if c.get("actual") is not None else ""
+            sub = f'expected {esc(fmt_num(c.get("expected")))}'
+            if c.get("rel_err") is not None:
+                sub += f'; rel. err {c["rel_err"]:.2e}'
+            msg = c.get("message") or ""
+            title = f' title="{esc(msg)}"' if msg else ""
+            cells.append(f'<td{title}>{verdict} {detail}<div class="small">{sub}</div></td>')
+        rows.append(f'<tr><td>{esc(str(x.get("name", "")))}</td><td>{st}</td><td>{btxt}</td>{"".join(cells)}</tr>')
+    head = "".join(f"<th>{esc(label)}</th>" for _, label in SOLID_CHECKS)
+    btiles = ", ".join(f'<a href="{up}units/{esc(u)}.html"><code>{esc(u)}</code></a> ({n})'
+                       for u, n in sorted(blockers.items(), key=lambda kv: (-kv[1], kv[0])))
+    return f"""{intro}
+<section class="kpis">
+<div class="tile big"><div class="k">Solids (primitives)</div><div class="v">{passed} / {total}</div>
+<div class="sub">pass every check; {built} / {total} build</div></div>
+<div class="tile"><div class="k">build</div><div class="v">{built}</div><div class="sub">of {total} primitives</div></div>
+<div class="tile"><div class="k">pass</div><div class="v">{passed}</div><div class="sub">of {total} primitives</div></div>
+<div class="tile"><div class="k">not built</div><div class="v">{total - built}</div><div class="sub">build stops at an error</div></div>
+</section>
+<p><strong>Solids: {built}/{total} build, {passed}/{total} pass.</strong>
+{('Blocked on: ' + btiles + '.') if btiles else ''}</p>
+<h2>Primitives</h2>
+<p class="muted">From <a href="{up}reports/solids.json"><code>reports/solids.json</code></a> (CI's latest
+<code>main</code> run). Each check shows the measured value, the analytic one and the relative error; a check
+that could not be measured says so. Hover a failed check for its message.</p>
+<div class="scroll"><table><thead><tr><th>Primitive</th><th>Status</th><th>Blocker</th>{head}</tr></thead>
+<tbody>{"".join(rows)}</tbody></table></div>
+{corpus_section}
+"""
+
+
 def module_path(u):
     return "crates/solidcore/src/" + u["rust_module"].replace("::", "/") + ".rs"
 
@@ -330,7 +484,7 @@ def parse_issues():
 def page(title, body, depth, nav, head_sha, head_date, description="", path="", scripts=()):
     up = "../" * depth
     links = [("index.html", "Overview", "overview"), ("units/index.html", "Units", "units"),
-             ("graph.html", "Graph", "graph"),
+             ("graph.html", "Graph", "graph"), ("solids.html", "Solids", "solids"),
              ("issues.html", "Upstream issues", "issues"), ("ssi.html", "SSI corpus", "ssi")]
     extra_js = "".join(f'\n<script src="{up}assets/{js}"></script>' for js in scripts)
     navhtml = "".join(
@@ -617,6 +771,7 @@ def build(out):
     s = progress.summary(units)
     callgraph = json.loads((ROOT / "harness/callgraph/units.json").read_text())
     reports = load_reports()
+    solids = load_solids()
     ssi = json.loads((ROOT / "reports/ssi-corpus.json").read_text())
     intro_md, issues = parse_issues()
     points, area_points, unit_hist = aggregate(timeline())
@@ -682,6 +837,11 @@ def build(out):
     ssi_rows = "".join(f"<tr><td>{esc(v)}</td><td class=num>{ssum.get('cpp', {}).get(v, 0)}</td>"
                        f"<td class=num>{ssum.get('rust', {}).get(v, 0)}</td></tr>" for v in verdicts)
     par = ssum.get("parity", {})
+    s_total, s_built, s_passed = solids_counts(solids)
+    solids_tile = (f'<div class="tile"><div class="k"><a href="solids.html">Solids</a></div>'
+                   + (f'<div class="v">{s_passed} / {s_total}</div><div class="sub">primitives pass; '
+                      f'{s_built} / {s_total} build</div>' if solids else
+                      '<div class="v">–</div><div class="sub">no data yet</div>') + '</div>')
     body = f"""
 <section class="hero">
 <h1>solidcore</h1>
@@ -701,6 +861,7 @@ fixtures and fixed-seed generated cases) and the topology is identical and every
 {gpct:.1f}% green</div></div>
 {tiles}
 <div class="tile"><div class="k">ready to claim</div><div class="v">{ready_n}</div><div class="sub">todo with all dependencies done</div></div>
+{solids_tile}
 </section>
 <section>
 <h2>Progress over time</h2>
@@ -736,6 +897,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <ul>
 <li><a href="units/index.html">All {len(units)} units</a>, with difftest results and blockers.</li>
 <li><a href="graph.html">Dependency graph</a>: what is ready to claim and what blocks the most.</li>
+<li><a href="solids.html">Solids</a>: {f"{s_built}/{s_total} primitives build, {s_passed}/{s_total} pass" if solids else "no data yet"}, and what blocks each.</li>
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
 <a href="{REPO_URL}/blob/main/plan/PROGRESS.md">checklist</a>.</li>
@@ -929,6 +1091,13 @@ counts). Click a column heading to sort.</p>
                           description="Port units of solidcore and their dependencies, by status.",
                           scripts=("vendor/d3-force.bundle.min.js", "graph.js")))
 
+    # ---- solids
+    if solids:
+        (out / "reports").mkdir(parents=True, exist_ok=True)
+        (out / "reports/solids.json").write_text(json.dumps(solids, indent=1, sort_keys=True))
+    write("solids.html", P("Solids · solidcore", solids_body(solids), 0, "solids", path="solids.html",
+                           description="Which solids solidcore builds in pure Rust, and what blocks the rest."))
+
     # ---- issues
     sc = collections.Counter(e["series"] for e in issues)
     cc = collections.Counter(e["confirmed"] for e in issues)
@@ -1023,6 +1192,7 @@ the C++ result's.</p>
 """
     write("ssi.html", P("SSI corpus · solidcore", body, 0, "ssi", path="ssi.html"))
     return {"units": len(units), "areas": len(present), "issues": len(issues), "ssi": len(cases),
+            "solids": "{1}/{0} build, {2}/{0} pass".format(*solids_counts(solids)) if solids else "no data",
             "timeline": len(points),
             "seconds": time.time() - t_start}
 
@@ -1032,7 +1202,7 @@ def main():
     ap.add_argument("--out", default=str(ROOT / "bin/site"))
     a = ap.parse_args()
     r = build(pathlib.Path(a.out).resolve())
-    print(f"site: {r['units']} unit pages, {r['areas']} module pages, {r['issues']} issues, {r['ssi']} SSI cases, "
+    print(f"site: {r['units']} unit pages, {r['areas']} module pages, {r['issues']} issues, {r['ssi']} SSI cases, solids {r['solids']}, "
           f"{r['timeline']} timeline points -> {a.out} ({r['seconds']:.1f}s)")
 
 

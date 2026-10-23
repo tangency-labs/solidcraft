@@ -61,6 +61,25 @@ jobs:
         with:
           workspaces: ". -> bin"
       - run: cargo test --workspace
+      # Solids: the primitives example's per-shape results (built, blocker, checks) for
+      # the site's Solids page. It reuses the test build and exits 1 while any primitive
+      # fails, so only a crash (or a missing JSON) fails the job.
+      - name: Solids report (primitives example)
+        run: |
+          set +e
+          cargo run -p solidcore --example primitives -- --json reports/solids/solids.json
+          rc=$?
+          set -e
+          [ "$rc" -le 1 ] && test -s reports/solids/solids.json
+      # main's solids report is published from here (site), never committed.
+      - name: Upload solids report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: solids-report
+          path: reports/solids/solids.json
+          if-no-files-found: error
+          retention-days: 90
       # The difftest runners' own unit tests (guards, decoders, probes) need the C++
       # reference. Same profile as the difftest job's binary (Cargo.toml
       # [profile.difftest]); here rather than after the difftest run, so they no longer
