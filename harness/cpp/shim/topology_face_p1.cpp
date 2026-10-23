@@ -35,6 +35,7 @@ enum : int32_t
     OP_PROBE = 10,
     OP_MOVE_SEAM = 11,
     OP_SPLIT_AT_SEAM = 12,
+    OP_UV_DOMAIN_AFTER_TRIM_SHIFT = 13,
 };
 
 const double FP1_NULL_DEREF = -2.0;
@@ -199,6 +200,7 @@ int64_t fp1_nargs(int32_t op)
 {
     switch (op)
     {
+    case OP_UV_DOMAIN_AFTER_TRIM_SHIFT: return 9;
     case OP_UV_DOMAIN:
     case OP_ORIENTED: return 3;
     case OP_SET_SURFACE:
@@ -239,10 +241,51 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     switch (op)
     {
     case OP_UV_DOMAIN:
+    case OP_UV_DOMAIN_AFTER_TRIM_SHIFT:
     {
         SmBoolean limit = ad.bflag();
         bool want_max = ad.flag();
         bool want_2nd = ad.flag();
+        if (op == OP_UV_DOMAIN_AFTER_TRIM_SHIFT)
+        {
+            if (f->GetSurface() == NULL)
+            {
+                o.push_back(FP1_NULL_DEREF);
+                break;
+            }
+            double tmp;
+            SmStatus prep = f->CreateUVTrimCurves(FALSE, NULL, NULL, tmp, tmp, tmp, tmp, tmp, tmp);
+            if (prep != SM_SUCCESS)
+            {
+                o.push_back(st(prep));
+                return;
+            }
+            SmPoint2d lo = ad.uv(), hi = ad.uv();
+            f->SetUVDomain(SmExtent2d(lo, hi));
+            SmPoint2d delta = ad.uv();
+            SmAxis2Placement transform;
+            transform.Translate(SmVector3d(delta[0], delta[1], 0.0));
+            SmTArray<SmLoopuse*> loops;
+            f->GetUpwardLoopuses(loops);
+            for (int64_t li = 0; li < loops.GetSize(); ++li)
+            {
+                SmTArray<SmEdgeuse*> edges;
+                loops[li]->GetEdgeuses(edges);
+                for (int64_t ei = 0; ei < edges.GetSize(); ++ei)
+                {
+                    SmCurve* curve = edges[ei]->GetUVTrimCurve();
+                    if (curve != NULL)
+                    {
+                        prep = curve->Transform(transform, NULL);
+                        if (prep != SM_SUCCESS)
+                        {
+                            o.push_back(st(prep));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
         SmExtent2d dom;
         double gap = -7.0, gap2 = -7.0;
         SmStatus r = f->CalculateUVDomainFromUVTrimCurves(dom, limit, want_max ? &gap : NULL,

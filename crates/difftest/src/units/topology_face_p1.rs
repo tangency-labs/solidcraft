@@ -120,6 +120,13 @@ enum OpIn {
         want_max: bool,
         want_2nd: bool,
     },
+    UvDomainAfterTrimShift {
+        limit: bool,
+        want_max: bool,
+        want_2nd: bool,
+        domain: [f64; 4],
+        shift: [f64; 2],
+    },
     Oriented {
         param: bool,
         fill: bool,
@@ -213,6 +220,18 @@ fn op_args(op: &OpIn) -> (Op, Vec<f64>) {
             Op::UvDomain,
             vec![flag(*limit), flag(*want_max), flag(*want_2nd)],
         ),
+        OpIn::UvDomainAfterTrimShift {
+            limit,
+            want_max,
+            want_2nd,
+            domain,
+            shift,
+        } => {
+            let mut args = vec![flag(*limit), flag(*want_max), flag(*want_2nd)];
+            args.extend(domain);
+            args.extend(shift);
+            (Op::UvDomainAfterTrimShift, args)
+        }
         OpIn::Oriented { param, fill, loop_ } => {
             (Op::Oriented, vec![flag(*param), flag(*fill), *loop_ as f64])
         }
@@ -674,18 +693,52 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             limit,
             want_max,
             want_2nd,
+        }
+        | OpIn::UvDomainAfterTrimShift {
+            limit,
+            want_max,
+            want_2nd,
+            ..
         } => {
-            let r = fp1::calculate_uv_domain_from_uv_trim_curves(
-                &k, &mut b, f, *limit, *want_max, *want_2nd,
+            if let OpIn::UvDomainAfterTrimShift { domain, shift, .. } = &i.op {
+                if fp2::surface(&b, f).map_err(e)?.is_none() {
+                    o.push(NULL_DEREF);
+                    return Ok(o);
+                }
+                solidcore::topology::face::p3::create_uv_trim_curves(&k, &mut b, f, false, None)
+                    .map_err(e)?;
+                b.face_mut(f).map_err(e)?.uv_domain =
+                    Extent2d::from_bounds(domain[0], domain[1], domain[2], domain[3]);
+                let mut transform = solidcore::geom::axis2_placement::Axis2Placement::default();
+                transform.translate(solidcore::math::Vec3::new(shift[0], shift[1], 0.0));
+                for lu in
+                    solidcore::topology::face::p4::upward_loopuses(&b, f, false, None).map_err(e)?
+                {
+                    for eu in eu1::loopuse_edgeuses(&b, lu).map_err(e)? {
+                        let (_, owner) = eu1::uv_trim_curve(&b, eu).map_err(e)?;
+                        if let Some(owner) = owner {
+                            if let Some(curve) =
+                                b.edgeuse_mut(owner).map_err(e)?.uv_trim_curve.as_mut()
+                            {
+                                curve.transform(&k, &transform, None).map_err(e)?;
+                            }
+                        }
+                    }
+                }
+            }
+            let mut d = fp1::UvDomainFromTrim {
+                domain: Extent2d::new(),
+                max_uv_loop_gap: 0.0,
+                second_max_uv_loop_gap: 0.0,
+            };
+            let r = fp1::calculate_uv_domain_from_uv_trim_curves_into(
+                &k, &mut b, f, *limit, *want_max, *want_2nd, &mut d,
             );
             o.push(status(&r)?);
-            if let Ok(d) = r {
-                put_domain(&mut o, &d.domain);
+            put_domain(&mut o, &d.domain);
+            if r.is_ok() {
                 o.extend([d.max_uv_loop_gap, d.second_max_uv_loop_gap]);
             } else {
-                // upstream leaves the face domain in the output (the gaps are not
-                // reported for a failed call)
-                put_domain(&mut o, &b.face(f).map_err(e)?.uv_domain);
                 o.extend([0.0, 0.0]);
             }
         }

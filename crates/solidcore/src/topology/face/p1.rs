@@ -10,7 +10,7 @@
 //! |----------------------------------------------|----------------------------------------------|
 //! | [`crate::topology::Face::new`]               | `SmFace::SmFace`                             |
 //! | [`destroy`]                                  | `SmFace::~SmFace`                            |
-//! | [`calculate_uv_domain_from_uv_trim_curves`], [`UvDomainFromTrim`] | `SmFace::CalculateUVDomainFromUVTrimCurves` |
+//! | [`calculate_uv_domain_from_uv_trim_curves`], [`calculate_uv_domain_from_uv_trim_curves_into`], [`UvDomainFromTrim`] | `SmFace::CalculateUVDomainFromUVTrimCurves` |
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
@@ -26,7 +26,8 @@
 //!
 //! Deviations:
 //! - **Object model.** A face is a record in the [`Brep`]'s arenas; the methods are free
-//!   functions taking the B-rep and the face's id, out-parameters are return values.
+//!   functions taking the B-rep and the face's id. Out-parameters are return values,
+//!   with an additional UV-domain `_into` entry point for partial outputs on error.
 //!   Where upstream dereferences null (a face without surface or face use, a loop
 //!   without loop uses, an edge use without edge, an edge without curve, a loop use
 //!   without face use) the port returns [`SolidError::InvalidInput`]. The identity a
@@ -515,8 +516,43 @@ pub fn calculate_uv_domain_from_uv_trim_curves(
     want_max_gap: bool,
     want_2nd_max_gap: bool,
 ) -> Result<UvDomainFromTrim> {
-    // Init output
     let mut out = UvDomainFromTrim {
+        domain: Extent2d::new(),
+        max_uv_loop_gap: 0.0,
+        second_max_uv_loop_gap: 0.0,
+    };
+    calculate_uv_domain_from_uv_trim_curves_into(
+        k,
+        b,
+        f,
+        limit_domain,
+        want_max_gap,
+        want_2nd_max_gap,
+        &mut out,
+    )?;
+    Ok(out)
+}
+
+/// Calculates the trim domain, retaining initialized and partial outputs on error.
+///
+/// The output follows native assignment order: the face/surface intersection remains
+/// available if a later bounding-box, loop-gap, or final domain intersection fails.
+/// If the face id is invalid, `out` is unchanged.
+///
+/// # Errors
+///
+/// As [`calculate_uv_domain_from_uv_trim_curves`].
+pub fn calculate_uv_domain_from_uv_trim_curves_into(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    limit_domain: bool,
+    want_max_gap: bool,
+    want_2nd_max_gap: bool,
+    out: &mut UvDomainFromTrim,
+) -> Result<()> {
+    // Init output
+    *out = UvDomainFromTrim {
         domain: fp2::uv_domain(b, f)?,
         max_uv_loop_gap: 0.0,
         second_max_uv_loop_gap: 0.0,
@@ -524,7 +560,7 @@ pub fn calculate_uv_domain_from_uv_trim_curves(
 
     // Check State - no Face->Surface
     let Some(surface) = fp2::surface(b, f)? else {
-        return Ok(out);
+        return Ok(());
     };
     let surf_domain = surface.natural_uv_domain();
 
@@ -540,7 +576,7 @@ pub fn calculate_uv_domain_from_uv_trim_curves(
         Ok(()) => {}
         Err(e) if e.is_unported() => return Err(e),
         // Return the default from above.
-        Err(_) => return Ok(out),
+        Err(_) => return Ok(()),
     }
     let loopuses = upward_loopuses(b, f)?;
 
@@ -601,7 +637,7 @@ pub fn calculate_uv_domain_from_uv_trim_curves(
 
     // all done - set output and return
     out.domain = face_domain;
-    Ok(out)
+    Ok(())
 }
 
 // ---- oriented trim boundary ---------------------------------------------------------------
