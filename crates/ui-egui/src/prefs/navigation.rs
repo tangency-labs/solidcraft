@@ -130,6 +130,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         });
         ui_kit::divider(ui, "navigation_view_controls");
         ui_kit::settings_form(ui, 150.0, |ui| {
+            setting::wheel_zoom_speed(app, ui);
             ui_kit::row(ui, app.tr_label("View navigator"), |ui| {
                 let mut selected = usize::from(app.preferences.navigator_style == NavigatorStyle::Cube);
                 if ui_kit::segmented(

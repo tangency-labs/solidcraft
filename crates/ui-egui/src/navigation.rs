@@ -391,7 +391,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if inside && scroll != 0.0 {
         app.viewport.orbit_free = None;
-        let f = (-scroll as f64 * 0.0015 * crate::prefs::zoom_sign(app)).exp();
+        let f = (-scroll as f64 * 0.0015 * f64::from(app.preferences.wheel_zoom_speed) * crate::prefs::zoom_sign(app)).exp();
         let anchor = zoom_anchor(app, rect, hover, caps.orbit);
         if app.preferences.nav == crate::prefs::TOUCHPAD_NAV {
             let mut params = json!({"motion":"zoom", "factor":f.clamp(0.05,20.0)});
@@ -1078,6 +1078,86 @@ mod tests {
         }
         assert!(scanned > 50, "the source tree was scanned ({scanned} files)");
         assert!(offenders.is_empty(), "camera input outside navigation::handle; call it instead:\n{}", offenders.join("\n"));
+    }
+
+    #[test]
+    fn wheel_zoom_speed_scales_each_step_on_every_canvas() {
+        use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, pos2, vec2};
+        use serde_json::json;
+
+        for caps in [super::NavCaps::MODEL, super::NavCaps::RENDER, super::NavCaps { orbit: false, pick: false }] {
+            for speed in [None, Some(0.25), Some(1.0), Some(4.0)] {
+                for reverse in [false, true] {
+                    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                    crate::prefs::set(&mut app, &json!({"smooth_wheel_zoom":false, "zoom_to_cursor":false, "zoom_reverse":reverse})).unwrap();
+                    if let Some(speed) = speed {
+                        crate::prefs::set(&mut app, &json!({"wheel_zoom_speed":speed})).unwrap();
+                    }
+                    let ctx = crate::fonts::test_context();
+                    let mut frame = |events| {
+                        let raw = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                            focused: true,
+                            events,
+                            ..Default::default()
+                        };
+                        let mut out = ctx.run_ui(raw, |ui| {
+                            let rect = ui.max_rect();
+                            let resp = ui.interact(rect, ui.id().with("wheel-speed"), egui::Sense::click_and_drag());
+                            super::handle(&mut app, ui, rect, &resp, caps);
+                        });
+                        out.textures_delta.clear();
+                    };
+                    frame(vec![Event::PointerMoved(pos2(200.0, 300.0))]);
+                    frame(vec![Event::MouseWheel {
+                        unit: MouseWheelUnit::Point,
+                        delta: vec2(0.0, 40.0),
+                        modifiers: Modifiers::NONE,
+                        phase: TouchPhase::Move,
+                    }]);
+                    let expected = (-40.0_f64 * 0.0015 * speed.unwrap_or(1.0) * if reverse { -1.0 } else { 1.0 }).exp();
+                    let default_distance = super::Camera::default().distance;
+                    assert!((app.cam.distance / default_distance - expected).abs() < 1e-6, "{caps:?}, {speed:?}, reverse={reverse}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wheel_zoom_speed_persists_defaults_and_rejects_invalid_values() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let old = crate::prefs::lenient(&json!({"zoom_reverse":true}));
+        assert_eq!(serde_json::to_value(old).unwrap()["wheel_zoom_speed"], 1.0);
+        crate::prefs::control(&mut app, &json!({"open":"Navigation", "wheel_zoom_speed":2.5, "button":"apply"})).unwrap();
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        assert_eq!(serde_json::to_value(crate::prefs::lenient(&saved)).unwrap()["wheel_zoom_speed"], 2.5);
+        for invalid in [0.0, 0.24, 4.01, 1e30] {
+            assert!(crate::prefs::set(&mut app, &json!({"wheel_zoom_speed":invalid})).is_err());
+            let loaded = crate::prefs::lenient(&json!({"wheel_zoom_speed":invalid, "zoom_reverse":true}));
+            assert_eq!(serde_json::to_value(&loaded).unwrap()["wheel_zoom_speed"], 1.0);
+            assert!(loaded.zoom_reverse);
+        }
+        crate::prefs::control(&mut app, &json!({"button":"defaults"})).unwrap();
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["wheel_zoom_speed"], 1.0);
+        crate::prefs::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["wheel_zoom_speed"], 2.5);
+    }
+
+    #[test]
+    fn wheel_zoom_speed_does_not_change_3d_mouse_zoom() {
+        use crate::space_mouse::{DeviceMotion, Motion};
+        let mut distances = Vec::new();
+        for speed in [0.25, 1.0, 4.0] {
+            let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            crate::prefs::set(&mut app, &serde_json::json!({"wheel_zoom_speed":speed})).unwrap();
+            let before = app.cam.distance;
+            app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0, 1.0, 0.0], rotation: [0.0; 3] }, seconds: 0.05 });
+            super::device(&mut app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)), super::NavCaps::MODEL);
+            assert!(app.cam.distance < before);
+            distances.push(app.cam.distance);
+        }
+        assert!(distances.windows(2).all(|pair| pair[0] == pair[1]));
     }
 
     /// A flat page (orbit off) pans and zooms with the same bindings and never turns the view.
