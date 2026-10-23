@@ -1223,3 +1223,83 @@ fn extrude_cut_into_a_rounded_block_top() {
     let v = before - volume(&cut, "Body1");
     assert!((v - taken).abs() < 0.05, "took {v}, expected {taken}");
 }
+
+/// A rod intersected with a rod of its radius on its axis that overlaps it by 8 mm (#1865): the
+/// two round walls lie on each other there, which the general boolean can't intersect, so the
+/// feature failed. It now keeps the 8 mm both share, a round wall and two caps, exactly.
+#[test]
+fn rods_on_one_cylinder_intersect_exactly() {
+    let mut s = Session::default();
+    s.execute("solid.cylinder", &json!({"radius": 25.6, "height": 30, "body_name": "Rod"})).unwrap();
+    s.execute("solid.cylinder", &json!({"radius": 25.6, "height": 24, "base": [0, 0, 22], "operation": "intersect", "targets": ["Rod"]})).unwrap();
+    let state = s.model.state();
+    let rod = &state.body("Rod").unwrap().body;
+    let expected = std::f64::consts::PI * 25.6 * 25.6 * 8.0;
+    assert!((volume(&s, "Rod") - expected).abs() < expected * 1e-4, "{} expected {expected}", volume(&s, "Rod"));
+    let round = (0..rod.face_count())
+        .filter(|&i| matches!(solidcraft_kernel::face_surface(rod, i), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })))
+        .count();
+    assert!(round >= 1 && rod.face_count() <= 6, "{} faces, {round} round", rod.face_count());
+}
+
+/// A plug extruded as a Join into the gap between two walls with a round top (r 11.75), flush
+/// with both, its screw holes going on from the lower wall's: its own sketch's arc is solved 3e-6
+/// off the walls' centre, so its corners on the arc lie a hair off the walls' edge. The exact join
+/// failed on that, then every nudged try, with "no result" (seconds here, minutes on a larger
+/// part). It is glued now, and adds the plug's volume.
+#[test]
+fn a_plug_sketched_a_hair_off_the_walls_arc_joins_them() {
+    let cap = |name: &str, z: f64, cx: f64, cut: bool| {
+        let mut steps = vec![
+            ("sketch.create", json!({"plane": "XY", "offset": z, "name": name})),
+            ("sketch.circle.center", json!({"center": [cx, 0], "radius": 11.75})),
+            ("sketch.line", json!({"points": [[-20, -6], [20, -6]]})),
+        ];
+        if cut {
+            steps.push(("sketch.line", json!({"points": [[-9, -20], [-9, 20]]})));
+            steps.push(("sketch.line", json!({"points": [[9, -20], [9, 20]]})));
+        }
+        if z < 16.0 {
+            steps.extend([-5, 5].map(|x| ("sketch.circle.center", json!({"center": [x, 0], "radius": 2.075}))));
+        }
+        steps.push(("sketch.finish", json!({})));
+        steps
+    };
+    let walls = |s: &mut Session| {
+        let mut steps = cap("Wall1", 0.0, 0.0, false);
+        steps.push(("solid.extrude", json!({"sketch": "Wall1", "profiles": [{"point": [0, 4]}], "distance": 10, "body_name": "Arm"})));
+        steps.extend(cap("Wall2", 16.8, 0.0, false));
+        steps.push((
+            "solid.extrude",
+            json!({"sketch": "Wall2", "profiles": [{"point": [0, 4]}], "distance": 13.2, "operation": "join", "targets": ["Arm"]}),
+        ));
+        steps.push(("sketch.create", json!({"plane": "XY", "name": "Bar"})));
+        steps.push(("sketch.rectangle.two_point", json!({"p0": [11, -6], "p1": [16, -2]})));
+        steps.push(("sketch.finish", json!({})));
+        steps.push(("solid.extrude", json!({"sketch": "Bar", "distance": 30, "operation": "join", "targets": ["Arm"]})));
+        for (command, params) in steps {
+            s.execute(command, &params).unwrap();
+        }
+    };
+    let plug = |s: &mut Session, operation: &str| {
+        for (command, params) in cap("Plug", 10.0, 3e-6, true) {
+            s.execute(command, &params).unwrap();
+        }
+        let mut params = json!({"sketch": "Plug", "profiles": [{"point": [0, 4]}], "distance": 6.8, "operation": operation});
+        params[if operation == "join" { "targets" } else { "body_name" }] = if operation == "join" { json!(["Arm"]) } else { json!("Plug") };
+        s.execute("solid.extrude", &params).unwrap();
+    };
+    // The plug's volume, as a body of its own.
+    let mut alone = Session::default();
+    plug(&mut alone, "new");
+    let added = volume(&alone, "Plug");
+    let mut s = Session::default();
+    walls(&mut s);
+    let before = volume(&s, "Arm");
+    plug(&mut s, "join");
+    let state = s.model.state();
+    let arm = &state.body("Arm").unwrap().body;
+    assert_eq!(arm.shell_count(), 1);
+    assert!(arm.validity().is_empty(), "{:?}", arm.validity());
+    assert!((volume(&s, "Arm") - before - added).abs() < 1e-6 * before, "{} = {before} + {added}?", volume(&s, "Arm"));
+}

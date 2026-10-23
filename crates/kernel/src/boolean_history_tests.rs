@@ -524,3 +524,37 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         }
     }
 }
+
+/// Bodies with walls on one cylinder, intersected (#1865): two rods of one radius on one axis
+/// that overlap, and a tube with a ring sector lying on both its walls. The general boolean can't
+/// intersect walls lying on each other, so this used to fail; taken as two cuts, the result is
+/// exact (round walls, no facets). The sector's faces all come from the operands; the rods'
+/// result has no history, as the cut of the rods it is made from has none (the prisms stacked
+/// end to end are sewn slab by slab without one).
+#[test]
+fn walls_on_one_cylinder_intersect_exactly() {
+    use crate::{FaceSurface, face_surface};
+    let rod = |z: f64, h: f64| crate::cylinder(Vec3::new(0.0, 0.0, z), Vec3::Z, 25.6, h).unwrap();
+    let tube = |z: f64, h: f64| {
+        let outer = crate::cylinder(Vec3::new(0.0, 0.0, z), Vec3::Z, 20.0, h).unwrap();
+        let bore = crate::cylinder(Vec3::new(0.0, 0.0, z - 1.0), Vec3::Z, 15.0, h + 2.0).unwrap();
+        boolean(&outer, &bore, BoolOp::Cut).unwrap().unwrap()
+    };
+    let sector = boolean(&tube(10.0, 20.0), &boxed(0.0, 0.0, 0.0, 30.0, 30.0, 40.0), BoolOp::Intersect).unwrap().unwrap();
+    let pi = std::f64::consts::PI;
+    for (a, b, volume, traced) in [
+        (rod(0.0, 30.0), rod(22.0, 24.0), pi * 25.6 * 25.6 * 8.0, false),
+        (tube(0.0, 20.0), sector, pi / 4.0 * (20.0 * 20.0 - 15.0 * 15.0) * 10.0, true),
+    ] {
+        let r = boolean(&a, &b, BoolOp::Intersect).unwrap().expect("they overlap");
+        let v = crate::measure(&r).unwrap().volume;
+        assert!((v - volume).abs() < volume * 1e-4, "volume {v}, expected {volume}");
+        assert!(r.validity().is_empty(), "{:?}", r.validity());
+        let round = (0..r.face_count()).filter(|&i| matches!(face_surface(&r, i), Some(FaceSurface::Cylinder { .. }))).count();
+        let flat = (0..r.face_count()).filter(|&i| matches!(face_surface(&r, i), Some(FaceSurface::Plane { .. }))).count();
+        assert!(round >= 1 && round + flat == r.face_count() && r.face_count() <= 12, "{} faces, {round} round, {flat} flat", r.face_count());
+        if traced {
+            verified(&r, &[&a, &b], 0.01);
+        }
+    }
+}

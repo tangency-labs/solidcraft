@@ -247,6 +247,35 @@ fn mismatch(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solid
     Some(bad as f64 / n.max(1) as f64)
 }
 
+/// Whether `result` (meshed) bounds what lies in both operands (meshed `a` and `b`, all at the
+/// step `tol`), seen from their facets: just inside each facet of the result lies material of
+/// both, and just inside each facet of an operand that lies well inside the other lies the
+/// result's. [`mismatch`] samples the volume, which a sliver left outside the tool a fraction
+/// of a millimetre wide slips through; this samples the whole boundary. Points closer than a
+/// few steps to a surface the facet doesn't lie on are not asked: there the facetings decide.
+fn bounds_intersection(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, result: &solidcraft_geom::Mesh, tol: f64) -> bool {
+    if a.triangles.len() + b.triangles.len() + result.triangles.len() > 200_000 {
+        return false;
+    }
+    let (ia, ib, ir) = (a.inside_index(), b.inside_index(), result.inside_index());
+    let depth = 3.0 * tol;
+    // Each facet's centre and outward normal (the meshes wind counter-clockwise seen from outside).
+    let facets = |m: &solidcraft_geom::Mesh| -> Vec<(Vec3, Vec3)> {
+        m.triangles
+            .iter()
+            .filter_map(|t| {
+                let [p, q, r] = m.tri(t)?;
+                Some(((p + q + r) / 3.0, (q - p).cross(r - p).normalized()?))
+            })
+            .collect()
+    };
+    // Well inside a body: on both sides of the facet's point.
+    let within = |i: &solidcraft_geom::InsideIndex, c: Vec3, n: Vec3| i.contains(c - n * depth) && i.contains(c + n * depth);
+    facets(result).iter().all(|&(c, n)| ia.contains(c - n * depth) && ib.contains(c - n * depth))
+        && facets(a).iter().all(|&(c, n)| !within(&ib, c, n) || ir.contains(c - n * depth))
+        && facets(b).iter().all(|&(c, n)| !within(&ia, c, n) || ir.contains(c - n * depth))
+}
+
 /// How one body sits relative to another, from sample points: (fraction of `b`'s samples
 /// inside `a`, fraction of `a`'s samples inside `b`).
 fn overlap(
@@ -874,6 +903,8 @@ thread_local! {
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set while a union runs with a bore narrowed off a common cylinder (no second round).
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set while an intersection runs as two cuts (no second round).
+    static CUTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
     static ATTEMPTS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -1397,10 +1428,35 @@ where
     // a hole). Asked before faces are pushed apart: that doesn't part walls on one cylinder, and
     // its tries at the general boolean, all failing on those walls, cost seconds.
     if op == BoolOp::Union && !BORES.with(|c| c.get()) && crate::coplanar::has_coincident_cylinders(a, b) {
+        // Bodies that also touch back to back (a plug filling a notch, its screw holes going on
+        // from the counterbores behind it) are glued along the contact's outline first, as further
+        // down: exact, and a fraction of what narrowing a bore and cutting it again costs.
+        if crate::coplanar::faces_touch(a, b) {
+            let accept = |body: &Body| check(body).0 && !unfused(body) && crate::boolean_guard::check_retry(a, b, op, Some(body)).is_ok();
+            if let Some(body) = crate::outline::outline_union(a, b, &accept) {
+                return Ok(Some(body));
+            }
+        }
         BORES.with(|c| c.set(true));
         let (r, diagnostics) = capture_boolean_diagnostics(|| crate::coplanar::bore_union(a, b, &|body| check(body).0));
         BORES.with(|c| c.set(false));
         if let Some(body) = r {
+            merge(diagnostics);
+            return Ok(Some(body));
+        }
+    }
+    // Walls on a common cylinder in an intersection (two rods of one radius on one axis that
+    // overlap, a ring sector lying on a tube's walls): the intersection can't take them, and its
+    // tries all fail there, but a cut can. Exact; asked before the general boolean, as above.
+    if op == BoolOp::Intersect && !CUTS.with(|c| c.get()) && crate::coplanar::has_coincident_cylinders(a, b) {
+        CUTS.with(|c| c.set(true));
+        let (r, diagnostics) = capture_boolean_diagnostics(|| intersect_by_cuts(a, b));
+        CUTS.with(|c| c.set(false));
+        if let Ok(Some(body)) = r
+            && check(&body).0
+            && let (Some(ma), Some(mb)) = &meshes
+            && body.tessellate_with(tol_m, true).is_ok_and(|mr| bounds_intersection(ma, mb, &mr, tol_m))
+        {
             merge(diagnostics);
             return Ok(Some(body));
         }
@@ -1823,6 +1879,19 @@ where
         }
         None => Err(KernelError::Failed(format!("boolean {op:?}: {last}"))),
     }
+}
+
+/// The intersection of `a` and `b` as `a` less what `b` leaves of it: a ∩ b = a − (a − b), for
+/// bodies with walls on a common cylinder, which the intersection can't take and a cut can.
+/// `Ok(None)` when either cut leaves nothing, which the caller doesn't take: an empty
+/// intersection, or `a` whole, is left to the general boolean. The history is over `[a, b]`.
+fn intersect_by_cuts(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let counts = record::counts(&[a, b]);
+    let Some(rest) = boolean(a, b, BoolOp::Cut)? else { return Ok(None) };
+    let Some(r) = boolean(a, &rest, BoolOp::Cut)? else { return Ok(None) };
+    // Over [a, rest], `rest` over [a, b].
+    let h = recorded::of_pair(&r, &recorded::kept(a, 0, 2), &rest.history().cloned());
+    Ok(Some(r.with_checked_history(h, &counts)))
 }
 
 /// `a` cut by `b` with the walls of `b` that only touch `a` pushed outward (see

@@ -520,8 +520,22 @@ fn cut_edge(e: &mt::Edge, t: f64, p: mt::Point3, tol: f64) -> Result<(mt::Vertex
         let t = abs.curve().search_nearest_parameter(p, None, 100)?;
         abs.cut_with_parameter(&v, t)
     });
-    let (a, b) = cut.ok_or_else(|| KernelError::Failed("cannot cut an edge at the split line".into()))?;
-    Ok((v, Some((a, b))))
+    if let Some((a, b)) = cut {
+        return Ok((v, Some((a, b))));
+    }
+    // A point a hair off the edge (a corner of another body's outline on an arc of this one,
+    // each sketched on its own and solved to within round-off of the other) is near enough to
+    // be split at, but too far for the edge to take as its own: it is cut at its own point there.
+    let c = abs.curve();
+    let t = c.search_nearest_parameter(p, Some(t), 100).unwrap_or(t);
+    let q = c.subs(t);
+    if q.distance(p) <= tol * 10.0 {
+        let v = mt::Vertex::new(q);
+        if let Some((a, b)) = abs.cut_with_parameter(&v, t) {
+            return Ok((v, Some((a, b))));
+        }
+    }
+    Err(KernelError::Failed("cannot cut an edge at the split line".into()))
 }
 
 /// Replace cut edges (absolute edge → its two pieces) in a face's loops.

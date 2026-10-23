@@ -194,6 +194,16 @@ fixes below (sound face pushes, no panics in the boolean's final assembly).
   attempt failed on.
 - **Booleans on bodies in several pieces** (a join that left two lumps): when the whole fails
   or comes out empty, a piece at a time.
+- **Intersections of bodies with walls on one cylinder** (two rods of one radius on one axis
+  that overlap, a ring sector on a tube's walls, #1865): the general boolean can't intersect
+  walls lying on each other, and failed after seconds of retries. A cut can, so the
+  intersection is taken as `a − (a − b)`: exact round walls, no facets.
+- **A plug joined flush between walls with a round top, sketched on its own** (its arc solved a
+  few microns off the walls'): its corners on the arc lie near enough to the walls' edge to be
+  split at, but too far for the edge to take as its own points, so the exact join along the
+  contact's outline failed, and every nudged try after it, with "no result" (minutes on a large
+  part). The edge is now cut at its own point there. Where screw holes in the plug go on from the
+  wall's, the outline join is asked before narrowing a bore and cutting it again.
 - **Pushing a face apart** (coincident faces) checks its result: the exact rebuild could leave a
   cylinder unsound, and then the general offset is used. A boss standing on a plate joins again.
 - **No panics in the boolean's final assembly.** Natively a panic inside the kernel is caught,
