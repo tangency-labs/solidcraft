@@ -75,6 +75,11 @@ pub struct MassMeasure {
 /// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
 /// meshing failure) use the coarse result.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
+    Ok(measure_keeping(b, false)?.0)
+}
+
+/// [`measure`], with the points its box bounds when `keep_points` (none otherwise).
+fn measure_keeping(b: &Body, keep_points: bool) -> Result<(BodyMeasure, Vec<Vec3>)> {
     if let Some((pos, tris)) = b.triangle_mesh() {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
         let m = b.tessellate(1.0)?;
@@ -82,7 +87,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
         let merged =
             TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
-        return Ok(BodyMeasure {
+        let measure = BodyMeasure {
             volume: mm.volume,
             area: mm.area,
             centroid: mm.centroid,
@@ -92,14 +97,15 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
             vertices: pos.len(),
             shells: 1,
             merged,
-        });
+        };
+        return Ok((measure, if keep_points { m.positions } else { Vec::new() }));
     }
-    let (m, topo) = mass(b, true)?;
+    let (m, topo, points) = mass(b, true, keep_points)?;
     let topo = match topo {
         Some(t) => t,
         None => b.tessellate((b.size() * 1e-3).max(1e-3))?,
     };
-    Ok(BodyMeasure {
+    let measure = BodyMeasure {
         volume: m.volume,
         area: m.area,
         centroid: m.centroid,
@@ -109,7 +115,75 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         vertices: b.vertex_count(),
         shells: b.shell_count(),
         merged: merged_topology(b, &topo)?,
-    })
+    };
+    Ok((measure, points))
+}
+
+/// A body's [`measure`] with the points its box was taken from, so the measure of the body
+/// moved anywhere can be had without measuring it again ([`DefinitionMeasure::placed`]): one
+/// part placed many times in an assembly is measured once.
+#[derive(Clone, Debug)]
+pub struct DefinitionMeasure {
+    pub measure: BodyMeasure,
+    /// The vertices of the meshes [`BodyMeasure::bbox`] bounds.
+    points: Vec<Vec3>,
+}
+
+/// [`measure`], keeping what [`DefinitionMeasure::placed`] needs.
+pub fn measure_definition(b: &Body) -> Result<DefinitionMeasure> {
+    let (measure, points) = measure_keeping(b, true)?;
+    Ok(DefinitionMeasure { measure, points })
+}
+
+impl DefinitionMeasure {
+    /// The measure of the body moved by the rigid motion `m` (a turn, or a turn and a
+    /// reflection, then a shift; column-major as [`crate::transform_matrix`] takes it): volume,
+    /// area and topology counts as they are, the centre moved, and the box around the moved
+    /// mesh points, as tight as the body's own. None when `m` is not rigid (a scale or a shear
+    /// changes the volume and the area: measure the moved body instead).
+    pub fn placed(&self, m: &[[f64; 4]; 4]) -> Option<BodyMeasure> {
+        if !is_rigid(m) {
+            return None;
+        }
+        let mut out = self.measure.clone();
+        out.centroid = apply(m, self.measure.centroid);
+        let mut bbox = Aabb3::EMPTY;
+        for p in &self.points {
+            bbox.add(apply(m, *p));
+        }
+        out.bbox = bbox;
+        Some(out)
+    }
+}
+
+/// `m` applied to the point `p` (column-major: `m[3]` is the shift).
+fn apply(m: &[[f64; 4]; 4], p: Vec3) -> Vec3 {
+    Vec3::new(
+        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
+        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
+        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+    )
+}
+
+/// An affine map whose linear part is orthonormal (a turn, or a turn and a reflection).
+fn is_rigid(m: &[[f64; 4]; 4]) -> bool {
+    if m.iter().flatten().any(|x| !x.is_finite()) {
+        return false;
+    }
+    let [c0, c1, c2, c3] = m;
+    let col = |c: &[f64; 4]| Vec3::new(c[0], c[1], c[2]);
+    let (x, y, z) = (col(c0), col(c1), col(c2));
+    let near = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+    near(c0[3], 0.0)
+        && near(c1[3], 0.0)
+        && near(c2[3], 0.0)
+        && near(c3[3], 1.0)
+        && near(x.dot(x), 1.0)
+        && near(y.dot(y), 1.0)
+        && near(z.dot(z), 1.0)
+        && near(x.dot(y), 0.0)
+        && near(y.dot(z), 0.0)
+        && near(z.dot(x), 0.0)
 }
 
 /// [`measure`]'s volume, area, centre and box alone: the same numbers, a tessellation fewer
@@ -119,14 +193,14 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
         let m = measure(b)?;
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox });
     }
-    Ok(mass(b, false)?.0)
+    Ok(mass(b, false, false)?.0)
 }
 
 /// The mass properties of a B-rep body from three tessellations: a coarse one (which sets how
 /// fine the others go), then a fine and a medium one at once on desktop (one after the other
 /// in the browser). With `topology`, also the coarse unrefined mesh the topology counts take,
-/// made alongside them.
-fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
+/// made alongside them; with `keep_points`, the vertices of the meshes the box bounds.
+fn mass(b: &Body, topology: bool, keep_points: bool) -> Result<(MassMeasure, Option<Mesh>, Vec<Vec3>)> {
     let size = b.size();
     let coarse_tol = (size * 1e-3).max(1e-3);
     let coarse = b.tessellate_with(coarse_tol, true)?;
@@ -189,7 +263,15 @@ fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
     let mom = o * (4.0 * v6) + mom;
     let volume = v6 / 6.0;
     let centroid = if v6.abs() > 1e-12 { mom / (4.0 * v6) } else { fine.bounds().center() };
-    Ok((MassMeasure { volume, area, centroid, bbox: coarse.bounds().union(&fine.bounds()) }, topo))
+    let bbox = coarse.bounds().union(&fine.bounds());
+    let points = if keep_points {
+        let mut points = fine.positions;
+        points.extend(coarse.positions);
+        points
+    } else {
+        Vec::new()
+    };
+    Ok((MassMeasure { volume, area, centroid, bbox }, topo, points))
 }
 
 #[cfg(test)]

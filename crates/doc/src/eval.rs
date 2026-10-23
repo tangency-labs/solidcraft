@@ -109,6 +109,14 @@ impl ModelBody {
         self.source_transform.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
         Some(h.finish())
     }
+    /// In a world state: identity of the model body this one places, the same for every
+    /// placement of it (none outside a world state, or for a body the evaluation cache does not
+    /// key). Bodies with one key are one geometry moved apart, by the change between their
+    /// [`ModelBody::source_transform`]s.
+    pub fn definition_key(&self) -> Option<u64> {
+        (self.source_key != 0).then_some(self.source_key)
+    }
+
     pub fn definition_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
     }

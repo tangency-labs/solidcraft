@@ -54,9 +54,13 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
-    match solidcraft_kernel::measure(&b.body) {
+    measure_value(&b.name, solidcraft_kernel::measure(&b.body).map_err(|e| e.to_string()))
+}
+
+fn measure_value(name: &str, m: std::result::Result<solidcraft_kernel::BodyMeasure, String>) -> Value {
+    match m {
         Ok(m) => json!({
-            "name": b.name,
+            "name": name,
             "volume_mm3": m.volume,
             "area_mm2": m.area,
             "center_of_mass": m.centroid,
@@ -67,8 +71,87 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
             "face_types": m.merged.face_types,
             "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
         }),
-        Err(e) => json!({"name": b.name, "error": e.to_string()}),
+        Err(e) => json!({"name": name, "error": e}),
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Bodies [`measure_bodies`] measured with the kernel on this thread (a test reads it).
+    pub(crate) static KERNEL_MEASURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Each body's measure, in body order. A part placed many times is measured once: the bodies
+/// placing one definition ([`solidcraft_doc::ModelBody::definition_key`]) take the measure of
+/// the first of them, moved by the change between their placements (volume, area and counts as
+/// they are, the centre moved, the box around the moved mesh points). A body whose placement is
+/// not a rigid move of that one's (or whose definition could not be measured) is measured on its
+/// own. Definitions are measured on all cores.
+fn measure_bodies(bodies: &[&solidcraft_doc::ModelBody]) -> Vec<Value> {
+    use std::collections::HashMap;
+    // The first body of each definition, and the bodies that take its measure.
+    let mut first: HashMap<(u64, &str), usize> = HashMap::new();
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (i, b) in bodies.iter().enumerate() {
+        let key = b.definition_key().map(|k| (k, b.definition_name()));
+        match key.and_then(|k| first.get(&k).copied()) {
+            Some(g) => {
+                if let Some((_, members)) = groups.get_mut(g) {
+                    members.push(i);
+                }
+            }
+            None => {
+                if let Some(k) = key {
+                    first.insert(k, groups.len());
+                }
+                groups.push((i, Vec::new()));
+            }
+        }
+    }
+    let failed = || "measuring this body failed".to_string();
+    // Each definition measured once: alone with what moving its measure takes when it is placed
+    // again.
+    let measured = solidcraft_kernel::map_on_threads(&groups, 16, |(i, members)| {
+        let b = bodies.get(*i)?;
+        Some(if members.is_empty() {
+            (solidcraft_kernel::measure(&b.body).map_err(|e| e.to_string()), None)
+        } else {
+            match solidcraft_kernel::measure_definition(&b.body) {
+                Ok(d) => (Ok(d.measure.clone()), Some(d)),
+                Err(e) => (Err(e.to_string()), None),
+            }
+        })
+    });
+    #[cfg(test)]
+    KERNEL_MEASURES.with(|c| c.set(c.get() + groups.len()));
+    let mut out: Vec<Option<std::result::Result<solidcraft_kernel::BodyMeasure, String>>> = vec![None; bodies.len()];
+    for ((i, members), m) in groups.iter().zip(measured) {
+        let (m, def) = m.flatten().unwrap_or_else(|| (Err(failed()), None));
+        if let Some(slot) = out.get_mut(*i) {
+            *slot = Some(m);
+        }
+        // The others where the change of placement is rigid (left to be measured otherwise).
+        let (Some(rep), Some(def)) = (bodies.get(*i), def) else { continue };
+        let Some(back) = solidcraft_doc::mat_inverse(&rep.source_transform) else { continue };
+        for j in members {
+            let placed = bodies.get(*j).and_then(|b| def.placed(&solidcraft_doc::mat_mul(&b.source_transform, &back)));
+            if let Some(slot) = out.get_mut(*j) {
+                *slot = placed.map(Ok);
+            }
+        }
+    }
+    // The bodies left: measured on their own.
+    let alone: Vec<usize> = out.iter().enumerate().filter(|(_, m)| m.is_none()).map(|(i, _)| i).collect();
+    #[cfg(test)]
+    KERNEL_MEASURES.with(|c| c.set(c.get() + alone.len()));
+    let again =
+        solidcraft_kernel::map_on_threads(&alone, 16, |i| bodies.get(*i).map(|b| solidcraft_kernel::measure(&b.body).map_err(|e| e.to_string())));
+    for (i, m) in alone.iter().zip(again) {
+        if let Some(slot) = out.get_mut(*i) {
+            *slot = Some(m.flatten().ok_or_else(failed).and_then(|m| m));
+        }
+    }
+    bodies.iter().zip(out).map(|(b, m)| measure_value(&b.name, m.unwrap_or_else(|| Err(failed())))).collect()
 }
 
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
@@ -78,12 +161,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let want = string_list(p, "bodies");
     let st = s.world_state();
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
-    // Each body is measured on its own: on all cores, in body order.
-    let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
-        .into_iter()
-        .zip(&selected)
-        .map(|(m, b)| m.unwrap_or_else(|| json!({"name": b.name, "error": "measuring this body failed"})))
-        .collect();
+    let mut bodies = measure_bodies(&selected);
     // Mass from each body's material.
     for (b, body) in bodies.iter_mut().zip(selected) {
         if let Some(v) = b["volume_mm3"].as_f64() {

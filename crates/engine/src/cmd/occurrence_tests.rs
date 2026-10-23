@@ -789,3 +789,59 @@ fn joins_into_a_moved_occurrence_meet_the_tool_where_it_is_shown() {
     let want = 10.0 * 10.0 * 10.0 - 4.0 * 4.0 * 10.0;
     assert!((volume(&s, "C") - want).abs() < 1e-6 * want, "C: {} vs {want}", volume(&s, "C"));
 }
+
+/// Measuring an assembly measures each part once (#3906): every placement's volume, area,
+/// counts, centre and box are what measuring that placed body on its own gives, for a shifted,
+/// a turned and a mirrored placement alike.
+#[test]
+fn measure_takes_each_placement_from_its_definition_measured_once() {
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Bracket");
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "body_name": "bracket"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 20, "base": [10, 10, 0], "operation": "cut", "targets": ["bracket"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 10], [60, 0, 10], [13, 10, 20]], "radius": 0.5, "body": "bracket"}));
+    let copy =
+        |s: &mut Session, x: f64| run(s, "occurrence.copy", json!({"component": component, "translate": [x, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (shifted, turned, mirrored) = (copy(&mut s, 100.0), copy(&mut s, 0.0), copy(&mut s, 0.0));
+    run(&mut s, "occurrence.move", json!({"occurrence": turned, "axis": [1, 2, 3], "angle": "40 deg", "origin": [0, 80, 0]}));
+    // A mirrored placement (an imported assembly can hold one; the move commands refuse them).
+    let doc = std::sync::Arc::make_mut(&mut s.doc);
+    doc.occurrences.iter_mut().find(|o| o.id == mirrored).unwrap().transform =
+        [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [-50.0, 0.0, 0.0, 1.0]];
+    let _ = (first, shifted);
+
+    crate::cmd::inspect::KERNEL_MEASURES.with(|c| c.set(0));
+    let all = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(crate::cmd::inspect::KERNEL_MEASURES.with(|c| c.get()), 1, "one definition, one measure");
+    let world = s.world_state();
+    assert_eq!(world.bodies.len(), 4);
+    let measured = all["bodies"].as_array().unwrap();
+    let f = |v: &Value| v.as_f64().unwrap();
+    let mut centres = Vec::new();
+    for (b, got) in world.bodies.iter().zip(measured) {
+        // The placed body measured on its own, as every placement was before.
+        let want = crate::cmd::inspect::measure_json(b);
+        for k in ["faces", "edges", "vertices", "face_types", "kernel"] {
+            assert_eq!(got[k], want[k], "{} {k}", b.name);
+        }
+        for k in ["volume_mm3", "area_mm2"] {
+            assert!((f(&got[k]) - f(&want[k])).abs() <= 1e-6 * f(&want[k]), "{} {k}: {} against {}", b.name, got[k], want[k]);
+        }
+        let points = [
+            ("center_of_mass", &got["center_of_mass"], &want["center_of_mass"], 1e-6),
+            ("bbox min", &got["bbox"]["min"], &want["bbox"]["min"], 1e-6),
+            ("bbox max", &got["bbox"]["max"], &want["bbox"]["max"], 1e-6),
+        ];
+        for (k, g, w, tol) in points {
+            for axis in 0..3 {
+                let (x, y) = (f(&g[axis]), f(&w[axis]));
+                assert!((x - y).abs() <= tol, "{} {k}[{axis}]: {x} against {y}", b.name);
+            }
+        }
+        centres.push(got["center_of_mass"].clone());
+    }
+    // Four placements, four places.
+    for (i, a) in centres.iter().enumerate() {
+        assert!(centres[i + 1..].iter().all(|b| b != a), "{centres:?}");
+    }
+}
