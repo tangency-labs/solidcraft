@@ -57,6 +57,18 @@ fn hole_centre(s: &Session, sketch: u64, link: &str) -> Vec2 {
         .unwrap()
 }
 
+/// A script reaches a copy by naming its body ("Plate (A:2)") as well as by `path`, and
+/// follows that copy when it moves.
+#[test]
+fn a_copy_is_projected_by_its_body_name() {
+    let (mut s, _, a2, sketch) = holed_parts();
+    let r = run(&mut s, "sketch.project", json!({"refs":[{"face":[105,5,10],"body":"Plate (A:2)"}]}));
+    let face = r["links"][0]["link"].as_str().unwrap().to_string();
+    assert!((hole_centre(&s, sketch, &face) - Vec2::new(120.0, 20.0)).len() < 1e-6);
+    run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[0,7,0]}));
+    assert!((hole_centre(&s, sketch, &face) - Vec2::new(120.0, 27.0)).len() < 1e-6);
+}
+
 #[test]
 fn a_face_brings_every_boundary_loop_and_an_edge_only_itself() {
     let (mut s, _, a2, sketch) = holed_parts();
