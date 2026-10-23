@@ -178,6 +178,8 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
     if sk.links.is_empty() {
         return Vec::new();
     }
+    #[cfg(test)]
+    refresh_count::record();
     let doc = placed_candidate(s, doc);
     let (vals, _) = doc.param_values();
     // A text's outlines are rebuilt from its numbers: the ones its expressions give come first
@@ -207,6 +209,25 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         }
     }
     warnings
+}
+
+/// Refreshes of a sketch's links run on this thread by [`refresh`].
+#[cfg(test)]
+pub(super) mod refresh_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn record() {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+
+    /// The count since the last call.
+    pub fn take() -> usize {
+        COUNT.with(|c| c.replace(0))
+    }
 }
 
 /// Add a link for `src` to sketch `id` in `doc` (not stored in the session). Returns the link id.

@@ -258,6 +258,10 @@ pub struct Session {
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
+    /// After a live frame: its sketch, the document it left and the revision. Its links were
+    /// brought up to date by that frame, so the gesture's next frame needn't project them again
+    /// while nothing else has run (#3222).
+    pub(crate) live_links: Option<(u64, Arc<Document>, u64)>,
     /// The component new sketches and features go into (0 = the root).
     pub active_component: u64,
     /// The placement used when authoring shared component geometry.
@@ -422,6 +426,7 @@ impl Session {
             revision: 1,
             auto_project: true,
             param_check: schema::ParamCheck::Off,
+            live_links: None,
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
@@ -786,8 +791,11 @@ impl Session {
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
-        if live.is_none() && spec.reads_model && self.model.is_stale() {
-            self.refresh();
+        if live.is_none() {
+            self.live_links = None;
+            if spec.reads_model && self.model.is_stale() {
+                self.refresh();
+            }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         let before = Snapshot {
@@ -852,7 +860,11 @@ impl Session {
                         self.redo.clear();
                     }
                     match live_edit {
-                        Some(edit) => self.refresh_live(edit),
+                        Some(edit) => {
+                            let sketch = edit.sketch;
+                            self.refresh_live(edit);
+                            self.live_links = Some((sketch, self.doc.clone(), self.revision));
+                        }
                         None if render_only => self.refresh_render(&previous_doc),
                         None => self.refresh_from(&previous_doc),
                     }
@@ -955,6 +967,7 @@ impl Session {
             revision: self.revision,
             auto_project: self.auto_project,
             param_check: self.param_check,
+            live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
