@@ -603,6 +603,24 @@ impl Scene {
 }
 
 impl TopologyObjects<Obj> for Scene {
+    // SmTol::GetZoneTol3d(const SmObject*) of the shim's free-standing objects: a
+    // vertex's own tolerance, an edge's default (`SmEdge` stores 0.0), a curve's edge's
+    // tolerance or, without edge (the cache's analytic line too), the system's
+    fn object_zone_tol_3d(&self, k: &Kernel, object: Obj) -> solidcore::Result<f64> {
+        let system = || {
+            solidcore::geom::tol::zone_tol_3d(k, solidcore::geom::tol::SmallTopoType::NormalSize)
+        };
+        match object {
+            Obj::Vertex(_) => self.vertex_tolerance(object),
+            Obj::Edge(_) => Ok(0.0),
+            Obj::Curve(..) => Ok(match self.curve_edge(object)? {
+                Some(_) => 0.0,
+                None => system(),
+            }),
+            Obj::Analytic(_) => Ok(system()),
+        }
+    }
+
     fn curve(&self, object: Obj) -> solidcore::Result<&Curve> {
         match object {
             Obj::Curve(i, _) => match self.items.get(i) {

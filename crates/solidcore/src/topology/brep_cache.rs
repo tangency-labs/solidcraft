@@ -620,6 +620,43 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             })
             .transpose()
     }
+    fn object_zone_tol_3d(&self, k: &Kernel, object: CacheObject) -> Result<f64> {
+        use crate::geom::tol::{zone_tol_3d, SmallTopoType};
+        let system = zone_tol_3d(k, SmallTopoType::NormalSize);
+        match object {
+            // topology: GetTolerance (SM_USE_OLDTOL)
+            CacheObject::Vertex(v) => crate::topology::vertex::tolerance(self.brep, v),
+            CacheObject::Edge(e) => edge::tolerance(self.brep, e),
+            CacheObject::Face(f) => crate::topology::face::p2::tolerance(self.brep, f),
+            // geometry: the tolerance of its edge or face, else the system's
+            CacheObject::Curve(_) => match self.curve_edge(object)? {
+                Some(CacheObject::Edge(e)) => edge::tolerance(self.brep, e),
+                Some(_) => Err(SolidError::invalid_input(OP, "curve edge is not an edge")),
+                None => Ok(system),
+            },
+            CacheObject::Surface(_) => match self.surface_face(object)? {
+                Some(CacheObject::Face(f)) => crate::topology::face::p2::tolerance(self.brep, f),
+                Some(_) => Err(SolidError::invalid_input(OP, "surface face is not a face")),
+                None => Ok(system),
+            },
+            // SmBrep: GetZoneTol3d(const SmBrep*)
+            CacheObject::Brep => Ok(self.brep.tolerance()),
+            // UNPORTED(query.poly): SmPolyVertex/SmPolyEdge/SmPolyFace::GetTolerance (the
+            // poly B-rep is not in this view)
+            CacheObject::PolyVertex(_) | CacheObject::PolyEdge(_) | CacheObject::PolyFace(_) => {
+                Err(SolidError::unported(
+                    "SmPolyVertex::GetTolerance",
+                    "query.poly",
+                ))
+            }
+            // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an owner outside
+            // this view's topology records
+            CacheObject::Other(_) => Err(SolidError::unported(
+                "SmTol::GetZoneTol3d(const SmObject*)",
+                "geom.tol",
+            )),
+        }
+    }
     fn shape_member(&self, object: CacheObject) -> object::ShapeMember {
         use crate::geom::object::ShapeMember;
         let b = self.brep_id;

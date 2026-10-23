@@ -1566,6 +1566,7 @@ pub fn find_side_of_curve(
             opt_vectors: Some(&vectors),
             handle: None,
             analytic_handle: None,
+            zone_tol_3d: None,
         },
     )?;
 

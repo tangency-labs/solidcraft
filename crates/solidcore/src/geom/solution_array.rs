@@ -26,6 +26,7 @@
 //! | [`Solution::object_index_for_parameter_index`] | `SmSolution::GetObjectIndexForParameterIndex`             |
 //! | [`Solution::parameter_interval`]              | `SmSolution::GetParameterInterval`                         |
 //! | [`Solution::object_tolerance`]                | `SmSolution::GetObjectTolerance`                           |
+//! | [`Solution::object_tolerance_with`]           | `SmSolution::GetObjectTolerance` (caller-resolved handle)   |
 //! | [`Solution::is_equal`]                        | `SmSolution::IsEqual`                                      |
 //! | `are_sequential` (private)                    | `sm_AreSequential`                                         |
 //! | [`SolutionObject`], [`ObjectKind`]            | the `SmObject*` of `m_apObjects` and its `IsKindOf` tests  |
@@ -1022,7 +1023,8 @@ impl<O: SolutionObject> Solution<O> {
     }
 
     /// The zone tolerance of object `index`, `0.0` for an index outside the
-    /// objects or a null object (`GetObjectTolerance`).
+    /// objects or a null object (`GetObjectTolerance`), for handles nothing can
+    /// resolve: see [`Solution::object_tolerance_with`].
     ///
     /// # Errors
     ///
@@ -1030,6 +1032,29 @@ impl<O: SolutionObject> Solution<O> {
     /// fixed arrays;
     /// [`SolidError::Unported`] for a non-null object (zone tolerances).
     pub fn object_tolerance(&self, index: usize) -> Result<f64> {
+        self.object_tolerance_with(index, |_| {
+            // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle
+            // (callers that can resolve it use `object_tolerance_with`)
+            Err(SolidError::Unported {
+                upstream: "SmTol::GetZoneTol3d(const SmObject*)",
+                unit: "geom.tol",
+            })
+        })
+    }
+
+    /// The zone tolerance of object `index` (`GetObjectTolerance`): `0.0` for an index
+    /// outside the objects or a null object, else `zone_tol_3d` of the object (the
+    /// caller's `SmTol::GetZoneTol3d(const SmObject*)`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when a variable or object count exceeds the
+    /// fixed arrays; those of `zone_tol_3d`.
+    pub fn object_tolerance_with(
+        &self,
+        index: usize,
+        zone_tol_3d: impl FnOnce(O) -> Result<f64>,
+    ) -> Result<f64> {
         const OP: &str = "geom::solution_array::Solution::object_tolerance";
         self.check(OP)?;
 
@@ -1040,16 +1065,7 @@ impl<O: SolutionObject> Solution<O> {
 
         // pass the call along
         match self.object(index, OP)? {
-            Some(_) => {
-                // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle. Every
-                // arm it dispatches to is ported (topology::{vertex, edge, face::p2, edgeuse::p1}::tolerance,
-                // Brep::tolerance) but each takes `&Brep` and none is in scope here; wire once this code
-                // receives the owning B-rep
-                Err(SolidError::Unported {
-                    upstream: "SmTol::GetZoneTol3d(const SmObject*)",
-                    unit: "geom.tol",
-                })
-            }
+            Some(o) => zone_tol_3d(o),
             None => Ok(0.0),
         }
     }

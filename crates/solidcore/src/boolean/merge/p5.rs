@@ -661,9 +661,10 @@ mod tests {
             mt,
             &mut keep,
         );
-        // the second wire's classification reaches a callee not ported yet
+        // the second wire's classification fails (its ray fire finds no region:
+        // `SM_ERR` from `Point3DClassify`)
         assert!(
-            matches!(result, Err(SolidError::Unported { .. })),
+            matches!(result, Err(SolidError::Upstream { code: 1001, .. })),
             "{result:?}"
         );
         assert_eq!(keep, [ae]);

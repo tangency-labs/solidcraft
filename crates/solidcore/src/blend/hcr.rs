@@ -1431,6 +1431,7 @@ impl Hcr {
                 opt_vectors: Some(&view),
                 handle: Some(handle),
                 analytic_handle: None,
+                zone_tol_3d: None,
             };
             // Find projection of vertex on the curve along view vector.
             let sols = curve.global_point_solve(

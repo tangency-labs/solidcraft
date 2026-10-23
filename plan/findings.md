@@ -17050,6 +17050,31 @@ Not fixed, and no tolerance was loosened. The case is listed in
 `crates/difftest/known_mismatches.toml` (reported as `known-mismatch`; `blend.fillet_intersector`
 stays partial, never green). Remove the entry when the cause is fixed.
 
+## geom.tol: `SmTol::GetZoneTol3d(const SmObject*)` on solver handles (2026-10-22)
+
+- Solution handles stay opaque; the caller that owns the B-rep resolves them.
+  `GlobalSolve::object_zone_tol_3d` (default: the `geom.tol` deferral) is what
+  `AddSortedSolution` reads for `SM_SO_RAYFIRE` (`SmSolution::GetObjectTolerance` is
+  `Solution::object_tolerance_with`). `TopologySolver` forwards it to
+  `TopologyObjects::object_zone_tol_3d`; `BrepObjects` answers per `SM_USE_OLDTOL`:
+  vertex/edge/face `GetTolerance`, a curve's `GetEdge()` tolerance (else the system
+  zone tolerance), a surface's `GetFace()` tolerance (else system), a B-rep's
+  tolerance; poly entities and foreign owners stay deferred. Curve point solves get
+  the resolver through `GlobalPointSolveOptions::zone_tol_3d` (`ObjectZoneTol`).
+- The topology solver's local solvers called `ts.base.add_sorted_solution`, i.e. the
+  plain `GlobalSolver` impl rather than `SmTopologySolver`'s (upstream calls the
+  virtual on the topology solver). Equivalent while no hook was overridden; they now
+  sort through the `TopologySolver` so the tolerance hook applies.
+- `face::p3::is_degenerate`'s `EdgeGeometry` now resolves its `EntityRef` handles
+  (`topology_entity`), so `SmEdge::GetTolerance` in the point classification of its
+  coincidence solutions reads the edge.
+- With these, the B-rep ray fire of `split_closed` (`find_infinite_region` ->
+  `shell::ray_fire`) gets past the tolerances and stops at
+  `topology_solver::p1::face_point_classify` (`SmFace::PointClassify` on an opaque
+  face handle, `query.face_p2`). Upstream classifies against the face surface's
+  trimmed surface cache when one exists (`SmCacheMgr::GetObjectCache`), which the
+  arena B-rep does not keep between operations; wiring it faithfully needs that
+  cache state (and `&mut Brep` for missing UV trims), so it is left deferred.
 ## PR #463: 27 Rust-vs-C++ mismatches newly reachable once `SmSurface::DropCurve` is wired (known mismatches, follow-ups)
 
 Main's wiring of `SmFace::CreateUVTrimCurves` (`topology.face_p3`) and `SmCrvOnSurf` over
@@ -17084,6 +17109,14 @@ step in the face UV-trim path on the B-spline cylinder fixture.
 
 `ints.topology.len: cpp=278 rust=274` (fixture `SmMerge.cpp:4367`, closed loop
 orientation from tangents): the merged topology differs.
+- `Surface::base_global_line_intersect` built its own cache (no caller cache) without
+  `GetTree()`: a cache made while a boolean operation delays its tree (the primitive
+  sweeps set `doing_boolean`) had no tree and the solve returned `SM_ERR_NULL_POINTER`
+  where upstream's `pSurfaceCache->GetTree()` builds it. The fresh cache now goes through
+  `held_cache` like the caller's, so the B-rep ray fire of a sphere's region split
+  reaches the face-bound tree build (deferred, `surface.trim_srf_cache`) instead of
+  failing, and `sweep.api_brep` `rotational_sweep_semicircle_sphere` no longer keeps a
+  half-built analytic face (it defers rather than mismatch).
 
 ## offset.offset_geometry_creation: face-bound ExtendTrimEdges cache (A) — 24 gains but two iso-lift mismatches
 

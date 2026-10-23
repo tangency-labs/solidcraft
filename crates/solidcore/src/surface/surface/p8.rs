@@ -1423,7 +1423,7 @@ impl Surface {
         // local Surface Cache
         // (`held`: the caller's cache, which the coincident traces below share)
         let mut held: Option<&mut SurfaceCache<O>> = None;
-        let built;
+        let mut built;
         let mut owned;
         // the trimmed cache's point test (`sm_IsPointValid` -> `PointTest`)
         let mut face_cache: Option<&mut (dyn FaceSolveCache<O> + '_)> = None;
@@ -1457,7 +1457,9 @@ impl Surface {
                         .as_mut()
                         .map(|context| &mut **context as &mut dyn SurfaceSolveContext<O>),
                 )?;
-                &built
+                // pSurfaceCache->GetTree() (NER): a cache made while a boolean operation
+                // delays its tree builds it now
+                Self::held_cache(k, &mut built, OP_LINE)?
             }
             LineCacheSource::Held(kept) => {
                 match kept.get_or_insert_with(|| {

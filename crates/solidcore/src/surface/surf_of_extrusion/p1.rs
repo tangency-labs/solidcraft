@@ -1451,6 +1451,7 @@ impl SurfOfExtrusion {
                 opt_vectors: None,
                 handle: Some(gen_handle),
                 analytic_handle: Some(analytic_handle),
+                zone_tol_3d: None,
             },
         )?;
 

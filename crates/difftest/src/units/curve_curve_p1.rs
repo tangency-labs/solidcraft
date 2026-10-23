@@ -762,11 +762,19 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
             let mut c = build(curve)?;
             apply_xf(&k, &mut c, xf)?;
             let vs: Vec<Vec3> = vecs.iter().map(|x| v3(*x)).collect();
+            // SmTol::GetZoneTol3d of the (unowned) curve: the system zone tolerance
+            let system_zone_tol = |_: Obj| {
+                Ok(solidcore::geom::tol::zone_tol_3d(
+                    &k,
+                    solidcore::geom::tol::SmallTopoType::NormalSize,
+                ))
+            };
             let opts = GlobalPointSolveOptions {
                 target_distance: *target,
                 opt_vectors: if vs.is_empty() { None } else { Some(&vs) },
                 handle: Some(Obj(0, Some(c.natural_interval()))),
                 analytic_handle: Some(Obj(2, None)),
+                zone_tol_3d: Some(solidcore::geom::global_solver::ObjectZoneTol(&system_zone_tol)),
             };
             let req = SolutionRequested::from_code(*req).ok_or_else(|| harness("req"))?;
             let sols = tri!(

@@ -697,6 +697,7 @@ impl SurfOfRevolution {
             opt_vectors: None,
             handle: Some(gen_handle),
             analytic_handle: Some(GenHandle(2, gen_handle.1)),
+            zone_tol_3d: None,
         };
         let gen_solutions = gen.global_point_solve(
             k,

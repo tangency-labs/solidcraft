@@ -2301,6 +2301,7 @@ impl OffsetGeometryCreation {
                 opt_vectors: None,
                 handle: Some(curve),
                 analytic_handle: None,
+                zone_tol_3d: None,
             },
         )
     }
@@ -3429,6 +3430,7 @@ impl OffsetGeometryCreation {
                                         opt_vectors: Some(&rays),
                                         handle: Some(arc_h),
                                         analytic_handle: None,
+                                        zone_tol_3d: None,
                                     },
                                 )?;
                             if let Some(sol) = sols.get(0) {

@@ -373,6 +373,52 @@ impl Default for SolveRequest<'_> {
     }
 }
 
+/// The caller's `SmTol::GetZoneTol3d(const SmObject*)` for the solution handles of a
+/// solve: the handles are opaque to the solver, so a caller that can resolve them to
+/// their B-rep entities (vertex, edge, face, or the edge of a curve, the face of a
+/// surface) passes this to the curve and surface solves (see
+/// [`GlobalSolve::object_zone_tol_3d`]).
+#[derive(Clone, Copy)]
+pub struct ObjectZoneTol<'a, O>(pub &'a dyn Fn(O) -> Result<f64>);
+
+impl<O> core::fmt::Debug for ObjectZoneTol<'_, O> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ObjectZoneTol(..)")
+    }
+}
+
+impl<O> ObjectZoneTol<'_, O> {
+    /// The zone tolerance of `object`.
+    ///
+    /// # Errors
+    ///
+    /// The resolver's.
+    pub fn get(&self, object: O) -> Result<f64> {
+        (self.0)(object)
+    }
+}
+
+/// [`GlobalSolve::object_zone_tol_3d`] for a solver given an optional resolver: the
+/// resolver's answer, else the opaque-handle deferral.
+///
+/// # Errors
+///
+/// The resolver's; [`SolidError::Unported`] without one.
+pub fn resolve_object_zone_tol_3d<O>(
+    resolver: Option<ObjectZoneTol<'_, O>>,
+    object: O,
+) -> Result<f64> {
+    match resolver {
+        Some(r) => r.get(object),
+        // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on a handle the
+        // caller gave no resolver for
+        None => Err(SolidError::Unported {
+            upstream: "SmTol::GetZoneTol3d(const SmObject*)",
+            unit: "geom.tol",
+        }),
+    }
+}
+
 /// The state of a global solve (`SmGlobalSolver`'s data members).
 #[derive(Debug, Clone)]
 pub struct GlobalSolver<'t, O> {
@@ -1577,6 +1623,19 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
     /// The solver state, mutable.
     fn solver_mut(&mut self) -> &mut GlobalSolver<'t, O>;
 
+    /// `SmTol::GetZoneTol3d(const SmObject*)` of a non-null solution object (read by
+    /// `SmSolution::GetObjectTolerance` in [`GlobalSolve::add_sorted_solution`] for
+    /// [`SolverOperation::Rayfire`]). The handles are opaque here: a solver whose
+    /// caller can resolve them to their B-rep entities (the topology solver, or a
+    /// curve or surface solve given [`ObjectZoneTol`]) overrides this.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] by default (no resolver for the handle).
+    fn object_zone_tol_3d(&self, object: O) -> Result<f64> {
+        resolve_object_zone_tol_3d(None, object)
+    }
+
     /// `BranchMayContainAnswers`: false when `branch` provably holds no
     /// answer.
     fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
@@ -2026,10 +2085,12 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
             // To match old behavior, we check the distance between
             // intersection points on the ray.
             if op == SolverOperation::Rayfire {
-                let first_tol = first.object_tolerance(0)?;
-                let last_tol = s.solutions.get_at(last_index)?.object_tolerance(0)?;
+                let last = s.solutions.get_at(last_index)?;
+                let first_tol = first.object_tolerance_with(0, |o| self.object_zone_tol_3d(o))?;
+                let last_tol = last.object_tolerance_with(0, |o| self.object_zone_tol_3d(o))?;
                 this_tol = max2(tol, first_tol + last_tol);
             }
+            let s = self.solver_mut();
 
             while s.solutions.len() > 1
                 && (first.start.solution_value

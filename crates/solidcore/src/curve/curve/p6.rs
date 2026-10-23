@@ -829,6 +829,7 @@ impl Curve {
                     opt_vectors: vectors,
                     handle: this,
                     analytic_handle: analytic,
+                    zone_tol_3d: None,
                 };
                 Ok(self
                     .global_point_solve(

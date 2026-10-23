@@ -1022,6 +1022,14 @@ impl ClassGeometry<EntityRef> for EdgeGeometry<'_> {
             _ => None,
         }
     }
+    // the handles are the face's B-rep entities: the topology members
+    // (`SmEdge::GetTolerance`, ...) read them there
+    fn topology_entity(&self, o: EntityRef) -> Option<(&Brep, EntityRef)> {
+        Some((self.b, o))
+    }
+    fn topology_handle(&self, e: EntityRef) -> Option<EntityRef> {
+        Some(e)
+    }
 }
 
 /// The curve objects of [`is_degenerate`]'s coincidence solutions (upstream passes the
