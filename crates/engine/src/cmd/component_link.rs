@@ -8,7 +8,9 @@
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
 
+use std::hash::{Hash, Hasher};
 use std::path::{Component as PathPart, Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind};
@@ -127,15 +129,82 @@ pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::coll
 /// the design gives their faces (`Feature::link_faces`).
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>);
 
-/// The solid bodies of the design at `file`, evaluated, as an Import feature.
-fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+/// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
+/// of its face names, and that read's warnings. Update Links evaluates a file again only when its
+/// bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
+static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
+const READS_SIZE: usize = 256;
+
+struct LinkRead {
+    file: PathBuf,
+    bytes: u64,
+    step: u64,
+    faces: u64,
+    warnings: Vec<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Linked designs read and evaluated on this thread, for tests.
+    static EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut h);
+    h.finish()
+}
+
+/// The warnings of the last read of `file`, when it had these bytes and gave the STEP text
+/// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
+fn unchanged_read(file: &Path, bytes: u64, step: u64, faces: u64) -> Option<Vec<String>> {
+    let file = absolute(file);
+    let reads = READS.lock().ok()?;
+    reads.iter().find(|r| r.file == file && r.bytes == bytes && r.step == step && r.faces == faces).map(|r| r.warnings.clone())
+}
+
+fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, faces: &[Vec<String>]) {
+    let FeatureKind::Import { step, .. } = &feature.kind else { return };
+    let file = absolute(file);
+    let Ok(mut reads) = READS.lock() else { return };
+    reads.retain(|r| r.file != file);
+    if reads.len() >= READS_SIZE {
+        reads.remove(0);
+    }
+    reads.push(LinkRead { file, bytes, step: digest(step.as_bytes()), faces: digest(faces), warnings: feature.warnings.clone() });
+}
+
+/// The bytes of the design at `file`, which must not be the design saved at `own`.
+fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    let bytes = solidcraft_io::vfs::read(&shown, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::new(doc), &shown)
+    solidcraft_io::vfs::read(&shown, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{shown}: {e}")))
+}
+
+/// The solid bodies of the design at `file`, evaluated, as an Import feature.
+fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+    design_bodies(file, &read_link(file, own)?)
+}
+
+/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
+/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
+    #[cfg(test)]
+    EVALUATED.with(|n| n.set(n.get() + 1));
+    let shown = file.display().to_string();
+    let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
+    let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
+        let saved = reader.geometry();
+        (reader.read_document().map_err(fail)?, saved)
+    } else {
+        (solidcraft_io::read_design(bytes).map_err(fail)?, None)
+    };
+    let (name, feature, faces) = session_bodies(&Session::opened(doc, saved.as_ref()), &shown)?;
+    remember_read(file, digest(bytes), &feature, &faces);
+    Ok((name, feature, faces))
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -248,7 +317,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let old = old.clone();
         let file = resolve(s.path.as_deref(), &link.path);
-        let (_, sf, faces) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let kept_faces = s.doc.feature(link.feature).map(|f| digest(f.link_faces.as_slice()));
+        if let Some(known) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), digest(old.as_bytes()), faces)) {
+            warnings.extend(known);
+            unchanged.push(cname);
+            continue;
+        }
+        let (_, sf, faces) = design_bodies(&file, &bytes).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
@@ -466,6 +542,43 @@ mod tests {
         assert_eq!(run(&mut b, "component.links", json!({}))["links"], json!([]));
         assert!((volume(&mut b) - 9000.0).abs() < 1e-6);
         assert!(b.execute("component.update_links", &json!({"component": "plate"})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_links_reads_again_only_the_designs_that_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-reads-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (plate, block) = (dir.join("plate.solidcraft"), dir.join("block.solidcraft"));
+        save_box(&plate, 30.0);
+        save_box(&block, 10.0);
+        let mut a = Session::default();
+        run(&mut a, "component.insert_design", json!({"path": plate}));
+        run(&mut a, "component.insert_design", json!({"path": block, "translate": [50, 0, 0]}));
+        let evaluated = || EVALUATED.with(std::cell::Cell::get);
+        // Unchanged files are not evaluated again.
+        let before = evaluated();
+        let r = run(&mut a, "component.update_links", json!({}));
+        assert_eq!((r["updated"].clone(), r["unchanged"].clone()), (json!([]), json!(["plate", "block"])), "{r}");
+        assert_eq!(evaluated(), before);
+        // An edited file is, and only that one.
+        save_box(&plate, 45.0);
+        let r = run(&mut a, "component.update_links", json!({}));
+        assert_eq!((r["updated"].clone(), r["unchanged"].clone()), (json!(["plate"]), json!(["block"])), "{r}");
+        assert_eq!(evaluated(), before + 1);
+        assert!((volume(&mut a) - 11000.0).abs() < 1e-6, "{}", volume(&mut a));
+        // Undone, the link holds the old bodies again: the same file brings the new ones back.
+        run(&mut a, "edit.undo", json!({}));
+        assert!((volume(&mut a) - 8000.0).abs() < 1e-6, "{}", volume(&mut a));
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["plate"]));
+        assert!((volume(&mut a) - 11000.0).abs() < 1e-6, "{}", volume(&mut a));
+        // A file saved again without its model is evaluated, and gives the same bodies.
+        let mut part = Session::default();
+        run(&mut part, "doc.open", json!({"path": block}));
+        run(&mut part, "file.save", json!({"cache": false}));
+        let before = evaluated();
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate", "block"]));
+        assert_eq!(evaluated(), before + 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
