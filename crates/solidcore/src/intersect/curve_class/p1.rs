@@ -1175,7 +1175,7 @@ fn surface_zone_tol_3d(k: &Kernel, surface: &Surface) -> Result<f64> {
 
 /// A copy of `surface` evaluating out of bounds when it is an `SmBSplineSurface` kind
 /// (`SmTemporaryChangeValue<SmBoolean>(GetOutOfBoundsEnabled(), TRUE)`).
-fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
+pub(super) fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => {
             let mut s = s.clone();

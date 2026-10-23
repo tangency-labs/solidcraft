@@ -848,3 +848,11 @@ SC_EXPORT int32_t sc_intersect_curve_class_p5_run(const double* in, int64_t n_in
     return sc_copy_out(result.data(),result.size(),out,cap,out_len);
     SC_CATCH
 }
+
+// The verbatim sm_InsertSolutions above, for the B-rep cases of
+// intersect_curve_class_p5_topo.cpp (a file-static function cannot be linked against).
+SmStatus sc_cc_p5_insert_solutions(SmCurveClassification* pCurveClassification, SmSolutionArray& rSolutions,
+                                   SmObject* pObj, SmXSectTol3d* pOptXSectTol3d)
+{
+    return sc_cc_p5::sm_InsertSolutions(pCurveClassification, rSolutions, pObj, pOptXSectTol3d);
+}

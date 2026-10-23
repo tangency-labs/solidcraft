@@ -10,11 +10,64 @@
 //! targets are real line/plane/vertex/face. Counts and native undefined branches are
 //! checked before entry. Output contains status, operation outputs, both full interval
 //! states and every mutable solution end. No native pointers cross the boundary.
+//!
+//! **B-rep cases** ([`topo`], shim `harness/cpp/shim/intersect_curve_class_p5_topo.cpp`,
+//! `sc_intersect_curve_class_p5_topo`) run on real `SmBrep` objects. The input is a
+//! B-rep block of unit `topology.edgeuse_p1` (`path` is the `.smb` file of a file
+//! block), then
+//!
+//! - edits `n (kind sel value)*` (`n <= 64`; the entity `sel` modulo the count of its
+//!   kind, in export order): kind 0 face, 1 edge, 2 vertex: the raw zone tolerance set to
+//!   `value` (`0..=1e3`); 3: `GetOrCreateUVTrimCurve` on the face's loop edge uses; 4, 5,
+//!   6: the raw vertex point's x, y or z moved by `value` (`|value| <= 1e3`);
+//! - mates `n (e1 e2)*` (`n <= 16`): with `n > 0` the block is built twice (same edits)
+//!   and an `SmTopologyIntersector` relates edge `e1` of the first B-rep to edge `e2` of
+//!   the second (`Relate`). No edge may appear twice on one side: the Rust side has no
+//!   `Relate`, and a second relation of an edge is a refused `Relate` upstream;
+//!
+//! then the op's arguments ([`TopoOp`]). Indices are export indices of the first
+//! B-rep. A surface block is unit `topology.edgeuse_p1`'s (`1 O[3] N[3]` an `SmPlane`,
+//! `0 ...` an `SmBSplineSurface`), a curve block likewise (`SmBSplineCurve`).
+//!
+//! | [`TopoOp`]   | arguments | output after `0` |
+//! |--------------|-----------|------------------|
+//! | `Export`     | `which` (`1`, the second B-rep, only with mates) | that B-rep's export (unit `topology.edgeuse_p1`'s layout) |
+//! | `EdgeInsert` | `e ok_set ignore tol P[3] Q[3] opt_tol has_srf [surface surface] ns (type t0 t1 t2 t3 g0 g1)*` | `status`, the classification, the solutions, the topology state |
+//! | `Vertices`   | `f big uv_ok tol cc_face curve has_srf [surface surface] has_uv1 [curve] has_uv2 [curve] nv v*` | `status is_curve_current`, the curve block, the classification, the topology state |
+//!
+//! `EdgeInsert` runs `sm_InsertSolutions` on `SmCurveClassification(line, [0, 1], NULL,
+//! tol)` of the line segment `P -> Q` (`SmBSplineCurve::CreateLineSegment`), with
+//! `SetIgnoreTangency(ignore)`, `SetOKToSetTolerance(ok_set)` and, with `has_srf`,
+//! `SetIntersectData(s1, s2, NULL)`, against edge `e` (solutions name the line and the
+//! edge; `opt_tol < 0` is the default tolerance). `Vertices` runs `IntersectVertices`
+//! of the vertices `v` against face `f`'s surface on `SmCurveClassification(curve,
+//! natural interval, uv1, tol)` (a 3D curve), with `SetIntersectData(s1, s2, uv2, TRUE,
+//! ti)` when `has_srf` (`ti` the intersector when there are mates) and `SetFace(f)` when
+//! `cc_face`. A classification is `size min max` then per interval `min max` and three
+//! point classifications `class kind brep index deviation tparam u v U V W params_set
+//! sss_flag sss(x y z) presnap src_zone` (object `kind`: 0 none, 1 face, 2 edge, 3 vertex
+//! with the B-rep and export index, 4 the classification curve, 5 and 6 the surfaces).
+//! The topology state is, per B-rep, every vertex tolerance then per edge use whether it
+//! has a UV trim curve. The shim refuses (`-3` alone) an edge without curve or end
+//! vertex, a face without surface or surface owner, and with large gaps a vertex
+//! without a vertex use on the gap face, all of which upstream dereferences; `-1
+//! status` is a failed B-rep build, `-2` a refused `Relate`.
 
 use crate::{call_with_buffer, FfiError};
 
+use super::topology_edgeuse_p1::{self as eu1, bad, brep_block, curve, surface, Reader};
+
 mod sys {
     extern "C" {
+        pub fn sc_intersect_curve_class_p5_topo(
+            op: i32,
+            path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
         pub fn sc_intersect_curve_class_p5_run(
             input: *const f64,
             n: i64,
@@ -115,6 +168,148 @@ pub fn run(input: &[f64]) -> Result<Vec<f64>, FfiError> {
         // above are validated; output and length have caller-owned valid storage.
         unsafe {
             sys::sc_intersect_curve_class_p5_run(
+                input.as_ptr(),
+                input.len() as i64,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                len,
+            )
+        }
+    })
+}
+
+/// The B-rep ops of [`topo`] (see the module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopoOp {
+    /// Export one B-rep after the edits and mates.
+    Export = 0,
+    /// `sm_InsertSolutions` against an edge.
+    EdgeInsert = 1,
+    /// `SmCurveClassification::IntersectVertices`.
+    Vertices = 2,
+}
+
+/// The most edits of a B-rep case.
+pub const MAX_EDITS: usize = 64;
+/// The most edge mates of a B-rep case.
+pub const MAX_MATES: usize = 16;
+
+fn tolerance(rd: &mut Reader<'_>) -> Result<f64, FfiError> {
+    let t = rd.finite()?;
+    if !(0.0..=1e3).contains(&t) {
+        return Err(bad("tolerance out of range"));
+    }
+    Ok(t)
+}
+
+/// Validates a B-rep case of [`topo`] without running it.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input; the errors of building and
+/// exporting the B-rep (unit `topology.edgeuse_p1`'s shim).
+pub fn validate_topo(op: TopoOp, path: &str, input: &[f64]) -> Result<(), FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    brep_block(&mut rd, path)?;
+    let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
+    let export = eu1::eval(eu1::Op::Export, path, block)?;
+    let Some(c) = eu1::counts(&export) else {
+        // the B-rep cannot be built: the shim reports it before reading further
+        return Ok(());
+    };
+    let (n_f, n_e, n_v) = (c[3], c[7], c[9]);
+    for _ in 0..rd.index(MAX_EDITS)? {
+        let kind = rd.index(6)?;
+        rd.index(usize::MAX >> 12)?;
+        let value = rd.finite()?;
+        if (kind <= 2 && !(0.0..=1e3).contains(&value)) || (kind >= 4 && value.abs() > 1e3) {
+            return Err(bad("edit value out of range"));
+        }
+    }
+    let n_mates = rd.index(MAX_MATES)?;
+    let (mut firsts, mut seconds) = (Vec::new(), Vec::new());
+    for _ in 0..n_mates {
+        let (e1, e2) = (rd.below(n_e)?, rd.below(n_e)?);
+        if firsts.contains(&e1) || seconds.contains(&e2) {
+            return Err(bad("an edge mated twice"));
+        }
+        firsts.push(e1);
+        seconds.push(e2);
+    }
+    match op {
+        TopoOp::Export => {
+            if rd.flag()? && n_mates == 0 {
+                return Err(bad("no second B-rep without mates"));
+            }
+        }
+        TopoOp::EdgeInsert => {
+            rd.below(n_e)?;
+            rd.flag()?;
+            rd.flag()?;
+            tolerance(&mut rd)?;
+            rd.vec3()?;
+            rd.vec3()?;
+            rd.finite()?;
+            if rd.flag()? {
+                surface(&mut rd)?;
+                surface(&mut rd)?;
+            }
+            for _ in 0..rd.index(32)? {
+                rd.index(4)?;
+                rd.finites(4)?;
+                let (g0, g1) = (rd.finite()?, rd.finite()?);
+                if g0 < 0.0 || g1 < 0.0 {
+                    return Err(bad("negative solution value"));
+                }
+            }
+        }
+        TopoOp::Vertices => {
+            rd.below(n_f)?;
+            rd.flag()?;
+            rd.flag()?;
+            tolerance(&mut rd)?;
+            rd.flag()?;
+            if input.get(rd.at) != Some(&3.0) {
+                return Err(bad("the classification curve must be 3D"));
+            }
+            curve(&mut rd)?;
+            if rd.flag()? {
+                surface(&mut rd)?;
+                surface(&mut rd)?;
+            }
+            for _ in 0..2 {
+                if rd.flag()? {
+                    if input.get(rd.at) != Some(&2.0) {
+                        return Err(bad("a UV curve must be 2D"));
+                    }
+                    curve(&mut rd)?;
+                }
+            }
+            for _ in 0..rd.index(64)? {
+                rd.below(n_v)?;
+            }
+        }
+    }
+    rd.done()
+}
+
+/// Runs a validated B-rep case (layout in the module docs).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
+/// failure.
+pub fn topo(op: TopoOp, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_topo(op, path, input)?;
+    let cpath = std::ffi::CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
+    call_with_buffer(4096, |out, len| {
+        // SAFETY: cpath is a valid NUL-terminated string; input is valid for
+        // input.len() reads and holds what the shim reads (validated above); out is valid
+        // for out.len() writes and the shim honours the capacity; len is valid.
+        unsafe {
+            sys::sc_intersect_curve_class_p5_topo(
+                op as i32,
+                cpath.as_ptr(),
                 input.as_ptr(),
                 input.len() as i64,
                 out.as_mut_ptr(),

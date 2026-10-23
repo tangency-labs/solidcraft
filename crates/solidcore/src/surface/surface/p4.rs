@@ -1344,6 +1344,41 @@ impl Surface {
         Ok(solutions)
     }
 
+    /// [`Surface::global_point_solve_point_test_off`] with upstream's out-parameter, as
+    /// [`Surface::global_point_solve_into`]: `solutions` keeps what was found when the
+    /// call fails (for callers that ignore the status).
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::global_point_solve`].
+    pub(crate) fn global_point_solve_point_test_off_into<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        uv_domain: &Extent2d,
+        op: SolverOperation,
+        test_point: Point3,
+        src_zone_tol_3d: f64,
+        opt_target_distance: Option<f64>,
+        requested: SolutionRequested,
+        solutions: &mut SolutionArray<O>,
+    ) -> Result<()> {
+        self.global_point_solve_in(
+            k,
+            surface,
+            None,
+            None,
+            uv_domain,
+            op,
+            test_point,
+            src_zone_tol_3d,
+            opt_target_distance,
+            requested,
+            solutions,
+            true,
+        )
+    }
+
     /// [`Surface::global_point_solve`] with upstream's out-parameter: `solutions` keeps
     /// what was found when the call fails (for callers that ignore the status), except
     /// what the fast drop produced before it failed itself.

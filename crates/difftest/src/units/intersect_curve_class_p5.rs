@@ -1,6 +1,10 @@
 //! Differential runner for the part-5 `SmCurveClassification` operations.
 //! Real lines, circles and stationary B-splines; complete interval and solution
 //! state is compared. Topology-handle and part-6 gaps are explicit deferrals.
+//!
+//! Cases with a `topo` input run on real B-reps instead (module `topo`): an edge target
+//! of `sm_InsertSolutions` and the vertices of `IntersectVertices`, including the edits
+//! both make (vertex tolerances, the classification curve, edge-use UV trim curves).
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -27,8 +31,14 @@ use solidcore::surface::volume::Volume;
 use solidcore::{Result as ScResult, SolidError};
 use solidcore_ffi::units::intersect_curve_class_p5 as ffi;
 
+#[path = "intersect_curve_class_p5/topo.rs"]
+mod topo;
+
 /// Differential runner for curve classification part 5.
 pub struct Runner;
+
+/// Generated B-rep cases per run, whatever `--seeds` says (it can only raise this).
+const MIN_TOPO_GENERATED: usize = 300;
 
 fn scale() -> f64 {
     1.0
@@ -84,6 +94,9 @@ struct Input {
     solutions: Vec<[f64; 7]>,
     #[serde(default = "none_tol")]
     xsect_tol: f64,
+    /// A B-rep case (module `topo`); the fields above are then unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    topo: Option<topo::TopoIn>,
 }
 
 impl Input {
@@ -628,16 +641,37 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(800),
             ..ctx.clone()
         };
-        default_cases(self, &context)
+        let mut cases = default_cases(self, &context)?;
+        // the B-rep cases: their own seed stream, after the flat ones
+        let topo_context = CaseContext {
+            seeds: ctx.seeds.max(MIN_TOPO_GENERATED),
+            ..ctx.clone()
+        };
+        let stream = format!("{}/topo", self.id());
+        for mut case in topo_context.generated_cases(&stream, |rng| {
+            let t = topo::generate(rng)?;
+            Some(json!({"op": 7, "topo": t}))
+        }) {
+            case.unit = self.id().to_string();
+            case.name = case.name.replacen("gen", "topo", 1);
+            cases.push(case);
+        }
+        Ok(cases)
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Input = case.parse()?;
+        if let Some(t) = &i.topo {
+            return topo::cpp(t);
+        }
         ffi::run(&i.flat())
             .map(|v| Output::new().values("out", v))
             .map_err(|e| HarnessError::new(e.to_string()))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Input = case.parse()?;
+        if let Some(t) = &i.topo {
+            return topo::rust(t);
+        }
         ffi::validate(&i.flat()).map_err(|e| HarnessError::new(e.to_string()))?;
         rust(&i).map_err(|e| HarnessError::new(e.to_string()))
     }
